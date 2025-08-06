@@ -836,11 +836,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
-        root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
+        root_mesh = flattened_dp_cp_mesh.get_root_mesh()
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
-            "dp_cp"
-        ]
+        flatten_mesh_root_dims = root_mesh.flatten_name_to_root_dims["dp_cp"]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
         ref_pg_count = _world.group_count
@@ -854,11 +852,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flattened_dp_tp_mesh = dp_tp_mesh._flatten()
         self.assertEqual(dp_tp_mesh.mesh.flatten(), flattened_dp_tp_mesh.mesh)
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
-        root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
+        root_mesh = flattened_dp_tp_mesh.get_root_mesh()
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
-            "dp_tp"
-        ]
+        flatten_mesh_root_dims = root_mesh.flatten_name_to_root_dims["dp_tp"]
         self.assertEqual(flatten_mesh_root_dims, (0, 2))
 
         # Test flatten with a flattened mesh_dim_name
@@ -881,7 +877,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # check flattened mesh dim names is correct
         self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
         # check flattened mesh dependency
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_4d)
+        self.assertEqual(dp_cp_mesh.get_root_mesh(), mesh_4d)
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
@@ -929,12 +925,12 @@ class TestMeshEnv(DTensorTestBase):
         dp_mesh = mesh_3d["dp"]
         cp_mesh = mesh_3d["cp"]
         tp_mesh = mesh_3d["tp"]
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_tp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(cp_tp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(cp_mesh), mesh_3d)
-        self.assertEqual(_mesh_resources.get_root_mesh(tp_mesh), mesh_3d)
+        self.assertEqual(dp_cp_mesh.get_root_mesh(), mesh_3d)
+        self.assertEqual(dp_tp_mesh.get_root_mesh(), mesh_3d)
+        self.assertEqual(cp_tp_mesh.get_root_mesh(), mesh_3d)
+        self.assertEqual(dp_mesh.get_root_mesh(), mesh_3d)
+        self.assertEqual(cp_mesh.get_root_mesh(), mesh_3d)
+        self.assertEqual(tp_mesh.get_root_mesh(), mesh_3d)
 
     @with_comms
     def test_get_root_mesh_dim_exist(self):
@@ -944,15 +940,15 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh_2d["DP"]), 0)
-        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh_2d["TP"]), 1)
+        self.assertEqual(mesh_2d["DP"].get_root_mesh_dim(), 0)
+        self.assertEqual(mesh_2d["TP"].get_root_mesh_dim(), 1)
 
     @with_comms
     def test_get_root_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
-        self.assertEqual(_mesh_resources.get_root_mesh_dim(mesh), None)
+        self.assertEqual(mesh.get_root_mesh_dim(), None)
 
     @with_comms
     def test_get_mesh_dim_by_name(self):
@@ -962,15 +958,15 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
-        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("DP"), 0)
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("TP"), 1)
 
     @with_comms
     def test_get_all_submeshes(self):
         mesh_2d = init_device_mesh(
             self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
         )
-        all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
+        all_submeshes = mesh_2d._get_all_submeshes("replicate")
         self.assertEqual(len(all_submeshes), 4)
         self.assertEqual(
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True

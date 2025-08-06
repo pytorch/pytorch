@@ -68,198 +68,14 @@ else:
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
-            self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
             self.mesh_dim_group_options: dict[
                 int, tuple[Optional[str], Optional[C10dBackend.Options]]
-            ] = {}
-            self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
-            # Record flatten mesh name to its mesh dim index in root mesh.
-            self.flatten_name_to_root_dims: dict[
-                DeviceMesh, dict[str, tuple[int, ...]]
             ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
-
-        def create_sub_mesh(
-            self,
-            device_mesh: "DeviceMesh",
-            submesh_dim_names: tuple[str, ...],
-            submesh_dims: list[tuple[int, ...]],
-        ) -> "DeviceMesh":
-            # Get the submesh dim size from the submesh_dims.
-            # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
-            # to slice out mesh["dp_cp"], then submesh_dims = [(0, 1), (2,)] and submesh_dim_size = [2 * 2, 2] = [4, 2].
-            # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
-            slice_dim_size = [
-                reduce(
-                    lambda x, y: x * device_mesh.mesh.size(y),
-                    mesh_dim,
-                    1,
-                )
-                for mesh_dim in submesh_dims
-            ]
-
-            mesh_tensor = device_mesh.mesh
-            # slice_dim_idx could be different from submesh_dims, as we may need to flatten out some dims.
-            slice_dim_idx = []
-            slice_dim_group_name = []
-            # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
-            # flattened mesh tensor.
-            num_dims_flatten = 0
-            for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
-                # Currently, this only allows slicing out a contiguous flattened dim.
-                # TODO: we need to handle reconstructing a non-contiguous flattened dim.
-                if len(mesh_dim_indices) > 1:
-                    # We need to move the start_dim and end_dim to the left if some dims are already flattened.
-                    mesh_tensor = mesh_tensor.flatten(
-                        start_dim=mesh_dim_indices[0] - num_dims_flatten,
-                        end_dim=mesh_dim_indices[-1] - num_dims_flatten,
-                    )
-                    # If some dims are already flattened, we need to adjust the slice_dim_idx accordingly.
-                    # For example, if the submesh_dims = [(0, 1), (2,), (3, 4)] with 0-1 flattened and 3-4 flattened,
-                    # then the final slice_dim_idx should be [0, 1, 2].
-                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
-                    num_dims_flatten += len(mesh_dim_indices) - 1
-                    slice_dim_group_name.append(
-                        self.root_to_flatten_mapping[device_mesh][
-                            mesh_dim_name
-                        ]._dim_group_names[0]  # type: ignore[has-type]
-                    )
-                else:
-                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
-                    slice_dim_group_name.append(
-                        device_mesh._dim_group_names[mesh_dim_indices[0]]  # type: ignore[has-type]
-                    )
-
-            # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
-            mesh_dims_remained_idx = list(range(mesh_tensor.ndim))
-            for idx in slice_dim_idx:
-                if idx not in mesh_dims_remained_idx:
-                    raise NotImplementedError(
-                        "Currently, this only allows slicing out a contiguous flattened dim."
-                    )
-                mesh_dims_remained_idx.remove(idx)
-
-            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *slice_dim_idx]
-            # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
-            # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
-            pg_ranks_by_dim = mesh_tensor.permute(
-                *mesh_dims_remained_idx, *slice_dim_idx
-            ).reshape(-1, *slice_dim_size)
-
-            cur_rank = device_mesh.get_rank()
-            for mesh_nd in pg_ranks_by_dim:
-                submesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_nd,
-                    mesh_dim_names=submesh_dim_names,
-                    _init_backend=False,
-                )
-                if cur_rank in mesh_nd:
-                    res_submesh = submesh
-
-            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined, has-type]
-            self.child_to_root_mapping[res_submesh] = device_mesh
-
-            return res_submesh
-
-        def create_flatten_mesh(
-            self,
-            device_mesh: "DeviceMesh",
-            mesh_dim_name: Optional[str] = None,
-            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
-                None,
-                None,
-            ),
-        ) -> "DeviceMesh":
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
-
-            flatten_dims_in_root = [
-                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
-                for flatten_mesh_dim_name in not_none(device_mesh.mesh_dim_names)
-            ]
-
-            if not mesh_dim_name:
-                mesh_dim_name = "_".join(not_none(device_mesh.mesh_dim_names))
-
-            # Check whether the mesh_dim_name for flattened mesh is valid.
-            self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                *list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
-            )
-            if mesh_dim_name in invalid_dim_names:
-                raise RuntimeError(
-                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
-                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
-                    f"Please specify another valid mesh_dim_name.",
-                )
-
-            # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
-            if (
-                root_mesh in self.root_to_flatten_mapping
-                and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]
-            ):
-                return self.root_to_flatten_mapping[root_mesh][mesh_dim_name]
-
-            flattened_mesh_dim_size = math.prod(device_mesh.mesh.size())
-
-            remained_dims_in_root = list(range(root_mesh.mesh.ndim))
-            for flatten_dim_in_root in flatten_dims_in_root:
-                remained_dims_in_root.remove(flatten_dim_in_root)
-
-            pg_ranks_by_dim = root_mesh.mesh.permute(
-                *remained_dims_in_root, *flatten_dims_in_root
-            ).reshape(-1, flattened_mesh_dim_size)
-
-            cur_rank = root_mesh.get_rank()
-            for mesh_nd in pg_ranks_by_dim:
-                # need to init backend here since the flattened pg doesn't exist in root mesh.
-                flattened_mesh = DeviceMesh(
-                    root_mesh.device_type,
-                    mesh_nd,
-                    mesh_dim_names=(mesh_dim_name,),
-                    backend_override=(backend_override,),
-                )
-                if cur_rank in mesh_nd:
-                    res_flattened_mesh = flattened_mesh
-            self.child_to_root_mapping[res_flattened_mesh] = root_mesh  # type: ignore[possibly-undefined]
-            self.root_to_flatten_mapping.setdefault(root_mesh, {})[mesh_dim_name] = (
-                res_flattened_mesh  # type: ignore[possibly-undefined]
-            )
-            self.flatten_name_to_root_dims[root_mesh][mesh_dim_name] = tuple(
-                flatten_dims_in_root
-            )  # type: ignore[possibly-undefined]
-
-            return res_flattened_mesh
-
-        def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
-            # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
-            # A root mesh is not created through slicing.
-            # We considers the root mesh of a root mesh is itself.
-            root_mesh = self.child_to_root_mapping.get(device_mesh, None)
-            return device_mesh if not root_mesh else root_mesh
-
-        def get_root_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
-            """
-            Returns the index of the mesh dim in the root mesh.
-            The device_mesh passed in needs to be sliced out from the root mesh
-            or submesh of the root mesh.
-            """
-            root_mesh = self.get_root_mesh(device_mesh)
-            child_mesh_dim_names = device_mesh.mesh_dim_names
-            if root_mesh and child_mesh_dim_names:
-                assert len(child_mesh_dim_names) == 1, (
-                    "The submesh can only be a 1D mesh."
-                )
-                child_mesh_dim_name = child_mesh_dim_names[0]
-                return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
-            return None
 
         @staticmethod
         def num_devices_per_host(device_type: str) -> int:
@@ -271,23 +87,6 @@ else:
             # homogeneous hardware for now
             return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
 
-        def get_mesh_dim_by_name(
-            self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> int:
-            if (
-                device_mesh.mesh_dim_names is None
-                or len(device_mesh.mesh_dim_names) == 0
-            ):
-                raise KeyError(
-                    "No `mesh_dim_names` found.",
-                )
-            if mesh_dim_name not in device_mesh.mesh_dim_names:
-                raise KeyError(
-                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                    f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
-                )
-            return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
-
         def _set_mesh_dim_group_options(
             self,
             dim: int,
@@ -295,91 +94,6 @@ else:
             pg_options: Optional[C10dBackend.Options] = None,
         ) -> None:
             self.mesh_dim_group_options[dim] = (backend, pg_options)
-
-        def _get_slice_mesh_dims(
-            self, device_mesh, mesh_dim_names
-        ) -> list[tuple[int, ...]]:
-            """
-            Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
-            If valid, return dim indexes of the slice mesh in the device mesh.
-            """
-            if device_mesh != self.get_root_mesh(device_mesh):
-                warnings.warn(
-                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
-                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
-                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
-                )
-
-            # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
-            # or its flattened mesh's mesh_dim_names.
-            self.flatten_name_to_root_dims.setdefault(device_mesh, {})
-            flatten_name_to_root_dims = self.flatten_name_to_root_dims[device_mesh]
-            valid_mesh_dim_names = [
-                *device_mesh.mesh_dim_names,
-                *flatten_name_to_root_dims,
-            ]
-
-            if not all(
-                mesh_dim_name in valid_mesh_dim_names
-                for mesh_dim_name in mesh_dim_names
-            ):
-                raise KeyError(
-                    f"Invalid mesh_dim_names {mesh_dim_names} specified. "
-                    f"Valid mesh_dim_names are {valid_mesh_dim_names}."
-                )
-
-            # Validate the order of the slice mesh dim indices.
-            # This needs to be in ascending order.
-            curr_idx = -1
-            slice_mesh_dims = []
-            for mesh_dim_name in mesh_dim_names:
-                if mesh_dim_name in flatten_name_to_root_dims:
-                    mesh_indices = flatten_name_to_root_dims[mesh_dim_name]
-                    # TODO: this doesn't allow non-contiguous slicing with flatten dim yet. next_idx
-                    # should be mesh_indices[0] once we support non-contiguous slicing with flatten dim.
-                    next_idx = mesh_indices[-1]
-                    slice_mesh_dims.append(mesh_indices)
-                else:
-                    next_idx = device_mesh.mesh_dim_names.index(mesh_dim_name)
-                    slice_mesh_dims.append((next_idx,))
-                if next_idx <= curr_idx:
-                    raise KeyError(
-                        f"Invalid mesh_dim_names {mesh_dim_names} specified. "
-                        f"Found mesh dim indices to slice: {slice_mesh_dims}. "
-                        "Mesh dim indices should be in ascending order."
-                    )
-                curr_idx = next_idx
-
-            return slice_mesh_dims
-
-        def _get_all_submeshes(
-            self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> list["DeviceMesh"]:
-            """
-            Return all the submeshes of a given mesh dimension of the device mesh.
-            """
-            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
-            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
-                -1, device_mesh.mesh.size(mesh_dim)
-            )
-
-            cur_rank = device_mesh.get_rank()
-            res_submeshes = []
-            for mesh_1d in pg_ranks_by_dim:
-                submesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_1d,
-                    mesh_dim_names=(mesh_dim_name,),
-                    _init_backend=False,
-                )
-                submesh._dim_group_names = (
-                    [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
-                    if cur_rank in mesh_1d
-                    else []
-                )
-                res_submeshes.append(submesh)
-
-            return res_submeshes
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -440,6 +154,11 @@ else:
         device_type: str
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
+        root_mesh: Optional["DeviceMesh"] = None
+        # Record flatten mesh name to its mesh in root mesh.
+        root_to_flatten_mapping: dict[str, "DeviceMesh"] = {}
+        # Record flatten mesh name to its mesh dim index in root mesh.
+        flatten_name_to_root_dims: dict[str, tuple[int, ...]] = {}
 
         def __init__(
             self,
@@ -698,6 +417,7 @@ else:
                         self.device_type,
                         self.mesh_dim_names,
                         self._thread_id,
+                        self.root_mesh,
                     )
                 )
             return self._hash
@@ -714,6 +434,7 @@ else:
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
                     and self._thread_id == other._thread_id
+                    and self.root_mesh == other.root_mesh
                 )
 
         def __getitem__(
@@ -772,9 +493,7 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
-                slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
-                    self, mesh_dim_names
-                )
+                slice_mesh_dims = self._get_slice_mesh_dims(mesh_dim_names)
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
@@ -785,9 +504,7 @@ else:
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                    submesh = _mesh_resources.create_sub_mesh(
-                        self, mesh_dim_names, slice_mesh_dims
-                    )
+                    submesh = self.create_sub_mesh(mesh_dim_names, slice_mesh_dims)
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
@@ -817,10 +534,8 @@ else:
             if self.mesh.ndim == 1 and mesh_dim is None:
                 return not_none(_resolve_process_group(self._dim_group_names[0]))
 
-            root_mesh = _mesh_resources.get_root_mesh(self)
-            root_to_flatten_mapping = _mesh_resources.root_to_flatten_mapping.get(
-                root_mesh, None
-            )
+            root_mesh = self.get_root_mesh()
+            root_to_flatten_mapping = root_mesh.root_to_flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
@@ -828,7 +543,7 @@ else:
                 return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
-                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    self.get_mesh_dim_by_name(mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
@@ -843,6 +558,268 @@ else:
                 A list of :class:`ProcessGroup` object.
             """
             return [self.get_group(i) for i in range(self.mesh.ndim)]
+
+        def create_sub_mesh(
+            self,
+            submesh_dim_names: tuple[str, ...],
+            submesh_dims: list[tuple[int, ...]],
+        ) -> "DeviceMesh":
+            # Get the submesh dim size from the submesh_dims.
+            # For example, if we have a 3D mesh with mesh_shape (2, 2, 2) mesh_dim_names ("dp", "cp", "tp") and we want
+            # to slice out mesh["dp_cp"], then submesh_dims = [(0, 1), (2,)] and submesh_dim_size = [2 * 2, 2] = [4, 2].
+            # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
+            slice_dim_size = [
+                reduce(
+                    lambda x, y: x * self.mesh.size(y),
+                    mesh_dim,
+                    1,
+                )
+                for mesh_dim in submesh_dims
+            ]
+
+            mesh_tensor = self.mesh
+            # slice_dim_idx could be different from submesh_dims, as we may need to flatten out some dims.
+            slice_dim_idx = []
+            slice_dim_group_name = []
+            # keep track of the number of dims that have been flattened so we can get the correct slice_dim_idx in the
+            # flattened mesh tensor.
+            num_dims_flatten = 0
+            for mesh_dim_indices, mesh_dim_name in zip(submesh_dims, submesh_dim_names):
+                # Currently, this only allows slicing out a contiguous flattened dim.
+                # TODO: we need to handle reconstructing a non-contiguous flattened dim.
+                if len(mesh_dim_indices) > 1:
+                    # We need to move the start_dim and end_dim to the left if some dims are already flattened.
+                    mesh_tensor = mesh_tensor.flatten(
+                        start_dim=mesh_dim_indices[0] - num_dims_flatten,
+                        end_dim=mesh_dim_indices[-1] - num_dims_flatten,
+                    )
+                    # If some dims are already flattened, we need to adjust the slice_dim_idx accordingly.
+                    # For example, if the submesh_dims = [(0, 1), (2,), (3, 4)] with 0-1 flattened and 3-4 flattened,
+                    # then the final slice_dim_idx should be [0, 1, 2].
+                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
+                    num_dims_flatten += len(mesh_dim_indices) - 1
+                    slice_dim_group_name.append(
+                        self.root_to_flatten_mapping[mesh_dim_name]._dim_group_names[0]  # type: ignore[has-type]
+                    )
+                else:
+                    slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
+                    slice_dim_group_name.append(
+                        self._dim_group_names[mesh_dim_indices[0]]  # type: ignore[has-type]
+                    )
+
+            # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
+            mesh_dims_remained_idx = list(range(mesh_tensor.ndim))
+            for idx in slice_dim_idx:
+                if idx not in mesh_dims_remained_idx:
+                    raise NotImplementedError(
+                        "Currently, this only allows slicing out a contiguous flattened dim."
+                    )
+                mesh_dims_remained_idx.remove(idx)
+
+            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *slice_dim_idx]
+            # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
+            # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
+            pg_ranks_by_dim = mesh_tensor.permute(
+                *mesh_dims_remained_idx, *slice_dim_idx
+            ).reshape(-1, *slice_dim_size)
+
+            cur_rank = self.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    self.device_type,
+                    mesh_nd,
+                    mesh_dim_names=submesh_dim_names,
+                    _init_backend=False,
+                )
+                if cur_rank in mesh_nd:
+                    res_submesh = submesh
+
+            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined, has-type]
+            res_submesh.root_mesh = self  # type: ignore[possibly-undefined]
+
+            return res_submesh
+
+        def create_flatten_mesh(
+            self,
+            mesh_dim_name: Optional[str] = None,
+            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
+                None,
+                None,
+            ),
+        ) -> "DeviceMesh":
+            root_mesh = self.get_root_mesh()
+
+            flatten_dims_in_root = [
+                not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
+                for flatten_mesh_dim_name in not_none(self.mesh_dim_names)
+            ]
+
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(not_none(self.mesh_dim_names))
+
+            # Check whether the mesh_dim_name for flattened mesh is valid.
+            invalid_dim_names = chain(
+                *list(not_none(root_mesh.mesh_dim_names)),
+                *root_mesh.flatten_name_to_root_dims.keys(),
+            )
+            if mesh_dim_name in invalid_dim_names:
+                raise RuntimeError(
+                    f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
+                    f"The mesh_dim_names of submesh and flattened mesh are {invalid_dim_names}. "
+                    f"Please specify another valid mesh_dim_name.",
+                )
+
+            # Quick return if the flatten mesh has been created before.
+            # TODO: If we decide to restrict flatten initialization once, we should remove
+            # this check and throw an error if the flatten mesh is already created before.
+            if mesh_dim_name in root_mesh.root_to_flatten_mapping:
+                return root_mesh.root_to_flatten_mapping[mesh_dim_name]
+
+            flattened_mesh_dim_size = math.prod(self.mesh.size())
+
+            remained_dims_in_root = list(range(root_mesh.mesh.ndim))
+            for flatten_dim_in_root in flatten_dims_in_root:
+                remained_dims_in_root.remove(flatten_dim_in_root)
+
+            pg_ranks_by_dim = root_mesh.mesh.permute(
+                *remained_dims_in_root, *flatten_dims_in_root
+            ).reshape(-1, flattened_mesh_dim_size)
+
+            cur_rank = root_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                # need to init backend here since the flattened pg doesn't exist in root mesh.
+                flattened_mesh = DeviceMesh(
+                    root_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=(mesh_dim_name,),
+                    backend_override=(backend_override,),
+                )
+                if cur_rank in mesh_nd:
+                    res_flattened_mesh = flattened_mesh
+            res_flattened_mesh.root_mesh = root_mesh  # type: ignore[possibly-undefined]
+            root_mesh.root_to_flatten_mapping[mesh_dim_name] = res_flattened_mesh  # type: ignore[possibly-undefined]
+            root_mesh.flatten_name_to_root_dims[mesh_dim_name] = tuple(
+                flatten_dims_in_root
+            )  # type: ignore[possibly-undefined]
+
+            return res_flattened_mesh
+
+        def get_root_mesh(self) -> "DeviceMesh":
+            # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
+            # A root mesh is not created through slicing.
+            # We considers the root mesh of a root mesh is itself.
+            root_mesh = self.root_mesh
+            return self if not root_mesh else root_mesh
+
+        def get_root_mesh_dim(self) -> Optional[int]:
+            """
+            Returns the index of the mesh dim in the root mesh.
+            The device_mesh passed in needs to be sliced out from the root mesh
+            or submesh of the root mesh.
+            """
+            root_mesh = self.get_root_mesh()
+            child_mesh_dim_names = self.mesh_dim_names
+            if root_mesh and child_mesh_dim_names:
+                assert len(child_mesh_dim_names) == 1, (
+                    "The submesh can only be a 1D mesh."
+                )
+                child_mesh_dim_name = child_mesh_dim_names[0]
+                return root_mesh.get_mesh_dim_by_name(child_mesh_dim_name)
+            return None
+
+        def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+            if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
+                raise KeyError(
+                    "No `mesh_dim_names` found.",
+                )
+            if mesh_dim_name not in self.mesh_dim_names:
+                raise KeyError(
+                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                    f"Available mesh dimensions are: mesh_dim_names={self.mesh_dim_names}",
+                )
+            return not_none(self.mesh_dim_names.index(mesh_dim_name))
+
+        def _get_slice_mesh_dims(self, mesh_dim_names) -> list[tuple[int, ...]]:
+            """
+            Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
+            If valid, return dim indexes of the slice mesh in the device mesh.
+            """
+            if self != self.get_root_mesh():
+                warnings.warn(
+                    "You are attempting to slice a submesh from another submesh. While we support this operation, "
+                    "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
+                    "If not, this may result in some ranks receiving the submesh while others encounter errors."
+                )
+
+            # The slice mesh_dim_names should consist either the device_mesh's mesh_dim_names
+            # or its flattened mesh's mesh_dim_names.
+            flatten_name_to_root_dims = self.flatten_name_to_root_dims
+            valid_mesh_dim_names = [
+                *not_none(self.mesh_dim_names),
+                *flatten_name_to_root_dims,
+            ]
+
+            if not all(
+                mesh_dim_name in valid_mesh_dim_names
+                for mesh_dim_name in mesh_dim_names
+            ):
+                raise KeyError(
+                    f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                    f"Valid mesh_dim_names are {valid_mesh_dim_names}."
+                )
+
+            # Validate the order of the slice mesh dim indices.
+            # This needs to be in ascending order.
+            curr_idx = -1
+            slice_mesh_dims = []
+            for mesh_dim_name in mesh_dim_names:
+                if mesh_dim_name in flatten_name_to_root_dims:
+                    mesh_indices = flatten_name_to_root_dims[mesh_dim_name]
+                    # TODO: this doesn't allow non-contiguous slicing with flatten dim yet. next_idx
+                    # should be mesh_indices[0] once we support non-contiguous slicing with flatten dim.
+                    next_idx = mesh_indices[-1]
+                    slice_mesh_dims.append(mesh_indices)
+                else:
+                    next_idx = not_none(self.mesh_dim_names).index(mesh_dim_name)
+                    slice_mesh_dims.append((next_idx,))
+                if next_idx <= curr_idx:
+                    raise KeyError(
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                        f"Found mesh dim indices to slice: {slice_mesh_dims}. "
+                        "Mesh dim indices should be in ascending order."
+                    )
+                curr_idx = next_idx
+
+            return slice_mesh_dims
+
+        def _get_all_submeshes(self, mesh_dim_name: str) -> list["DeviceMesh"]:
+            """
+            Return all the submeshes of a given mesh dimension of the device mesh.
+            """
+            mesh_dim = self.get_mesh_dim_by_name(mesh_dim_name)
+            pg_ranks_by_dim = self.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, self.mesh.size(mesh_dim)
+            )
+            root_mesh = self.get_root_mesh()
+
+            cur_rank = self.get_rank()
+            res_submeshes = []
+            for mesh_1d in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    self.device_type,
+                    mesh_1d,
+                    mesh_dim_names=(mesh_dim_name,),
+                    _init_backend=False,
+                )
+                submesh._dim_group_names = (
+                    [self._dim_group_names[mesh_dim]]  # type: ignore[has-type]
+                    if cur_rank in mesh_1d
+                    else []
+                )
+                submesh.root_mesh = root_mesh  # type: ignore[possibly-undefined]
+                res_submeshes.append(submesh)
+
+            return res_submeshes
 
         @staticmethod
         def from_group(
@@ -1033,9 +1010,7 @@ else:
             else:
                 backend_override_tuple = (None, None)
 
-            return _mesh_resources.create_flatten_mesh(
-                self, mesh_dim_name, backend_override_tuple
-            )
+            return self.create_flatten_mesh(mesh_dim_name, backend_override_tuple)
 
     def _normalize_backend_override(
         backend_override: dict[
