@@ -139,7 +139,7 @@ fi
 echo "Calling setup.py bdist at $(date)"
 
 setup_ccache() {
-    CCACHE_DIR=/opt/ccache/bin/
+    CCACHE_DIR=/opt/ccache/bin
     echo "Installing ccache"
     retry dnf install -y ccache
 
@@ -171,7 +171,14 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
 elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
     setup_ccache
 
-    python3 tools/packaging/build_wheel.py --find-python manylinux -d "/tmp/${WHEELHOUSE_DIR}"
+    time CMAKE_ARGS=${CMAKE_ARGS[@]} \
+        EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
+        BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
+        USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
+        python3 tools/packaging/build_wheel.py \
+          --find-python manylinux \
+          --log-destination "/tmp/${WHEELHOUSE_DIR}" \
+          -d "/tmp/${WHEELHOUSE_DIR}"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
