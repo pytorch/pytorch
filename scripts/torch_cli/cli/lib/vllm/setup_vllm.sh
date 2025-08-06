@@ -115,3 +115,9 @@ echo "[INFO] Done, installed mamba@v2.2.4...."
 echo "[INFO]] Verify torch, xformers, torchvision, torchaudio, flashinfer are installed as whls...."
 >>>>>>> fc8fbe80961 (setup)
 pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
+
+
+echo "[INFO]] Verify torch version from python"
+
+which python
+python -c "import torch; print(torch.__version__)"
