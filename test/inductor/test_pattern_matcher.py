@@ -635,6 +635,7 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @skipIfRocm
     def test_addmm_activation(self):
         def fn_addmm_relu(input, mat1, mat2):
             return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
@@ -653,9 +654,9 @@ class TestPatternMatcher(TestCase):
             )
 
         args = [
-            torch.randn(20, device="cuda"),
-            torch.randn(10, 15, device="cuda"),
-            torch.randn(15, 20, device="cuda"),
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
         ]
 
         for fn, atol in (
@@ -678,9 +679,9 @@ class TestPatternMatcher(TestCase):
         args_not_replaced = [
             # addmm + activation with a rank-2 input
             # is not fusable, hence not replaced
-            torch.randn(10, 20, device="cuda"),  # input
-            torch.randn(10, 15, device="cuda"),  # mat1
-            torch.randn(15, 20, device="cuda"),  # mat2
+            torch.randn(10, 20, device=GPU_TYPE),  # input
+            torch.randn(10, 15, device=GPU_TYPE),  # mat1
+            torch.randn(15, 20, device=GPU_TYPE),  # mat2
         ]
 
         for fn in (fn_addmm_relu, fn_addmm_gelu):
