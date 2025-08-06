@@ -151,6 +151,7 @@ class Builder:
         # Use Popen for real-time streaming
         with subprocess.Popen(
             [self.interpreter, str(SETUP_PY_PATH), *cmd_args],
+            env={**os.environ},  # Ensure we use the same environment as the parent process
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
