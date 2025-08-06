@@ -2,7 +2,7 @@ import asyncio
 import sys
 import weakref
 from asyncio import AbstractEventLoop, Future
-from collections.abc import Awaitable, Coroutine, Generator, Iterator, Set
+from collections.abc import Awaitable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
 from typing import Any, Callable, Optional, Protocol, TypeVar
@@ -173,4 +173,4 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
     # pyre-ignore[8]
     loop.get_task_factory = _get_task_factory  # type: ignore[method-assign, assignment]
 
-    return tasks
+    return tasks  # type: ignore[return-value]
