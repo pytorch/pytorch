@@ -1475,8 +1475,8 @@ class TestFullyShardWorldSize1(FSDPTest):
     @skip_if_lt_x_gpu(1)
     def test_train_parity_single_worldsize1(self):
         """
-        Tests train parity with DDP for a single FSDP group when sharding
-        parameters on dim-0.
+        Tests train parity with DDP for a single FSDP group (new replicate)
+        when sharding parameters on dim-0.
         """
         self.run_subtests(
             {
