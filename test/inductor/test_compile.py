@@ -156,19 +156,27 @@ int main(){
         )
         cpp_builder.build()
         binary_path = cpp_builder.get_target_file_path()
-        print(os.path.exists(binary_path))
-        switch = os.getenv("TORCHINDUCTOR_DEBUG_SYMBOL")
-        print("switch: ", switch)
+
+        """
+        When we turn on generate debug symbol.
+        On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+        On Linux, it should create some debug sections in binary file.
+        """
 
         def check_linux_debug_section(module_path: str):
             check_cmd = shlex.split(f"readelf -S {module_path}")
             output = safe_command_output(check_cmd)
-            print("output: ", output)
             has_debug_sym = ".debug_info" in output
             self.assertEqual(has_debug_sym, True)
 
+        def check_windows_pdb_exist(module_path: str):
+            file_name_no_ext = os.path.splitext(module_path)
+            file_name_pdb = f"{file_name_no_ext}.pdb"
+            has_pdb_file = os.path.exists(file_name_pdb)
+            self.assertEqual(has_pdb_file, True)
+
         if _IS_WINDOWS:
-            pass
+            check_windows_pdb_exist(binary_path)
         else:
             check_linux_debug_section(binary_path)
 
