@@ -1,5 +1,9 @@
 # Owner(s): ["module: inductor"]
 import os
+import shlex
+import subprocess
+import sys
+from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
@@ -10,6 +14,24 @@ from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import HAS_CPU
+
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def safe_command_output(cmd, timeout=30):
+    try:
+        return subprocess.check_output(
+            cmd,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            shell=isinstance(cmd, str),
+        ).strip()
+    except subprocess.CalledProcessError as e:
+        return f"run failed（error code {e.returncode}）: {e.output.strip()}"
+    except subprocess.TimeoutExpired:
+        return "runt timeout"
 
 
 class MyModule(torch.nn.Module):
@@ -113,6 +135,7 @@ class TestStandaloneInductor(TestCase):
         mod_opt = inductor.compile(mod, inp)
         self.assertEqual(mod(*inp), mod_opt(*inp))
 
+    @mock.patch.dict(os.environ, {"TORCHINDUCTOR_DEBUG_SYMBOL": "1"})
     def test_inductor_generate_debug_symbol(self):
         cpp_code = """
 int main(){
@@ -134,6 +157,20 @@ int main(){
         cpp_builder.build()
         binary_path = cpp_builder.get_target_file_path()
         print(os.path.exists(binary_path))
+        switch = os.getenv("TORCHINDUCTOR_DEBUG_SYMBOL")
+        print("switch: ", switch)
+
+        def check_linux_debug_section(module_path: str):
+            check_cmd = shlex.split(f"readelf -S {module_path}")
+            output = safe_command_output(check_cmd)
+            print("output: ", output)
+            has_debug_sym = ".debug_info" in output
+            self.assertEqual(has_debug_sym, True)
+
+        if _IS_WINDOWS:
+            pass
+        else:
+            check_linux_debug_section(binary_path)
 
 
 if __name__ == "__main__":
