@@ -1401,7 +1401,7 @@ def quantized_decomposed_quantize_per_tensor_default(
 ) -> Union[TensorBox, ShapeAsConstantBuffer]:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
-    assert input.get_dtype() == torch.float32, (
+    assert input.get_dtype() in [torch.float32, torch.float16], (
         f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
     )
 

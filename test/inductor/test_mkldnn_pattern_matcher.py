@@ -2334,6 +2334,86 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_dynamic=is_dynamic,
         )
 
+    def _qlinear_fp16_test_helper(
+        self,
+        inputs,
+        device="cpu",
+        int8_mixed_bf16=False,
+        do_permute=False,
+        matcher_check_fn=None,
+        bias=True,
+        is_dynamic=False,
+        is_qat=False,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3, use_bias)
+                self.linear2 = torch.nn.Linear(3, 4, use_bias)
+                self.softmax = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.softmax(x.to(torch.float32))
+                x = self.linear2(x.to(torch.float16))
+                return x
+
+            #    return  self.linear2(self.softmax(self.linear(x).to(torch.float32)).to(torch.float16))
+
+        mod = M(bias).eval().to(device=device, dtype=torch.float16)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
+
+        def _default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+            )
+
+        self._test_common(
+            mod,
+            inputs,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else _default_matcher_check_fn
+            ),
+            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+            check_quantization=True,
+            is_qat=is_qat,
+            is_dynamic=is_dynamic,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_fp16_xpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel with fp16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_fp16_test_helper(
+                (torch.randn((2, 4), dtype=torch.float16, device="xpu"),),
+                device="xpu",
+                bias=bias,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qlinear_fp16_cpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel with fp16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_fp16_test_helper(
+                (torch.randn((2, 4), dtype=torch.float16, device="cpu"),),
+                device="cpu",
+                bias=bias,
+            )
+
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     def test_qlinear_cpu(self):
