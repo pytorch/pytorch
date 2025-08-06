@@ -255,6 +255,22 @@ class TestDynamoTimed(TestCase):
             "bundled_autotune_remote_cache": False,
         }
     )
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_stack_trace(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        stack_trace_list = []
+        for e in compilation_events:
+            stack_trace_list.append(e.stack_trace)
+        
+        self.assertTrue(len(stack_trace_list)>0)
+        
     # We can't easily test that timing is actually accurate. Mock time to always
     # return the same value; all durations will be zero.
     @mock.patch("time.time", return_value=0.001)
