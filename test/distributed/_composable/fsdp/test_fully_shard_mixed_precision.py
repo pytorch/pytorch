@@ -172,8 +172,20 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
+        # Get the device_mesh from _init_models_and_optims
+        default_pg = dist.distributed_c10d._get_default_group()
+        device = torch._C._get_accelerator()
+        device_mesh = init_device_mesh(
+            device.type,
+            mesh_shape=(default_pg.size(), 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        # Extract the all_reduce_group from the device_mesh
+        all_reduce_group = device_mesh.get_group("replicate")
         predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+            self.process_group,
+            all_reduce_group=all_reduce_group,
+            reduce_dtype=param_dtype,
         )
 
         torch.manual_seed(42 + self.rank + 1)
@@ -249,8 +261,20 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
+        # Get the device_mesh for replicate
+        default_pg = dist.distributed_c10d._get_default_group()
+        device = torch._C._get_accelerator()
+        device_mesh = init_device_mesh(
+            device.type,
+            mesh_shape=(default_pg.size(), 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        # Extract the all_reduce_group from the device_mesh
+        all_reduce_group = device_mesh.get_group("replicate")
         predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+            self.process_group,
+            all_reduce_group=all_reduce_group,
+            reduce_dtype=param_dtype,
         )
 
         torch.manual_seed(42 + self.rank + 1)
