@@ -2885,6 +2885,10 @@ class GuardsState:
     shape_code_parts: Optional[ShapeCodeParts]
 
 
+class _Missing:
+    pass
+
+
 class GuardsStatePickler(pickle.Pickler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -2943,6 +2947,10 @@ class GuardsStatePickler(pickle.Pickler):
     @classmethod
     def _unpickle_mapping_proxy(cls, d):
         return types.MappingProxyType(d)
+
+    @classmethod
+    def _unpickle_c_op(cls, name):
+        return getattr(torch.ops._C, name)
 
     def reducer_override(self, obj):
         import sympy
@@ -3007,6 +3015,27 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
+
+        elif isinstance(
+            obj, torch._ops.OpOverloadPacket
+        ) and obj._qualified_op_name.startswith("_C::"):
+            return type(self)._unpickle_c_op, (obj.__name__,)
+
+        elif (
+            obj.__class__.__module__ == "builtins"
+            and obj.__class__.__name__ == "PyCapsule"
+        ):
+            # Skipping PyCapsule since there isn't much to be guarded about them.
+            return _Missing, ()
+
+        elif isinstance(obj, types.CodeType):
+            # We only do ID_MATCH on code objects which is already banned from guards serialization.
+            return _Missing, ()
+
+        elif inspect.isfunction(obj) and (obj.__code__.co_flags & inspect.CO_NESTED):
+            # Skipping nested function since CLOSURE_MATCH is banned from guards serialization.
+            assert obj.__qualname__ != obj.__name__
+            return _Missing, ()
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
