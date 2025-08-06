@@ -2,10 +2,12 @@ import asyncio
 import sys
 import weakref
 from asyncio import AbstractEventLoop, Future
-from collections.abc import Awaitable, Coroutine, Generator, Iterator
+from collections.abc import Awaitable, Coroutine, Generator, Iterator, Set
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import AbstractSet, Any, Callable, Optional, Protocol, TypeVar
+from typing import Any, Callable, Optional, Protocol, TypeVar
+
+from torch.utils._ordered_set import OrderedSet
 
 
 T = TypeVar("T")
@@ -101,7 +103,7 @@ def _new_loop(
 
 def _cancel_all_tasks(
     loop: AbstractEventLoop,
-    tasks: AbstractSet[Future],  # type: ignore[type-arg]
+    tasks: OrderedSet[Future],  # type: ignore[type-arg]
 ) -> None:
     to_cancel = [task for task in tasks if not task.done()]
 
@@ -127,7 +129,7 @@ def _cancel_all_tasks(
             )
 
 
-def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore[type-arg]
+def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[type-arg]
     tasks: weakref.WeakSet[Future] = weakref.WeakSet()  # type: ignore[type-arg]
 
     task_factories: list[Optional[TaskFactoryType]] = [None]
@@ -152,12 +154,12 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore
                 task = asyncio.Task(coro, loop=loop)
             # pyre-ignore[16]: `Task` has no attribute `_source_traceback`.
             if task._source_traceback:  # type: ignore[attr-defined]
-                del task._source_traceback[
+                del task._source_traceback[  # type: ignore[attr-defined]
                     -1
                 ]  # pragma: no cover  # type: ignore[attr-defined]
         else:
             if sys.version_info >= (3, 11):
-                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type, call-arg]
+                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type, call-arg, assignment]
             else:
                 task = task_factory(loop, coro)  # type: ignore[arg-type]
         #  `Union[Task[Any], Future[Any]]`.
@@ -165,7 +167,7 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore
         return task
 
     # pyre-ignore[6]
-    loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign]
+    loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign, arg-type]
     # pyre-ignore[8]
     loop.set_task_factory = _set_task_factory  # type: ignore[method-assign, assignment]
     # pyre-ignore[8]
