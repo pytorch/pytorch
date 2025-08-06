@@ -260,7 +260,6 @@ class TestDynamoTimed(TestCase):
     @mock.patch("time.time", return_value=0.001)
     @mock.patch("time.time_ns", return_value=100000)
     @dynamo_config.patch(specialize_float=False)
-    @mock.patch.dict(os.environ, {"EXPECTTEST_ACCEPT": "1"})
     def test_dynamo_timed(self, mock_time, mock_time_ns):
         """
         Run a compilation that includes a forward and a backward and validate
@@ -301,7 +300,6 @@ class TestDynamoTimed(TestCase):
  'additional_fake_tensor_prop': [0.0, 0.0],
  'aot_collect_metadata': [0.0],
  'aot_trace_joint_graph': [0.0],
- 'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
  'build_guards': [0.0],
  'bytecode_tracing': [0.0],
@@ -325,7 +323,6 @@ class TestDynamoTimed(TestCase):
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
- 'async_compile.wait': 0.0,
  'backend_compile': 0.0,
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
@@ -441,7 +438,7 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_attempt': None,
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
- 'triton_compile_time_us': 0,
+ 'triton_compile_time_us': None,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
@@ -533,7 +530,7 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_attempt': None,
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
- 'triton_compile_time_us': 0,
+ 'triton_compile_time_us': None,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
