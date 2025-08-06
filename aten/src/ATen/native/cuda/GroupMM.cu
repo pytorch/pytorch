@@ -248,6 +248,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       scaling_format,
       a_row_major,
       b_row_major);

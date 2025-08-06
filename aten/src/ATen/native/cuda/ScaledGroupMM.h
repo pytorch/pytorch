@@ -29,6 +29,7 @@ struct GroupCountInfo {
 // not the dimensions of the stacked input tensors
 //
 // Notice: If the input tensors are 2D, the M, N, K may need to be recalculated from the offs tensor
+// Then the dimension does not represent the actual size for each group; it is used solely for sizing heuristics.
 GroupCountInfo get_group_info(
     at::Tensor mat_a,
     at::Tensor mat_b,

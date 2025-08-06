@@ -85,6 +85,7 @@ GroupCountInfo get_group_info(
     group_count = offs->size(0);
     type = GroupMMInputMatrixType::MatrixA_2D_MatrixB_2D;
     // stack on the K dimension
+    // Note: K here does not represent the actual size for each group; it is used solely for sizing heuristics.
     K = K / group_count;
   } else if (mat_a.dim() == 2) {
     group_count = mat_b.size(0);
@@ -374,6 +375,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       scaling_format,
       true,  // a_row_major
       false  // b_col_major
@@ -654,6 +657,8 @@ void launch_gemm_sm100(at::Tensor mat_a,   // FP8
   Strides tensor_StrideOutput = make_strides(out.strides());
   Strides tensor_StrideSFA = make_strides(scale_a.strides());
   Strides tensor_StrideSFB = make_strides(scale_b.strides());
+  Strides tensor_ShapeA = make_strides(mat_a.sizes());
+  Strides tensor_ShapeB = make_strides(mat_b.sizes());
 
   at::cuda::detail::Sm100ScalingFormat<typename Config::LayoutSFA, typename Config::LayoutSFB, typename Config::ScaleConfig> scaling_format{
     tensor_StrideSFA,
@@ -684,6 +689,8 @@ void launch_gemm_sm100(at::Tensor mat_a,   // FP8
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
+      tensor_ShapeA,
+      tensor_ShapeB,
       scaling_format,
       true,  // a_row_major
       false  // b_col_major
