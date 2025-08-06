@@ -1,112 +1,13 @@
+import logging
 import os
-import shlex
-import shutil
-import subprocess
-import sys
+import re
 from dataclasses import fields
-from pathlib import Path
 from textwrap import indent
-from typing import Optional
 
 import yaml
 
 
-def run_shell(
-    cmd: str,
-    logging: bool = True,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
-):
-    if logging:
-        print(f"[shell] {cmd}", flush=True)
-    try:
-        subprocess.run(
-            cmd,
-            shell=True,
-            executable="/bin/bash",
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            check=True,
-            env=env,
-            cwd=cwd,
-        )
-    except subprocess.CalledProcessError as e:
-        print("docker build failed]")
-        print("Command:", " ".join(cmd))
-        print("Exit code:", e.returncode)
-        print("STDOUT:\n", e.stdout)
-        print("STDERR:\n", e.stderr)
-
-
-def run_cmd(
-    cmd: str,
-    logging: bool = True,
-    cwd: Optional[str] = None,
-    env: Optional[dict] = None,
-):
-    args = shlex.split(cmd)
-
-    if logging:
-        print(f"[cmd] {' '.join(args)}", flush=True)
-    try:
-        subprocess.run(
-            args,
-            shell=False,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            check=True,
-            env=env,
-            cwd=cwd,
-        )
-    except subprocess.CalledProcessError as e:
-        print("[❌ docker build failed]")
-        print("Command:", " ".join(cmd))
-        print("Exit code:", e.returncode)
-        print("STDOUT:\n", e.stdout)
-        print("STDERR:\n", e.stderr)
-
-
-# eliainwy
-def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
-    path = Path(prefix) / f"{name}.txt"
-    if not path.exists():
-        raise FileNotFoundError(f"Pin file not found: {path}")
-    return path.read_text(encoding="utf-8").strip()
-
-
-def get_env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
-
-
-def force_create_dir(path: str):
-    """
-    Forcefully create a fresh directory.
-    If the directory exists, it will be removed first.
-    """
-    remove_dir(path)
-    ensure_dir_exists(path)
-
-
-def ensure_dir_exists(path: str):
-    """
-    Ensure the directory exists. Create it if necessary.
-    """
-    if not os.path.exists(path):
-        print(f"[INFO] Creating directory: {path}", flush=True)
-        os.makedirs(path, exist_ok=True)
-    else:
-        print(f"[INFO] Directory already exists: {path}", flush=True)
-
-
-def remove_dir(path: str):
-    """
-    Remove a directory if it exists.
-    """
-    if os.path.exists(path):
-        print(f"[INFO] Removing directory: {path}", flush=True)
-        shutil.rmtree(path)
-    else:
-        print(f"[INFO] Directory not found (skipped): {path}", flush=True)
+logger = logging.getLogger(__name__)
 
 
 def get_abs_path(path: str):
@@ -132,31 +33,7 @@ def get_existing_abs_path(path: str) -> str:
     return path
 
 
-def clone_vllm(commit: str):
-    """
-    cloning vllm and checkout pinned commit
-    """
-    print(f"clonening vllm....", flush=True)
-    cwd = "vllm"
-    # delete the directory if it exists
-    remove_dir(cwd)
-    # Clone the repo & checkout commit
-    run_cmd("git clone https://github.com/vllm-project/vllm.git")
-    run_cmd(f"git checkout {commit}", cwd=cwd)
-    run_cmd("git submodule update --init --recursive", cwd=cwd)
-
-
-def pip_install(package: str):
-    cmd = f"python3 -m pip install {package}"
-    subprocess.run(shlex.split(cmd), check=True)
-
-
-def uv_pip_install(package: str):
-    cmd = f"python3 -m  uv pip install --system {package}"
-    subprocess.run(shlex.split(cmd), check=True)
-
-
-def read_yaml_file(file_path: str) -> dict:
+def read_yaml_file(file_path: str, app=None) -> dict:
     p = get_abs_path(file_path)
 
     if not os.path.exists(p):
@@ -166,9 +43,25 @@ def read_yaml_file(file_path: str) -> dict:
         with open(p, "r", encoding="utf-8") as f:
             raw_content = f.read()
 
-        # Replace environment variables with env var such as ${DOCKER_IMAGE}
+        # Find all $VAR and ${VAR}
+        pattern = re.compile(r"\$(\w+)|\$\{([^}]+)\}")
+        missing_vars = set()
+
         expanded_content = os.path.expandvars(raw_content)
-        data = yaml.safe_load(expanded_content)
+
+        # Then remove any remaining unresolved $VAR or ${VAR} patterns
+        for match in pattern.finditer(expanded_content):
+            if match.group(1):
+                missing_vars.add(match.group(1))
+            else:
+                missing_vars.add(match.group(2))
+        if missing_vars:
+            logger.warning(f"Missing environment variables: {', '.join(missing_vars)}")
+
+        # remove $VAR or ${VAR} if it does not exist in the yml file
+        cleaned = re.sub(r"\$(\w+)|\$\{[^}]+\}", "", expanded_content)
+        # remove the env_var holder ${ENV_VAR} if it does not exist in the env
+        data = yaml.safe_load(cleaned)
         if data is None:
             return {}
         if not isinstance(data, dict):
@@ -176,8 +69,9 @@ def read_yaml_file(file_path: str) -> dict:
                 f"YAML content must be a dictionary, got {type(data).__name__}"
             )
         return data
-
     except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse YAML file '{file_path}': {e}") from e
+    except ValueError as e:
         raise ValueError(f"Failed to parse YAML file '{file_path}': {e}") from e
     except Exception as e:
         raise RuntimeError(
