@@ -354,3 +354,7 @@ def get_default_numa_options():
     Must return None or NumaOptions, but not specifying to avoid circular import.
     """
     return None
+
+
+def log_triton_builds(fail: Optional[str]):
+    pass
