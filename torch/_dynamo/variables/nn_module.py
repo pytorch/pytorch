@@ -909,7 +909,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @functools.cache
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
-        supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
+        supported = {
+            torch.nn.Module.__setattr__,
+            torch.nn.Module.__init__,
+            torch.nn.Module.__delattr__,
+        }
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
@@ -1043,6 +1047,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 hasattr(method, "__code__")
                 and id(method.__code__) in self._nn_module_method_ids()
             ):
+                breakpoint()
                 unimplemented_v2(
                     gb_type="UnspecializedNNModuleVariable missing method",
                     context=f"call_method: {self} {name} {args} {kwargs}",
@@ -1091,8 +1096,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     # Handle submodules
                     self.is_state_mutated = True
 
-            if method is torch.nn.Module.__setattr__ and isinstance(
-                args[1], variables.DeletedVariable
+            if (
+                method is torch.nn.Module.__setattr__
+                and isinstance(args[1], variables.DeletedVariable)
+                or method is torch.nn.Module.__delattr__
             ):
                 # Trace through __delattr__ to track mutations on the module
                 # members like `_modules``.
