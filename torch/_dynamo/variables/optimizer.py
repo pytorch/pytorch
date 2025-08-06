@@ -247,10 +247,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Mark all the tensors in the state dict to be static address. This has
         # to be done first because the variable builder relies on the static
         # address annotation.
-        def mark_static(x):
-            mark_static_address(x)
+        # NB: Caching precompile is incompatible with mark_static_address
+        # https://github.com/pytorch/pytorch/issues/159228
+        if not torch._dynamo.config.caching_precompile:
 
-        tree_map_only(torch.Tensor, mark_static, self.value.state)
+            def mark_static(x):
+                mark_static_address(x)
+
+            tree_map_only(torch.Tensor, mark_static, self.value.state)
 
         # Recursively realize the variable trackers for optim.state and
         # optim.param_groups, which recursively install the necessary guards.

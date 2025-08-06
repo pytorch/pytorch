@@ -131,6 +131,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -854,7 +856,9 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(f"{wrapper.comment}   {node.format_node()}")
+            detailed_metadata.append(
+                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -2817,10 +2821,9 @@ def maybe_get_suppress_shape_guards_ctx() -> contextlib.AbstractContextManager[N
         return contextlib.nullcontext()
 
     # In standalone inductor compile mode, we might not have a shape_env attached to the fake mode
-    shape_env = tracing_context.fake_mode.shape_env
-    if not shape_env:
+    if not tracing_context.fake_mode or not tracing_context.fake_mode.shape_env:
         return contextlib.nullcontext()
-
+    shape_env = tracing_context.fake_mode.shape_env
     return shape_env.suppress_guards()
 
 
@@ -2964,6 +2967,26 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
+    # in case the hinted value is < 2**32, but the allowed range is larger.
+    # However, to prevent possible perf regressions on pre-existing AOTI models
+    # which don't set an upper bound on the valid range, we'll skip the check.
+    # To recap:
+    # - If using AOTI:
+    #   - If allowed range has no upper bound, then check the hint to determine
+    #       whether this fits in int32
+    #   - If allowed range does have an upper bound, then obey the upper bound
+    #       (check whether upper bound < int32_max) without checking the hint.
+
+    if V.aot_compilation:
+        # check whether value has an upper bound (1e20 is > INT64_MAX, assume
+        # there is no upper bound if it can be larger than 1e20)
+        if V.graph.sizevars.statically_known_true(e < 1e20):
+            # if so, then assume int_max < upper bound < inf
+            # so this could potentially have int64 values
+            return False
+
     # Otherwise, the hint MUST exist and be in range
     return has_hint(e) and size_hint(e) <= int_max
 
@@ -3343,12 +3366,13 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    # Need nested {} for string formatting; ignore SET_LINTER here
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
     return "\n".join(lines)
 
 
@@ -3460,3 +3484,28 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
+
+
+def maybe_log_cudagraph_partition(
+    msg: str,
+    prefix: Optional[str] = "cudagraph partition due to ",
+    node: Optional[BaseSchedulerNode] = None,
+) -> None:
+    """
+    Cudagraph partition may lead to extra memory overhead so we
+    log partition reasons to help users understand the overhead.
+    """
+    if not config.triton.cudagraphs:
+        return
+
+    warning_msg = f"{prefix}{msg}"
+
+    if (
+        node
+        and (ir_node := node.node)
+        and (fx_node := ir_node.get_origin_node())
+        and (stack_trace := fx_node.meta.get("stack_trace", None))
+    ):
+        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
+
+    perf_hint_log.warning(warning_msg)

@@ -183,6 +183,9 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
           fmt::format("{}/", groupName), store_->clone()));
+  std::string groupDesc = desc.has_value()
+      ? desc.value()
+      : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
@@ -197,25 +200,20 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     if (splitBackend == nullptr) {
       continue;
     }
-
-    // TODO: Figure out a better way for split group desc.
-    // TODO: We can add a new field in Backend::Options to specify the group
-    // desc
-    std::string groupDesc = desc.has_value()
-        ? desc.value()
-        : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
     splitBackend->setGroupDesc(groupDesc);
-
     if (!newGroup) {
       newGroup = c10::make_intrusive<ProcessGroup>(
           store, splitBackend->getRank(), splitBackend->getSize());
       newGroup->setDefaultBackend(backendType_);
-      newGroup->setGroupName(groupName);
-      newGroup->setGroupDesc(groupDesc);
     }
     newGroup->setBackend(deviceType, backendType, splitBackend);
   }
 
+  if (!newGroup) {
+    return nullptr;
+  }
+  newGroup->setGroupName(groupName);
+  newGroup->setGroupDesc(groupDesc);
   return newGroup;
 }
 
@@ -227,22 +225,20 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
   // We assume rank number is within the range of int32_t, so it won't overflow.
   int rank = static_cast<int>(store->add("mergeGroupRank", 1) - 1);
   // TODO: Do we need to check all groups have same deviceTypeToBackendType_?
+  std::string groupName = opts.group_name.has_value()
+      ? opts.group_name.value()
+      : c10::str(getGroupName(), ":merge");
+  std::string groupDesc = opts.group_desc.has_value()
+      ? opts.group_desc.value()
+      : c10::str(getGroupDesc(), ":merge");
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
-
     auto parentBackend = getBackend(deviceType);
     auto backendOpts = parentBackend->getBackendOptions();
-    std::string groupName = opts.group_name.has_value()
-        ? opts.group_name.value()
-        : c10::str(getGroupName(), ":merge");
     backendOpts->group_name = groupName;
     backendOpts->timeout = opts.timeout;
     auto mergedBackend = parentBackend->merge(store, backendOpts, rank, size);
-
-    std::string groupDesc = opts.group_desc.has_value()
-        ? opts.group_desc.value()
-        : c10::str(getGroupDesc(), ":merge");
     mergedBackend->setGroupDesc(groupDesc);
 
     // Historically, we have been using one process_group to map to all
@@ -251,12 +247,15 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
     if (!newGroup) {
       newGroup = c10::make_intrusive<ProcessGroup>(store, rank, size);
       newGroup->setDefaultBackend(backendType_);
-      newGroup->setGroupName(groupName);
-      newGroup->setGroupDesc(groupDesc);
     }
     newGroup->setBackend(deviceType, backendType, mergedBackend);
   }
 
+  if (!newGroup) {
+    return nullptr;
+  }
+  newGroup->setGroupName(groupName);
+  newGroup->setGroupDesc(groupDesc);
   return newGroup;
 }
 
