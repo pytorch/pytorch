@@ -15,12 +15,12 @@ from pathlib import Path
 from typing import *  # noqa: F403
 
 import numpy as np
+import yaml
 
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-import yaml
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
