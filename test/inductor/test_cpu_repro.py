@@ -5417,7 +5417,13 @@ class CPUReproTests(TestCase):
 
                 # Verify correctness with explicit samples (should match exactly)
                 torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
-
+    @config.patch({"emulate_precision_casts": True})
+    def test_to_dtype_use_compute_types(self):
+        x = torch.randn(128, dtype = torch.bfloat16)
+        y = torch.randn(128, dtype = torch.bfloat16)
+        def fn(x, y):
+            return x + y
+        torch.compile(fn)(x, y)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

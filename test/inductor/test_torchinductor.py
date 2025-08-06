@@ -15456,14 +15456,7 @@ if RUN_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
-def test_to_dtype_use_compute_types():
-    config.emulate_precision_casts=True
-    torch.manual_seed(0)
-    x=torch.randn(128,dtype=torch.bfloat16)
-    y=torch.randn(128,dtype=torch.bfloat16)
-    def fn(x,y):
-        return x+y
-    torch.compile(fn)(x,y)
+
 
 def _strip_tmp_path(code: str) -> str:
     """
