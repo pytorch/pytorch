@@ -1502,6 +1502,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
+        print(evt_py_code)
         examples = create_example_tensors(
             var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
