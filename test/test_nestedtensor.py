@@ -4444,12 +4444,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_dim(
         self,
         device,
         dtype,
         requires_grad,
         components_require_grad,
+        func,
     ):
         """
         Softmax passes when reducing on valid reduction dimensions.
@@ -4468,7 +4474,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         for reduce_dim, _ in reduce_dims:
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-            out_actual = torch.nn.functional.softmax(nt, dim=reduce_dim)
+            out_actual = func(nt, dim=reduce_dim)
             torch._dynamo.disable(self.assertEqual)(
                 len(out_actual.shape), len(output_shape)
             )  # disable if running on dynamo
@@ -4498,12 +4504,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             reduce_dim, reduce_dim_expected = reduce_dim_tuple
 
             if nt.dim() > reduce_dim:
-                out_actual = torch.nn.functional.softmax(
-                    nt, dim=reduce_dim
-                )  # nested tensor
-                out_expected = torch.nn.functional.softmax(
-                    nt.values(), dim=reduce_dim_expected
-                )  # dense tensor of dimensions 1 less than out_actual
+                # nested tensor
+                out_actual = func(nt, dim=reduce_dim)
+                # dense tensor of dimensions 1 less than out_actual
+                out_expected = func(nt.values(), dim=reduce_dim_expected)
                 self.assertTrue(
                     torch.allclose(out_actual.values().view(-1), out_expected.view(-1))
                 )
@@ -4601,8 +4605,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_reduce_batch_dim(
-        self, device, dtype, requires_grad, components_require_grad
+        self, device, dtype, requires_grad, components_require_grad, func
     ):
         """
         Softmax on NestedTensor fails when trying to reduce across batch dimension.
@@ -4627,7 +4636,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 RuntimeError,
                 "not supported when reducing across the batch dimension for NestedTensor",
             ):
-                out = torch.nn.functional.softmax(nt, dim=reduce_dim)
+                out = func(nt, dim=reduce_dim)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
