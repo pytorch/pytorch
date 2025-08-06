@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-""" This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
+"""This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention"""
+
 import contextlib
 from collections.abc import Iterable
 from typing import Union
@@ -66,6 +67,7 @@ _backend_names = {
     "flash": "FLASH_ATTENTION",
     "mem_efficient": "EFFICIENT_ATTENTION",
     "math": "MATH",
+    "overrideable": "OVERRIDEABLE",
 }
 
 
@@ -76,7 +78,7 @@ def _backend_from_string(name: str):
 def _cur_sdpa_kernel_backends(with_priority: bool = False):
     backends = []
     for name, val in _backend_names.items():
-        if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
+        if getattr(torch._C, f"_get_{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
     if with_priority:
         curr_priority = torch._C._get_sdp_priority_order()
@@ -89,7 +91,7 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
 def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
-        getattr(torch.backends.cuda, f"enable_{name}_sdp")(enabled)
+        getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
     if set_priority:
         # backends should be a unique list
         user_priority = [int(backend) for backend in backends]
@@ -119,6 +121,7 @@ def sdpa_kernel(
 
         from torch.nn.functional import scaled_dot_product_attention
         from torch.nn.attention import SDPBackend, sdpa_kernel
+
         # Only enable flash attention backend
         with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             scaled_dot_product_attention(...)
@@ -130,9 +133,9 @@ def sdpa_kernel(
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(
-        backends, (list, SDPBackend)
-    ), "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
+    assert isinstance(backends, (list, SDPBackend)), (
+        "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
+    )
 
     if isinstance(backends, SDPBackend):
         backends = [backends]

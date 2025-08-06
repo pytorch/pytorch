@@ -13,6 +13,12 @@ inputs:
   github-token:
     description: GitHub token
     required: true
+  job-id:
+    description: Job ID
+    required: true
+  job-name:
+    description: Job name
+    required: true
 
 outputs:
   reuse:
@@ -30,8 +36,11 @@ runs:
       continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        JOB_ID: ${{ inputs.job-id }}
+        JOB_NAME: ${{ inputs.job-name }}
       run: |
         set -x
+        python3 -m pip install boto3==1.35.42
         python3 ${GITHUB_ACTION_PATH}/reuse_old_whl.py \
           --build-environment "${{ inputs.build-environment }}" \
           --run-id "${{ inputs.run-id }}" \

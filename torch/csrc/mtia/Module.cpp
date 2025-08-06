@@ -63,6 +63,18 @@ void initModule(PyObject* module) {
     return at::detail::getMTIAHooks().getDefaultStream(device_index);
   });
 
+  m.def(
+      "_mtia_setStream",
+      [](int64_t stream_id,
+         c10::DeviceIndex device_index,
+         int64_t device_type) {
+        torch::utils::device_lazy_init(at::kMTIA);
+        at::detail::getMTIAHooks().setCurrentStream(c10::Stream::unpack3(
+            stream_id,
+            device_index,
+            static_cast<c10::DeviceType>(device_type)));
+      });
+
   m.def("_mtia_setCurrentStream", [](const c10::Stream& stream) {
     torch::utils::device_lazy_init(at::kMTIA);
     auto device = at::detail::getMTIAHooks().getCurrentDevice();
@@ -81,6 +93,12 @@ void initModule(PyObject* module) {
   m.def("_mtia_getDeviceCapability", [](c10::DeviceIndex device_index) {
     PyObject* raw_pyobject =
         at::detail::getMTIAHooks().getDeviceCapability(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
+
+  m.def("_mtia_getDeviceProperties", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceProperties(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 

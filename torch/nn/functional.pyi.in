@@ -1,7 +1,8 @@
 # ${generated_comment}
 # mypy: allow-untyped-defs
 
-from typing import Any, Callable, Literal, overload, Sequence
+from collections.abc import Sequence
+from typing import Any, Callable, Literal, overload
 from typing_extensions import TypeAlias
 
 from torch import Tensor
@@ -395,14 +396,14 @@ def instance_norm(
 __all__ += ["instance_norm"]
 
 def interpolate(
-    input: Any,
-    size: Any | None = ...,
-    scale_factor: Any | None = ...,
+    input: Tensor,
+    size: int | Sequence[int] | None = ...,
+    scale_factor: float | Sequence[float] | None = ...,
     mode: str = ...,
-    align_corners: Any | None = ...,
-    recompute_scale_factor: Any | None = ...,
+    align_corners: bool | None = ...,
+    recompute_scale_factor: bool | None = ...,
     antialias: bool = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["interpolate"]
 

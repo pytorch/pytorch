@@ -3,9 +3,19 @@ import logging
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
+import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.utils import do_bench_using_profiling
 
-from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    IRNode,
+    Layout,
+    PrimitiveInfoType,
+    ShapeAsConstantBuffer,
+    TensorBox,
+)
 from ...virtualized import V
 from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
@@ -247,6 +257,9 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
         return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
@@ -271,7 +284,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             **dict(self.info_kwargs["op"].dict_items()),  # type: ignore[union-attr, index]
         }
 
-    def output_node(self) -> TensorBox:
+    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             ROCmTemplateBuffer(

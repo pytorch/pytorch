@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Utilities for reproducing and debugging issues in Dynamo after graph capture.
 
@@ -26,12 +24,12 @@ import os
 import shutil
 import sys
 import textwrap
+from collections.abc import Sequence
 from importlib import import_module
-from typing import Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx as fx
-from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
     backend_accuracy_fails,
@@ -53,7 +51,7 @@ from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
 
 from .. import config
-from ..backends.registry import lookup_backend, register_debug_backend
+from ..backends.registry import CompilerFn, lookup_backend, register_debug_backend
 from ..debug_utils import clone_inputs_retaining_gradness
 
 
@@ -68,7 +66,11 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def _accuracy_fails(gm, example_inputs, compiler_fn):
+def _accuracy_fails(
+    gm: torch.fx.GraphModule,
+    example_inputs: Sequence[Any],
+    compiler_fn: Callable[[torch.fx.GraphModule, list[Any]], torch.fx.GraphModule],
+) -> bool:
     return backend_accuracy_fails(
         gm,
         example_inputs,
@@ -79,29 +81,33 @@ def _accuracy_fails(gm, example_inputs, compiler_fn):
 
 
 class WrapBackendDebug:
-    def __init__(self, unconfigured_compiler_fn, compiler_name: str) -> None:
+    def __init__(
+        self, unconfigured_compiler_fn: CompilerFn, compiler_name: Optional[str]
+    ) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
-        self._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
+        self._torchdynamo_orig_backend = unconfigured_compiler_fn
         self._compiler_name = compiler_name
         if hasattr(unconfigured_compiler_fn, "__name__"):
             self.__name__ = unconfigured_compiler_fn.__name__
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
-            self.__name__ = unconfigured_compiler_fn.compiler_name
+            self.__name__ = unconfigured_compiler_fn.compiler_name  # type: ignore[attr-defined]
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
             self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
 
-    def __call__(self, gm, example_inputs, **kwargs):
-        compiler_fn = functools.partial(self._torchdynamo_orig_callable, **kwargs)
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: list[Any], **kwargs: Any
+    ) -> torch.fx.GraphModule:
+        compiler_fn = functools.partial(self._torchdynamo_orig_backend, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
 
         if config.repro_after == "dynamo":
 
-            def add_paths(exc):
-                exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+            def add_paths(exc: Exception) -> None:
+                exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")  # type: ignore[attr-defined]
                 if use_buck:
-                    exc.buck_command = " ".join(
+                    exc.buck_command = " ".join(  # type: ignore[attr-defined]
                         BUCK_CMD_PREFIX
-                        + [BuckTargetWriter(exc.minifier_path).cmd_line_path]
+                        + [BuckTargetWriter(exc.minifier_path).cmd_line_path]  # type: ignore[attr-defined]
                     )
 
             if config.repro_level == 3:
@@ -111,7 +117,7 @@ class WrapBackendDebug:
             if config.repro_level == 4:
                 # Check Accuracy
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                if _accuracy_fails(gm, example_inputs, compiler_fn):
+                if _accuracy_fails(gm, example_inputs, compiler_fn):  # type: ignore[arg-type]
                     log.warning(
                         "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                     )
@@ -126,7 +132,7 @@ class WrapBackendDebug:
             else:
                 try:
                     compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                    run_fwd_maybe_bwd(compiled_gm, example_inputs)
+                    run_fwd_maybe_bwd(compiled_gm, example_inputs)  # type: ignore[arg-type]
                 except Exception as exc:
                     log.warning(
                         "Compiled Fx GraphModule failed. Creating script to minify the error."
@@ -149,10 +155,12 @@ class WrapBackendDebug:
         else:
             compiled_gm = compiler_fn(gm, example_inputs)
 
-        return compiled_gm
+        return compiled_gm  # type: ignore[return-value]
 
 
-def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
+def wrap_backend_debug(
+    unconfigured_compiler_fn: CompilerFn, compiler_name: Optional[str]
+) -> WrapBackendDebug:
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
     As opposed to wrap_compiler_debug, this wrapper intercepts at the
@@ -170,15 +178,15 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
 
 
 def generate_dynamo_fx_repro_string(
-    gm,
-    args,
-    compiler_name,
-    check_accuracy=False,
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: Optional[str],
+    check_accuracy: bool = False,
     *,
-    stable_output=False,
-    save_dir=None,
-    command="run",
-):
+    stable_output: bool = False,
+    save_dir: Optional[str] = None,
+    command: str = "run",
+) -> str:
     """
     Generate a repro string for backend-agnostic minified version.
     """
@@ -225,7 +233,12 @@ if __name__ == '__main__':
     )
 
 
-def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
+def dump_backend_repro_as_file(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: Optional[str],
+    check_accuracy: bool = False,
+) -> None:
     """
     Saves the repro to a repro.py file
     """
@@ -253,7 +266,12 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     shutil.copyfile(file_name, latest_repro)
 
 
-def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
+def dump_backend_state(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    compiler_name: Optional[str],
+    check_accuracy: bool = False,
+) -> None:
     """
     Dumps the dynamo graph to repro the issue.
     1) It tries to convert Fx GraphModule to a string. If we can, it writes to a
@@ -271,7 +289,9 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def dump_to_minify_after_dynamo(gm, args, compiler_name):
+def dump_to_minify_after_dynamo(
+    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: Optional[str]
+) -> None:
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -295,8 +315,8 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 
 @register_debug_backend  # type: ignore[arg-type]
 def dynamo_minifier_backend(
-    gm: fx.GraphModule, example_inputs, compiler_name: CompiledFn
-):
+    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: Optional[str]
+) -> fx.GraphModule:
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -336,7 +356,9 @@ def dynamo_minifier_backend(
 
 
 @register_debug_backend  # type: ignore[arg-type]
-def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
+def dynamo_accuracy_minifier_backend(
+    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: Optional[str]
+) -> fx.GraphModule:
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -366,7 +388,12 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     return gm
 
 
-def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
+def backend_fails(
+    gm: fx.GraphModule,
+    example_inputs: Sequence[Any],
+    compiler_fn: CompilerFn,
+    orig_failure: Sequence[Any],
+) -> bool:
     """
     Minifier uses this function to identify if the minified graph module fails
     with the same error.
@@ -383,8 +410,8 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     try:
         # Run the original gm to check eager validity
         run_fwd_maybe_bwd(gm, clone_inputs_retaining_gradness(example_inputs))
-        compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, clone_inputs_retaining_gradness(example_inputs))
+        compiled_gm = compiler_fn(gm, example_inputs)  # type: ignore[arg-type]
+        run_fwd_maybe_bwd(compiled_gm, clone_inputs_retaining_gradness(example_inputs))  # type: ignore[arg-type]
     except Exception as e:
         new_failure = str(e)
         if SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5:
@@ -397,7 +424,7 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def run_load_args(options, mod, load_args):
+def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[Any]:
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -423,7 +450,7 @@ def run_load_args(options, mod, load_args):
     return args
 
 
-def repro_minify(options, mod, load_args):
+def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     args = run_load_args(options, mod, load_args)
 
     # Setup debug minifier compiler
@@ -450,20 +477,20 @@ def repro_minify(options, mod, load_args):
         opt_mod(*args)
 
 
-def repro_run(options, mod, load_args):
+def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
         mod.eval()
-        opt_mod.eval()
+        opt_mod.eval()  # type: ignore[union-attr]
 
         with torch.amp.autocast("cuda", enabled=options.autocast):
             # TODO: disable clone
             args = run_load_args(options, mod, load_args)
-            assert same_two_models(mod, mod, args), "Eager itself failed"
+            assert same_two_models(mod, mod, args), "Eager itself failed"  # type: ignore[arg-type]
             if not same_two_models(
-                mod,
-                opt_mod,
+                mod,  # type: ignore[arg-type]
+                opt_mod,  # type: ignore[arg-type]
                 args,
                 only_fwd=config.repro_forward_only,
                 ignore_non_fp=config.repro_ignore_non_fp,
@@ -472,26 +499,29 @@ def repro_run(options, mod, load_args):
     else:
         with torch.amp.autocast("cuda", enabled=options.autocast):
             args = run_load_args(options, mod, load_args)
-            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
+            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)  # type: ignore[arg-type]
             del args
 
             args = run_load_args(options, mod, load_args)
             run_fwd_maybe_bwd(
-                opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
+                opt_mod,  # type: ignore[arg-type]
+                args,
+                only_fwd=options.only_fwd,
+                disable_clone=True,  # type: ignore[arg-type]
             )
 
 
 def run_repro(
-    mod,
-    load_args,
+    mod: torch.nn.Module,
+    load_args: Any,
     *,
-    command="run",
+    command: str = "run",
     accuracy: Union[bool, str] = "",
-    save_dir=None,
-    autocast=False,
-    backend="inductor",
-    **kwargs,
-):
+    save_dir: Optional[str] = None,
+    autocast: bool = False,
+    backend: str = "inductor",
+    **kwargs: Any,
+) -> None:
     for k in kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
@@ -517,7 +547,7 @@ default settings on this script:
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def common_flags(parser):
+    def common_flags(parser: argparse.ArgumentParser) -> None:
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
             "--no-accuracy",

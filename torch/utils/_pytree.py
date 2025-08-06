@@ -113,10 +113,14 @@ class KeyEntry(Protocol):
 
 
 class EnumEncoder(json.JSONEncoder):
-    def default(self, obj: object) -> str:
+    def default(self, obj: object) -> Union[str, dict[str, Any]]:
         if isinstance(obj, Enum):
-            return obj.value  # type: ignore[no-any-return]
-        return super().default(obj)  # type: ignore[no-any-return]
+            return {
+                "__enum__": True,
+                "fqn": f"{obj.__class__.__module__}:{obj.__class__.__qualname__}",
+                "name": obj.name,
+            }
+        return cast(str, super().default(obj))
 
 
 Context = Any
@@ -1836,6 +1840,18 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
 
+def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
+    if "__enum__" in obj:
+        modname, _, classname = obj["fqn"].partition(":")
+        mod = importlib.import_module(modname)
+        enum_cls = mod
+        for attr in classname.split("."):
+            enum_cls = getattr(enum_cls, attr)
+        enum_cls = cast(type[Enum], enum_cls)
+        return enum_cls[obj["name"]]
+    return obj
+
+
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     if (
         json_schema["type"] is None
@@ -1854,7 +1870,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
 
     if serialize_node_def.from_dumpable_context is None:
         try:
-            context = json.loads(json_schema["context"])
+            context = json.loads(json_schema["context"], object_hook=enum_object_hook)
         except TypeError as ex:
             raise TypeError(
                 "Unable to deserialize context. "

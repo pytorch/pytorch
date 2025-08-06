@@ -354,6 +354,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseMPS", c10::DispatchKey::SparseMPS},
+      {"SparseCsrMPS", c10::DispatchKey::SparseCsrMPS},
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},

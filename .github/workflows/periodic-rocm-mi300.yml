@@ -50,18 +50,18 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-rocm-py3_10-build:
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi300.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx942.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
@@ -69,13 +69,13 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3.10
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
