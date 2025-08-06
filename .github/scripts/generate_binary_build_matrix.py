@@ -193,7 +193,7 @@ LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     "cpu": "libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -314,6 +314,11 @@ def generate_wheels_matrix(
 
             # TODO: Enable python 3.13t on cpu-s390x
             if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
+                continue
+            # TODO: Enable python 3.14 on non linux OSes
+            if os != "linux" and (
+                python_version == "3.14" or python_version == "3.14t"
+            ):
                 continue
 
             if use_split_build and (
