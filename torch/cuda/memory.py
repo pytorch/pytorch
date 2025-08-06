@@ -255,9 +255,9 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
 
     - ``all``: combined statistics across all memory pools.
     - ``large_pool``: statistics for the large allocation pool
-      (as of October 2019, for size >= 1MB allocations).
+      (as of June 2025, for size >= 1MB allocations).
     - ``small_pool``: statistics for the small allocation pool
-      (as of October 2019, for size < 1MB allocations).
+      (as of June 2025, for size < 1MB allocations).
 
     Metric type:
 
@@ -1075,8 +1075,8 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
         f.write(_memory(snapshot))
 
 
-def _set_allocator_settings(env: str):
-    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+# Keep for BC only
+_set_allocator_settings = torch._C._accelerator_setAllocatorSettings
 
 
 def get_allocator_backend() -> str:
