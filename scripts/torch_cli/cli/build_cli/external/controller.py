@@ -15,11 +15,12 @@ class ExternalBuildController(Controller):
     )
     def vllm(self):
         config = self.app.pargs.config
+        config_map = {}
         if config:
             self.app.info("use config file user provided")
+            self.app.info("Reading config yaml file ...")
+            config_map = read_yaml_file(config, self.app)
+            self.app.info(f"config_map: {config_map}")
         else:
             self.app.info("please input config file, otherwise use default config")
-        # TODO: implement vllm build
         self.app.info("implement vllm build")
-        config_map = read_yaml_file(config, self.app)
-        self.app.info(f"config_map: {config_map}")
