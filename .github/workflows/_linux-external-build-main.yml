@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: target library to build
+      ci-config:
+        required: false
+        type: string
+        description: CI config to use for the build and test.
       use-gha:
         required: false
         type: string
@@ -93,12 +97,12 @@ on:
           FB app token to write to scribe endpoint
 
 jobs:
-  build-vllm:
+  build-external-lib:
     environment: ${{ github.ref == 'refs/heads/main' && 'scribe-protected' || startsWith(github.ref, 'refs/heads/release/') && 'scribe-protected' || contains(github.event.pull_request.labels.*.name, 'ci-scribe') && 'scribe-pr' || '' }}
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
-    timeout-minutes: 360
+    timeout-minutes: 240
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -217,6 +221,7 @@ jobs:
           MAX_JOBS: 89 # TODO(elainewy): make this configurable
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
+          CI_CONFIG: ${{ inputs.ci-config }}
         run: |
           set -euo pipefail
           python3 --version
@@ -226,7 +231,7 @@ jobs:
             cd scripts/torch_cli
             python3 -m pip install -e .
           )
-          python3 -m cli.run --config ".github/ci_configs/vllm_ci_config.yaml" build external "$BUILD_TARGET"
+          python3 -m cli.run --config "$CI_CONFIG" build external "$BUILD_TARGET"
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 

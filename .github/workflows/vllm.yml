@@ -55,6 +55,7 @@ jobs:
       build-additional-packages: "vision audio"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
       build-target: vllm
+      ci-config: ".github/ci_configs/vllm_ci_config.yaml"
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.docker-image }}
       runner: linux.24xlarge.memory
@@ -86,6 +87,7 @@ jobs:
       build-additional-packages: "vision audio"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm90
       build-target: vllm
+      ci-config: ".github/ci_configs/vllm_ci_config.yaml"
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-90.outputs.docker-image }}
       runner: linux.24xlarge.memory
