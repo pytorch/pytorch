@@ -31,7 +31,7 @@ def run_shell(
             cwd=cwd,
         )
     except subprocess.CalledProcessError as e:
-        print("[❌ docker build failed]")
+        print("docker build failed]")
         print("Command:", " ".join(cmd))
         print("Exit code:", e.returncode)
         print("STDOUT:\n", e.stdout)
@@ -146,15 +146,6 @@ def clone_vllm(commit: str):
     run_cmd("git submodule update --init --recursive", cwd=cwd)
 
 
-def read_yaml_file(file_path: str) -> dict:
-    p = get_abs_path(file_path)
-    if not os.path.exists(p):
-        raise FileNotFoundError(f"YAML file not found: {file_path}")
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def pip_install(package: str):
     cmd = f"python3 -m pip install {package}"
     subprocess.run(shlex.split(cmd), check=True)
@@ -177,7 +168,6 @@ def read_yaml_file(file_path: str) -> dict:
 
         # Replace environment variables with env var such as ${DOCKER_IMAGE}
         expanded_content = os.path.expandvars(raw_content)
-
         data = yaml.safe_load(expanded_content)
         if data is None:
             return {}
