@@ -105,6 +105,25 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                     f"{msg_prefix} .to('{arg.value}'), suggest to use .to(GPU_TYPE)",
                 )
 
+    def _check_with_statement(self, node: ast.With, msg_prefix: str) -> None:
+        for item in node.items:
+            ctx_expr = item.context_expr
+            if isinstance(ctx_expr, ast.Call):
+                func = ctx_expr.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "device"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "torch"
+                    and ctx_expr.args
+                    and isinstance(ctx_expr.args[0], ast.Constant)
+                    and any(bias in ctx_expr.args[0].value for bias in DEVICE_BIAS)
+                ):
+                    self.record(
+                        ctx_expr,
+                        f"{msg_prefix} `with torch.device('{ctx_expr.args[0].value}')`, suggest to use torch.device(GPU_TYPE)",
+                    )
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         # Check if the function is decorated with @requires_gpu, which indicates
         # that the function is intended to run on GPU devices (e.g., CUDA or XPU),
@@ -121,6 +140,8 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                 subnode.func, ast.Attribute
             ):
                 self._check_device_methods(subnode, msg_prefix)
+            elif isinstance(subnode, ast.With):
+                self._check_with_statement(subnode, msg_prefix)
 
         self.generic_visit(node)
 
