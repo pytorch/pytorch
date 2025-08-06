@@ -136,7 +136,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
-def has_higher_order_op(gm):
+def has_higher_order_op(gm) -> bool:
     # Check if there is a higher order op in the graph
     for node in gm.graph.nodes:
         if node.op == "get_attr":

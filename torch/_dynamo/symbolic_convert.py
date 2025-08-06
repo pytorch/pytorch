@@ -3136,7 +3136,7 @@ class InstructionTranslatorBase(
     def FORMAT_WITH_SPEC(self, inst):
         self._format_value(self.pop(), 0)
 
-    def is_non_empty_graph(self):
+    def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
             # perf optimization only
             self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
@@ -3160,7 +3160,7 @@ class InstructionTranslatorBase(
             lookup_line=False,
         )
 
-    def is_co_filename_from_nn_modules(self):
+    def is_co_filename_from_nn_modules(self) -> bool:
         filename = getattr(self.f_code, "co_filename", "<unknown>")
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None

@@ -3670,11 +3670,11 @@ def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
-def is_recompiles_enabled():
+def is_recompiles_enabled() -> bool:
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
-def is_recompiles_verbose_enabled():
+def is_recompiles_verbose_enabled() -> bool:
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
 
 

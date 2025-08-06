@@ -187,7 +187,7 @@ class CustomOp:
     def _get_impl(self, kind):
         return self._impls[kind]
 
-    def _has_impl(self, kind):
+    def _has_impl(self, kind) -> bool:
         return kind in self._impls
 
     def _destroy(self):
