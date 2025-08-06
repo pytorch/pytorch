@@ -154,11 +154,11 @@ else:
         device_type: str
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
-        root_mesh: "DeviceMesh"
+        root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its mesh in root mesh.
-        root_to_flatten_mapping: dict[str, "DeviceMesh"]
+        root_to_flatten_mapping: dict[str, "DeviceMesh"] = {}
         # Record flatten mesh name to its mesh dim index in root mesh.
-        flatten_name_to_root_dims: dict[str, tuple[int, ...]]
+        flatten_name_to_root_dims: dict[str, tuple[int, ...]] = {}
 
         def __init__(
             self,
@@ -417,6 +417,7 @@ else:
                         self.device_type,
                         self.mesh_dim_names,
                         self._thread_id,
+                        self.root_mesh,
                     )
                 )
             return self._hash
@@ -433,6 +434,7 @@ else:
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
                     and self._thread_id == other._thread_id
+                    and self.root_mesh == other.root_mesh
                 )
 
         def __getitem__(
@@ -491,9 +493,7 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
-                slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
-                    self, mesh_dim_names
-                )
+                slice_mesh_dims = self._get_slice_mesh_dims(mesh_dim_names)
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
@@ -534,7 +534,7 @@ else:
             if self.mesh.ndim == 1 and mesh_dim is None:
                 return not_none(_resolve_process_group(self._dim_group_names[0]))
 
-            root_mesh = _mesh_resources.get_root_mesh(self)
+            root_mesh = self.get_root_mesh()
             root_to_flatten_mapping = root_mesh.root_to_flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
                 dim_group_name = root_to_flatten_mapping[
@@ -543,7 +543,7 @@ else:
                 return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
-                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    self.get_mesh_dim_by_name(mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
@@ -647,7 +647,7 @@ else:
                 None,
             ),
         ) -> "DeviceMesh":
-            root_mesh = self.root_mesh
+            root_mesh = self.get_root_mesh()
 
             flatten_dims_in_root = [
                 not_none(root_mesh.mesh_dim_names).index(flatten_mesh_dim_name)
@@ -711,20 +711,20 @@ else:
             root_mesh = self.root_mesh
             return self if not root_mesh else root_mesh
 
-        def get_root_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        def get_root_mesh_dim(self) -> Optional[int]:
             """
             Returns the index of the mesh dim in the root mesh.
             The device_mesh passed in needs to be sliced out from the root mesh
             or submesh of the root mesh.
             """
             root_mesh = self.get_root_mesh()
-            child_mesh_dim_names = device_mesh.mesh_dim_names
+            child_mesh_dim_names = self.mesh_dim_names
             if root_mesh and child_mesh_dim_names:
                 assert len(child_mesh_dim_names) == 1, (
                     "The submesh can only be a 1D mesh."
                 )
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return self.get_mesh_dim_by_name(child_mesh_dim_name)
+                return root_mesh.get_mesh_dim_by_name(child_mesh_dim_name)
             return None
 
         def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
@@ -800,6 +800,7 @@ else:
             pg_ranks_by_dim = self.mesh.swapdims(-1, mesh_dim).reshape(
                 -1, self.mesh.size(mesh_dim)
             )
+            root_mesh = self.get_root_mesh()
 
             cur_rank = self.get_rank()
             res_submeshes = []
@@ -815,6 +816,7 @@ else:
                     if cur_rank in mesh_1d
                     else []
                 )
+                submesh.root_mesh = root_mesh  # type: ignore[possibly-undefined]
                 res_submeshes.append(submesh)
 
             return res_submeshes
@@ -1008,9 +1010,7 @@ else:
             else:
                 backend_override_tuple = (None, None)
 
-            return _mesh_resources.create_flatten_mesh(
-                self, mesh_dim_name, backend_override_tuple
-            )
+            return self.create_flatten_mesh(mesh_dim_name, backend_override_tuple)
 
     def _normalize_backend_override(
         backend_override: dict[
