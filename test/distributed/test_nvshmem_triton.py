@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import requires_triton, IS_A100
+from torch.testing._internal.inductor_utils import IS_A100, requires_triton
 
 
 # Decorators
@@ -26,11 +26,13 @@ def requires_nvshmem():
         "test_nvshmem requires NVSHMEM, skipping tests",
     )
 
+
 def skip_on_a100():
     return skip_but_pass_in_sandcastle_if(
         IS_A100,
         "NVSHMEM requires H100. Skipping test on A100 GPU.",
     )
+
 
 # So that tests are written in device-agnostic way
 device_type = "cuda"
@@ -591,7 +593,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 peer=peer,  # The target PE (Rank 0)
                 extern_libs=nvshmem_lib,
             )
-
 
     @skipIfRocm
     @requires_triton()
