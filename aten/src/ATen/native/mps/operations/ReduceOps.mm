@@ -152,7 +152,6 @@ static void reduction_out_mps(const Tensor& input_t,
                               const Tensor& output_t,
                               MPSReductionType reduction_type,
                               const std::string& func_name) {
-  bool macOS13_3_plus = true;
   // NS: TODO: get rid of all those shenanigans and just call reduction_op with view tensor
   bool canSqueezeLastDim = true;
   IntArrayRef input_shape = input_t.sizes();
@@ -235,12 +234,10 @@ static void reduction_out_mps(const Tensor& input_t,
       MPSGraphTensor* castInputTensor = inputTensor;
       MPSDataType inputCastType = MPSDataTypeInvalid;
       if (dtype.has_value() &&
-          (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt ||
-           (dtype.value() == kLong && macOS13_3_plus))) {
+          (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt || dtype.value() == kLong)) {
         inputCastType = getMPSDataType(dtype.value());
       } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
-                 (inputScalarType != kLong || !macOS13_3_plus)) {
+                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf && inputScalarType != kLong) {
         inputCastType = getMPSDataType(kFloat);
       }
 
@@ -614,8 +611,6 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
 }
 
 static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
-  bool macOS13_3_plus = true;
-
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
@@ -690,8 +685,6 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
 }
 
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
-  bool macOS13_3_plus = true;
-
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
@@ -744,8 +737,6 @@ static void min_max_out_mps(const Tensor& input_t,
                             const Tensor& indices_t,
                             MPSReductionType reduction_type,
                             const std::string& func_name) {
-  bool macOS13_3_plus = true;
-
   if (output_t.numel() == 0) {
     return;
   }
@@ -889,8 +880,6 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
                                   const std::string& func_name) {
   using CachedGraph = MPSUnaryCachedGraph;
 
-  bool macOS13_3_plus = true;
-
   int64_t dim_ = -1;
 
   if (dim.has_value()) {
@@ -945,7 +934,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
 
       MPSGraphTensor* castInputTensor = inputTensor;
       if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
-          (inputScalarType != kLong || !macOS13_3_plus)) {
+          inputScalarType != kLong) {
         castInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
       }
       if (reduction_type == MPSReductionType::MAX) {
@@ -1274,8 +1263,6 @@ static void all_any_common_impl_mps(const Tensor& input_t,
     return;
   }
 
-  bool macOS13_3_plus = true;
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, op_name.c_str());
 
@@ -1360,8 +1347,6 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
     return;
   }
 
-  bool macOS13_3_plus = true;
-
   @autoreleasepool {
     std::string key = std::string("any_all_out_mps:") + getTensorsStringKey(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -1409,8 +1394,6 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
     output_t.fill_(1);
     return;
   }
-
-  bool macOS13_3_plus = true;
 
   @autoreleasepool {
     std::string key = std::string("all_all_out_mps:") + getTensorsStringKey(input_t);
@@ -1501,8 +1484,6 @@ static void median_out_mps_common(const Tensor& input_t,
                                   Tensor& indices,
                                   const std::string& func_name,
                                   bool nanmedian) {
-  bool macOS13_3_plus = true;
-
   int64_t dim_ = maybe_wrap_dim(dim, input_t.dim());
   native::zero_numel_check_dims(input_t, dim_, "max()");
 
