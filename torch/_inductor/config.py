@@ -741,6 +741,12 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
+)
+
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
@@ -1860,6 +1866,8 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
 
     # If set to True, AOTI-generated CMakelists.txt will still use libtorch
     # for unit testing
