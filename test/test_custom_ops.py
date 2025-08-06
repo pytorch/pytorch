@@ -544,62 +544,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
 
-    def test_deploy_interaction(self):
-        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
-        script = """
-import torch
-torch._running_with_deploy = lambda: True
-
-# creating the library is a no-op, so you can DEF multiple times
-m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
-
-m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
-
-# define is a no-op
-m.define("foobarbaz9996(Tensor x) -> Tensor")
-assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
-
-def sin_override(x):
-    raise AssertionError("m.impl should have been a noop")
-
-# impl is a no-op
-m.impl("sin", sin_override, "CompositeImplicitAutograd")
-x = torch.randn(3)
-y = torch.sin(x)
-
-# should be a no-op
-@torch.library.custom_op("mylib::foobar", mutates_args={})
-def foobar(x: torch.Tensor) -> torch.Tensor:
-    return x.sin()
-
-# should be a no-op
-@foobar.register_fake
-def _(x):
-    return torch.empty_like(x)
-
-# should be a no-op
-m2.define("foobarbaz9996(Tensor x) -> Tensor")
-
-# should be a no-op
-@torch.library.register_fake("mylib4392::foobarbaz9996")
-def _(x):
-    return torch.empty_like(x)
-        """
-        script = script.strip()
-        env = os.environ.copy()
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                env=env,
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
-
     @requires_compile
     def test_functionalize_error(self):
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
@@ -1664,7 +1608,7 @@ def _(x):
         lib = self.lib()
         lib.define("sin.blah(Tensor x) -> Tensor")
 
-        torch.library.impl_abstract(
+        torch.library.register_fake(
             f"{self.test_ns}::sin.blah", torch.empty_like, lib=lib
         )
 
@@ -1677,7 +1621,7 @@ def _(x):
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -1693,7 +1637,7 @@ def _(x):
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -1701,7 +1645,7 @@ def _(x):
 
         with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+            @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1712,7 +1656,7 @@ def _(x):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             ctx = torch.library.get_ctx()
             r = ctx.new_dynamic_size(min=1)
@@ -1739,7 +1683,7 @@ def _(x):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
 
-        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+        @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             return x.sum()
 
@@ -1824,7 +1768,8 @@ Dynamic shape operator
   Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
 
   Developer debug context: _torch_testing.numpy_nonzero.default
-""",
+
+ For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0036.html""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
@@ -1882,7 +1827,7 @@ Dynamic shape operator
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
 
-        @torch.library.impl_abstract(qualname, lib=self.lib())
+        @torch.library.register_fake(qualname, lib=self.lib())
         def foo_impl(x):
             return x.sin()
 
@@ -1905,7 +1850,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1919,7 +1864,7 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
-            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
+            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -1932,7 +1877,7 @@ Dynamic shape operator
         lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
         op = self.get_op(qualname)
 
-        torch.library.impl_abstract(qualname, func=lambda x: x.sum(), lib=self.lib())
+        torch.library.register_fake(qualname, lambda x: x.sum(), lib=self.lib())
         with torch._subclasses.FakeTensorMode():
             x = torch.randn(10)
             result = op(x)
@@ -2387,6 +2332,14 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
+
+    # Using a non-existent DSO is a quick way to trigger an OSError,
+    # which can be used to not break BC.
+    def test_load_library(self):
+        with self.assertRaisesRegex(
+            OSError, "Could not load this library: .*libnoexist.so"
+        ):
+            torch.ops.load_library("libnoexist.so")
 
 
 def op_with_incorrect_schema(testcase, name):

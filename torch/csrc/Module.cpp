@@ -138,6 +138,8 @@
 #include <torch/csrc/itt.h>
 #endif
 
+#include <torch/nativert/python/Bindings.h>
+
 namespace py = pybind11;
 
 static PyObject* module;
@@ -407,10 +409,10 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
       a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+          /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
       b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+          /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -420,10 +422,8 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   a->cdata = b->cdata;
   b->cdata = tmp;
 
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
+  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1172,6 +1172,29 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setImmediateMiopen(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_immediate_miopen expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setImmediateMiopen(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_immediateMiopen(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().immediateMiopen()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setAllowTF32CuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1642,6 +1665,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
+    {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
+    {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
     {"_get_cudnn_deterministic",
      THPModule_deterministicCuDNN,
      METH_NOARGS,
@@ -2755,6 +2780,8 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  auto nativert_module = py_module.def_submodule("_nativert");
+  torch::nativert::initModelRunnerPybind(nativert_module);
   return module;
   END_HANDLE_TH_ERRORS
 }
