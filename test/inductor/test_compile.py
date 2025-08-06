@@ -16,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
+_IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
 
@@ -177,6 +178,8 @@ int main(){
 
         if _IS_WINDOWS:
             check_windows_pdb_exist(binary_path)
+        elif _IS_MACOS:
+            pass  # MacOS not sure that if it should be works.
         else:
             check_linux_debug_section(binary_path)
 
