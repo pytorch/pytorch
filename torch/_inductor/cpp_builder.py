@@ -637,7 +637,7 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(do_link: bool) -> list[str]:
+def _get_shared_cflags(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -650,6 +650,25 @@ def _get_shared_cflag(do_link: bool) -> list[str]:
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     return ["shared", "fPIC"]
+
+
+def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+    """
+    When we turn on generate debug symbol.
+    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+    On Linux, it should create some debug sections in binary file.
+    """
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    b_enable_debug_symbol = os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+    if b_enable_debug_symbol:
+        if _IS_WINDOWS:
+            cflags = ["Z7", "_DEBUG", "OD"]
+            ldflags = ["DEBUG", "OPT:REF", "OPT:ICF"]
+        else:
+            cflags.append("g")
+
+    return cflags, ldflags
 
 
 def get_cpp_options(
@@ -667,12 +686,15 @@ def get_cpp_options(
     libraries: list[str] = []
     passthrough_args: list[str] = []
 
+    dbg_cflags, dbg_ldflags = _get_inductor_debug_symbol_cflags()
+
     cflags = (
-        _get_shared_cflag(do_link)
+        _get_shared_cflags(do_link)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
+        + dbg_cflags
     )
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
@@ -685,7 +707,7 @@ def get_cpp_options(
         definitions,
         include_dirs,
         cflags,
-        ldflags,
+        ldflags + dbg_ldflags,
         libraries_dirs,
         libraries,
         passthrough_args,

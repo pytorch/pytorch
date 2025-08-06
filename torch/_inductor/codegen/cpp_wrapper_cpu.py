@@ -1278,12 +1278,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if (
-            extern_kernel.python_kernel_name
-            == "torch.ops._c10d_functional.wait_tensor.default"
+        if extern_kernel.python_kernel_name in (
+            "torch.ops._c10d_functional.all_reduce_.default",
+            "torch.ops._c10d_functional.wait_tensor.default",
         ):
-            # wait_tensor returns its input, and the returned tensor is not used anywhere,
-            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
+            # all_reduce_ is an inplace op and its returned tensor is not used anywhere.
+            # wait_tensor returns its input without any modification and the returned tensor is not used anywhere.
+            # In both cases, we can immediately delete the returned AtenTensorHandle to reduce its lifetime.
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
             )
