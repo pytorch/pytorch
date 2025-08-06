@@ -167,7 +167,7 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   py::dict env;
-  // Kept identical to values in env. Used for constant-time existance check.
+  // Kept identical to values in env. Used for constant-time existence check.
   py::set values_in_env;
   try {
     BlockToONNX(
@@ -448,7 +448,8 @@ void NodeToONNX(
       std::ostringstream ss;
       ss << "Error casting results of symbolic for " << op_name
          << ": expected to return list of op nodes, instead received type ''"
-         << py::str(raw_output.get_type()) << "': " << py::str(raw_output);
+         << py::str(py::type::handle_of(raw_output))
+         << "': " << py::str(raw_output);
       throw std::runtime_error(ss.str());
     }
 

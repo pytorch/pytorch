@@ -3,7 +3,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <tuple>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #define CUTLASS_STATUS_CHECK(status)                                    \
   {                                                                     \
@@ -28,7 +28,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 // Wrapper function for CUTLASS sparse GEMM implementation, used
 // solely to simplify dispatching from
@@ -526,7 +526,7 @@ Tensor sparse_semi_structured_mad_op(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
       const std::optional<Tensor>& input_opt, const Scalar& alpha,
       const Scalar& beta, const std::optional<c10::ScalarType> out_dtype_opt) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
     TORCH_CHECK(false, __func__, " : CUTLASS not supported");
     return Tensor{};
 #else
@@ -818,7 +818,7 @@ Tensor _sparse_semi_structured_addmm(
 // Following is just for testing purposes.
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
 // tree.  This is for simplicity - namely, this file is not under
@@ -856,7 +856,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, __func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else

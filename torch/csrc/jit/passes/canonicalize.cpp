@@ -96,7 +96,7 @@ static bool isBefore(Node* n1, Node* n2) {
     }
   }
 
-  // Now they are the same numer of blocks from the graph block,
+  // Now they are the same number of blocks from the graph block,
   // recurse upwards, checking if they are on the same block
   while (true) {
     if (n1->owningBlock() == n2->owningBlock()) {

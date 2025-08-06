@@ -433,7 +433,7 @@ def enabled_metric_tables() -> OrderedSet[str]:
 
 @lru_cache
 def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
-    enabled = OrderedSet[str]()
+    enabled: OrderedSet[str] = OrderedSet()
     for name in config_str.split(","):
         name = name.strip()
         if not name:

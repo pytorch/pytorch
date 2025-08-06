@@ -34,9 +34,12 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export_for_training, load, save, unflatten
+from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
 from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -481,10 +484,12 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
-    def test_infinity_inputs(self) -> None:
+    def test_nonfinite_inputs(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, -math.inf)
+                return torch.ops.aten.add.Scalar(x, math.nan)
 
         fn = Module()
         ep = torch.export.export(
@@ -790,7 +795,7 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo")
+            @torch.library.register_fake("mylib::foo")
             def foo_impl(a, b, c):
                 res2 = None
                 if c is not None:
@@ -879,21 +884,21 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo1", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo1")
+            @torch.library.register_fake("mylib::foo1")
             def foo1_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return n + n
 
             @torch.library.impl("mylib::foo2", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo2")
+            @torch.library.register_fake("mylib::foo2")
             def foo2_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
             @torch.library.impl("mylib::foo3", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo3")
+            @torch.library.register_fake("mylib::foo3")
             def foo3_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
@@ -944,10 +949,12 @@ class TestDeserialize(TestCase):
         ep = torch.export.export(M(), (torch.ones(3, 3), None, torch.ones(3, 3)))
 
         serialized_program = ExportedProgramSerializer(None, 2).serialize(ep)
-        serialized_program.exported_program.graph_module.signature.input_specs[
-            1
-        ] = schema.InputSpec.create(
-            user_input=schema.UserInputSpec(arg=schema.Argument.create(as_none=True))
+        serialized_program.exported_program.graph_module.signature.input_specs[1] = (
+            schema.InputSpec.create(
+                user_input=schema.UserInputSpec(
+                    arg=schema.Argument.create(as_none=True)
+                )
+            )
         )
         ep = ExportedProgramDeserializer(None).deserialize(
             serialized_program.exported_program, {}, {}, {}
@@ -1491,6 +1498,7 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1501,10 +1509,10 @@ class TestSaveLoad(TestCase):
         inp = (torch.randn(2, 2),)
         ep = export_for_training(f, inp, strict=True)
 
-        with tempfile.NamedTemporaryFile() as f:
-            save(ep, f)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            save(ep, f.name)
             f.seek(0)
-            loaded_ep = load(f)
+            loaded_ep = load(f.name)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
@@ -1518,7 +1526,7 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor([6]), torch.tensor([7]))
         ep = export_for_training(f, inp, strict=True)
 
-        with TemporaryFileName() as fname:
+        with TemporaryFileName(suffix=".pt2") as fname:
             path = Path(fname)
             save(ep, path)
             loaded_ep = load(path)
@@ -1545,6 +1553,9 @@ class TestSaveLoad(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
         self.assertEqual(extra_files["extra.txt"], "moo")
 
+    @unittest.skipIf(
+        IS_FBCODE or IS_MACOS or IS_WINDOWS, "The file path is different in fbcode CI"
+    )
     def test_version_error(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1555,18 +1566,19 @@ class TestSaveLoad(TestCase):
         ep = export_for_training(f, (torch.randn(1, 3),), strict=True)
 
         with self.assertRaisesRegex(
-            RuntimeError, r"Serialized version .* does not match our current"
+            ValueError, r"Saved archive version -1 does not match our current"
         ):
-            with tempfile.NamedTemporaryFile() as f:
-                save(ep, f)
+            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+                save(ep, f.name)
                 f.seek(0)
+                file_prefix = f.name.split("/")[2].split(".")[0]
 
                 # Modify the version
                 with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr("version", "-1.1")
+                    zipf.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
 
                 f.seek(0)
-                load(f)
+                load(f.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
@@ -1803,6 +1815,60 @@ def forward(self, x):
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertEqual(counter, 1)
+
+    def test_unbacked_range_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._check_is_size(n, max=y.size(0) - 1)
+                return torch.empty(n), y[n]
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.tensor([5]), torch.randn(10)),
+            dynamic_shapes={
+                "x": None,
+                "y": (Dim.DYNAMIC,),
+            },
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        # pre-serialize ep
+        pre_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in ep.graph.nodes]
+        ).shape_env
+        post_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        self.assertEqual(pre_shape_env.var_to_range, post_shape_env.var_to_range)
+
+    def test_backed_size_oblivious_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z.item()
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = torch.export.export(
+                Foo(),
+                (torch.randn(1), torch.randn(1), torch.tensor([5])),
+                dynamic_shapes={
+                    "x": (Dim.DYNAMIC,),
+                    "y": (Dim.DYNAMIC,),
+                    "z": None,
+                },
+            )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
+        self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
 
 
 if __name__ == "__main__":

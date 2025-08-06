@@ -185,6 +185,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
     def test_inductor_profiling_triton_hooks(self):
         from triton.compiler import CompiledKernel  # @manual
 
+        from torch._inductor.runtime.triton_compat import knobs
+
         hooks_called = {"enter": False, "exit": False}
 
         def launch_enter_hook(lazy_dict):
@@ -193,8 +195,12 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def launch_exit_hook(lazy_dict):
             hooks_called["exit"] = True
 
-        CompiledKernel.launch_enter_hook = launch_enter_hook
-        CompiledKernel.launch_exit_hook = launch_exit_hook
+        if knobs:
+            knobs.runtime.launch_enter_hook = launch_enter_hook
+            knobs.runtime.launch_exit_hook = launch_exit_hook
+        else:
+            CompiledKernel.launch_enter_hook = launch_enter_hook
+            CompiledKernel.launch_exit_hook = launch_exit_hook
 
         def fn(x, y):
             return torch._foreach_add(x, y)

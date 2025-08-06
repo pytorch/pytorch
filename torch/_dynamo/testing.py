@@ -204,7 +204,7 @@ def debug_insert_nops(
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
-            root_tx=None,
+            root_tx=None,  # type: ignore[arg-type]
             export=False,
             export_constraints=None,
             frame_state={"_id": 0},
@@ -213,6 +213,7 @@ def debug_insert_nops(
             global_scope=globals(),
             f_code=frame.f_code,
             torch_function_mode_stack=[],
+            package=None,
         )
 
         return wrap_guarded_code(

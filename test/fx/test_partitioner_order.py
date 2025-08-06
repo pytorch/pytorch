@@ -1,6 +1,5 @@
 # Owner(s): ["module: fx"]
 
-import unittest
 from collections.abc import Mapping
 
 import torch
@@ -37,9 +36,9 @@ class TestPartitionerOrder(TestCase):
     def test_partitioner_order(self):
         m = AddModule()
         traced_m = torch.fx.symbolic_trace(m)
-        partions = DummyPartitioner(traced_m).propose_partitions()
-        partion_nodes = [list(partition.nodes) for partition in partions]
-        node_order = [n.name for n in partion_nodes[0]]
+        partitions = DummyPartitioner(traced_m).propose_partitions()
+        partition_nodes = [list(partition.nodes) for partition in partitions]
+        node_order = [n.name for n in partition_nodes[0]]
         for _ in range(10):
             traced_m = torch.fx.symbolic_trace(m)
             new_partion = DummyPartitioner(traced_m).propose_partitions()
@@ -49,4 +48,7 @@ class TestPartitionerOrder(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

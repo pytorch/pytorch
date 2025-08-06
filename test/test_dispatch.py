@@ -1118,7 +1118,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
     def test_duplicate_registrations(self):
         dispatcher = PythonDispatcher()
 
-        with self.assertRaisesRegex(RuntimeError, r"Overriden is not allowed"):
+        with self.assertRaisesRegex(RuntimeError, r"Overridden is not allowed"):
             dispatcher.register(["CPU", "CPU"])
 
     def test_defaultbackend_math(self):

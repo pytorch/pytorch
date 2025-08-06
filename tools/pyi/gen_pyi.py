@@ -261,7 +261,7 @@ def sig_for_ops(opname: str) -> list[str]:
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
@@ -412,6 +412,16 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "tuple[Tensor, Tensor]",
                     )
                 ],
+                f"adaptive_avg_pool{d}d": [
+                    defs(
+                        f"adaptive_avg_pool{d}d",
+                        [
+                            INPUT,
+                            "output_size: _int | _size",
+                        ],
+                        "Tensor",
+                    )
+                ],
             }
         )
 
@@ -512,6 +522,31 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "is_causal: bool = False",
                         "scale: float | None = None",
                         "enable_gqa: bool = False",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "binary_cross_entropy": [
+                defs(
+                    "binary_cross_entropy",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "col2im": [
+                defs(
+                    "col2im",
+                    [
+                        INPUT,
+                        "output_size: _int | _size",
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        *STRIDE_PADDING,
                     ],
                     "Tensor",
                 )
@@ -877,6 +912,27 @@ def gen_pyi(
                     "None",
                 )
             ],
+            "_functionalize_mutation_counter": [
+                defs(
+                    "_functionalize_mutation_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_storage_changed_counter": [
+                defs(
+                    "_functionalize_storage_changed_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_inductor_storage_resized_counter": [
+                defs(
+                    "_functionalize_inductor_storage_resized_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",
@@ -902,8 +958,8 @@ def gen_pyi(
             "_functionalize_was_storage_changed": [
                 defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
             ],
-            "_functionalize_set_storage_changed": [
-                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
+            "_functionalize_mark_storage_changed": [
+                "def _functionalize_mark_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 defs(
@@ -1234,6 +1290,30 @@ def gen_pyi(
                         "dispatch_strides: _bool = False",
                         "dispatch_device: _bool = False",
                         "device_for_backend_keys: _device | None = None",
+                    ],
+                    "S",
+                )
+            ],
+            "_make_wrapper_subclass": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_wrapper_subclass",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt] | None = None",
+                        "storage_offset: _int | SymInt | None = None",
+                        "memory_format: torch.memory_format | None = None",
+                        "dtype: _dtype | None = None",
+                        "layout: _layout = strided",
+                        "device: _device | None = None",
+                        "pin_memory: _bool = False",
+                        "requires_grad: _bool = False",
+                        "dispatch_sizes_strides_policy: str | None = None",
+                        "dispatch_device: _bool = False",
+                        "dispatch_layout: _bool = False",
+                        "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
+                        "storage_size: _int | SymInt | None = None",
                     ],
                     "S",
                 )
@@ -1657,10 +1737,10 @@ def gen_pyi(
 
     # Include only the functions that contain hints, to prevent undefined
     # symbols to be included in the `__all__` directive.
-    hinted_function_names = [
+    hinted_function_names = {
         name for name, hint in unsorted_function_hints.items() if hint
-    ]
-    all_symbols = sorted(list(structseqs) + hinted_function_names)
+    }
+    all_symbols = sorted(hinted_function_names.union(structseqs))
     all_directive = [
         "__all__ = [",
         *(f'    "{name}",' for name in all_symbols),
