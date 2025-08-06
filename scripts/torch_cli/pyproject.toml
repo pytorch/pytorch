@@ -2,7 +2,6 @@
 name = "torch-ci"
 version = "0.1.0"
 dependencies = [
-    "cement>=3.0.0",
     "pyyaml>=6.0"
 ]
 
