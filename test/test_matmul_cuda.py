@@ -1842,28 +1842,52 @@ class TestFP8Matmul(TestCase):
     def create_scaled_grouped_gemm_scale_tensors(self, m, n, k, n_groups, is_a_3d, is_b_3d):
         device = "cuda"
 
-        m_scale_group_size = 1
-        n_scale_group_size = 128
-        k_scale_group_size = 128
-
-        if SM100OrLater:
-            scale_a = torch.rand(n_groups, m // m_scale_group_size, k // k_scale_group_size, device=device, dtype=torch.float32)
-            scale_b = torch.rand(n_groups, n // n_scale_group_size, k // k_scale_group_size, device=device, dtype=torch.float32)
-        else:
-            scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
-            scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
-            if is_a_3d:
-                scale_a = scale_a.view(n_groups, m)
-            if is_b_3d:
-                scale_b = scale_b.view(n_groups, n)
+        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        if is_a_3d:
+            scale_a = scale_a.view(n_groups, m)
+        if is_b_3d:
+            scale_b = scale_b.view(n_groups, n)
 
         return scale_a, scale_b
 
     def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
-                                       out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
-            self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
+                                    out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
+            self.assertEqual(out.float(), out_ref.float(), atol=5e-2, rtol=5e-4)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM100OrLater, "Grouped gemm supported on SM100")
+    def test_scaled_grouped_gemm_3d_3d_sm100(self):
+        device = "cuda"
+        m, n, k, n_groups = 512, 512, 512, 4
+
+        a_2d_list, b_2d_list, a_scale_list, b_scale_list = [], [], [], []
+        for _ in range(n_groups):
+            a_2d, a_scale = tensor_to_scale_block(torch.randn(m, k, device=device, dtype=torch.float32).pow(3), torch.float8_e4m3fn, 1, 128)
+            b_2d, b_scale = tensor_to_scale_block(torch.randn(n, k, device=device, dtype=torch.float32).pow(3), torch.float8_e4m3fn, 128, 128)
+            a_2d_list.append(a_2d)
+            b_2d_list.append(b_2d)
+            a_scale_list.append(a_scale)
+            b_scale_list.append(b_scale)
+
+        a = torch.stack(a_2d_list, dim=0)
+        b = torch.stack(b_2d_list, dim=0)
+        a_scale = torch.stack(a_scale_list, dim=0)
+        b_scale = torch.stack(b_scale_list, dim=0)
+        a_scale = a_scale.transpose(1, 2).contiguous().transpose(1, 2) # scale a needs to be outer-dim-major
+
+        f = torch._scaled_grouped_mm
+        out = f(a, b.transpose(-2, -1), a_scale, b_scale.transpose(-2, -1), out_dtype=torch.bfloat16)
+
+        # _scaled_mm is not currently supported on SM100, we use emulated implementation instead
+        for a_2d, b_2d, a_scale_2d, b_scale_2d, out_2d in zip(a, b, a_scale, b_scale, out):
+            out_ref_2d = mm_float8_emulated_block(a_2d, a_scale_2d.reciprocal(), b_2d.t(), b_scale_2d.reciprocal().t(), torch.bfloat16)
+            cosine_sim = torch.nn.functional.cosine_similarity(out_2d.flatten().float(), out_ref_2d.flatten().float(), dim=0)
+            self.assertGreaterEqual(float(cosine_sim), 0.999)
+            self.assertEqual(out_2d.float(), out_ref_2d.float(), atol=6e-1, rtol=7e-2)
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
     # _scaled_mm() already has more combinations of parameters than
