@@ -5,7 +5,7 @@ from cli.build_cli import BUILD_CONTROLLERS
 class MainController(Controller):
     class Meta:
         label = "base"
-        description = "Main entry point"
+        description = "Main entry point, please use --help for more information about sub-commands"
         arguments = [
             (
                 ["--config"],

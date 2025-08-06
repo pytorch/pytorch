@@ -13,5 +13,4 @@ class BuildController(Controller):
         label = "build"
         stacked_on = "base"
         stacked_type = "nested"
-        description = "Build CLI group"
-        
+        description = "Build CLI group, please use --help for more information"
