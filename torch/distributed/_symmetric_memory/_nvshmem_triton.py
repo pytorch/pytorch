@@ -280,3 +280,60 @@ if has_triton():
             is_pure=False,
             _builder=_builder,
         )
+
+    @core.extern
+    def sum_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Sum reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_sum_reduce", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def max_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Max reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_max_reduce", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
+    def min_reduce(team, dest, source, nreduce, _builder=None):  # type: ignore[no-untyped-def]
+        """Min reduction for int64"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmem_int64_min_reduce", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
