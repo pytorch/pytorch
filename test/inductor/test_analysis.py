@@ -396,6 +396,7 @@ class TestAnalysis(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_augment_trace_against_flop_counter(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
@@ -408,7 +409,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )

@@ -138,12 +138,8 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = Config(
-    justknob="pytorch/remote_cache:force_disable_caches",
-    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
-    default=False,
-)
+# See torch.compiler.config.force_disable_caches
+force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -427,6 +423,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
+
+# Report the autotune choices and their benchmark results. Default is True.
+max_autotune_report_choices_stats = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
+)
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition = False
@@ -738,6 +739,12 @@ worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
     env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
     default=True,
+)
+
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
 )
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
@@ -1859,6 +1866,8 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
 
 
 if TYPE_CHECKING:
