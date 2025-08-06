@@ -105,6 +105,8 @@ from .source import (
     CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
+    ClosureSource,
+    CodeSource,
     ConstantSource,
     ConstDictKeySource,
     DataclassFieldsSource,
@@ -132,6 +134,8 @@ from .source import (
     TorchFunctionModeStackSource,
     TorchSource,
     TupleIteratorGetItemSource,
+    TypeDictSource,
+    TypeMROSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -351,7 +355,7 @@ class GuardManagerWrapper:
         def visit_dict_manager(node):
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
-            assert node.is_guarded_value_dict()
+            assert issubclass(node.get_type_of_guarded_value(), dict)
 
             tag_safe_roots = []
             is_subtree_tag_safe = True
@@ -390,12 +394,12 @@ class GuardManagerWrapper:
                 # If the node guards a tensor, mark it tag safe only if there
                 # are no accessors. Presence of accessors means presence of
                 # symbolic shape guards.
-                if node.is_guarded_value_tensor():
+                if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
                     if node.has_no_accessors() and not node.has_object_aliasing_guard():
                         node.mark_tag_safe()
                 else:
                     node.mark_tag_safe()
-            elif node.is_guarded_value_dict():
+            elif issubclass(node.get_type_of_guarded_value(), dict):
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
@@ -404,7 +408,7 @@ class GuardManagerWrapper:
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-            elif node.is_guarded_value_nn_module():
+            elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
@@ -430,7 +434,7 @@ class GuardManagerWrapper:
 
         tag_safe_roots = visit(self.root)
         for node in tag_safe_roots:
-            if node.is_guarded_value_nn_module():
+            if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self):
@@ -464,7 +468,7 @@ class GuardManagerWrapper:
         s = t + ": source=" + source
         if accessor_str:
             s += ", " + accessor_str
-        s += f", type={guard_manager.type_of_guarded_value()}"
+        s += f", type={guard_manager.get_type_of_guarded_value()}"
         s += f", tag_safe=({guard_manager.is_tag_safe()}, {guard_manager.is_tag_safe_root()})"
         return s
 
@@ -862,6 +866,9 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
+        self.already_guarded_not_present_in_generic_dict: OrderedSet[
+            tuple[str, str]
+        ] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1209,6 +1216,20 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, TypeDictSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_dict_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, TypeMROSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_mro_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(
             source,
             (
@@ -1495,6 +1516,20 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CodeSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.code_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ClosureSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.closure_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name()}"
@@ -1568,7 +1603,10 @@ class GuardBuilder(GuardBuilderBase):
         return name
 
     def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
-        attr_source = AttrSource(guard.originating_source, attr_name)
+        if attr_name == "__code__":
+            attr_source = CodeSource(guard.originating_source)
+        else:
+            attr_source = AttrSource(guard.originating_source, attr_name)  # type: ignore[assignment]
         # Copy the stack info
         new_guard = Guard(
             attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
@@ -1580,6 +1618,9 @@ class GuardBuilder(GuardBuilderBase):
         source = guard.originating_source
         if isinstance(source, NNModuleSource):
             source = source.base
+        if isinstance(source, CodeSource):
+            # No need to guard that a function has a __code__ attribute
+            return
         assert isinstance(source, AttrSource), f"invalid source {guard.name}"
         base_source = source.base
         base = base_source.name()
@@ -1634,9 +1675,11 @@ class GuardBuilder(GuardBuilderBase):
         assert attr is not None
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        assert isinstance(val, torch.nn.Module)
 
         base_manager = self.get_guard_manager(guard)
+
+        if (ref, attr) in self.already_guarded_not_present_in_generic_dict:
+            return
 
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
@@ -1649,6 +1692,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_generic_dict_manager.add_dict_contains_guard(
             False, attr, get_verbose_code_parts(code, guard)
         )
+        self.already_guarded_not_present_in_generic_dict.add((ref, attr))
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -3685,7 +3729,7 @@ def strip_local_scope(s: str) -> str:
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
-    compile_id: CompileId,
+    compile_id: Optional[CompileId],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
