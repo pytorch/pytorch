@@ -237,13 +237,13 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
                   output_strides,
                   grid_strides);
 
-      const uint32_t TILE_SIZE = 16;
+      constexpr uint32_t TILE_SIZE = 16;
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_SIZE, TILE_SIZE, 1);
 
       MTLSize threadsPerGrid;
       if (use_vectorized) {
         // For vectorized kernel: each thread processes 4 elements in width dimension
-        const uint32_t ELEMS_PER_THREAD = 4;
+        constexpr uint32_t ELEMS_PER_THREAD = 4;
         threadsPerGrid = MTLSizeMake((out_W + ELEMS_PER_THREAD - 1) / ELEMS_PER_THREAD, out_H * out_D, N * C);
       } else {
         // For standard kernel: one thread per output element
@@ -353,7 +353,7 @@ static void grid_sampler_3d_backward_mps_impl(Tensor& grad_input,
                     grid_strides,
                     grad_output_strides);
 
-        const uint32_t TILE_SIZE = 16;
+        constexpr uint32_t TILE_SIZE = 16;
         MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_SIZE, TILE_SIZE, 1);
         MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
 
@@ -390,7 +390,7 @@ static void grid_sampler_3d_backward_mps_impl(Tensor& grad_input,
                   grid_strides,
                   grad_output_strides);
 
-      const uint32_t TILE_SIZE = 16;
+      constexpr uint32_t TILE_SIZE = 16;
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_SIZE, TILE_SIZE, 1);
       MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
 
