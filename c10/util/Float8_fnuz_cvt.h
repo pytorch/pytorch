@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/headeronly/util/floating_point_utils.h>
+#include <c10/util/floating_point_utils.h>
 
 #include <cstdint>
 
@@ -8,7 +8,7 @@
 #include <sycl/sycl.hpp>
 #endif
 
-namespace torch::headeronly::detail {
+namespace c10::detail {
 
 /*
  * Convert a 8-bit floating-point number in either f8 E4M3FNUZ or bf8 E5M2FNUZ
@@ -61,8 +61,4 @@ inline C10_HOST_DEVICE float fp8_fnuz_to_fp32_value(uint8_t x) {
   return fp32_from_bits(retval);
 }
 
-} // namespace torch::headeronly::detail
-
-namespace c10::detail {
-using torch::headeronly::detail::fp8_fnuz_to_fp32_value;
-}
+} // namespace c10::detail

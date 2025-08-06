@@ -5,7 +5,7 @@ from asyncio import AbstractEventLoop, Future
 from collections.abc import Awaitable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import AbstractSet, Any, Callable, List, Optional, Protocol, TypeVar
+from typing import AbstractSet, Any, Callable, Optional, Protocol, TypeVar
 
 
 T = TypeVar("T")
@@ -24,7 +24,7 @@ if sys.version_info >= (3, 11):
 
     TaskFactoryType = TaskFactory
 else:
-    TaskFactoryType = Callable[[AbstractEventLoop, Generator[TCoro, None, T]], Future]
+    TaskFactoryType = Callable[[AbstractEventLoop, Generator[TCoro, None, T]], Future]  # type: ignore[valid-type]
 
 
 def await_sync(awaitable: Awaitable[T]) -> T:
@@ -68,12 +68,12 @@ def get_loop(
         if loop.is_running():
             stack.enter_context(_restore_running_loop())
             stack.enter_context(_restore_loop(loop=loop))
-            loop = stack.enter_context(_new_loop(loop.get_task_factory()))
+            loop = stack.enter_context(_new_loop(loop.get_task_factory()))  # type: ignore[arg-type]
         elif loop.is_closed():
-            loop = stack.enter_context(_new_loop())
+            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
         elif always_create_new_loop:
             stack.enter_context(_restore_loop(loop=loop))
-            loop = stack.enter_context(_new_loop())
+            loop = stack.enter_context(_new_loop())  # type: ignore[arg-type]
         yield loop
 
 
@@ -86,7 +86,7 @@ def _new_loop(
 
     if task_factory:
         # pyre-ignore[6]
-        loop.set_task_factory(task_factory)
+        loop.set_task_factory(task_factory)  # type: ignore[arg-type]
 
     asyncio.set_event_loop(loop)
     try:
@@ -101,7 +101,7 @@ def _new_loop(
 
 def _cancel_all_tasks(
     loop: AbstractEventLoop,
-    tasks: AbstractSet[Future],
+    tasks: AbstractSet[Future],  # type: ignore[type-arg]
 ) -> None:
     to_cancel = [task for task in tasks if not task.done()]
 
@@ -127,10 +127,10 @@ def _cancel_all_tasks(
             )
 
 
-def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:
-    tasks: weakref.WeakSet[Future] = weakref.WeakSet()
+def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:  # type: ignore[type-arg]
+    tasks: weakref.WeakSet[Future] = weakref.WeakSet()  # type: ignore[type-arg]
 
-    task_factories: List[Optional[TaskFactoryType]] = [None]
+    task_factories: list[Optional[TaskFactoryType]] = [None]
 
     def _set_task_factory(factory: Optional[TaskFactoryType]) -> None:
         task_factories[0] = factory
@@ -143,7 +143,7 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:
         coro: TCoro,
         *,
         context: Context | None = None,
-    ) -> asyncio.Future:
+    ) -> asyncio.Future:  # type: ignore[valid-type]
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
@@ -155,18 +155,18 @@ def _patch_loop(loop: AbstractEventLoop) -> AbstractSet[Future]:
                 del task._source_traceback[-1]  # pragma: no cover
         else:
             if sys.version_info >= (3, 11):
-                task = task_factory(loop, coro, context=context)
+                task = task_factory(loop, coro, context=context)  # type: ignore[arg-type]
             else:
-                task = task_factory(loop, coro)
+                task = task_factory(loop, coro)  # type: ignore[arg-type]
         #  `Union[Task[Any], Future[Any]]`.
         tasks.add(task)
         return task
 
     # pyre-ignore[6]
-    loop.set_task_factory(_safe_task_factory)
+    loop.set_task_factory(_safe_task_factory)  # type: ignore[method-assign]
     # pyre-ignore[8]
-    loop.set_task_factory = _set_task_factory
+    loop.set_task_factory = _set_task_factory  # type: ignore[method-assign]
     # pyre-ignore[8]
-    loop.get_task_factory = _get_task_factory
+    loop.get_task_factory = _get_task_factory  # type: ignore[method-assign]
 
     return tasks

@@ -1131,15 +1131,6 @@ def aot_module_simplified(
     return forward
 
 
-def boxed_nop_preserve_node_meta(fx_g, example_inputs):
-    def run(args):
-        with torch.fx.traceback.preserve_node_meta():
-            return torch.fx.Interpreter(fx_g).boxed_run(args)
-
-    run._boxed_call = True
-    return run
-
-
 def aot_export_joint_with_descriptors(
     stack: contextlib.ExitStack,
     mod: nn.Module,
@@ -1210,6 +1201,8 @@ def aot_export_joint_with_descriptors(
     of the inputs to determine if inputs are parameters and their FQNs.
     """
 
+    from torch._dynamo.backends.debugging import boxed_nop
+
     (
         functional_call,
         _params_buffers_flat,
@@ -1226,8 +1219,8 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        boxed_nop_preserve_node_meta,
-        boxed_nop_preserve_node_meta,
+        boxed_nop,
+        boxed_nop,
         default_partition,
         decompositions,
         keep_inference_input_mutations,

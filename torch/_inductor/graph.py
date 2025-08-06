@@ -1205,9 +1205,7 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                tag: Optional[torch._C.Tag] = get_layout_constraint_tag(
-                    target, with_default=False
-                )
+                tag = get_layout_constraint_tag(target, with_default=False)
                 if (
                     tag is None
                     and torch._library.utils.is_builtin(target)
@@ -1224,10 +1222,8 @@ class GraphLowering(torch.fx.Interpreter):
                     # and identify them one by one.
                     decided_constraint = require_contiguous  # type: ignore[assignment]
                 else:
-                    default_tag: torch._C.Tag = get_layout_constraint_tag(
-                        target, with_default=True
-                    )
-                    decided_constraint = tag_to_layout_constraint(default_tag)
+                    tag = get_layout_constraint_tag(target, with_default=True)
+                    decided_constraint = tag_to_layout_constraint(tag)
 
                 make_fallback(target, layout_constraint=decided_constraint)
 

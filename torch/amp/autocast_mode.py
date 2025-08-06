@@ -397,10 +397,7 @@ class autocast:
                         self._enabled,
                         self._cache_enabled,
                     )
-                    mode.__torch_function__(torch.amp._enter_autocast, (), args)
-                    return self
-
-        return self
+                    return mode.__torch_function__(torch.amp._enter_autocast, (), args)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
@@ -423,10 +420,7 @@ class autocast:
                     mode,
                     torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
                 ):
-                    mode.__torch_function__(torch.amp._exit_autocast, (), ())
-                    # This is very important because the above line actually doesn't
-                    # run exit code so it end up swallowing exceptions.
-                    return False
+                    return mode.__torch_function__(torch.amp._exit_autocast, (), ())
         return False
 
     def __call__(self, func):

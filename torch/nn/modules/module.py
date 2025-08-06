@@ -568,9 +568,7 @@ class Module:
             raise KeyError('buffer name can\'t be empty string ""')
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
-        elif tensor is not None and not (
-            isinstance(tensor, torch.Tensor) or hasattr(tensor, "__torch_function__")
-        ):
+        elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError(
                 f"cannot assign '{torch.typename(tensor)}' object to buffer '{name}' "
                 "(torch Tensor or None required)"
@@ -2026,10 +2024,7 @@ class Module:
             else:
                 buffers = self.__dict__.get("_buffers")
                 if isinstance(value, Buffer) or buffers is not None and name in buffers:
-                    if value is not None and not (
-                        isinstance(value, torch.Tensor)
-                        or hasattr(value, "__torch_function__")
-                    ):
+                    if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
                             "(torch.nn.Buffer, torch.Tensor or None expected)"
