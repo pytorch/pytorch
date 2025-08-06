@@ -1,6 +1,10 @@
 # Owner(s): ["module: inductor"]
+import os
+
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
+from torch._inductor.codecache import write
+from torch._inductor.cpp_builder import CppBuilder, CppOptions
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
@@ -108,6 +112,28 @@ class TestStandaloneInductor(TestCase):
         )
         mod_opt = inductor.compile(mod, inp)
         self.assertEqual(mod(*inp), mod_opt(*inp))
+
+    def test_inductor_generate_debug_symbol(self):
+        cpp_code = """
+int main(){
+    return 0;
+}
+        """
+
+        _, source_path = write(
+            cpp_code,
+            "cpp",
+        )
+        build_option = CppOptions()
+        cpp_builder = CppBuilder(
+            name="test_symbol",
+            sources=source_path,
+            output_dir=os.path.dirname(source_path),
+            BuildOption=build_option,
+        )
+        cpp_builder.build()
+        binary_path = cpp_builder.get_target_file_path()
+        print(os.path.exists(binary_path))
 
 
 if __name__ == "__main__":
