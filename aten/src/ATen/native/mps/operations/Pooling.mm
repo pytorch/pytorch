@@ -14,6 +14,7 @@
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/avg_pool3d_backward_native.h>
 #include <ATen/ops/avg_pool3d_native.h>
 #include <ATen/ops/max_pool2d_backward_native.h>
 #include <ATen/ops/max_pool2d_native.h>
@@ -725,6 +726,64 @@ static void avg_pool_out_mps_template(const Tensor& output,
   });
 }
 
+static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
+                                               const Tensor& input,
+                                               const Tensor& grad_output,
+                                               IntArrayRef _kernel_size,
+                                               IntArrayRef _stride,
+                                               IntArrayRef _padding,
+                                               bool ceil_mode,
+                                               bool count_include_pad,
+                                               std::optional<int64_t> divisor_override,
+                                               const int32_t pooling_dims,
+                                               const std::string& op_name) {
+  auto [dims, _, kernel_size, stride, padding, __] =
+      process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
+
+  const auto memory_format = input.suggest_memory_format();
+  grad_input.resize_(input.sizes(), memory_format);
+  grad_input.fill_(0);
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const auto numThreads = grad_output.numel();
+
+  AvgPoolingParams<5> params;
+
+  params.dims = dims;
+  params.pooling_dims = pooling_dims;
+  params.count_include_pad = count_include_pad;
+  params.has_divisor_override = divisor_override.has_value();
+  if (divisor_override.has_value()) {
+    params.divisor_override = safe_downcast<int32_t, int64_t>(divisor_override.value());
+  }
+
+  for (const auto dim : c10::irange(dims)) {
+    params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
+    params.output_strides[dim] = safe_downcast<int32_t, int64_t>(grad_output.stride(dim));
+    params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
+    params.input_strides[dim] = safe_downcast<int32_t, int64_t>(grad_input.stride(dim));
+  }
+
+  memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int32_t));
+  memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int32_t));
+  memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int32_t));
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto PSO = lib.getPipelineStateForFunc("avg_pool_backward_" + scalarToMetalTypeString(input));
+
+      getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output});
+      [computeEncoder setComputePipelineState:PSO];
+      mtl_setArgs(computeEncoder, grad_input, grad_output, params);
+
+      mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+      getMPSProfiler().endProfileKernel(PSO);
+    }
+  });
+}
+
 } // namespace mps
 
 Tensor mps_max_pool2d(const Tensor& input,
@@ -1081,6 +1140,28 @@ TORCH_IMPL_FUNC(avg_pool3d_out_mps)
                                  divisor_override,
                                  /*pooling_dims=*/3,
                                  "avg_pool3d");
+}
+
+TORCH_IMPL_FUNC(avg_pool3d_backward_out_mps)(const Tensor& grad_output,
+                                             const Tensor& input,
+                                             IntArrayRef kernel_size,
+                                             IntArrayRef stride,
+                                             IntArrayRef padding,
+                                             bool ceil_mode,
+                                             bool count_include_pad,
+                                             std::optional<int64_t> divisor_override,
+                                             const Tensor& grad_input) {
+  mps::avg_pool_backward_out_mps_template(grad_input,
+                                          input,
+                                          grad_output,
+                                          kernel_size,
+                                          stride,
+                                          padding,
+                                          ceil_mode,
+                                          count_include_pad,
+                                          divisor_override,
+                                          /*pooling_dims=*/3,
+                                          "avg_pool3d_backward");
 }
 
 } // namespace at::native
