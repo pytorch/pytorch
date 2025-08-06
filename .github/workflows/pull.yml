@@ -319,6 +319,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_9-clang9-xla-test:
+    if: false  # Broken, see https://github.com/pytorch/pytorch/issues/158876
     name: linux-jammy-py3_9-clang9-xla
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_9-clang9-xla-build
