@@ -714,6 +714,9 @@ def dynamo_timed(
     if is_backward is not None:
         event_metadata.update({"is_backward": is_backward})
 
+    if "mast_job_name" not in event_metadata:
+        event_metadata["mast_job_name"] = os.environ.get("MAST_HPC_JOB_NAME")
+
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
     chromium_log.log_event_start(
