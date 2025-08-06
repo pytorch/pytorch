@@ -741,6 +741,12 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
+)
+
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
