@@ -1370,6 +1370,19 @@ if(BUILD_TEST)
                      ${CMAKE_BINARY_DIR}/test_lazy)
   endif()
   if(BUILD_AOT_INDUCTOR_TEST)
+    # Check if Triton is installed when building AOT Inductor tests with CUDA
+    if(USE_CUDA)
+      execute_process(
+        COMMAND Python::Interpreter -c "import triton; print('Triton found')"
+        RESULT_VARIABLE TRITON_CHECK_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+      )
+      if(NOT TRITON_CHECK_RESULT EQUAL 0)
+        message(FATAL_ERROR "Triton is required for BUILD_AOT_INDUCTOR_TEST with USE_CUDA but was not found. Please install Triton.")
+      endif()
+    endif()
+
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/aoti_abi_check
       ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
