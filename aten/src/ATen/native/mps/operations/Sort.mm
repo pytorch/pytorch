@@ -52,8 +52,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self);
       MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
                                                          axis:(NSInteger)dim
                                                    descending:(BOOL)descending

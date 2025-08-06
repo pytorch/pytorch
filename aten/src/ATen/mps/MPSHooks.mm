@@ -41,6 +41,8 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
           TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
           return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
       }
+    case 13:
+      return true;
     default:
       TORCH_WARN("Checking for unexpected MacOS ", major, ".", minor, " returning false");
       return false;

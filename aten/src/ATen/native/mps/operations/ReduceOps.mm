@@ -632,8 +632,7 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   auto medianCachedGraph =
       LookUpOrCreateCachedGraph<MedianCachedGraph>(medianKey, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-        MPSGraphTensor* castInputTensor =
-            castToIHFTypes(mpsGraph, inputTensor, input_t);
+        MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
         MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
 
@@ -710,8 +709,7 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
       MPSGraphTensor* castOutputTensor = nil;
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       NSArray<NSNumber*>* axes = getTensorAxes(input_t);
       if (reduction_type == MPSReductionType::MAX) {
@@ -785,8 +783,7 @@ static void min_max_out_mps(const Tensor& input_t,
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
       MPSGraphTensor* outputTensor = nil;
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       if (reduction_type == MPSReductionType::MAX) {
         outputTensor = [mpsGraph reductionMaximumPropagateNaNWithTensor:castInputTensor axis:(NSInteger)dim_ name:nil];
@@ -1576,8 +1573,7 @@ static void median_out_mps_common(const Tensor& input_t,
         getTensorsStringKey(indices);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, inputTensor, input_t);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
 
       MPSGraphTensor* effectiveLengthTensor = nil;
       if (nanmedian) {
