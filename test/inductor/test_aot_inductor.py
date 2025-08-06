@@ -6833,11 +6833,21 @@ class TestAOTInductorConfig(TestCase):
         result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
         self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
+        self.assertEqual(
+            result["aot_inductor.emit_multi_arch_kernel"], not torch.version.hip
+        )
+        self.assertEqual(
+            result["aot_inductor.model_name_for_generated_files"], "aoti_model"
+        )
 
-    def test_compile_standalone_package_cpp_already_true(self):
+    def test_compile_standalone_explicit_set(self):
         patches = {
             "aot_inductor.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
+            "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
+            "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
         result = maybe_aoti_standalone_config(patches)
         self.assertEqual(result, patches)
