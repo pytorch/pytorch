@@ -56,7 +56,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_6
@@ -80,7 +79,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
       build_environment: linux-binary-manywheel
@@ -103,7 +101,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_8
@@ -127,7 +124,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_8
       build_environment: linux-binary-manywheel
@@ -150,7 +146,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_9
@@ -174,7 +169,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_9
       build_environment: linux-binary-manywheel
