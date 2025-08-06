@@ -12,6 +12,7 @@ import queue
 import selectors
 import subprocess
 import sys
+import sysconfig
 import time
 import warnings
 from collections.abc import Iterable, Sequence
@@ -128,6 +129,8 @@ class TuningProcess:
             "PYTHONPATH": os.environ.get(
                 "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
             ),
+            # Need to set this for internal builds that bundle the runtime.
+            "PYTHONHOME": sysconfig.get_path("data"),
             # We shouldn't be using the Triton async compile subprocess pool,
             # but as a precaution set the env var that disables its creation.
             "TORCH_WARM_POOL": "0",

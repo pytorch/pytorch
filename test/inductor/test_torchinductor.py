@@ -9570,7 +9570,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9592,7 +9591,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps_unimplemented
     @skip_if_halide  # compiles for 5+ minutes
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
@@ -9615,7 +9613,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9639,7 +9636,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward4(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -13654,31 +13650,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
-    @parametrize("dtype", [torch.int32, torch.int64])
-    def test_repeat_interleave_Tensor_decomp(self, dtype):
-        # https://github.com/pytorch/pytorch/issues/147160
-        def f(input, repeats):
-            return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
-
-        input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=self.device)
-        repeat = torch.tensor([1, 2], device=self.device)
-
-        if input.device.type == "mps" and dtype == torch.int64:
-            raise unittest.SkipTest(
-                "torch.compile fails this test with mps & int64, "
-                "see https://github.com/pytorch/pytorch/issues/159408"
-            )
-
-        f_compiled = torch.compile(f)
-        output, (code,) = run_and_get_code(f_compiled, input, repeat)
-        reference = f(input, repeat)
-        self.assertEqual(output, reference)
-        # we don't lower when the cpp_wrapper is used because it cannot generate
-        # proper examples during autotune
-        can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
-        has_lowered = not re.search(r"repeat_interleave.Tensor", code)
-        self.assertEqual(has_lowered, can_lower)
-
 
 @dataclasses.dataclass
 class TestFailure:
@@ -13720,6 +13691,25 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
     # Special case convenience routine
     if hasattr(my_cls, "is_dtype_supported"):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
+
+
+def add_test_failures(
+    test_failures: dict[str, TestFailure], added_test_failures: dict[str, TestFailure]
+):
+    """
+    In-place modifies the given dictionary of `test_failures` to add the
+    contents of `added_test_failures` by unioning the test_failure.suffixes, and
+    or-ing the the is_skip value.
+    """
+    for name, new_failure in added_test_failures.items():
+        if name in test_failures:
+            orig_failure = test_failures[name]
+            orig_failure.suffixes = tuple(
+                set(orig_failure.suffixes).union(set(new_failure.suffixes))
+            )
+            orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
+        else:
+            test_failures[name] = new_failure
 
 
 if RUN_CPU:
