@@ -243,19 +243,6 @@ class TestDynamoTimed(TestCase):
         utils.reset_frame_count()
         torch._logging._internal.structured_logging_overhead.clear()
 
-    @dynamo_config.patch(
-        {
-            "log_compilation_metrics": True,
-            "inline_inbuilt_nn_modules": False,
-        }
-    )
-    @inductor_config.patch(
-        {
-            "bundle_triton_into_fx_graph_cache": False,
-            "bundled_autotune_remote_cache": False,
-        }
-    )
-
     @dynamo_config.patch({"log_compilation_metrics": True})
     @inductor_config.patch({"force_disable_caches": True})
     def test_stack_trace(self):
@@ -268,9 +255,21 @@ class TestDynamoTimed(TestCase):
         stack_trace_list = []
         for e in compilation_events:
             stack_trace_list.append(e.stack_trace)
+
+        self.assertTrue(len(stack_trace_list) > 0)
         
-        self.assertTrue(len(stack_trace_list)>0)
-        
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+            "inline_inbuilt_nn_modules": False,
+        }
+    )
+    @inductor_config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": False,
+            "bundled_autotune_remote_cache": False,
+        }
+    )
     # We can't easily test that timing is actually accurate. Mock time to always
     # return the same value; all durations will be zero.
     @mock.patch("time.time", return_value=0.001)
