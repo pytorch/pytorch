@@ -6833,11 +6833,21 @@ class TestAOTInductorConfig(TestCase):
         result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
         self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
+        self.assertEqual(
+            result["aot_inductor.emit_multi_arch_kernel"], not torch.version.hip
+        )
+        self.assertEqual(
+            result["aot_inductor.model_name_for_generated_files"], "aoti_model"
+        )
 
-    def test_compile_standalone_package_cpp_already_true(self):
+    def test_compile_standalone_explicit_set(self):
         patches = {
             "aot_inductor.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
+            "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
+            "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
         result = maybe_aoti_standalone_config(patches)
         self.assertEqual(result, patches)
@@ -6918,12 +6928,6 @@ MPS_TEST_FAILURES = {
     "test_fp8_view_of_param": fail_mps(),
     # cannot initialize a parameter of type 'double' with an rvalue of type 'std::nullptr_t'
     "test_fallback_kernel_with_symexpr_output": fail_mps(),
-    # while-loop subgraph calls same kernel as outside. need to figure out how to
-    # either (1) tell outside to initialize a new kernel or (2) generate
-    # subgraph as a separate function, which would(?) cause (1) to happen automatically.
-    "test_while_loop_nested": fail_mps(),
-    "test_cond_with_parameters": fail_mps(),
-    "test_cond_share_predicte": fail_mps(),
     # correctness issue
     "test_index_put_with_none_index": fail_mps(),
     # Error device may not be nil
