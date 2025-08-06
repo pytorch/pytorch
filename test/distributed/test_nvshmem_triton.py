@@ -575,7 +575,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-        nvshmem_barrier_all_kernel[(1,)](extern_libs=nvshmem_lib)
 
     @skipIfRocm
     @requires_triton()
