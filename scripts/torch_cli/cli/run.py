@@ -1,46 +1,41 @@
-from cement import App, Controller, ex
-from cli.build_cli import BUILD_CONTROLLERS
+# main.py
+
+import argparse
+import logging
+
+from cli.build_cli.register_build import register_build_commands
+from cli.lib.logger import setup_logging
 
 
-class MainController(Controller):
-    class Meta:
-        label = "base"
-        description = "Main entry point"
-        arguments = [
-            (
-                ["--config"],
-                {
-                    "help": "Path to config file for ci build and test",
-                    "dest": "config",
-                    "default": "",
-                    "required": False,
-                },
-            ),
-        ]
+logger = logging.getLogger(__name__)
 
-class TorchCli(App):
-    class Meta:
-        label = "cli"
-        base_controller = "base"
-        log_handler = 'logging'
-        log_level = 'INFO'
-        handlers = [MainController] + BUILD_CONTROLLERS
-
-    def info(self, msg):
-        self.log.info(msg)
-
-    def debug(self, msg):
-        self.log.debug(msg)
-
-    def warn(self, msg):
-        self.log.warning(msg)
-
-    def error(self, msg):
-        self.log.error(msg)
 
 def main():
-    with TorchCli() as app:
-        app.run()
+    # Define top-level parser
+    parser = argparse.ArgumentParser(description="Torch CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    # Add top-level args
+    parser.add_argument(
+        "--config", required=False, help="Path to config file for build and test"
+    )
+    parser.add_argument(
+        "--log-level", default="INFO", help="Log level (DEBUG, INFO, WARNING, ERROR)"
+    )
+
+    # registers second-level subcommands
+    register_build_commands(subparsers)
+
+    # parse args after all options are registered
+    args = parser.parse_args()
+
+    # setup global logging
+    setup_logging(getattr(logging, args.log_level.upper(), logging.INFO))
+    logger.debug("Parsed args: %s", args)
+
+    if hasattr(args, "func"):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
