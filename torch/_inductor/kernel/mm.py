@@ -1259,9 +1259,7 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(
-        "scaled_mm", choices, kernel_inputs.nodes(), layout
-    )
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
 @functools.cache
