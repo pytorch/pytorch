@@ -1,4 +1,4 @@
-name: vllm
+name: vllm-test
 
 on:
   push:
