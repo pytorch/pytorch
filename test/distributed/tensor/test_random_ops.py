@@ -88,6 +88,21 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
 
     @with_comms
+    def test_init_with_user_generator(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+        t1 = torch.distributed.tensor.empty(
+            (2, 3), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+        torch.nn.init.uniform_(t1, 0.0, 1.0)
+        rng = torch.Generator(device="cuda").manual_seed(42)
+        t2 = torch.distributed.tensor.empty(
+            (2, 3), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+        torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
+        self.assertEqual(t1.full_tensor(), t2.full_tensor())
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value but in actual
