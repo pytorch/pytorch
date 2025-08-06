@@ -58,6 +58,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_FBGEMM_GENAI=1
+#     enables the FBGEMM GenAI kernels to build
+#
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
 #

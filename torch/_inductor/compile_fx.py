@@ -1509,6 +1509,7 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
+                    node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                         metrics.num_bytes_accessed += num_bytes
@@ -1522,6 +1523,14 @@ class _InProcessFxCompile(FxCompile):
                                 "node_runtimes": node_runtimes,
                             },
                         )
+
+                    # Collect and dump op runtimes for TLParse
+                    if config.log_tlparse:
+                        _, _, node_runtimes = graph.count_bytes()
+                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
+
+                    # Collect and dump collective-op schedule for external diagnostics
+                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
                     if (
                         cudagraphs
@@ -1942,7 +1951,7 @@ def fw_compiler_freezing(
         idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
     ]
 
-    static_input_idxs = []
+    static_input_idxs: list[Any] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -2041,6 +2050,34 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
         if len(cuda_devices) == 1
         else contextlib.nullcontext()
     )
+
+
+def partition_fn(
+    gm: GraphModule,
+    joint_inputs: Sequence[object],
+    **kwargs: object,
+) -> tuple[GraphModule, GraphModule]:
+    cuda_context = get_cuda_device_context(gm)
+    with cuda_context:
+        # We can skip the invoke_subgraph because the
+        # entire_partition_fn is called recursively for invoke_subgraph
+        # in partitioning.
+        _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
+
+    static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
+        "static_lifetime_input_indices", None
+    )
+
+    with dynamo_utils.dynamo_timed(
+        "min_cut_rematerialization_partition", log_pt2_compile_event=True
+    ):
+        return min_cut_rematerialization_partition(
+            gm,
+            joint_inputs,
+            compiler="inductor",
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
 
 
 def compile_fx(
@@ -2361,33 +2398,6 @@ def compile_fx(
                 OutputCode, inference_compiler
             )
 
-        def partition_fn(
-            gm: GraphModule,
-            joint_inputs: Sequence[object],
-            **kwargs: object,
-        ) -> tuple[GraphModule, GraphModule]:
-            cuda_context = get_cuda_device_context(gm)
-            with cuda_context:
-                # We can skip the invoke_subgraph because the
-                # entire_partition_fn is called recursively for invoke_subgraph
-                # in partitioning.
-                _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
-
-            static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
-                "static_lifetime_input_indices", None
-            )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
-
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
             gm: GraphModule, example_inputs: Sequence[InputType]
@@ -2461,6 +2471,7 @@ def compile_fx(
                     if node.op == "get_attr" and "val" not in node.meta:
                         target = attrgetter(node.target)(gm)
                         if isinstance(target, torch.Tensor):
+                            assert fake_mode is not None
                             node.meta["val"] = fake_mode.from_tensor(
                                 target, static_shapes=True
                             )
