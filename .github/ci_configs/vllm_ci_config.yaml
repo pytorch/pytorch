@@ -1,3 +1,4 @@
+# Todo: potentially add build config
 external_build:
   build_target: vllm
   artifact_dir: shared
