@@ -61,6 +61,7 @@ class ForwardRef {
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
   }
+  ~ForwardRef();
   const T& operator*() const {
     return *ptr_;
   }
@@ -3717,6 +3718,7 @@ inline void from_json(const nlohmann::json& nlohmann_json_j, UserOutputSpec& nlo
 
 template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
 template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>::~ForwardRef() = default;
 } // namespace _export
 } // namespace torch
 
