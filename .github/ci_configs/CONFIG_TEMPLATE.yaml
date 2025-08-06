@@ -1,0 +1,4 @@
+build:
+  build_target: fake_build_target
+  fake_env: ${ENV_VAR1}
+  fake_env2: ${ENV_VAR2}
