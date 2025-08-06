@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <shared_mutex>
@@ -682,7 +683,19 @@ class AOTInductorModelContainer {
 
   RAIIDataPtr allocate_constant_blob() {
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    return RAII_gpuMalloc(blob_size_);
+    // Check if we should use PyTorch's CUDACachingAllocator for weight
+    // management
+    const char* use_caching_allocator =
+        std::getenv("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR");
+    if (use_caching_allocator && std::string(use_caching_allocator) == "1") {
+#ifdef USE_CUDA
+      return RAII_gpuMallocCaching(blob_size_);
+#else
+      return RAII_gpuMalloc(blob_size_);
+#endif
+    } else {
+      return RAII_gpuMalloc(blob_size_);
+    }
 #else
     return RAII_cpuMalloc(blob_size_);
 #endif // USE_CUDA
