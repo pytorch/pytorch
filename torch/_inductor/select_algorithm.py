@@ -27,7 +27,13 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._dynamo.utils import (
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+    identity,
+    preserve_rng_state,
+)
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -2337,22 +2343,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={
-                    "autotune_strides": ", ".join(
-                        [str(n.get_stride()) for n in input_nodes]
-                    ),
-                    "autotune_dtypes": ", ".join(
-                        [str(n.get_dtype()) for n in input_nodes]
-                    ),
-                    "autotune_shape": ", ".join(
-                        ["x".join(map(str, n.get_size())) for n in input_nodes]
-                    ),
-                    "autotune_offset": ", ".join(
-                        [str(n.get_layout().offset) for n in input_nodes]
-                    ),
-                },
+                metadata=_autotune_metadata(input_nodes),
             ):
-                return benchmark(choices, hint_override=hint_override)
+                benchmark_results = benchmark(choices, hint_override=hint_override)
+                if config.max_autotune_report_choices_stats:
+                    _log_autotune_choices_stats(
+                        f"{name}_template_autotuning", benchmark_results
+                    )
+                return benchmark_results
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -3368,6 +3366,90 @@ class SymbolicGridFn:
 
     def sympy_call(self, *args, **kwargs):
         return self.fn(*args, **kwargs, **self.kwargs_sym)
+
+
+def _autotune_metadata(input_nodes):
+    """Helper function to extract autotune metadata from input nodes."""
+    return {
+        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
+        "autotune_shape": ", ".join(
+            ["x".join(map(str, n.get_size())) for n in input_nodes]
+        ),
+        "autotune_offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
+        # TODO(coconutruben): replace this with taking KernelInputs as the
+        # argument, and extracting those out there directly
+        "autotune_strides_hinted": ", ".join(
+            [
+                str(
+                    V.graph.sizevars.size_hints(
+                        n.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+        "autotune_shape_hinted": ", ".join(
+            [
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+    }
+
+
+def _log_autotune_choices_stats(
+    event_name: str, timings: dict[ChoiceCaller, float]
+) -> None:
+    """Helper function to extract autotune metadata from benchmark results."""
+    if not timings:
+        return None
+
+    metadata: dict[str, Union[int, float, str]] = {
+        "num_choices": len(timings),
+        "num_triton_choices": len(
+            [c for c in timings if isinstance(c, TritonTemplateCaller)]
+        ),
+    }
+
+    sorted_choices = sorted(timings, key=timings.__getitem__)
+    best_choice = sorted_choices[0]
+    metadata["best_kernel"] = best_choice.name
+    if best_choice.description:
+        metadata["best_kernel_desc"] = best_choice.description
+    metadata["best_time"] = timings[best_choice]
+
+    best_triton_pos = next(
+        (
+            i
+            for i, choice in enumerate(sorted_choices)
+            if isinstance(choice, TritonTemplateCaller)
+        ),
+        None,
+    )
+    if best_triton_pos is not None:
+        metadata["best_triton_pos"] = best_triton_pos
+        best_triton_kernel = sorted_choices[best_triton_pos]
+        if best_triton_pos != 0:
+            metadata["best_triton_time"] = timings[best_triton_kernel]
+            metadata["best_triton_kernel"] = best_triton_kernel.name
+            if best_triton_kernel.description:
+                metadata["best_triton_kernel_desc"] = best_triton_kernel.description
+
+    payload = json.dumps(metadata)
+    get_chromium_event_logger().add_event_data(
+        event_name, autotune_choices_stats=payload
+    )
+    sys.stderr.write(f"Autotune Choices Stats:\n{payload}\n")
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated
