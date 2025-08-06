@@ -361,7 +361,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # install flashinfer python
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system wheels/flashinfer/*.whl --verbose
-    
+
 # Logging to confirm the torch versions
 RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
 ################### VLLM INSTALLED IMAGE ####################
