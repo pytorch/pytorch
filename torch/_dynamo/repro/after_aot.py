@@ -68,6 +68,8 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
+from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+from triton.runtime.jit import JITFunction
 
 from .. import config
 
@@ -289,6 +291,7 @@ def generate_compiler_repro_string(
     save_dir: Optional[str] = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
+    has_user_defined_triton_kernel: bool = False,
 ) -> str:
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
@@ -299,6 +302,14 @@ def generate_compiler_repro_string(
             """
 import torch.distributed as dist
 from torch.testing._internal.distributed.fake_pg import FakeStore
+        """
+        ).strip()
+    triton_imports = ""
+    if has_user_defined_triton_kernel:
+        triton_imports = textwrap.dedent(
+            """
+import triton
+import triton.language as tl
         """
         ).strip()
 
@@ -312,6 +323,7 @@ from torch._dynamo.testing import rand_strided
 from math import inf
 import torch._inductor.inductor_prims
 {distributed_imports}
+{triton_imports}
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -329,6 +341,16 @@ isolate_fails_code_str = None
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
+
+    for id in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(id)
+        if isinstance(kernel, JITFunction):
+            model_str += "@triton.jit\n"
+            model_str += kernel.src
+            model_str += "\n"
+            model_str += f"torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.add_kernel({kernel._fn_name})\n"
+    
+    model_str += f"torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
 
@@ -411,6 +433,10 @@ def save_graph_repro(
         for node in gm.graph.nodes
     )
 
+    has_user_defined_triton_kernel = any(
+        "triton_kernel_wrapper" in node.name for node in gm.graph.nodes
+    )
+
     fd.write(
         generate_compiler_repro_string(
             gm,
@@ -419,6 +445,7 @@ def save_graph_repro(
             save_dir=save_dir,
             stable_hash=stable_hash,
             has_distributed_ops=has_distributed_ops,
+            has_user_defined_triton_kernel=has_user_defined_triton_kernel,
         )
     )
     if accuracy is None:
