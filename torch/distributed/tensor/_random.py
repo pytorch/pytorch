@@ -238,7 +238,10 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             # ensure we (a) propagate the state advancement back to the user's RNG so its visible and impacts any future
             # usage of that RNG (dtensor or non-dtensor), (b) drop it from our own cache so that if the user updates
             # the seed value in their rng and uses it with DTensor again, we always use the latest value
-            generator.set_state(self.rng_states.pop(g_name))
+            # TODO: we don't actually do this yet, because it deviates the semantics of user-supplied RNG from the
+            # semantics of default RNG.
+            # generator.set_state(self.rng_states.pop(g_name))
+            pass
 
     def get_offset(self, name: str) -> int:
         if name not in self.rng_states:
