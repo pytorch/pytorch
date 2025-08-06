@@ -26,7 +26,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
+from torch.utils._triton import has_triton_package
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
@@ -1692,12 +1692,14 @@ class TMACompatibilityChecker:
     def can_use_tma(
         self,
     ) -> bool:
+        import triton
+
         if not (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
             and config.triton.use_tensor_descriptor
             and config.assume_aligned_inputs
-            and has_triton_stable_tma_api()
+            and triton.__version__ >= "3.4.0"
             # For CUDA The base ptr needs to be aligned
         ):
             log.debug(
