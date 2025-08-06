@@ -55,7 +55,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_XPU
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -415,6 +415,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1571
     def test_set_reduce_scatter_divide_factor(self):
         self.run_subtests(
             {"divide_factor": [self.world_size * 2, self.world_size]},
