@@ -69,7 +69,7 @@ function install_nvshmem {
   wget -q "${url}"
   tar xf "${filename}.tar.gz"
   cp -a "libnvshmem/include/"* /usr/local/cuda/include/
-  cp -a "libnvshmem/lib/"*     /usr/local/cuda/lib/
+  cp -a "libnvshmem/lib/"*     /usr/local/cuda/lib64/
 
   # cleanup
   cd ..
