@@ -13654,6 +13654,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "cpp_wrapper samples will lead to invalid indexing",
+    )
     def test_inductor_triton_bucketize_respects_masking(self):
         def fn(inp, repeats, output_size):
             # return torch.repeat_interleave(inp, repeats, dim=0, output_size=output_size)
