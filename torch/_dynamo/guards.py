@@ -3031,7 +3031,7 @@ class GuardsStatePickler(pickle.Pickler):
         return types.MappingProxyType(d)
 
     @classmethod
-    def _unpickle_c_op(cls, name):
+    def _unpickle_c_op(cls, name: str) -> Any:
         return getattr(torch.ops._C, name)
 
     def reducer_override(
