@@ -225,7 +225,7 @@ def fx_forward_from_src_skip_result(
     return result
 
 
-def log_dynamo_start(code: CodeType, skip: int = 0):
+def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
     # Extract and filter the stack
     stack = list(
