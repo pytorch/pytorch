@@ -36,7 +36,7 @@ endif()
 
 execute_process(
     #COMMAND python3 ${CMAKE_SOURCE_DIR}/third_party/aiter/csrc/cpp_itfs/mha_fwd_generate.py --receipt 3 --output_dir ${CMAKE_CURRENT_LIST_DIR}
-    COMMAND python3 /tmp/pytorch/third_party/aiter/csrc/cpp_itfs/mha_fwd_generate.py --receipt 5 --output_dir ${CMAKE_CURRENT_LIST_DIR}
+    COMMAND python3 /tmp/pytorch/third_party/aiter/csrc/cpp_itfs/mha_fwd_generate.py --receipt 6 --output_dir ${CMAKE_CURRENT_LIST_DIR}
     RESULT_VARIABLE ret
 )
 
