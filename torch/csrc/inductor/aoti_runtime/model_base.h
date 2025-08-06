@@ -10,9 +10,11 @@
 #endif
 
 #include <fcntl.h>
+#include <cstdlib>
 #include <optional>
 #include <regex>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -71,6 +73,18 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+RAIIDataPtr RAII_gpuMallocCaching(size_t num_bytes) {
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
   return RAIIDataPtr(data_ptr, deleter);
 }
 
@@ -324,7 +338,19 @@ class AOTInductorModelBase {
       return;
     }
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    constant_blob_ = RAII_gpuMalloc(blob_size);
+    // Check if we should use PyTorch's CUDACachingAllocator for weight
+    // management
+    const char* use_caching_allocator =
+        std::getenv("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR");
+    if (use_caching_allocator && std::string(use_caching_allocator) == "1") {
+#ifdef USE_CUDA
+      constant_blob_ = RAII_gpuMallocCaching(blob_size);
+#else
+      constant_blob_ = RAII_gpuMalloc(blob_size);
+#endif
+    } else {
+      constant_blob_ = RAII_gpuMalloc(blob_size);
+    }
 #else
     constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif

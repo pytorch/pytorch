@@ -879,14 +879,24 @@ void test_cuda_alloc_test() {
   if (cudaStatus != cudaSuccess || device_idx == -1) {
     throw std::runtime_error("cudaGetDevice failed!");
   }
+
+  // Set the environment variable to enable CUDACachingAllocator for weights
+  setenv("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "1", 1);
+
   c10::cuda::CUDACachingAllocator::DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   size_t initTorchActive = stats.active_bytes[0].current;
+
   auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
+
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
   size_t torchActive = stats.active_bytes[0].current;
 
   ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
+
+  // Clean up the environment variable
+  unsetenv("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR");
 
   auto actual_output_tensors =
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
@@ -1113,8 +1123,7 @@ TEST(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
 }
 
-// TODO: ENABLE CUDACachingAllocator Test
-TEST(DISABLED_AotInductorTest, CudaAllocTestCuda) {
+TEST(AotInductorTest, CudaAllocTestCuda) {
   test_cuda_alloc_test();
 }
 #endif

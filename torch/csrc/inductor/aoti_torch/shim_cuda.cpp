@@ -2,6 +2,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -52,4 +53,16 @@ AOTITorchError aoti_torch_get_current_cuda_stream(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *(cudaStream_t*)(ret_stream) = at::cuda::getCurrentCUDAStream(device_index);
   });
+}
+
+AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    void** ptr,
+    size_t size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ptr = c10::cuda::CUDACachingAllocator::raw_alloc(size); });
+}
+
+AOTITorchError aoti_torch_cuda_caching_allocator_raw_delete(void* ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { c10::cuda::CUDACachingAllocator::raw_delete(ptr); });
 }
