@@ -581,7 +581,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-
     @skipIfRocm
     @requires_triton()
     def test_triton_signal_wait_until(self) -> None:
