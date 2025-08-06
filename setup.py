@@ -929,29 +929,27 @@ def build_deps() -> None:
     if nightly_version is not None:
         import re
 
-        if nightly_version == "":
-            # Empty string should show error with latest CPU version suggestion
-            variant = "cpu"  # Default to CPU for empty string
-            report("-- Detecting latest nightly version...")
-            latest_version = get_latest_nightly_version(variant)
-            # Also get the git hash to tell user which commit to checkout
-            git_hash = get_nightly_git_hash(latest_version)
-            error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
-            error_msg += 'Try: USE_NIGHTLY="{latest_version}"'
-            error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
-            raise RuntimeError(error_msg)
-        elif (
-            nightly_version == "cpu"
+        if (
+            nightly_version == ""
+            or nightly_version == "cpu"
             or re.match(r"^cu\d+$", nightly_version)
             or re.match(r"^rocm\d+\.\d+$", nightly_version)
         ):
-            # Variant-only specification, get latest version for that variant
-            latest_version = get_latest_nightly_version(nightly_version)
-            report(
-                f"-- USE_NIGHTLY={nightly_version} detected, using latest {nightly_version} nightly: {latest_version}"
-            )
-            download_and_extract_nightly_wheel(latest_version)
-            return
+            # Empty string or variant-only specification, show error with latest version
+            variant = "cpu" if nightly_version == "" else nightly_version
+            report(f"-- Detecting latest {variant} nightly version...")
+            latest_version = get_latest_nightly_version(variant)
+            # Also get the git hash to tell user which commit to checkout
+            git_hash = get_nightly_git_hash(latest_version)
+            
+            if nightly_version == "":
+                error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
+            else:
+                error_msg = f"USE_NIGHTLY requires a specific version, not just a variant. Latest available {nightly_version} version: {latest_version}\n"
+            
+            error_msg += f'Try: USE_NIGHTLY="{latest_version}"'
+            error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
+            raise RuntimeError(error_msg)
         else:
             # Full version specification
             report(
