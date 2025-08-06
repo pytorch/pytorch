@@ -53,16 +53,18 @@ def nvshmem_get_kernel(
     nvshmem.get(dest, src, nelems, pe)
 
 @triton.jit
-def nvshmem_put_signal_kernel(
-    dest,
-    src,
-    nelems,
-    sig_addr,
+def nvshmem_putmem_signal_block_kernel(
+    dst_ptr,
+    src_ptr,
+    size_bytes,
+    sig_ptr,
     signal_val,
     sig_op,
-    pe,
+    peer,
 ):
-    nvshmem.put_signal(dest, src, nelems, sig_addr, signal_val, sig_op, pe)
+    nvshmem.putmem_signal_block(
+        dst_ptr, src_ptr, size_bytes, sig_ptr, signal_val, sig_op, peer
+    )
 
 
 @triton.jit
