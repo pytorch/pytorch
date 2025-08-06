@@ -306,6 +306,28 @@ void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& newsize) {
     // behavior when compared to resize_bytes_xxx. For these cases,
     // an additional memory copy and update for storage are required.
     if (original_data_ptr == src_tensor.storage().data_ptr().get()) {
+      // FIXME: ideally we should call resize_bytes_mtia() directly in this function
+      // for MTIA tensors similar to resize_bytes_cuda/cpu() rather than dispatch to
+      // resize_() operator, but MTIA runtime APIs are not available for a direct call
+      // here. so we add some special checks for MTIA below:
+      // 1. when |size_bytes| == 0, MTIA resize_() op above won't do anything to
+      // |src_tensor| b/c of the size/strides of `src_tensor` matches the resize_()
+      // operator input (size == 0), so we manually erase the data_ptr and nbytes;
+      // 2. when |size_bytes| != 0, since tensor.resize_() doesn't allocate new memory
+      // or update storage.nbytes() when storage is resized to a smaller size, we need
+      // to manually update the storage.nbytes() here, but no need to copy the data.
+      if (device_type == kMTIA) {
+        if (size_bytes == 0) {
+          storage.unsafeGetStorageImpl()->set_data_ptr_noswap(at::DataPtr(nullptr, storage.device()));
+          storage.unsafeGetStorageImpl()->set_nbytes(0);
+          return;
+        }
+        if (size_bytes < static_cast<int64_t>(storage.nbytes())) {
+          storage.set_nbytes(size_bytes);
+          return;
+        }
+        return;
+      }
       auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
       new_tensor.copy_(src_tensor);
       storage.set_data_ptr_noswap(
