@@ -171,7 +171,7 @@ int main(){
             self.assertEqual(has_debug_sym, True)
 
         def check_windows_pdb_exist(module_path: str):
-            file_name_no_ext = os.path.splitext(module_path)
+            file_name_no_ext = os.path.splitext(module_path)[0]
             file_name_pdb = f"{file_name_no_ext}.pdb"
             has_pdb_file = os.path.exists(file_name_pdb)
             self.assertEqual(has_pdb_file, True)
