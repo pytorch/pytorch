@@ -1,1 +1,2 @@
 - This is the only AGENTS.md, there are no recursive AGENTS.md
+- Do NOT run setup.py, you do not have a working build environment
