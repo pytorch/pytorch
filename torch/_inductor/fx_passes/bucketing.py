@@ -93,6 +93,12 @@ def greedy_bucket_collective_by_mb(
     node_group_key: Callable[[torch.fx.Node], Any],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> list[list[torch.fx.Node]]:
+    """
+    Bucketing adjacent collectives with equal node_group_key.
+    We can not bucket non adjacent collectives,
+    as this will effectively change the order of collectives.
+    Reordering can lead to different order on different ranks.
+    """
     g = gm.graph
     found_candidates = False
     for node in g.nodes:
@@ -139,7 +145,7 @@ def greedy_bucket_collective_by_mb(
         )
         for node in nodes:
             if node in cur_bucket_successors:
-                # We can not bucket successors with the node
+                # We cannot bucket successors with the node
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
@@ -174,7 +180,7 @@ def bucket_all_gather_by_mb(
 
     Args:
         gm (torch.fx.GraphModule): GraphModule where to bucket all_gathers.
-        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+        bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets at the start,
             as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
@@ -212,14 +218,14 @@ def bucket_reduce_scatter_by_mb(
 
     Args:
         gm (torch.fx.GraphModule): GraphModule where to bucket reduce_scatters.
-        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+        bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets.
         filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
             only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
-        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
+        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of reduce_scatter nodes.
     """
 
     def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
