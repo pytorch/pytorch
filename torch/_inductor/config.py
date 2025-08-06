@@ -1454,6 +1454,15 @@ class aot_inductor:
         os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
     )
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        # When weight_use_caching_allocator is set to True, also set the environment variable
+        # so that the runtime code can access it
+        if name == "weight_use_caching_allocator" and value:
+            os.environ["AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR"] = "1"
+        elif name == "weight_use_caching_allocator" and not value:
+            os.environ["AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR"] = "0"
+        super().__setattr__(name, value)
+
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
 
