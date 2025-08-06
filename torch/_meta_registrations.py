@@ -3846,8 +3846,9 @@ def meta__dyn_quant_matmul_4bit(
 ):
     torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
     torch._check(
-        inp.dtype in [torch.float32],
-        lambda: f"expected input to be f32, got {inp.dtype}",
+        inp.dtype in [torch.float32]
+        or (inp.dtype in [torch.bfloat16] and block_size == in_features),
+        lambda: f"expected input to be f32 or bf16, got {inp.dtype}",
     )
     M = inp.size(0)
     return inp.new_empty(M, out_features, dtype=inp.dtype)
