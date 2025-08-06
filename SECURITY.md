@@ -1,16 +1,16 @@
 # Security Policy
 
- - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
- - [**Using Pytorch Securely**](#using-pytorch-securely)
+ - [**Reporting a Vulnerability**](#reporting-security-issues)
+ - [**Using PyTorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
    - [TorchScript models](#torchscript-models)
-   - [Untrusted inputs](#untrusted-inputs)
+   - [Untrusted inputs](#untrusted-inputs-during-training-and-prediction)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
 - [**CI/CD security principles**](#cicd-security-principles)
 ## Reporting Security Issues
 
-Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
+Beware that none of the topics under [Using PyTorch Securely](#using-pytorch-securely) are considered vulnerabilities of PyTorch.
 
 However, if you believe you have found a security vulnerability in PyTorch, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
 
@@ -21,8 +21,8 @@ Please refer to the following page for our responsible disclosure policy, reward
 https://www.facebook.com/whitehat
 
 
-## Using Pytorch Securely
-**Pytorch models are programs**, so treat its security seriously -- running untrusted models is equivalent to running untrusted code. In general we recommend that model weights and the python code for the model are distributed independently. That said, be careful about where you get the python code from and who wrote it (preferentially check for a provenance or checksums, do not run any pip installed package).
+## Using PyTorch Securely
+**PyTorch models are programs**, so treat its security seriously -- running untrusted models is equivalent to running untrusted code. In general we recommend that model weights and the python code for the model are distributed independently. That said, be careful about where you get the python code from and who wrote it (preferentially check for a provenance or checksums, do not run any pip installed package).
 
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources[^data-poisoning-sources].
