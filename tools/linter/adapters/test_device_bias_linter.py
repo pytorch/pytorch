@@ -42,7 +42,7 @@ DEVICE_BIAS = ["cuda", "xpu", "mps"]
 GPU_RELATED_DECORATORS = {"requires_gpu", "requires_triton"}
 
 
-def is_main_has_gpu(tree) -> bool:
+def is_main_has_gpu(tree: ast.AST) -> bool:
     def _contains_has_gpu(node: ast.AST) -> bool:
         if isinstance(node, ast.Name) and node.id in ["HAS_GPU", "RUN_GPU"]:
             return True
