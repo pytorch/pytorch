@@ -4280,11 +4280,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         test_name: str,
         file_name: str,
         parent_pipe,
-        seed: int,
         **kwargs,
     ) -> None:
         cls.parent = parent_conn
-        super()._run(rank, test_name, file_name, parent_pipe, seed)
+        super()._run(rank, test_name, file_name, parent_pipe)
 
     @property
     def local_device(self):
