@@ -514,6 +514,12 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_alloc(void** ptr, size_t size);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
+
 #endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
