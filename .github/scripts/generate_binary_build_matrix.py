@@ -16,7 +16,8 @@ from typing import Optional
 
 
 # NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
-CUDA_ARCHES = ["12.6", "12.8", "12.9"]
+# CUDA_ARCHES = ["12.6", "12.8", "12.9"]
+CUDA_ARCHES = ["12.9"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
@@ -30,7 +31,8 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 # NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
-ROCM_ARCHES = ["6.3", "6.4"]
+# ROCM_ARCHES = ["6.3", "6.4"]
+ROCM_ARCHES = ["6.4"]
 
 XPU_ARCHES = ["xpu"]
 

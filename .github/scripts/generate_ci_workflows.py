@@ -173,16 +173,16 @@ ROCM_SMOKE_WORKFLOWS = [
 ]
 
 LINUX_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["12.6", "12.8", "12.9"],
-            python_versions=["3.9"],
-        ),
-        branches="main",
-    ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="manywheel",
+    #     build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+    #         OperatingSystem.LINUX,
+    #         arches=["12.9"],
+    #         python_versions=["3.9"],
+    #     ),
+    #     branches="main",
+    # ),
     # See https://github.com/pytorch/pytorch/issues/138750
     # BinaryBuildWorkflow(
     #     os=OperatingSystem.LINUX,
