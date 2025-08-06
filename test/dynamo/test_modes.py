@@ -13,7 +13,7 @@ from torch._C import (
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
 from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_gpu, GPU_TYPE
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
