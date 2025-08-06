@@ -9,7 +9,7 @@ external_build:
   dockerfile_path: "./.github/docker/external/vllm/Dockerfile.base"
 test:
   - name: Basic Correctness Test # name of the test
-    id: vllm_basic_correctness_test # the unique id to identify the test config, it must be unqiue in the ci config yml file
+    id: vllm_basic_correctness_test # the unique id to identify the test config, it must be unique in the ci config yml file
     env_vars:  # global env vars
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
     preset: # this can be bash, python etc anything you want to run to set the proper test env
