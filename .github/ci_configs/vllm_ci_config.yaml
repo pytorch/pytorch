@@ -1,4 +1,4 @@
-build:
+external_build:
   build_target: vllm
   artifact_dir: shared
   torch_whl_dir: dist
@@ -12,6 +12,7 @@ test:
     env_vars:  # global env vars
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
     preset: # this can be bash, python etc anything you want to run to set the proper test env
+    run:
     - test: pytest -v -s basic_correctness/test_cumem.py
     - test: pytest -v -s basic_correctness/test_basic_correctness.py
     - test: pytest -v -s basic_correctness/test_cpu_offload.py

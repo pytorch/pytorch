@@ -58,16 +58,13 @@ def _prepare_artifact_dir(path: str):
 
 def getVllmBuildConfig(config: Dict[str, Any]):
     print("config", config)
-    build_config = config.get("build", {})
-
+    external_build_config = config.get("external_build", {})
     return VllmBuildConfig(
-        artifact_dir=build_config.get("artifact_dir", ""),
-        torch_whl_dir=build_config.get("torch_whl_dir", ""),
-        base_image=build_config.get("base_image", ""),
-        dockerfile_path=build_config.get("dockerfile_path", ""),
+        artifact_dir=external_build_config.get("artifact_dir", ""),
+        torch_whl_dir=external_build_config.get("torch_whl_dir", ""),
+        base_image=external_build_config.get("base_image", ""),
+        dockerfile_path=external_build_config.get("dockerfile_path", ""),
     )
-
-
 def build_vllm(config: Dict[str, Any]):
     cfg = getVllmBuildConfig(config)
     print(f"Target artifact dir path is {cfg.artifact_dir}", flush=True)
