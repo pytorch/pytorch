@@ -43,17 +43,17 @@ GPU_RELATED_DECORATORS = {"requires_gpu", "requires_triton"}
 
 
 def is_main_has_gpu(tree) -> bool:
-    def _is_has_gpu(test: ast.expr) -> bool:
-        # Match: if HAS_GPU
-        if isinstance(test, ast.Name):
-            return test.id in ["HAS_GPU", "RUN_GPU"]
-
-        # Match: if HAS_GPU and XXX, if XXX and HAS_GPU, if HAS_GPU or XXX, etc.
-        if isinstance(test, ast.BoolOp) and isinstance(test.op, (ast.And, ast.Or)):
-            # Only allow expressions composed entirely of Name nodes
-            if all(isinstance(value, ast.Name) for value in test.values):
-                return any(value.id == "HAS_GPU" for value in test.values)
-
+    def _contains_has_gpu(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name) and node.id in ["HAS_GPU", "RUN_GPU"]:
+            return True
+        elif isinstance(node, ast.BoolOp):
+            return any(_contains_has_gpu(value) for value in node.values)
+        elif isinstance(node, ast.UnaryOp):
+            return _contains_has_gpu(node.operand)
+        elif isinstance(node, ast.Compare):
+            return _contains_has_gpu(node.left) or any(_contains_has_gpu(comp) for comp in node.comparators)
+        elif isinstance(node, (ast.IfExp, ast.Call)):
+            return False
         return False
 
     for node in ast.walk(tree):
@@ -69,7 +69,7 @@ def is_main_has_gpu(tree) -> bool:
                     for comp in node.test.comparators
                 ):
                     for inner_node in node.body:
-                        if isinstance(inner_node, ast.If) and _is_has_gpu(
+                        if isinstance(inner_node, ast.If) and _contains_has_gpu(
                             inner_node.test
                         ):
                             return True

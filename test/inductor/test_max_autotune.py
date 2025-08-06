@@ -2493,6 +2493,8 @@ class TestPrologueFusion(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._inductor.utils import is_big_gpu
+
     # Set env to make it work in CI.
-    if HAS_GPU:
+    if HAS_GPU and HAS_CPU and is_big_gpu():
         run_tests()
