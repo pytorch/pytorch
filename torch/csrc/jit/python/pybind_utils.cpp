@@ -90,7 +90,21 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
         } else if (THPUtils_checkLong(obj.ptr())) {
-          scalar = at::Scalar(THPUtils_unpackLong(obj.ptr()));
+            int overflow = -1;
+            auto value = PyLong_AsLongLongAndOverflow(obj.ptr(), &overflow);
+          if (value == -1 && PyErr_Occurred()) {
+            throw python_error();
+          }
+	  if (overflow == 0) {
+          scalar = at::Scalar(value);
+	  } else {
+		// try unsigned
+            auto value = PyLong_AsUnsignedLongLong(obj.ptr());
+      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
+        throw python_error();
+      }
+      scalar = at::Scalar(value);
+	  }
         } else if (PyComplex_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
@@ -512,7 +526,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       if (py::isinstance<py::bool_>(obj)) {
         return py::cast<bool>(obj);
       } else if (py::isinstance<py::int_>(obj)) {
-        return py::cast<int64_t>(obj);
+	// NS: Fixme
+        // return py::cast<int64_t>(obj);
+        return py::cast<uint64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       } else if (PyComplex_CheckExact(obj.ptr())) {
@@ -598,6 +614,8 @@ py::object toPyObject(IValue ivalue) {
           return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
           return py::cast(*tensor.const_data_ptr<int64_t>());
+        case at::ScalarType::UInt64:
+          return py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
           return py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
@@ -763,6 +781,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toSymFloat());
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
+  } else if (ivalue.isUnsigned()) {
+    return py::cast(std::move(ivalue).toUInt());
   } else {
     TORCH_CHECK(
         false,
