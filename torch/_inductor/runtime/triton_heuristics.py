@@ -1299,7 +1299,6 @@ class CompileResult(Generic[_T]):
             f"    grid_2 = {grid.z_grid}",
             f"    runner({', '.join(runner_args)})",
         ]
-        breakpoint()
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)
         return scope["launcher"]
