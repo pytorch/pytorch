@@ -293,7 +293,7 @@ Value* CloneValueFromListConstruct(
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(
+static Node* CloneNodeToGraph(
     Node* n,
     std::shared_ptr<Graph> n_graph,
     const ParamMap& params_dict,
