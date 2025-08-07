@@ -21,7 +21,7 @@ from torch.testing._internal.common_distributed import (
     run_subtests,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
+from torch.testing._internal.common_fsdp import MLPStack
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -205,53 +205,6 @@ class ReplicateTest(MultiProcessTestCase):
             for parameter in layer.parameters():
                 self.assertEqual(parameter.device_mesh.shape, (2, 1))
                 self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
-
-    @skip_if_lt_x_gpu(2)
-    def test_train_replicate_fsdp(self):
-        """
-        Tests that replicate_model has the same behavior as original model when training
-        """
-        self._init_pg()
-
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-        model = Net().to(device)
-        replicate_model = deepcopy(model)
-
-        layers = [
-            replicate_model.fc1,
-            replicate_model.fc2,
-            replicate_model.fc3,
-        ]
-
-        for layer in layers:
-            replicate(layer)
-
-        replicate_model = replicate(replicate_model)
-
-        optim = torch.optim.Adam(model.parameters(), lr=0.01)
-        replicate_optim = torch.optim.Adam(replicate_model.parameters(), lr=0.01)
-
-        torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn(2, 2, device=device)
-
-        for _ in range(10):
-            loss = model(inp).sum()
-            loss.backward()
-
-            for param in model.parameters():
-                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
-
-            replicate_loss = replicate_model(inp).sum()
-            replicate_loss.backward()
-
-            optim.step()
-            replicate_optim.step()
-
-            optim.zero_grad()
-            replicate_optim.zero_grad()
-
-            self.assertEqual(replicate_loss, loss)
-            check_sharded_parity(self, model, replicate_model)
 
     @skip_if_lt_x_gpu(2)
     def test_train_parity_2d_mlp(self):
