@@ -18,7 +18,6 @@ ciflow_push_tags:
 - ciflow/mps
 - ciflow/nightly
 - ciflow/periodic
-- ciflow/vllm
 - ciflow/periodic-rocm-mi300
 - ciflow/rocm
 - ciflow/rocm-mi300
@@ -27,6 +26,7 @@ ciflow_push_tags:
 - ciflow/trunk
 - ciflow/unstable
 - ciflow/xpu
+- ciflow/vllm
 - ciflow/torchbench
 - ciflow/op-benchmark
 - ciflow/pull
