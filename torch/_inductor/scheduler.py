@@ -605,7 +605,7 @@ class BaseSchedulerNode:
             out_lines.append(op_info_str)
             if "stack_trace" in o.meta:
                 stack_trace = f"{o.meta['stack_trace']}"
-                stack_trace_last_line = stack_trace.split("|")[-1]
+                stack_trace_last_line = stack_trace.rsplit("|", maxsplit=1)[-1]
                 out_lines.append(
                     "#pragma CMT "
                     + stack_trace_last_line.replace("{", "{{")

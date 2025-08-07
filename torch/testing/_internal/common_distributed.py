@@ -1605,7 +1605,7 @@ class MultiProcContinousTest(TestCase):
     @classmethod
     def _run_test_given_id(cls, test_id: str, **kwargs) -> None:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        test_name = test_id.split(".")[-1]
+        test_name = test_id.rsplit(".", maxsplit=1)[-1]
         # Get the test function from the test class
         self = cls(test_name)
         self.rank = cls.rank
