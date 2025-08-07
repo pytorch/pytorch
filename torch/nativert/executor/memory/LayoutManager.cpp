@@ -105,6 +105,7 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
     auto* tensor = planned_tensors_[i];
 
     at::StorageImpl& storage = *tensor->storage().unsafeGetStorageImpl();
+    at::TensorImpl& tensor_impl = *tensor->unsafeGetTensorImpl();
 
     if (C10_UNLIKELY(allocate)) {
       // from: https://fburl.com/code/4it00yph
@@ -120,7 +121,7 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
       //
       // For more information, see the doc comment for
       // intrusive_ptr::unsafe_adapt_non_heap_allocated.
-      tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+      tensor_impl.set_storage_keep_dtype(at::Storage(
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
               &storage_impl_buffer_.to_managed(storage), 1)));
     } else if (
@@ -130,12 +131,16 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
             &storage_buf
                 [i]) /* managed storage was replaced for some reason */) {
       storage.reset();
-      tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+      tensor_impl.set_storage_keep_dtype(at::Storage(
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
               // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
               &storage_buf[i],
               1)));
     }
+
+    // resize to zero so that we ensure that we don't access out-of-bounds
+    // addr's in the next iteration
+    tensor_impl.set_sizes_contiguous({0});
   }
 }
 
