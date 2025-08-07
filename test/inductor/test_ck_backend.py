@@ -36,20 +36,8 @@ if HAS_CUDA:
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
-
-
-_test_env = {
-    "PATH": _get_path_without_sccache(),
-    "DISABLE_SCCACHE": "1",
-}
+# patch env for tests if needed
+_test_env = {}
 
 
 @instantiate_parametrized_tests
