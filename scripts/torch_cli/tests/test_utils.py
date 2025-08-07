@@ -1,9 +1,8 @@
 import os
 import unittest
-from unittest import mock
 from unittest.mock import patch
 
-from cli.lib.common.utils import read_yaml_file
+from cli.lib.common.file_utils import read_yaml_file
 
 from utils import create_temp_yaml
 
@@ -36,7 +35,7 @@ class TestReadYamlFile(unittest.TestCase):
         }
         path = create_temp_yaml(content)
 
-        with patch("cli.lib.utils.logger") as mock_logger:
+        with patch("cli.lib.common.file_utils.logger") as mock_logger:
             result = read_yaml_file(path)
 
             self.assertIsNone(result["key1"])
