@@ -51,6 +51,13 @@ class VllmBuildRunner(BuildRunner):
         self.result_path = _DEFAULT_RESULT_PATH
 
     def prepare(self):
+        """
+        Prepare the vllm build environment:
+        - clone vllm repo with  pinned commit
+        - create result dir if it does not exist
+        - copy torch whls to vllm work directory if provided
+        - copy user provided dockerfile to vllm work directory if provided
+        """
         clone_vllm()
         cfg = self._to_vllm_build_config()
 
@@ -61,6 +68,12 @@ class VllmBuildRunner(BuildRunner):
         self.cp_torch_whls_if_exist()
 
     def run(self):
+        """
+        main function to run vllm build
+        1. prepare vllm build environment
+        2. prepare the docker build command args
+        3. run docker build
+        """
         self.prepare()
         logger.info(f"Running vllm build: {self.cfg}")
         torch_arg = _get_torch_wheel_path_arg(self.cfg.torch_whl_dir)
