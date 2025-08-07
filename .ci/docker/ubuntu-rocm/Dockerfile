@@ -133,8 +133,5 @@ RUN rm install_openmpi.sh
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-# Install LLVM dev version (Defined in the pytorch/builder github repository)
-COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
 USER jenkins
 CMD ["bash"]

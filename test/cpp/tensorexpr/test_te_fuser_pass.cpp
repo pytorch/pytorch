@@ -351,6 +351,7 @@ TEST(TEFuserPass, FuserPass_WhereList) {
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 
+#ifdef TEST_LLVM
 TEST(TEFuserPass, DynamicShapeFusion) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -397,6 +398,7 @@ TEST(TEFuserPass, DynamicShapeFusion) {
   std::vector<at::Tensor> inputs3 = {at::rand({25, 60}), at::rand({25, 60})};
   run_and_compare(inputs3);
 }
+#endif
 
 } // namespace jit
 } // namespace torch
