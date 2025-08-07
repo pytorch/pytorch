@@ -155,6 +155,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
         # but prefer the preprocess_mm_configs argument when it's used for both
         self.has_int8_tensor: bool = False
+        # Whether to scale configs at all
+        # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
+        self.should_scale_configs: bool = True
         # List of dictionaries to store the kernel configs. Configs that evaluate to true
         # will be utilised on the target platform. The configs are as follows:
         # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
@@ -481,6 +484,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Scales and filters matrix multiplication configs based on input size.
         """
+        if not self.should_scale_configs:
+            return configs
         from .runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
@@ -1354,6 +1359,19 @@ class INT8MMTemplateConfigMixin(MMTemplateConfigMixin):
         self.has_int8_tensor = True
 
 
+# MMPlusMM specific mixin to avoid running _scale_mm_configs
+class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """
+    Ensure that _should_scale_configs is False
+    """
+
+    # TODO(coconutruben): remove this once all tests work
+    # with proper scaling on mm_plus_mm
+    def __init__(self) -> None:
+        super().__init__()
+        self.should_scale_configs = False
+
+
 # TMA-specific mixin for TMA templates
 class TMAConfigMixin(MMTemplateConfigMixin):
     """
@@ -1578,7 +1596,9 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic("mm_plus_mm", "cuda", register=torch.version.hip is None)
-class CUDAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+class CUDAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CUDAConfigHeuristic
+):
     """MM Plus MM template heuristic for CUDA"""
 
     def __init__(self) -> None:
@@ -1674,11 +1694,16 @@ class ROCmInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, ROCmConfigHeu
 @register_template_heuristic(
     "mm_plus_mm", "cuda", register=torch.version.hip is not None
 )
-class ROCmMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+class ROCmMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, ROCmConfigHeuristic
+):
     """MM Plus MM template heuristic for ROCm"""
 
     def __init__(self) -> None:
         super().__init__()
+        # self.default_num_stages is used to make sure all configs have that in ROCm land
+        # for mm_plus_mm, we actually just want stages = 1, as pipelining brings no benefits
+        self.default_num_stages = 1
         # Override mm_configs to use mm_plus_mm_configs
         self.mm_configs = self.mm_plus_mm_configs
         # NOTE: overriding exhaustive configs here to be the same as mm_configs
@@ -1728,7 +1753,9 @@ class CPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CPUConfigHeuri
 
 
 @register_template_heuristic("mm_plus_mm", "cpu")
-class CPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+class CPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CPUConfigHeuristic
+):
     """MM Plus MM template heuristic for CPU"""
 
     def __init__(self) -> None:
@@ -1782,7 +1809,9 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
 
 
 @register_template_heuristic("mm_plus_mm", "xpu")
-class XPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+class XPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
+):
     """MM Plus MM template heuristic for XPU"""
 
     def __init__(self) -> None:
@@ -1836,7 +1865,9 @@ class MTIAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, MTIAConfigHeu
 
 
 @register_template_heuristic("mm_plus_mm", "mtia")
-class MTIAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, MTIAConfigHeuristic):
+class MTIAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, MTIAConfigHeuristic
+):
     """MM Plus MM template heuristic for MTIA"""
 
     def __init__(self) -> None:
