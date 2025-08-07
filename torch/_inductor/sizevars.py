@@ -380,6 +380,9 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
+        if numerator in sympy.Mul.make_args(denominator):
+            return True
+
         if len(free_symbols(numerator)) > 20:
             return False
 
