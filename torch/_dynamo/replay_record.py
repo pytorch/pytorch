@@ -1,7 +1,23 @@
+"""
+Python execution state recording and replay functionality.
+
+This module provides mechanisms for capturing and replaying Python execution state:
+
+- ModuleRecord: Tracks module access patterns and attribute usage
+- DummyModule: Lightweight module substitute for replay
+- ExecutionRecord: Manages execution context including globals, locals and builtins
+- ExecutionRecorder: Records variable states and module access during execution
+
+The module enables serialization and reproduction of Python execution environments,
+particularly useful for debugging and testing frameworks that need to capture
+and recreate specific program states.
+"""
+
 import dataclasses
 from dataclasses import field
+from io import BufferedReader, BufferedWriter
 from types import CellType, CodeType, ModuleType
-from typing import Any, BinaryIO, IO
+from typing import Any, IO, Union
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
@@ -20,6 +36,7 @@ class ModuleRecord:
 class DummyModule:
     name: str
     is_torch: bool = False
+    value: object = None
 
     @property
     def __name__(self) -> str:
@@ -35,12 +52,12 @@ class ExecutionRecord:
     builtins: dict[str, Any] = field(default_factory=dict)
     code_options: dict[str, Any] = field(default_factory=dict)
 
-    def dump(self, f: IO[str]) -> None:
+    def dump(self, f: Union[IO[str], BufferedWriter]) -> None:
         assert dill is not None, "replay_record requires `pip install dill`"
         dill.dump(self, f)
 
     @classmethod
-    def load(cls, f: BinaryIO) -> Self:
+    def load(cls, f: Union[IO[bytes], BufferedReader]) -> Self:
         assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 

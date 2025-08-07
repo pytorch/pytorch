@@ -8,6 +8,7 @@ import sys
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
 # We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+# We generate runWithoutCompiledAutograd for all tests in `compiled_autograd_skips`
 #
 # For an easier-than-manual way of generating and updating these lists,
 # see scripts/compile_tests/update_failures.py
@@ -71,15 +72,6 @@ FIXME_inductor_non_strict = {
     "test_torch",
 }
 
-# Tests that run without resetting dynamo in PYTORCH_TEST_WITH_INDUCTOR=1.
-# Please don't add anything to this list.
-#
-# Instead we will gradually remove items from this list. Once the list is empty,
-# we will remove the list.
-FIXME_inductor_dont_reset_dynamo = {
-    "test_ops",
-}
-
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
 # see NOTE [dynamo_test_failures.py] for more details
@@ -91,6 +83,8 @@ if test_dir is None:
 
     inductor_expected_failures = set()
     inductor_skips = set()
+
+    compiled_autograd_skips = set()
 else:
     dynamo_failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
     dynamo_skips_directory = os.path.join(test_dir, "dynamo_skips")
@@ -103,6 +97,11 @@ else:
 
     inductor_expected_failures = set(os.listdir(inductor_failures_directory))
     inductor_skips = set(os.listdir(inductor_skips_directory))
+
+    compiled_autograd_skips_directory = os.path.join(
+        test_dir, "compiled_autograd_skips"
+    )
+    compiled_autograd_skips = set(os.listdir(compiled_autograd_skips_directory))
 
 # TODO: due to case sensitivity problems, for now list these files by hand
 extra_dynamo_skips = {

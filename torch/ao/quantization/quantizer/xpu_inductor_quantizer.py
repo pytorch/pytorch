@@ -85,42 +85,10 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         overrides. We keep the annotate methods but make the function
         body empty, aiming to let `_generate_qdq_quantized_model`
         generate qdq around op and graph execute on fp32 dtype for
-        unspported operators.
+        unsupported operators.
     """
 
     def _annotate_qat_conv2d_fusion_pattern(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        pass
-
-    def _annotate_conv2d_binary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
-    def _annotate_conv2d_binary_unary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
-    def _annotate_linear_fusion_pattern(
-        self,
-        model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ):
-        pass
-
-    def _annotate_matmul(
         self,
         model: torch.fx.GraphModule,
         quantization_config: Optional[QuantizationConfig],

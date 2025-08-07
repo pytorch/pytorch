@@ -355,7 +355,7 @@ class TestLiteScriptModule(TestCase):
         # additional context to the exception message and preserve the correct
         #  C++ stack trace for symbolication. i.e. it isn't possible to add
         # the debug handle string to show where in the Python code the exception
-        # occured w/o first changing
+        # occurred w/o first changing
         # torch::jit::JITException to extend c10::Error.
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ft = FooTest2()
@@ -486,17 +486,9 @@ class TestLiteScriptModule(TestCase):
                 "Traceback of TorchScript"
             ).check("self.b.forwardError").check_next(
                 "~~~~~~~~~~~~~~~~~~~ <--- HERE"
-            ).check(
-                "return self.call"
-            ).check_next(
-                "~~~~~~~~~ <--- HERE"
-            ).check(
+            ).check("return self.call").check_next("~~~~~~~~~ <--- HERE").check(
                 "return torch.ones"
-            ).check_next(
-                "~~~~~~~~~~ <--- HERE"
-            ).run(
-                str(exp)
-            )
+            ).check_next("~~~~~~~~~~ <--- HERE").run(str(exp))
 
 
 class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):

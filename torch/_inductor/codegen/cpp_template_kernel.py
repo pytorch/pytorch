@@ -2,11 +2,13 @@
 import itertools
 from collections.abc import Iterable
 from typing import Any, Callable, Optional, Union
+from unittest.mock import patch
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
+from torch._inductor.utils import do_bench_using_profiling
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import SymT
 
@@ -16,10 +18,9 @@ from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
-from .common import CppWrapperKernelArgs
-from .cpp import CppKernel, CppKernelProxy, KernelGroup
+from .common import REMOVED
+from .cpp import CppKernel, CppKernelProxy, KernelGroup, ParallelDepth
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
-from .cpp_wrapper_cpu import CppWrapperCpu
 
 
 def parse_expr_with_index_symbols(expr):
@@ -33,7 +34,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> ir.TensorBox:
+def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -45,8 +46,6 @@ class CppTemplateKernel(CppKernel):
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
-        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
-            self.args = CppWrapperKernelArgs()
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -106,9 +105,11 @@ class CppTemplateKernel(CppKernel):
             if aliases is not None:
                 for alias in aliases:
                     if alias in self.args.input_buffers:
-                        self.args.input_buffers[alias] = "REMOVED"
+                        raise AssertionError(
+                            f"input_buffers cannot be removed: {alias}"
+                        )
                     if alias in self.args.output_buffers:
-                        self.args.output_buffers[alias] = "REMOVED"
+                        self.args.output_buffers[alias] = REMOVED
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
@@ -119,9 +120,7 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(
-            name, call_args, triton=False, gpu=False, arg_types=arg_types
-        )
+        wrapper.generate_kernel_call(name, call_args, triton=False, arg_types=arg_types)
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -163,6 +162,7 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced, ir.TensorBox)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
@@ -175,10 +175,10 @@ class CppTemplateKernel(CppKernel):
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
-    def view(self, node, sizes: list[Any]) -> ir.View:
+    def view(self, node, sizes: list[Any]) -> ir.IRNode:
         node = wrap_with_tensorbox(node)
         sizes = parse_expr_with_index_symbols(sizes)
-        return L.view(node, sizes).data
+        return L.view(node, sizes).data  # type: ignore[arg-type]
 
     def permute(self, node, dims):
         node = wrap_with_tensorbox(node)
@@ -210,6 +210,19 @@ class CppTemplateKernel(CppKernel):
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+
+    def define_stack_allocated_buffer(
+        self, name, sizes: list[Any], dtype=torch.float
+    ) -> str:
+        """Define stack-allocated buffer"""
+        sizes = parse_expr_with_index_symbols(sizes)
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
+        self.local_buffers[name] = buf
+        ctype = f"{DTYPE_TO_CPP[dtype]}"
+        numel = f"{cexpr_index(buf.get_numel())}"
+        return f"alignas(64) {ctype} _{name}[{numel}]; {ctype}* {name} = _{name};"
 
     def reinit_buffer_if_null(self, name):
         """Reinit the previously defined local buffer if it is null"""
@@ -276,7 +289,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_grouped_gemm_pointwise_nodes(
@@ -330,7 +351,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_output(
@@ -378,7 +407,10 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst,
+                    epilogue_nodes,  # type: ignore[arg-type]
+                    offsets,
+                    reindexers,
                 )
         else:
             if dst.get_name() != src.get_name():
@@ -471,7 +503,8 @@ class CppTemplateKernel(CppKernel):
                         multi_output_name = multi_output_buffers[gemm_idx].get_name()
                         if (
                             multi_output_name in self.args.output_buffers
-                            and self.args.output_buffers[multi_output_name] != "REMOVED"
+                            and self.args.output_buffers[multi_output_name]
+                            is not REMOVED
                         ):
                             self.remove_buffer(multi_output_name)
                 return res
@@ -501,6 +534,10 @@ class CppTemplateKernel(CppKernel):
                     for _src, _dst in zip(src, dst)
                 )
                 return ""
+
+    def check_bounds(self, expr, size, lower, upper):
+        # CppTemplateKernel does not need codegen related operations
+        return
 
 
 class CppTemplateCaller(ir.ChoiceCaller):
@@ -548,7 +585,10 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def hash_key(self) -> str:
         return "-".join(
@@ -563,7 +603,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
     ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> ir.TensorBox:
+    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
         return ir.TensorBox.create(
             ir.CppTemplateBuffer(
                 layout=self.layout,

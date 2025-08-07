@@ -234,7 +234,7 @@ DimSymbolMap& ConstantValueMap::GetDimSymbolMap() {
 }
 
 template <typename Map>
-void UpdateStrKey(
+static void UpdateStrKey(
     Map& map,
     const std::string& old_key,
     const std::string& new_key) {

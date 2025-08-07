@@ -45,7 +45,7 @@ class TestUnevenParamShard(FSDPTest):
     def test_one_iteration(self, device):
         """Test FSDP with uneven divide of parameter shards."""
         model = Linear(3, 3, bias=False)
-        input = torch.rand(8, 3)
+        input = torch.rand(self.world_size, 3)
         my_lr = 0.1
 
         ref_forward_output_my_rank, ref_weight_out = self._get_ref_results(
@@ -68,7 +68,9 @@ class TestUnevenParamShard(FSDPTest):
             self.assertEqual(ref_weight_out, weight_out)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestUnevenParamShard, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestUnevenParamShard, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

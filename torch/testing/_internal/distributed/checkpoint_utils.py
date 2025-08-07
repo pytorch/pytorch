@@ -3,6 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import io
+import logging
 import os
 import shutil
 import tempfile
@@ -88,9 +89,7 @@ class Rot13Example(StreamTransformExtension):
                     # It's possible self.input is an IO[bytes] with no readinto method.
                     # In that case, we emulate with a read and copy.  In practice,
                     # all of the current concrete extensions have readinto.
-                    # 0 as a flags value is janky, but the flag values aren't available
-                    # in python until 3.12.
-                    view = b.__buffer__(0)
+                    view = memoryview(b)
                     r = self.input.read(len(view))
                     if r is None:
                         count = None
@@ -157,5 +156,38 @@ def with_temp_dir(
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
             else:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    return wrapper
+
+
+def with_checkpoint_logging(
+    func: Optional[Callable] = None,
+    logger_name: str = "torch.distributed.checkpoint",
+    level: int = logging.INFO,
+) -> Optional[Callable]:
+    """
+    Wrapper to configure checkpoint logging for distributed tests.
+
+    Args:
+        func: The test function to wrap
+        logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
+        level: Logging level to set (default: logging.INFO)
+    """
+    assert func is not None
+
+    @wraps(func)
+    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
+        # Get the logger and store original level
+        target_logger = logging.getLogger(logger_name)
+        original_level = target_logger.level
+
+        # Set the desired logging level
+        target_logger.setLevel(level)
+
+        try:
+            func(self, *args, **kwargs)
+        finally:
+            # Restore original logging level
+            target_logger.setLevel(original_level)
 
     return wrapper

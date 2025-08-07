@@ -211,7 +211,9 @@ class TestFSDPExecOrder(FSDPTest):
         # an `AssertionError` will be raised above for both sharding strategies
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestFSDPExecOrder, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestFSDPExecOrder, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

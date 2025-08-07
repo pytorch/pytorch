@@ -1,4 +1,7 @@
 # Basic tests
+import tempfile
+
+print(f"{tempfile.gettempdir()}/memory_snapshot.pickle")
 
 ignored = set()  # noqa: set_linter
 a = set()
@@ -26,6 +29,9 @@ class A:
         self.x = x
 
 set = A().set
+
+# An f string as in https://github.com/pytorch/pytorch/issues/159056
+f_string = f" {h:{w}} "
 
 # Braced sets
 

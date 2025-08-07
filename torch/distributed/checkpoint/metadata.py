@@ -131,6 +131,7 @@ class StorageMeta:
     checkpoint_id: Union[str, os.PathLike, None] = None
     save_id: Optional[str] = None
     load_id: Optional[str] = None
+    modules: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -146,6 +147,7 @@ class Metadata:
     planner_data: Any = None
     storage_data: Any = None
     storage_meta: Optional[StorageMeta] = None
+    version: Optional[str] = None
 
 
 @dataclass(frozen=True)

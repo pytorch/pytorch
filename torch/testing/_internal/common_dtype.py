@@ -17,6 +17,8 @@ def _validate_dtypes(*dtypes):
 
 # class for tuples corresponding to a PyTorch dispatch macro
 class _dispatch_dtypes(tuple):
+    __slots__ = ()
+
     def __add__(self, other):
         assert isinstance(other, tuple)
         return _dispatch_dtypes(tuple.__add__(self, other))
@@ -117,6 +119,19 @@ _all_types_and_half = _all_types + (torch.half,)
 
 def all_types_and_half():
     return _all_types_and_half
+
+
+_all_mps_types = (
+    _dispatch_dtypes({torch.float, torch.half, torch.bfloat16}) + _integral_types
+)
+
+
+def all_mps_types():
+    return _all_mps_types
+
+
+def all_mps_types_and(*dtypes):
+    return _all_mps_types + _validate_dtypes(*dtypes)
 
 
 _float8_types = _dispatch_dtypes(

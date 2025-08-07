@@ -12,7 +12,7 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-std::vector<at::Tensor> getValues(
+static std::vector<at::Tensor> getValues(
     Node* node,
     const ValueToParamPairMap& valsToParamsMap) {
   size_t numInputs = node->inputs().size();
@@ -140,7 +140,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
-void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+static void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);

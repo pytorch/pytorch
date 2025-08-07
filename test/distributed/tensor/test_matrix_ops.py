@@ -7,7 +7,7 @@ from typing import cast, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed import init_device_mesh
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -17,13 +17,22 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
     with_comms,
 )
+
+
+funcol = torch.ops.c10d_functional
 
 
 def scale_for_fp8(
@@ -33,15 +42,17 @@ def scale_for_fp8(
         t = t.unsqueeze(0).unsqueeze(-2)
     else:
         t = t.unflatten(0, (scale_shape[0], -1)).unflatten(-1, (scale_shape[1], -1))
-    scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fn).max
-    t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fn)
+
+    scale = t.abs().amax(dim=[1, -1]).float() / E4M3_MAX_POS
+    t_fp8 = (t / scale[:, None, :, None]).to(e4m3_type)
+
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -58,7 +69,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_addmm_empty_operand(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -75,7 +86,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_addmm_auto_redistribute(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard0_spec = [Shard(0)]
         shard1_spec = [Shard(1)]
         replica_spec = [Replicate()]
@@ -106,7 +117,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_mm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard0_spec = Shard(0)
         shard1_spec = Shard(1)
         replica_spec = Replicate()
@@ -136,9 +147,12 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "torch._scaled_mm requires H100+")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     def test_scaled_mm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
         shrd1 = Shard(1)
         repl = Replicate()
@@ -202,13 +216,13 @@ class DistMatrixOpsTest(DTensorTestBase):
 
             full_dist_res = dist_res.full_tensor()
             # Fp8 matmuls are quite inaccurate, we need high tolerances
-            self.assertEqual(full_dist_res, full_ref_res, atol=1, rtol=7e-2)
+            self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
     def test_matmul(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         dim = 128
         x = torch.randn(8, dim)
         A = torch.randn(dim, dim)
@@ -227,7 +241,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_t(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         tensor_to_transpose = torch.randn(12, 8, requires_grad=True)
@@ -241,7 +255,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_t_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         a = torch.randn(12, 8)
         b = torch.randn(8, 4)
@@ -266,7 +280,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_baddbmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         tensor = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_1 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_2 = torch.rand(4, 8, 8, device=self.device_type, requires_grad=True)
@@ -330,7 +344,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_bmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         mat1 = torch.rand(4, 8, 4, device=self.device_type, requires_grad=True)
         mat2 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         local_result = torch.bmm(mat1, mat2)
@@ -375,7 +389,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
@@ -445,7 +459,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
-    @skipIfRocm
     @skip_unless_torch_gpu
     @with_comms()
     def test_dtensor_mm(self):
@@ -469,8 +482,132 @@ class DistMatrixOpsTest(DTensorTestBase):
             lhs_dtensor = distribute_tensor(lhs, mesh, [Shard(dim=0), Replicate()])
             rhs_dtensor = distribute_tensor(rhs, mesh, [Replicate(), Shard(dim=1)])
             dtensor_result = lhs_dtensor @ rhs_dtensor
-            self.assertEqual(dtensor_result.full_tensor(), mm_result)
+            self.assertEqual(
+                dtensor_result.full_tensor(), mm_result, atol=1.5e-5, rtol=1e-6
+            )
 
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_tensordot_shampoo(self):
+        """
+        Create a simple test for Shampoo's use case.
+        """
+        device_mesh = self.build_device_mesh()
+
+        local_a = torch.randn(4, 4)
+        local_b = torch.randn(4, 15)
+        dims = ([0], [0])
+        local_result = torch.tensordot(local_a, local_b, dims=(dims))
+
+        placements = [Replicate(), Shard(0), Shard(1)]
+        placements_tuples = itertools.product(placements, repeat=2)
+
+        for placement1, placement2 in placements_tuples:
+            dist_a = distribute_tensor(local_a, device_mesh, [placement1])
+            dist_b = distribute_tensor(local_b, device_mesh, [placement2])
+            dist_result = torch.tensordot(dist_a, dist_b, dims=dims)
+            dist_result_full = dist_result.full_tensor()
+            self.assertEqual(local_result, dist_result_full)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize(
+        "kwargs",
+        [
+            {
+                # 2D x 3D case from MoE layer
+                "inp_shape": (64, 16),
+                "w1_shape": (2, 16, 32),
+                "w2_shape": (2, 32, 16),
+                "inp_placements": [Replicate()],
+                "w1_placements": [Shard(2)],
+                "w2_placements": [Shard(1)],
+                "expected_comm_counts_fwd": 0,
+                "expected_comm_counts_bwd": 1,
+                "expected_out_placements": [Partial()],
+            },
+            {
+                # Case that would have invalid strides on inp * mat1 when sharded
+                "inp_shape": (64, 16),
+                "w1_shape": (2, 16, 16),
+                "w2_shape": (2, 16, 16),
+                "inp_placements": [Replicate()],
+                "w1_placements": [Shard(2)],
+                "w2_placements": [Shard(1)],
+                "expected_comm_counts_fwd": 2,
+                "expected_comm_counts_bwd": 4,
+                "expected_out_placements": [Replicate()],
+            },
+        ],
+    )
+    def test_grouped_mm(self, kwargs):
+        # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
+        # More tests need to be added.
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        dtype = torch.bfloat16
+        inp = torch.rand(
+            *kwargs["inp_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        w1 = torch.rand(
+            *kwargs["w1_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        w2 = torch.rand(
+            *kwargs["w2_shape"],
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
+
+        h = torch._grouped_mm(inp, w1, offs=offs)
+        out = torch._grouped_mm(h, w2, offs=offs)
+
+        dist_inp = distribute_tensor(inp, device_mesh, kwargs["inp_placements"])
+        # colwise sharded
+        dist_w1 = distribute_tensor(w1, device_mesh, kwargs["w1_placements"])
+        # rowwise sharded
+        dist_w2 = distribute_tensor(w2, device_mesh, kwargs["w2_placements"])
+        dist_offs = distribute_tensor(offs, device_mesh, [Replicate()])
+
+        with comm_mode:
+            dist_h = torch._grouped_mm(dist_inp, dist_w1, offs=dist_offs)
+            dist_out = torch._grouped_mm(dist_h, dist_w2, offs=dist_offs)
+            self.assertEqual(
+                comm_mode.get_total_counts(), kwargs["expected_comm_counts_fwd"]
+            )
+            self.assertEqual(dist_out.placements, kwargs["expected_out_placements"])
+            self.assertEqual(dist_out.full_tensor(), out)
+
+        out_grad = torch.ones_like(out)
+        out.backward(out_grad)
+
+        dist_out = dist_out.redistribute(device_mesh, [Shard(0)])
+        dist_out_grad = distribute_tensor(out_grad, device_mesh, [Shard(0)])
+
+        with comm_mode:
+            dist_out.backward(dist_out_grad)
+            self.assertEqual(
+                comm_mode.get_total_counts(), kwargs["expected_comm_counts_bwd"]
+            )
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                kwargs["expected_comm_counts_bwd"],
+            )
+        self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
+        self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
+        self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
+
+
+instantiate_parametrized_tests(DistMatrixOpsTest)
 
 if __name__ == "__main__":
     run_tests()

@@ -3,7 +3,8 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Optional, Union
+from contextlib import AbstractContextManager
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -66,7 +67,7 @@ class FunctionalTensor(torch.Tensor):
     # later, as long as it doesn't break anything).
     # FunctionalTensorWrapper copies **all** dispatch keys from the inner tensor
     # to the wrapper, excluding functorch and python dispatch keys.
-    # Here I'm trying to re-use the keyset the functorch wrapper subclasses copy,
+    # Here I'm trying to reuse the keyset the functorch wrapper subclasses copy,
     # except that they don't include ZeroTensor so I'm manually adding it in.
     _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
         torch._C.DispatchKey.ZeroTensor
@@ -117,7 +118,7 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
+        out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.
@@ -159,7 +160,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
             for t in types
@@ -259,9 +260,12 @@ class FunctionalTensor(torch.Tensor):
 
     def to(self, *args, **kwargs):
         if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
-            # If copy is specified as pos arg, it's always the second one.
-            if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
-                return super().to(*args, **{**kwargs, "copy": True})
+            torch.ops.aten._assert_tensor_metadata(
+                self,
+                dtype=self.dtype,
+                device=self.device,
+                layout=self.layout,
+            )
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -287,7 +291,7 @@ class FunctionalTensor(torch.Tensor):
         return self.elem.to_dense()
 
     @property
-    def layout(self):
+    def layout(self):  # type: ignore[override]
         return self.elem.layout
 
     def __bool__(self):
@@ -352,23 +356,6 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-
-        if self.export:
-            # We need to make sure that we don't decompose to() as usual in export mode,
-            # because it can get optimized away. Instead we always replace it with _to_copy().
-            if func == torch.ops.aten.to.dtype_layout:
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args, kwargs
-                )
-            if func == torch.ops.aten.to.dtype:
-                schema = tuple(arg.name for arg in func._schema.arguments)
-                for arg, name in zip(args[1:], schema[1:]):
-                    kwargs[name] = arg
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
-                )
 
         unrecognized_types = [
             t
@@ -459,15 +446,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            # it doesn't matter what mode we use here because
-            # the implementation of do_auto_functionalize doesn't
-            # interact with FunctionalTensorMode at all
             import torch._inductor.config as inductor_config
 
             if self.export or not inductor_config.enable_auto_functionalized_v2:
-                return do_auto_functionalize(func, args, kwargs)
+                return do_auto_functionalize(self, func, args, kwargs)
             else:
-                return do_auto_functionalize_v2(func, args, kwargs)
+                return do_auto_functionalize_v2(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -504,7 +488,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             - FunctionalTensor._extra_dispatch_keys
         )
 
-        # All we want to do here is re-use the existing C++ functionalization logic.
+        # All we want to do here is reuse the existing C++ functionalization logic.
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
             try:
@@ -529,33 +513,10 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout or _to_copy
+
                     if self.export:
-                        if func in (
-                            torch.ops.aten.dropout.default,
-                            torch.ops.aten._to_copy.default,
-                        ):
-
-                            def must_copy():
-                                """
-                                Return True if the output of the op must be copied, not an alias
-                                """
-                                # output dtype is different from input
-                                return (
-                                    func == torch.ops.aten._to_copy.default
-                                    and "dtype" in kwargs
-                                    and kwargs["dtype"] != args_unwrapped[0].dtype
-                                )
-
-                            if must_copy():
-                                # We can further relax to args_unwrapped[0] != kwargs["dtype"], but I don't think
-                                # we have an aten op for that.
-                                torch.ops.aten._assert_tensor_metadata.default(
-                                    torch._from_functional_tensor(args_unwrapped[0]),
-                                    dtype=args_unwrapped[0].dtype,
-                                )
-                            else:
-                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                        if func == torch.ops.aten.dropout.default:
+                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
@@ -662,7 +623,7 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         pass
 
     @abstractmethod
@@ -706,7 +667,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         # [NOTE] We don't do anything here because at the time
         # we exercise this path, we would have already popped the
         # FunctionalTensorMode from mode stack. Since FunctionalTensorMode
@@ -750,7 +711,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
@@ -798,7 +759,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             ),
         )
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return self.interpreter.lower()
 
     def replace(self, input_tensor, output_tensor) -> None:

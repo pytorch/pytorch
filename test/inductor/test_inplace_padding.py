@@ -9,6 +9,7 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -102,9 +103,9 @@ class InplacePaddingTest(TestCase):
         # . This will allocate an extra item for the last row so that
         # inplace padding would be safe without accessing out of bound
         # memory.
-        FileCheck().check(
-            "empty_strided_cuda((2048, 2048), (2048, 1), torch.float32)."
-            + "as_strided((2048, 2047), (2048, 1))"
+        FileCheck().check_regex(
+            r"empty_strided.*\(\(2048, 2048\), \(2048, 1\), torch.float32\)."
+            r"as_strided\(\(2048, 2047\), \(2048, 1\)\)"
         ).run(code)
 
         self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
@@ -135,7 +136,7 @@ class InplacePaddingTest(TestCase):
             out = orig_generate_and_run_autotune_block(wrapper)
             call_code = wrapper.kernel_autotune_calls.getvalue()
             FileCheck().check(
-                "buf0 = generate_example_value((2048, 2047), (2048, 1), 'cuda:0', torch.float32, 0, (2048, 2048))"
+                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{GPU_TYPE}:0', torch.float32, 0, (2048, 2048))"
             ).run(call_code)
             return out
 
@@ -211,6 +212,7 @@ class InplacePaddingTest(TestCase):
 
     @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)

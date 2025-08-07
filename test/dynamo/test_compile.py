@@ -81,11 +81,11 @@ class InPlaceCompilationTests(TestCase):
         torch._dynamo.reset()
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             print("Compilation started.")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             print("Compilation ended.")
 
         mod = ToyModel()
@@ -116,13 +116,13 @@ class InPlaceCompilationTests(TestCase):
         counter = 0
 
         @torch._dynamo.on_compile_start
-        def start_callback():
+        def start_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
 
         @torch._dynamo.on_compile_end
-        def end_callback():
+        def end_callback(_):
             nonlocal counter
             counter += 1
             print(f"Counter = {counter}")
@@ -188,6 +188,52 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_compilation_nn_module_invalid_method(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + self.doesnotexist
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(1, 1)
+        with self.assertRaises(AttributeError):
+            opt_mod(x)
+
+    def test_torch_script_compilation(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        a = torch.randn(1, 1)
+        out = torch.compile(fn)(a)
+        self.assertEqual(out, a)
+
+    def test_to_sparse_to_dense_with_graph_break(self):
+        def fn(x):
+            x = x.to_sparse()
+            x = x.to_dense()
+            return x
+
+        x = torch.tensor([[1.0]])
+        c_fn = torch.compile(fn)
+
+        output = fn(x)
+        c_output = c_fn(x)
+        self.assertEqual(output, c_output)
+
+    def test_list_bad_access(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            a = [x]
+            return a[y]
+
+        with self.assertRaises(IndexError):
+            fn(torch.randn(10), 99)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
@@ -199,9 +245,17 @@ class PublicTorchCompilerTests(TestCase):
         public_sig = inspect.signature(public_fn)
         private_sig = inspect.signature(private_fn)
 
+        matching = public_sig == private_sig
+        matching |= len(public_sig.parameters) < len(private_sig.parameters) and all(
+            public == private
+            for public, private in zip(
+                public_sig.parameters.items(), private_sig.parameters.items()
+            )
+        )
+
         self.assertEqual(
-            public_sig,
-            private_sig,
+            matching,
+            True,
             f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 

@@ -13,6 +13,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .exc import SubgraphLoweringException
+from .graph import GraphLowering
 from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
 
@@ -32,7 +33,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     """
 
     graph_outputs: Optional[list[ir.IRNode]]
-    root_graph: torch._inductor.graph.GraphLowering
+    root_graph: GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
     allowed_mutations: Optional[OrderedSet[OpOverload]]
@@ -43,7 +44,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        root_graph_lowering: torch._inductor.graph.GraphLowering,
+        root_graph_lowering: GraphLowering,
         allowed_mutations: Optional[OrderedSet[OpOverload]] = None,
         additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:
@@ -135,7 +136,7 @@ class InputDescriptor:
     device: torch.device
 
 
-class TracingOpsHandler(WrapperHandler[T]):
+class TracingOpsHandler(WrapperHandler):
     def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
@@ -149,8 +150,8 @@ class TracingOpsHandler(WrapperHandler[T]):
     def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args: tuple[object]) -> torch.fx.Node:
-        return self.tracer.create_node(
+    def output(self, *args: tuple[object]) -> None:
+        self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )
 

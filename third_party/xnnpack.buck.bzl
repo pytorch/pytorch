@@ -1437,7 +1437,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         labels = labels,
         platform_srcs = [
             (
-                "(arm64|aarch64)$",
+                "(arm64|aarch64)",
                 prod_srcs_for_arch_wrapper("neonfma") + prod_srcs_for_arch_wrapper("neonfma_aarch64"),
             ),
         ] if not is_arvr_mode() else [],
@@ -2227,6 +2227,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ],
             # doesn't cover iphonesimulator-x86_64
             "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
+            "ovr_config//runtime:fbcode-arm64": [":arm64_lib"],
             "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
         }),
     )
@@ -2236,7 +2237,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
         deps = [
-            ":subgraph",
             ":tables",
             ":prod_ukernels",
             third_party("cpuinfo"),
@@ -2247,6 +2247,13 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         },
         header_namespace = "",
         headers = get_xnnpack_headers(),
+        exported_deps = [
+            ":subgraph",
+        ],
+        compiler_flags = select({
+            "DEFAULT": [],
+            "ovr_config//os:macos": ["-fvisibility=default"],
+        }),
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
         preprocessor_flags = XNN_COMMON_PREPROCESSOR_FLAGS + [
             "-DXNN_NO_Q8_OPERATORS",

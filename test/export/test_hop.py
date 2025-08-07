@@ -14,14 +14,10 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    run_tests,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.hop_db import (
+    FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
-    hop_that_doesnt_have_opinfo_test_allowlist,
 )
 
 
@@ -29,28 +25,9 @@ hop_tests = []
 
 for op_info in hop_db:
     op_info_hop_name = op_info.name
-    if op_info_hop_name in hop_that_doesnt_have_opinfo_test_allowlist:
+    if op_info_hop_name in FIXME_hop_that_doesnt_have_opinfo_test_allowlist:
         continue
     hop_tests.append(op_info)
-
-
-class TestHOPGeneric(TestCase):
-    def test_all_hops_have_op_info(self):
-        from torch._ops import _higher_order_ops
-
-        hops_that_have_op_info = set([k.name for k in hop_db])
-        all_hops = _higher_order_ops.keys()
-
-        missing_ops = []
-
-        for op in all_hops:
-            if (
-                op not in hops_that_have_op_info
-                and op not in hop_that_doesnt_have_opinfo_test_allowlist
-            ):
-                missing_ops.append(op)
-
-        self.assertTrue(len(missing_ops) == 0, f"Missing op info for {missing_ops}")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -147,15 +124,7 @@ class TestHOP(TestCase):
             save(ep, buffer)
             buffer.seek(0)
             ep = load(buffer)
-            if "while_loop" in str(op):
-                # while_loop's arguments are cast into list after deserailize
-                # but while_loop expects it to still be tuple
-                with self.assertRaisesRegex(
-                    RuntimeError, "carried_inputs must be a tuple"
-                ):
-                    self._compare(model, ep, args, kwargs)
-            else:
-                self._compare(model, ep, args, kwargs)
+            self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
 

@@ -653,6 +653,16 @@ def jacobian(
                 [0.0000, 3.3963]]),
          tensor([[3., 0.],
                  [0., 3.]]))
+
+        >>> def linear_model(x):
+        ...     W = torch.tensor([[2.0, -1.0], [0.0, 1.0]])
+        ...     b = torch.tensor([1.0, 0.5])
+        ...     return x @ W.T + b
+
+        >>> x = torch.randn(4, 2, requires_grad=True)
+        >>> jac = jacobian(linear_model, x, vectorize=True)
+        >>> jac.shape
+        torch.Size([4, 2, 4, 2])
     """
     assert strategy in ("forward-mode", "reverse-mode"), (
         'Expected strategy to be either "forward-mode" or "reverse-mode". Hint: If your '

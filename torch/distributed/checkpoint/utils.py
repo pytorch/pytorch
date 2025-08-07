@@ -32,7 +32,7 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: list[Union[T, WRAPPED_EXCEPTION]]
+    results: list[Union[T, WRAPPED_EXCEPTION]],
 ) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
         dict[int, WRAPPED_EXCEPTION],
@@ -41,14 +41,35 @@ def _get_failure_dict(
 
 
 def _all_gather_keys(
-    local_dict: dict[Any, Any], group: Optional[dist.ProcessGroup] = None
-) -> list[Any]:
+    local_dict: dict[str, Any], group: Optional[dist.ProcessGroup] = None
+) -> set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
-    gathered_keys: list[list[Any]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
+    gathered_keys: list[list[str]] = [None] * dist.get_world_size(group)  # type: ignore[list-item]
 
     dist.all_gather_object(gathered_keys, keys, group=group)
-    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
+    return set(itertools.chain.from_iterable(gathered_keys))
+
+
+def _assert_same_keys(
+    state_dict: dict[str, Any], process_group: Optional[dist.ProcessGroup] = None
+) -> None:
+    """
+    Asserts that all ranks have the same keys in their state dict.
+    This is a collective call which requires all ranks in ``process_group`` to
+    join. It will also induce cross-rank communication and block CPU.
+    """
+
+    if dist.get_world_size(process_group) == 1:
+        return
+
+    all_keys = _all_gather_keys(state_dict, process_group)
+    my_keys = set(state_dict.keys())
+    diff = all_keys - my_keys
+    if len(diff) > 0:
+        raise AssertionError(
+            f"Key(s) present in other ranks but not this one, difference: {diff}"
+        )
 
 
 class _DistWrapper:
@@ -71,9 +92,15 @@ class _DistWrapper:
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
         if self.use_dist:
+            self.global_coordinator_rank = (
+                dist.get_global_rank(group, coordinator_rank)
+                if group is not None
+                else coordinator_rank
+            )
             self.rank = dist.get_rank(group)
             self.is_coordinator = self.rank == coordinator_rank
         else:
+            self.global_coordinator_rank = 0
             self.rank = 0
             self.is_coordinator = True
 
@@ -92,7 +119,7 @@ class _DistWrapper:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
             )
         return cast(T, object_list[0])
 
@@ -108,7 +135,7 @@ class _DistWrapper:
             dist.gather_object(
                 obj=object,
                 object_gather_list=gather_objs if self.is_coordinator else None,
-                dst=self.coordinator_rank,
+                dst=self.global_coordinator_rank,
                 group=self.group,
             )
             result = gather_objs
@@ -135,7 +162,7 @@ class _DistWrapper:
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
                 scatter_object_input_list=object_list if self.is_coordinator else None,
-                src=self.coordinator_rank,
+                src=self.global_coordinator_rank,
                 group=self.group,
             )
 
@@ -163,7 +190,7 @@ class _DistWrapper:
         local_data: Union[WRAPPED_EXCEPTION, T]
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -179,7 +206,7 @@ class _DistWrapper:
                         list[Union[R, CheckpointException]],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -210,7 +237,7 @@ class _DistWrapper:
         local_data: Union[T, WRAPPED_EXCEPTION]
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -221,7 +248,7 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -247,7 +274,7 @@ class _DistWrapper:
         result: Union[T, WRAPPED_EXCEPTION]
         try:
             result = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -273,12 +300,22 @@ class _DistWrapper:
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
+
+    def barrier(self) -> None:
+        """
+        Add a synchronization point across all processes when using distributed.
+        If torch.distributed is initialized, this function will invoke a barrier across the global process group.
+        If torch.distributed is not initialized, this function is a no-op.
+        """
+        if not self.use_dist:
+            return
+        dist.barrier(group=self.group)
 
 
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
@@ -399,7 +436,7 @@ ENABLE_PROFILE = False
 @contextmanager
 def _profile():
     # Only log the profiling when it is enable and is on rank0  or dist is not
-    # avaiable.
+    # available.
     if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
         profiler = cProfile.Profile()
         profiler.enable()

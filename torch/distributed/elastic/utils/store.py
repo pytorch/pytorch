@@ -57,10 +57,10 @@ def get_all(store, rank: int, prefix: str, world_size: int):
 
     ::
 
-     values = get_all(store, 'torchelastic/data', 3)
-     value1 = values[0] # retrieves the data for key torchelastic/data0
-     value2 = values[1] # retrieves the data for key torchelastic/data1
-     value3 = values[2] # retrieves the data for key torchelastic/data2
+     values = get_all(store, "torchelastic/data", 3)
+     value1 = values[0]  # retrieves the data for key torchelastic/data0
+     value2 = values[1]  # retrieves the data for key torchelastic/data1
+     value3 = values[2]  # retrieves the data for key torchelastic/data2
 
     """
     data_arr = store.multi_get([f"{prefix}{idx}" for idx in range(world_size)])
@@ -184,7 +184,7 @@ def barrier(
 
     Optionally, passing rank will enable tracing of missing ranks on timeouts.
     `rank_tracing_decoder` lambda arg can be used to convert rank data
-    into a more meaninful information at an app level (e.g. hostname).
+    into a more meaningful information at an app level (e.g. hostname).
 
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.

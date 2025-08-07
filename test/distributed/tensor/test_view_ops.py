@@ -7,14 +7,13 @@ from typing import cast
 import torch
 import torch.distributed as dist
 from torch import rand, randn, Tensor
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     init_device_mesh,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor._ops._view_ops import (
     Broadcast,
     dim_maps,
@@ -26,6 +25,7 @@ from torch.distributed.tensor._ops._view_ops import (
     view_groups,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -188,6 +188,31 @@ class TestViewOps(DTensorTestBase):
         rules = dim_maps[op](*args)
         self.assertEqual(rules, expected_rule_output)
         self.call_dt_test(op, args, {}, self.device_mesh)
+
+    @with_comms
+    def test_illegal_views(self):
+        device_mesh = self.build_device_mesh()
+        # 1D mesh [6] (see above)
+        tensor = torch.randn((6, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        # view should be legal, since sharding is even and flatten includes only one sharded dim
+        shard.view(-1)
+
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten sharded dimension"
+        ):
+            shard.view(-1)
+
+        # 8 is the uneven case since mesh dim is 6
+        tensor = torch.randn((8, 256))
+        dtensor = distribute_tensor(tensor, device_mesh, [Replicate()])
+        shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=0)])
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension"
+        ):
+            shard.view(-1)
 
     @with_comms
     def test_view_ops(self):
@@ -534,6 +559,9 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_dtensor_view_op_uneven(self):
         """
+        When the sharded dimension is unchanged, the view op should not trigger any communication.
+        And the behavior should be the same as operating under single-device.
+
         Test two uneven cases for view op:
             1) the sharded tensor dim is 1 so that only the first rank has an non-empty shard.
             2) the sharded tensor dim is uneven such that some ranks have full shards,
@@ -570,6 +598,21 @@ class TestViewOps(DTensorTestBase):
                     view.to_local().data_ptr(), dtensor.to_local().data_ptr()
                 )
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+
+    @with_comms
+    def test_view_redistribution(self):
+        """
+        This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
+        """
+
+        x = torch.randn(4, 4)
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension"
+        ):
+            dtensor_x.view(-1, 8)
 
 
 if __name__ == "__main__":
