@@ -87,7 +87,6 @@ Tensor& random_mps_impl(Tensor& self,
           case kFloat:
             return MPSDataTypeFloat32;
           case kBFloat16: {
-            checkSupportsBFloat16();
             return MPSDataTypeBFloat16;
           }
           default:
