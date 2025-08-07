@@ -477,12 +477,7 @@ class TestBasicOps(__TestCase):
         self.assertNotEqual(len(set(map(id, list(cwr('abcde', 3))))), 1)
 
     def test_permutations(self):
-        # self.assertRaises(TypeError, permutations)              # too few arguments
-        # self.assertRaises(TypeError, permutations, 'abc', 2, 1) # too many arguments
-        # self.assertRaises(TypeError, permutations, None)        # pool is not iterable
-        # self.assertRaises(ValueError, permutations, 'abc', -2)  # r is negative
         self.assertEqual(list(permutations('abc', 32)), [])     # r > n
-        # self.assertRaises(TypeError, permutations, 'abc', 's')  # r is not an int or None
         self.assertEqual(list(permutations(range(3), 2)),
                                            [(0,1), (0,2), (1,0), (1,2), (2,0), (2,1)])
 
@@ -1318,7 +1313,6 @@ class TestBasicOps(__TestCase):
                 self.assertEqual(list(product(*(args*r))),
                                  list(product(*args, **dict(repeat=r))))
         self.assertEqual(len(list(product(*[range(7)]*6))), 7**6)
-        # self.assertRaises(TypeError, product, range(6), None)
 
         def product1(*args, **kwds):
             pools = list(map(tuple, args)) * kwds.get('repeat', 1)
