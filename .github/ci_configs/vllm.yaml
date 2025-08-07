@@ -1,8 +1,8 @@
 external_build:
+  name: vllm-sm80-external-build
   build_target: vllm
   torch_whl_dir: dist
   work_directory: vllm
-  vllm_fa_cmake_gpu_arches: "80-real"
   # if set, overrides the base image used in vllm build
   base_image: ${DOCKER_IMAGE} # replace with the env_var DOCKER_IMAGE
   # if set, replaces the vllm dockerfile.torch_nightly with the local dockerfile.
