@@ -703,11 +703,12 @@ def analyze_memory_coalescing(
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
-            tiling_factor = solve_for_tiling(single_var_expr)
 
             # TODO: skip dynamic shapes for now,
             if len(single_var_expr.free_symbols) != 1:
                 continue
+
+            tiling_factor = solve_for_tiling(single_var_expr)
 
             if (
                 tiling_factor is None
