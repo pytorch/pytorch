@@ -193,7 +193,7 @@ LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
     "cpu": "libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t"]
+FULL_PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -273,7 +273,6 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[list[str]] = None,
     python_versions: Optional[list[str]] = None,
-    use_split_build: bool = False,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
@@ -315,15 +314,11 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13t on cpu-s390x
             if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
                 continue
-
-            if use_split_build and (
-                arch_version not in ["12.6", "12.8", "12.9", "cpu"] or os != "linux"
+            # TODO: Enable python 3.14 on non linux OSes
+            if os != "linux" and (
+                python_version == "3.14" or python_version == "3.14t"
             ):
-                raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12* and cpu.\n"
-                    f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
-                    "Please modify the matrix generation to exclude this combination."
-                )
+                continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
@@ -339,7 +334,6 @@ def generate_wheels_matrix(
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
                         "desired_cuda": desired_cuda,
-                        "use_split_build": "True" if use_split_build else "False",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
@@ -372,7 +366,6 @@ def generate_wheels_matrix(
                             "desired_cuda": translate_desired_cuda(
                                 gpu_arch_type, gpu_arch_version
                             ),
-                            "use_split_build": "True" if use_split_build else "False",
                             "container_image": WHEEL_CONTAINER_IMAGES[
                                 arch_version
                             ].split(":")[0],
@@ -395,7 +388,6 @@ def generate_wheels_matrix(
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
-                        "use_split_build": "True" if use_split_build else "False",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
