@@ -20,24 +20,6 @@ PyTorch, or torch, is an open-source machine learning library written in Python 
 provides a platform for deep learning. It features a dynamic computational graph
 that allows for flexible model building and debugging.
 
-Here is a quick PyTorch example
-
-```{code-cell}
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = x**2 + 3*x
-y.backward(torch.ones_like(x))
-print(y)
-print(x.grad)
-```
-
-The example above shows tensor creation, computation, and automatic gradient calculation - core features that enable neural network training through backpropagation. The code above:
-
-1. Imports `torch`
-2. Creates a tensor with gradient tracking enabled
-3. Defines a computation using tensor operations
-4. Calculates gradients of `y` with respect to `x`
-5. After this, `x.grad` will contain the derivatives: `d(x^2 + 3x)/dx = 2x + 3`
-
 At its core, PyTorch uses tensors (multidimensional arrays) that can run on GPUs
 for accelerated computation. For example, the gradient descent optimization
 process can be represented as:
@@ -55,50 +37,26 @@ PyTorch's autograd engine automatically computes the gradients needed for neural
 
 For a quick tutorial on PyTorch, see the [Learn the Basics tutorial](https://pytorch.org/tutorials/beginner/basics/intro.html).
 
-PyTorch can do so much more beyond the basic alarithmetic operations. It supports complex neural network architectures through
-its {mod}`torch.nn` module, provides efficient data loading utilities with 
-{mod}`torch.utils.data`, and offers a suite of optimization algorithms in
-{mod}`torch.optim`. PyTorch also facilitates distributed training across multiple GPUs and
-nodes, making it suitable for large-scale machine learning tasks. For performance optimization,
-PyTorch provides {func}`torch.compile`, which allows for compiling PyTorch models to improve execution
-speed and efficiency, and {func}`torch.export`, which enables exporting models for deployment in various environments.
-compiling PyTorch models to improve execution speed and efficiency.
+# Beyond Basic Operations
 
-## GPU Acceleration
+PyTorch extends far beyond basic arithmetic operations to provide a complete ecosystem for machine learning development:
+* {mod}`torch.nn` module: Offers pre-built neural network layers, activation functions, and loss functions for constructing complex architectures
+* {mod}`torch.utils.data`: Provides efficient data loading utilities with support for batching, shuffling, and parallel data loading
+* {mod}`torch.optim`: Contains a comprehensive suite of optimization algorithms including SGD, Adam, RMSprop, and many others
+* {func}`torch.compile`: Allows for compiling PyTorch models to improve execution speed and efficiency
+* {func}`torch.export`: Enables exporting models for deployment in various environments.
+* Distributed training: Facilitates training across multiple GPUs and nodes, making it suitable for large-scale machine learning tasks
 
-PyTorch can run on GPUs for accelerated computation and training.
-Herer is a quick example of using GPU acceleration:
+# Performance Optimization
+PyTorch provides several tools for optimizing model performance:
 
-```python
-# Check if GPU is available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+## {func}`torch.compile`
+This feature allows you to compile PyTorch models to improve execution speed and efficiency. By applying compilation decorators to functions or models, PyTorch can optimize the computational graph and generate more efficient code, often resulting in significant performance improvements without requiring code changes.
 
-# Run on GPU
-torch.randn(1000, 1000, device=device)
+## {func}`torch.export`
+This functionality enables exporting trained models for deployment in various environments, making it easier to transition from research to production. Exported models can be optimized for inference and deployed across different platforms while maintaining compatibility and performance.
 
-# Operations run on GPU
-y = x @ x  # Matrix multiplication
-```
 
-## Optimizing with `torch.compile`
-
-PyTorch offers performance optimization through compilation
-with `torch.compile`. Here is a quick example:
-
-```{code-cell}
-@torch.compile
-def compute(x):
-    return x**2 + 3*x
-
-x = torch.tensor([1.0, 2.0], requires_grad=True)
-y = compute(x)
-y.backward(torch.ones_like(x))
-print(y)
-print(x.grad)
-```
-
-Learn more about torch.compile in the {ref}`torch.compiler_overview` section.
 
 ```{seealso}
 * {ref}`torch.compiler_overview`
