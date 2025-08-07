@@ -22,7 +22,7 @@ from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CeilDiv
 
 from .. import config, ir
 from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
@@ -581,8 +581,8 @@ class FxConverter:
                 assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
                     f"Unsound replacement: '{new_expr}' != '{expr}'"
                 )
-
-                return FloorDiv(numerator, denominator)
+                # Undo the python division trick and replace with explicit CeilDiv
+                return -CeilDiv(-numerator, denominator)
             else:
                 return sympy.floor(expr)
 
