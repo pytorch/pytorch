@@ -6888,6 +6888,28 @@ metadata incorrectly.
         # Test coercion WrapperSubclass -> Tensor
         y3.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
 
+    def test_unsafe_index(self):
+        inp = torch.empty_strided([4, 512, 96, 96], (1, 4, 196608, 2048), device="cuda")
+        args = [
+            None,
+            None,
+            torch.empty_strided([192, 1], (1, 1), dtype=torch.int64, device="cuda").zero_(),
+            torch.empty_strided([192], (1,), dtype=torch.int64, device="cuda").zero_(),
+        ]
+        def fn(inp, args):
+            return torch.ops.aten._unsafe_index(inp, args)
+
+        ref = fn(inp, args)
+        print(f"ref.shape:{ref.shape} ref.stride:{ref.stride()}")
+
+        with torch._subclasses.CrossRefFakeMode():
+            out = torch.ops.aten._unsafe_index(inp, args)
+            print(f"out.shape:{out.shape} out.stride:{out.stride()}")
+
+        out_compile = torch.compile(fn)(inp, args)
+        print(f"out_compile.shape{out_compile.shape} out_compile.stride:{out_compile.stride()}")
+
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):

@@ -394,14 +394,65 @@ def estimate_peak_memory(
     # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0
-    memories_at_nodes = []
+    snodes_curr_memory = []
     for t in range(len(nodes) + 1):
         cur_memory += memory[t]
-        memories_at_nodes.append(cur_memory)
+        snodes_curr_memory.append(cur_memory)
         max_memory = max(max_memory, cur_memory)
 
-    return (max_memory, memories_at_nodes)
+    return (max_memory, snodes_curr_memory)
 
+@dataclasses.dataclass
+class SNodeMemory:
+    size_alloc: int
+    size_free: int
+
+def estimate_peak_memory_debug(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    graph_outputs: OrderedSet[str],
+) -> tuple[int, list[int]]:
+    """
+    Given a list of nodes in their execution order, estimate the peak memory, by
+    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
+
+    Returns:
+        int: peak memory
+        List[int]: memory usage at each node (or each step).
+    """
+
+    buf_info_list, _ = compute_memory_timeline(
+        nodes, name_to_freeable_input_buf, graph_outputs
+    )
+
+    # incremental memory changes at each step
+    step_idx_allocfree = [SNodeMemory(0, 0) for _ in range(len(nodes))]
+
+    # for each buffer, update memory when created and when freed
+    for buf_info in buf_info_list:
+        step_idx_allocfree[buf_info.start_step].size_alloc += buf_info.size_alloc
+        step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
+
+    snodes_allocfree = {}
+    for i, node in enumerate(nodes):
+        snodes_allocfree[node] = step_idx_allocfree[i]
+
+    torch.distributed.breakpoint()
+    # get peak memory by compute the cumulative memories
+    max_memory = 0
+    cur_memory = 0
+    snodes_curr_memory = []
+    for t in range(len(nodes)):
+        alloc = step_idx_allocfree[t].size_alloc
+        free = step_idx_allocfree[t].size_free
+        cur_memory += alloc
+        post_alloc = cur_memory
+        max_memory = max(max_memory, cur_memory)
+        cur_memory -= free
+        post_free = cur_memory
+        snodes_curr_memory.append((post_alloc, post_free))
+
+    return (max_memory, snodes_curr_memory, snodes_allocfree)
 
 def topological_sort_lpmf(
     nodes: list[BaseSchedulerNode],

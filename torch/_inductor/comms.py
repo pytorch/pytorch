@@ -6,6 +6,7 @@ import heapq
 import importlib
 import logging
 import operator
+import os
 import sys
 import time
 from collections import defaultdict
@@ -24,7 +25,7 @@ from .dependencies import WeakDep
 if TYPE_CHECKING:
     from .ir import IRNode, Operation
 
-from .memory import estimate_peak_memory, FreeableInputBuffer, get_freeable_input_buf
+from .memory import estimate_peak_memory, estimate_peak_memory_debug, FreeableInputBuffer, get_freeable_input_buf
 from .utils import (
     contains_collective,
     contains_wait,
@@ -214,17 +215,42 @@ def _reorder_communication_preserving_peak_memory_internal(
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
         snodes, graph_inputs
     )
-    peak_memory, curr_memory = estimate_peak_memory(
+    peak_memory, snodes_curr_memory, snodes_allocfree = estimate_peak_memory_debug(
         snodes, name_to_freeable_input_buf, graph_outputs
     )
-    runtimes = {snode: estimate_op_runtime(snode) for snode in snodes}
-    _curr_memory = dict(zip(snodes, curr_memory))
-    _curr_memory[None] = 0  # type: ignore[index]
+    print(f"XXX PEAK_MEMORY_BEFORE:{peak_memory}")
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "reorder_estimate_memory",
+            "encoding": "string",
+        },
+        payload_fn=lambda: f"PEAK_MEMORY:{peak_memory}\n" + "\n\n".join(
+            [
+                f"snode[{i}]"
+                + n.debug_str()
+                + f"\n --- alloc_free:{snodes_allocfree[n]}"
+                + f"\n --- curr_memory:{snodes_curr_memory[i]}"
+                for i, n in enumerate(snodes)
+            ]
+        ),
+    )
+    return snodes, {}
+
+    # snodes_allocfree: dict {snode -> (size_alloc, size_free)}
+    # snodes_curr_memory: list [(mem_post_output_alloc, mem_post_free)]
+    # If we swap candidate(position c0)  and {group of nodes} (position c0 + 1 to c0 + gn)
+    # 1. For all outputs of candidate - start_step c0 -> c0+gn+1
+    # 2. For all inputs of candidate - end_step c0 -> c0+gn+1
+    # 
+    runtimes: dict[BaseSchedulerNode, float] = {snode: estimate_op_runtime(snode) for snode in snodes}
+    _curr_memory: dict[Optional[BaseSchedulerNode], tuple[int, int]] = dict(zip(snodes, snodes_curr_memory))
+    _curr_memory[None] = 0
 
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
 
-    def exposed_communication_time(collective_snode, remaining_snodes):
+    def exposed_communication_time(collective_snode: BaseSchedulerNode, remaining_snodes: list[BaseSchedulerNode]) -> float:
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = estimate_op_runtime(collective_snode)
         compute_time = 0.0
@@ -236,7 +262,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
                 break
 
-            def accumulate_time(_snode):
+            def accumulate_time(_snode: BaseSchedulerNode) -> None:
                 nonlocal compute_time
                 compute_time += runtimes[_snode]
 
@@ -251,12 +277,10 @@ def _reorder_communication_preserving_peak_memory_internal(
     for i, snode in enumerate(snodes):
         _prev[snode] = snodes[i - 1] if i > 0 else None
         _next[snode] = snodes[i + 1] if i < len(snodes) - 1 else None
-    _curr_memory = dict(zip(snodes, curr_memory))
-    _curr_memory[None] = 0  # type: ignore[index]
 
     _head = snodes[0]
 
-    def _group_nodes(head, tail):
+    def _group_nodes(head: Optional[BaseSchedulerNode], tail: Optional[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         ret = []
         n = head
         while True:
@@ -267,7 +291,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             n = _next[n]
         return ret
 
-    def _group_names(head, tail):
+    def _group_names(head: Optional[BaseSchedulerNode], tail: Optional[BaseSchedulerNode]) -> str:
         ret = ""
         for n in _group_nodes(head, tail):
             if ret:
@@ -275,9 +299,21 @@ def _reorder_communication_preserving_peak_memory_internal(
             ret += n.get_name()
         return ret
 
+
+    num_collectives_to_reorder_env_str = os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT", None)
+    debug_num_collectives_to_reorder: Optional[int] = None
+    if num_collectives_to_reorder_env_str is not None:
+        debug_num_collectives_to_reorder = int(num_collectives_to_reorder_env_str)
+    print(f"XXX_DEBUG debug_num_collectives_to_reorder:{debug_num_collectives_to_reorder}")
+
+    num_processed_collectives: int = 0
     curr = _head
     while _next[curr] is not None:
         if contains_collective(curr):
+            if debug_num_collectives_to_reorder and (num_processed_collectives >= debug_num_collectives_to_reorder):
+                break
+            num_processed_collectives += 1
+
             reorder_info = stats[curr] = ReorderInfo()
             reorder_info.initial_exposed = reorder_info.final_exposed = (
                 exposed_communication_time(curr, _group_nodes(_next[curr], None))
@@ -286,7 +322,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             candidate = _prev[curr]
             group_head = curr
             group_tail = curr
-            group_peak_memory = _curr_memory[curr]
+            group_peak_memory = _curr_memory[curr][0] # post_alloc memory
             while candidate is not None:
                 if contains_collective(candidate):
                     reorder_info.limiting_factor = "collective ordering"
@@ -314,7 +350,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if data_dep is not None:
 
-                    def is_groupable(candidate):
+                    def is_groupable(candidate: BaseSchedulerNode) -> tuple[bool, Optional[str]]:
                         # preserve ordering
                         if contains_collective(candidate):
                             return False, "contains_collective"
@@ -323,11 +359,11 @@ def _reorder_communication_preserving_peak_memory_internal(
                             return False, "contains_gemm_like"
                         return True, None
 
-                    is_grp, grp_reason = is_groupable(candidate)
-                    if is_grp:
+                    is_groupable_result, grouping_reason = is_groupable(candidate)
+                    if is_groupable_result:
                         group_head = candidate
                         group_peak_memory = max(
-                            group_peak_memory, _curr_memory[candidate]
+                            group_peak_memory, _curr_memory[candidate][0]
                         )
                         reorder_info.grouped += 1
                         reorder_info.grouped_info = _group_names(group_head, group_tail)
@@ -336,27 +372,28 @@ def _reorder_communication_preserving_peak_memory_internal(
                     else:
                         msg = (
                             f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
-                            f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
+                            f"\n candidate:{candidate.get_name()}(outs:{[candidate.get_buffer_names()]})"
                             f"dep on {_group_names(group_head, group_tail)}"
-                            f"\n non_group_reason:{grp_reason}"
+                            f"\n non_group_reason:{grouping_reason}"
                         )
                         reorder_info.limiting_factor = msg
                         break
 
-                delta_memory_candidate = (
-                    _curr_memory[candidate] - _curr_memory[_prev[candidate]]  # type: ignore[index]
+                candidate_allocfree = snodes_allocfree[candidate]
+                candidate_delta_mem = candidate_allocfree.size_alloc - candidate_allocfree.size_free
+
+                potential_peak_after_reorder = max(
+                    group_peak_memory - candidate_delta_mem,
+                    _curr_memory[group_tail][1] - candidate_delta_mem + candidate_allocfree.size_alloc
                 )
 
-                if group_peak_memory - delta_memory_candidate > peak_memory:
+                if potential_peak_after_reorder > peak_memory:
                     reorder_info.limiting_factor = "peak memory"
                     break
 
                 reorder_info.moves += 1
                 total_moves += 1
 
-                mem_deltas = {}
-                for n in [candidate, *_group_nodes(group_head, group_tail)]:
-                    mem_deltas[n] = _curr_memory[n] - _curr_memory[_prev[n]]  # type: ignore[index]
                 # swap (candidate, group_head...group_tail)
                 # Before:
                 # candidate_prev -0-> candidate -1-> group_head...group_tail -2-> group_tail_next
@@ -386,10 +423,13 @@ def _reorder_communication_preserving_peak_memory_internal(
                 )
                 # Recompute curr_memory
                 _prev_curr_memory = _curr_memory[_prev[group_head]]  # type: ignore[index]
-                for n in _group_nodes(group_head, candidate):
-                    _curr_memory[n] = _prev_curr_memory = (
-                        _prev_curr_memory + mem_deltas[n]
-                    )
+                for n in _group_nodes(group_head, group_tail):
+                    cm = _curr_memory[n]
+                    _curr_memory[n] = (cm[0] - candidate_delta_mem, cm[1] - candidate_delta_mem)
+                candidate_post_alloc_mem = _curr_memory[group_tail][1] + candidate_allocfree.size_alloc
+                candidate_post_free_mem = candidate_post_alloc_mem + candidate_allocfree.size_free
+                _curr_memory[candidate] = (candidate_post_alloc_mem, candidate_post_free_mem)
+
                 candidate = _prev[group_head]
         curr = _next[curr]  # type: ignore[assignment]
 
@@ -441,11 +481,12 @@ def _reorder_communication_preserving_peak_memory_internal(
 
     new_snodes = _group_nodes(_head, None)
     assert len(new_snodes) == original_snodes_num
-    new_peak_memory, curr_memory = estimate_peak_memory(
+    new_peak_memory, _, _ = estimate_peak_memory_debug(
         new_snodes, name_to_freeable_input_buf, graph_outputs
     )
     reorder_log_str += f"\n peak_memory_before:{peak_memory}"
     reorder_log_str += f"\n peak_memory_after:{new_peak_memory}"
+    print(f"XXX PEAK_MEMORY_AFTER:{new_peak_memory}")
 
     overlap_log.info(reorder_log_str)
     trace_structured(

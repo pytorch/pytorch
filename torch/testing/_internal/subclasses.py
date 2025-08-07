@@ -47,6 +47,7 @@ class WrapperSubclass(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
+        print(f"XXX WSC.__torch_dispatch__ {func} {types}")
         if kwargs is None:
             kwargs = {}
         args_a = pytree.tree_map_only(WrapperSubclass, lambda x: x.a, args)
