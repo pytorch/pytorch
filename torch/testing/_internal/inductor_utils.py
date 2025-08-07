@@ -77,7 +77,6 @@ HAS_MPS = torch.mps.is_available()
 
 HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 
-
 GPU_TYPE = get_gpu_type()
 
 HAS_MULTIGPU = any(
