@@ -9837,6 +9837,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -9848,6 +9849,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (
@@ -9869,6 +9871,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
+    @skipIfXpu(msg="# Incorrect XPU reference ")
     @xfail_if_mps  # eager nan is wrong, see https://github.com/pytorch/pytorch/issues/130295
     @skip_if_halide  # nan behavior
     def test_argmax_argmin_with_nan(self):
@@ -9969,6 +9972,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin3(self):
         def fn(x):
             return (
@@ -13649,6 +13653,49 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
+
+    @requires_cuda
+    @parametrize("use_cat", [True, False])
+    def test_copy_non_blocking_is_pinned(self, use_cat):
+        def f(a_list):
+            a_cpu_list = []
+            a_to_cpu_event_list = []
+
+            for a in a_list:
+                a_cpu = a.to(device="cpu", non_blocking=True)
+                a_to_cpu_event = torch.Event()
+                a_to_cpu_event.record()
+                a_cpu_list.append(a_cpu)
+                a_to_cpu_event_list.append(a_to_cpu_event)
+
+            for e in a_to_cpu_event_list:
+                e.synchronize()
+
+            if use_cat:
+                return torch.cat(a_cpu_list)
+            else:
+                return a_cpu_list
+
+        f_compiled = torch.compile(f)
+        inputs = [
+            torch.rand(1000, dtype=torch.float16, device=GPU_TYPE) for _ in range(100)
+        ]
+        outputs = f(inputs)
+
+        with torch.profiler.profile(
+            activities=[
+                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
+            ],
+        ) as p:
+            outputs_compiled = f_compiled(inputs)
+
+        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
+        # self.assertTrue("pinned" in code)
+
+        self.assertEqual(outputs, outputs_compiled)
+        profile_output = str(p.key_averages())
+        print(profile_output)
+        self.assertFalse("Pageable" in profile_output)
 
 
 @dataclasses.dataclass

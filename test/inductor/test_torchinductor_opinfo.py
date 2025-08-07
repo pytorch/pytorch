@@ -293,6 +293,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
+    # [Begin] Incorrect XPU reference due to new driver.
+    "masked.prod": {b8, i32, i64},
+    "masked.amin": {i64},
+    "masked.amax": {i64},
+    "amax": {i64},
+    "amin": {i64},
+    "std": {f64},
+    "var": {f64},
+    "std_mean": {f64},
+    "var_mean": {f64},
+    # [End]
 }
 
 
