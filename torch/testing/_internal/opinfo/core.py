@@ -162,9 +162,7 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert (
-                not var_args and not var_kwargs
-            ), """
+            assert not var_args and not var_kwargs, """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
@@ -226,7 +224,7 @@ cannot specify additional metadata in keyword arguments"""
             f"name={repr(self.name)}",
         ]
 
-        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
+        return f"SampleInput({', '.join(a for a in arguments if a is not None)})"
 
     def __repr__(self):
         return self._repr_helper(lambda x: x)
@@ -1601,13 +1599,11 @@ class SampleRule(ABC):
 
     # returns a string identifier of the rule type
     @abstractmethod
-    def type(self) -> str:
-        ...
+    def type(self) -> str: ...
 
     # returns an appropriate context that handles the xfail, skips, etc.
     @abstractmethod
-    def get_context(self, test_case):
-        ...
+    def get_context(self, test_case): ...
 
 
 # useful for specifying xfails
@@ -1791,8 +1787,10 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield (),
-            {},
+            yield (
+                (),
+                {},
+            )
         ),
         # Options from the OpInfo base class
         **kwargs,
@@ -2476,9 +2474,9 @@ class BinaryUfuncInfo(OpInfo):
             self.supports_one_python_scalar = True
 
         if self.supports_one_python_scalar:
-            assert (
-                supports_rhs_python_scalar
-            ), "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            assert supports_rhs_python_scalar, (
+                "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            )
 
 
 # The following functions and classes are for testing elementwise unary operators.
