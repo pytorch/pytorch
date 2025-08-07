@@ -4,7 +4,7 @@ set -ex
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P ))"
 
-export TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+export TORCH_NVCC_FLAGS="-Xfatbin -compress-all -compress-mode=size"
 export NCCL_ROOT_DIR=/usr/local/cuda
 export TH_BINARY_BUILD=1
 export USE_STATIC_CUDNN=1
@@ -61,13 +61,14 @@ case ${CUDA_VERSION} in
         ;;
     12.9)
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
-        # WAR to resolve the ld error in libtorch build with CUDA 12.9
-        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
-        fi
         ;;
     12.6)
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
+            # CUDA 12.6 seems to have a bug which prevents aggressive compression here
+            export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=default"
+        fi
         ;;
     *)
         echo "unknown cuda version $CUDA_VERSION"
@@ -114,7 +115,7 @@ DEPS_SONAME=(
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
-    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --threads 2"
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
