@@ -11,6 +11,7 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
+from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
@@ -44,6 +45,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
+        self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
@@ -53,6 +55,8 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._cuda_cpp_scheduling
         if self._rocm_cpp_scheduling.is_rocm_cpp_template(node):
             return self._rocm_cpp_scheduling
+        if self._cutedsl_scheduling.is_cutedsl_template(node):
+            return self._cutedsl_scheduling
         return self._triton_scheduling
 
     def can_fuse_vertical(
@@ -64,6 +68,11 @@ class CUDACombinedScheduling(BaseScheduling):
             node1
         ) or self._cuda_cpp_scheduling.is_cuda_cpp_template(node2):
             return False
+        # CuteDSL doesn't support vertical fusion currently
+        elif self._cutedsl_scheduling.is_cutedsl_template(
+            node1
+        ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
+            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -72,6 +81,10 @@ class CUDACombinedScheduling(BaseScheduling):
         for node in (node1, node2):
             if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
                 return self._cuda_cpp_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )  # always False at the moment
+            if self._cutedsl_scheduling.is_cutedsl_template(node):
+                return self._cutedsl_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
@@ -96,6 +109,13 @@ class CUDACombinedScheduling(BaseScheduling):
             assert not epilogue_nodes
             assert not prologue_nodes
             return self._rocm_cpp_scheduling.codegen_template(
+                template_node, epilogue_nodes, prologue_nodes
+            )
+        elif self._cutedsl_scheduling.is_cutedsl_template(template_node):
+            # TODO remove this when we add epilogue support
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            return self._cutedsl_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
         else:
