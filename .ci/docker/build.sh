@@ -176,7 +176,7 @@ case "$tag" in
     VISION=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-noble-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
     else
@@ -190,7 +190,9 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    INDUCTOR_BENCHMARKS=yes
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-noble-rocm-alpha-py3)
     ANACONDA_PYTHON_VERSION=3.12
@@ -202,7 +204,6 @@ case "$tag" in
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    INDUCTOR_BENCHMARKS=yes
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
     ;;
   pytorch-linux-jammy-xpu-2025.0-py3)
