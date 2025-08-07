@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch.fx.graph_module import GraphModule
@@ -9,14 +9,16 @@ from torch.fx.graph_module import GraphModule
 _EMPTY_NN_MODULE_STACK_KEY = "_empty_nn_module_stack_from_metadata_hook"
 
 
-def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) -> None:
+def _node_metadata_hook(
+    node: torch.fx.Node, metadata: Optional[dict[str, Any]] = None
+) -> None:
     """
     Hook for adding the appropriate metadata to nodes that are created during a
     pass using graph.create_node. An example of how to use it:
 
     ```
     with _set_node_metadata_hook(gm,
-        functools.partial(_node_metadata_hook, stack_trace="file")
+        functools.partial(_node_metadata_hook, metadata={"stack_trace": "file"})
     ):
         pass(gm)
     ```
@@ -44,7 +46,6 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
         fake_res = node.target(*fake_args)
         node.meta["val"] = fake_res
 
-    node.meta["stack_trace"] = stack_trace
     node.meta["nn_module_stack"] = arg_meta.get(
         "nn_module_stack",
         {
@@ -59,6 +60,12 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
         f"{node.target.__name__}_0",
         f"{node.target.__class__.__name__}.{node.target.__name__}",
     )
+
+    # Hook specified metadata takes precedence over all previously set
+    # metadata, so this goes last
+    if metadata is not None:
+        for k, v in metadata.items():
+            node.meta[k] = v
 
 
 @contextlib.contextmanager

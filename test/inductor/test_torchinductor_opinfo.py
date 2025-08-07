@@ -48,7 +48,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA,
     has_triton,
-    HAS_XPU,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -286,8 +286,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -295,9 +293,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
+    # [Begin] Incorrect XPU reference due to new driver.
+    "masked.prod": {b8, i32, i64},
+    "masked.amin": {i64},
+    "masked.amax": {i64},
+    "amax": {i64},
+    "amin": {i64},
+    "std": {f64},
+    "var": {f64},
+    "std_mean": {f64},
+    "var_mean": {f64},
+    # [End]
 }
 
 
@@ -1121,7 +1127,9 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")

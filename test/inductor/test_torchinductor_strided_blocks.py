@@ -1188,6 +1188,9 @@ class CommonTemplate:
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
     @xfail_if_use_tensor_descriptor
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)

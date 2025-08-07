@@ -59,6 +59,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     TensorArgument,
 )
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -8314,6 +8315,29 @@ def forward(self, b_a_buffer, x):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_ccode_python_mod(self):
+        import sympy
+
+        from torch.utils._sympy.functions import PythonMod
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                torch._check_is_size(u1)
+                return u0, u1
+
+        ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
+        u0_node, u1_node = list(ep.graph.nodes)[-1].args[0]
+        u0 = u0_node.meta["val"]
+        u1 = u1_node.meta["val"]
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, 3)), """(u0 % 3) < 0 ? u0 % 3 + 3 : u0 % 3"""
+        )
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, u1)),
+            """(u0 % u1) < 0 ? u0 % u1 + abs(u1) : u0 % u1""",
+        )
+
     def test_aten_lift_fresh_copy(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -8889,7 +8913,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             self.assertExpectedInline(
                 str(ep_decompose_linear.graph_module.code).strip(),
                 """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
@@ -14923,6 +14947,51 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+                self.register_buffer("buffer", torch.ones(4, 4))
+                self.register_buffer("param", torch.ones(4, 4))
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
+
+        class BarModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        class BarBar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = BarModel()
+
+            def forward(self, x):
+                with torch.amp.autocast(device_type="cuda"):
+                    y = self.mod(x)
+                return y
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+                _ = torch.export.export(
+                    BarBar(),
+                    (),
+                    {"x": torch.randn(4, 4, 4, device="cuda")},
+                    strict=False,
+                ).module()
+
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
             mod._buffers["test"] = torch.Tensor([1])
@@ -15845,6 +15914,22 @@ def forward(self, x):
         self.assertEqual(
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
+
+    @requires_cuda
+    def test_assert_tensor_metadata_device_index(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x.float()
+                y = y.float()
+                return x + y
+
+        inp = (torch.randn(3, device="cuda"), torch.randn(3, device="cuda"))
+        ep = export(N(), inp)
+        ep = move_to_device_pass(ep, {"cuda:0": "cuda"})
+        ep.module()(torch.randn(3, device="cuda:0"), torch.randn(3, device="cuda:0"))
 
     def test_input_output_no_stacktrace(self):
         class M(torch.nn.Module):

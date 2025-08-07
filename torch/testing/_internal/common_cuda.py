@@ -107,7 +107,18 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     return False
 
-PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+def evaluate_platform_supports_fp8_grouped_gemm():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            if "USE_FBGEMM_GENAI" not in torch.__config__.show():
+                return False
+            archs = ['gfx942']
+            for arch in archs:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
+        else:
+            return SM90OrLater and not SM100OrLater
+    return False
 
 def evaluate_platform_supports_mx_gemm():
     if torch.cuda.is_available():
@@ -120,6 +131,8 @@ def evaluate_platform_supports_mx_gemm():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())  
+PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 
 if TEST_NUMBA:
     try:
