@@ -19,7 +19,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -28,7 +28,7 @@ from torch.utils.checkpoint import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

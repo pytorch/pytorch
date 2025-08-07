@@ -11,12 +11,12 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 aten = torch.ops.aten
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 
 f32 = torch.float32
 i64 = torch.int64
