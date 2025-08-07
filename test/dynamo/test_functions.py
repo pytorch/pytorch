@@ -268,6 +268,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             v = v + x * i
         return v
 
+    def test_itertools_product_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            itertools.product(*args, **kwargs)
+
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
     @make_test
     def test_itertools_product_various_iterators(a, b):
         itertools.product(
