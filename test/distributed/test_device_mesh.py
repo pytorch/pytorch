@@ -369,7 +369,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_hash(self):
-        mesh_tensor_2d = torch.arange(self.world_size).reshape(self.world_size // 2, 2)
+        mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
         self.assertEqual(hash(mesh), hash(mesh2))
@@ -1226,7 +1226,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
     @with_comms
     def test_broadcast_nd(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
+        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
@@ -1244,7 +1244,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
     @with_comms
     def test_scatter_nd(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
+        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
