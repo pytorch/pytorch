@@ -5,11 +5,7 @@ from typing import Optional
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
 # Protects against includes accidentally setting the default dtype
