@@ -49,6 +49,20 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
+if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    DEPS_LIST+=(
+        "/opt/OpenBLAS/lib/libopenblas.so.0"
+        "/acl/build/libarm_compute.so"
+        "/acl/build/libarm_compute_graph.so"
+    )
+    DEPS_SONAME+=(
+        "libopenblas.so.0"
+        "libarm_compute.so"
+        "libarm_compute_graph.so"
+    )
+fi
+
+
 rm -rf /usr/local/cuda*
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"

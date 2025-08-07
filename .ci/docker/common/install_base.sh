@@ -71,7 +71,8 @@ install_ubuntu() {
     unzip \
     gpg-agent \
     gdb \
-    bc
+    bc \
+    zip
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931

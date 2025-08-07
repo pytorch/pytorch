@@ -35,6 +35,8 @@ RUN yum install -y \
   yasm \
   zstd \
   sudo \
+  zip \
+  openssl \
   gcc-toolset-${GCCTOOLSET_VERSION}-gcc \
   gcc-toolset-${GCCTOOLSET_VERSION}-gcc-c++ \
   gcc-toolset-${GCCTOOLSET_VERSION}-gcc-gfortran \

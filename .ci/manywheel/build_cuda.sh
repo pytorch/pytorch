@@ -109,6 +109,19 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
+if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    DEPS_LIST+=(
+        "/opt/OpenBLAS/lib/libopenblas.so.0"
+        "/acl/build/libarm_compute.so"
+        "/acl/build/libarm_compute_graph.so"
+    )
+    DEPS_SONAME+=(
+        "libopenblas.so.0"
+        "libarm_compute.so"
+        "libarm_compute_graph.so"
+    )
+fi
+
 
 # CUDA_VERSION 12.6, 12.8, 12.9
 if [[ $CUDA_VERSION == 12* ]]; then
