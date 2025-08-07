@@ -204,9 +204,9 @@ def debug_insert_nops(
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
-            root_tx=None,
+            root_tx=None,  # type: ignore[arg-type]
             export=False,
-            export_constraints=None,
+            export_constraints=[],
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),
