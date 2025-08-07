@@ -342,42 +342,43 @@ isolate_fails_code_str = None
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
 
-    if len(kernel_side_table.id_to_kernel) > 0:
-        # Track which grid entry corresponds to the best config
-        for id in kernel_side_table.id_to_kernel:
-            kernel = kernel_side_table.get_kernel(id)
-            if isinstance(kernel, Autotuner):
-                config_strs = []
-                for config in kernel.configs:
-                    config_strs.append(f"""triton.Config(
-                            {str(config.kwargs)},
-                            num_warps={config.num_warps},
-                            num_stages={config.num_stages},
-                        )""")
+    kernel_side_table_prefix = (
+        "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
+    )
+    # Track which grid entry corresponds to the best config
+    for id in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(id)
+        if isinstance(kernel, Autotuner):
+            config_strs = []
+            for kernel_config in kernel.configs:
+                config_strs.append(f"""triton.Config(
+                        {str(kernel_config.kwargs)},
+                        num_warps={kernel_config.num_warps},
+                        num_stages={kernel_config.num_stages},
+                    )""")
 
-                config_str = ",".join(config_strs)
-                model_str += textwrap.dedent(f"""
-                @triton.autotune(
-                    configs=[
-                        {config_str}
-                    ],
-                    key=[]
-                )
-                """).strip()
-
-            model_str += "\n@triton.jit\n"
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-            fn_name = (
-                kernel._fn_name
-                if isinstance(kernel, JITFunction)
-                else kernel.fn._fn_name
+            config_str = ",".join(config_strs)
+            model_str += textwrap.dedent(f"""
+            @triton.autotune(
+                configs=[
+                    {config_str}
+                ],
+                key=[]
             )
+            """).strip()
 
-            model_str += src_code
-            model_str += "\n"
-            model_str += f"torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.add_kernel({fn_name})\n"
+        model_str += "\n@triton.jit\n"
+        src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+        fn_name = (
+            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
+        )
 
-        model_str += f"torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.constant_args={kernel_side_table.constant_args}\n"
+        model_str += src_code
+        model_str += "\n"
+        model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+
+    if len(kernel_side_table.constant_args) > 0:
+        model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
 
