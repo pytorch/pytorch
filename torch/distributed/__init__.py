@@ -29,9 +29,14 @@ def is_available() -> bool:
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
-# Import from _distributed_c10d module which handles distributed availability internally
+# Custom Runtime Errors thrown from the distributed package
+DistError = torch._C._DistError
+DistBackendError = torch._C._DistBackendError
+DistNetworkError = torch._C._DistNetworkError
+DistStoreError = torch._C._DistStoreError
+QueueEmptyError = torch._C._DistQueueEmptyError
+
 from torch.distributed._distributed_c10d import (
-    _Backend,
     _broadcast_coalesced,
     _compute_bucket_assignment_by_size,
     _ControlCollectives,
@@ -42,173 +47,113 @@ from torch.distributed._distributed_c10d import (
     _StoreCollectives,
     _test_python_store,
     _verify_params_across_processes,
-    _Work,
-    Backend,
+    Backend as _Backend,
     BuiltinCommHookType,
     DebugLevel,
     FileStore,
     get_debug_level,
     GradBucket,
-    HAS_DISTRIBUTED,
     Logger,
     PrefixStore,
-    ProcessGroup,
-    ReduceOp,
+    ProcessGroup as ProcessGroup,
     Reducer,
     set_debug_level,
     set_debug_level_from_env,
     Store,
     TCPStore,
+    Work as _Work,
 )
 
 
-# Create Work alias for backward compatibility
-Work = _Work
+class _DistributedPdb(pdb.Pdb):
+    """
+    Supports using PDB from inside a multiprocessing child process.
 
-# Import platform-specific components
+    Usage:
+    _DistributedPdb().set_trace()
+    """
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open("/dev/stdin")
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
+_breakpoint_cache: dict[int, typing.Any] = {}
+
+
+def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
+    """
+    Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
+    done with the breakpoint before continuing.
+
+    Args:
+        rank (int): Which rank to break on.  Default: ``0``
+        skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
+    """
+    if skip > 0:
+        key = hash(str(traceback.format_exc()))
+        counter = _breakpoint_cache.get(key, 0) + 1
+        _breakpoint_cache[key] = counter
+        if counter <= skip:
+            log.warning("Skip the breakpoint, counter=%d", counter)
+            return
+
+    # avoid having the default timeout (if short) interrupt your debug session
+    if timeout_s is not None:
+        for group in torch.distributed.distributed_c10d._pg_map:
+            torch.distributed.distributed_c10d._set_pg_timeout(
+                timedelta(seconds=timeout_s), group
+            )
+
+    if get_rank() == rank:
+        pdb = _DistributedPdb()
+        pdb.message(
+            "\n!!! ATTENTION !!!\n\n"
+            f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
+        )
+        pdb.set_trace()
+    # If Meta/Python keys are in the TLS, we want to make sure that we ignore them
+    # and hit the (default) CPU/CUDA implementation of barrier.
+    meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+    torch._C._set_meta_in_tls_dispatch_include(False)
+    try:
+        barrier()
+    finally:
+        torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+        del guard
+
+
 if sys.platform != "win32":
     from torch.distributed._distributed_c10d import HashStore
 
-# Custom Runtime Errors thrown from the distributed package
-if HAS_DISTRIBUTED:
-    DistError = torch._C._DistError
-    DistBackendError = torch._C._DistBackendError
-    DistNetworkError = torch._C._DistNetworkError
-    DistStoreError = torch._C._DistStoreError
-    QueueEmptyError = torch._C._DistQueueEmptyError
-else:
-    # Fallback for non-distributed builds
-    class DistError(Exception):
-        pass
+from .device_mesh import DeviceMesh, init_device_mesh
 
-    class DistBackendError(Exception):
-        pass
+# Variables prefixed with underscore are not auto imported
+# See the comment in `distributed_c10d.py` above `_backend` on why we expose
+# this.
+from .distributed_c10d import *  # noqa: F403
+from .distributed_c10d import (
+    _all_gather_base,
+    _coalescing_manager,
+    _CoalescingManager,
+    _create_process_group_wrapper,
+    _get_process_group_name,
+    _rank_not_in_group,
+    _reduce_scatter_base,
+    _time_estimator,
+    get_node_local_rank,
+)
+from .remote_device import _remote_device
+from .rendezvous import (
+    _create_store_from_options,
+    register_rendezvous_handler,
+    rendezvous,
+)
 
-    class DistNetworkError(Exception):
-        pass
 
-    class DistStoreError(Exception):
-        pass
-
-    class QueueEmptyError(Exception):
-        pass
-
-
-if HAS_DISTRIBUTED:
-
-    class _DistributedPdb(pdb.Pdb):
-        """
-        Supports using PDB from inside a multiprocessing child process.
-
-        Usage:
-        _DistributedPdb().set_trace()
-        """
-
-        def interaction(self, *args, **kwargs):
-            _stdin = sys.stdin
-            try:
-                sys.stdin = open("/dev/stdin")
-                pdb.Pdb.interaction(self, *args, **kwargs)
-            finally:
-                sys.stdin = _stdin
-
-    _breakpoint_cache: dict[int, typing.Any] = {}
-
-    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
-        """
-        Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
-        done with the breakpoint before continuing.
-
-        Args:
-            rank (int): Which rank to break on.  Default: ``0``
-            skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
-        """
-        if skip > 0:
-            key = hash(str(traceback.format_exc()))
-            counter = _breakpoint_cache.get(key, 0) + 1
-            _breakpoint_cache[key] = counter
-            if counter <= skip:
-                log.warning("Skip the breakpoint, counter=%d", counter)
-                return
-
-        # avoid having the default timeout (if short) interrupt your debug session
-        if timeout_s is not None:
-            for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d._set_pg_timeout(
-                    timedelta(seconds=timeout_s), group
-                )
-
-        if get_rank() == rank:
-            pdb = _DistributedPdb()
-            pdb.message(
-                "\n!!! ATTENTION !!!\n\n"
-                f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
-            )
-            pdb.set_trace()
-        # If Meta/Python keys are in the TLS, we want to make sure that we ignore them
-        # and hit the (default) CPU/CUDA implementation of barrier.
-        meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-        guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-        torch._C._set_meta_in_tls_dispatch_include(False)
-        try:
-            barrier()
-        finally:
-            torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
-            del guard
-
-    from .device_mesh import DeviceMesh, init_device_mesh
-
-    # Variables prefixed with underscore are not auto imported
-    # See the comment in `distributed_c10d.py` above `_backend` on why we expose
-    # this.
-    from .distributed_c10d import *  # noqa: F403
-    from .distributed_c10d import (
-        _all_gather_base,
-        _coalescing_manager,
-        _CoalescingManager,
-        _create_process_group_wrapper,
-        _get_process_group_name,
-        _rank_not_in_group,
-        _reduce_scatter_base,
-        _time_estimator,
-        get_node_local_rank,
-    )
-    from .remote_device import _remote_device
-    from .rendezvous import (
-        _create_store_from_options,
-        register_rendezvous_handler,
-        rendezvous,
-    )
-
-    set_debug_level_from_env()
-
-else:
-
-    def batch_isend_irecv(*args, **kwargs):
-        """Mock batch_isend_irecv function."""
-        return []
-
-    # Add _remote_device stub
-    _remote_device = str
-
-    def init_process_group(
-        backend=None,
-        init_method=None,
-        timeout=None,
-        world_size=None,
-        rank=None,
-        store=None,
-        group_name="",
-    ):
-        """Mock init_process_group function."""
-
-    # Add simple group stub class for compatibility
-    class group:
-        """Group class. Placeholder for non-distributed builds."""
-
-        WORLD = None  # Will be set to the default ProcessGroup
-
-    import sys
-
-    sys.modules["torch.distributed"].ProcessGroup = ProcessGroup  # type: ignore[attr-defined]
-    sys.modules["torch.distributed"].group = group  # type: ignore[attr-defined]
+set_debug_level_from_env()

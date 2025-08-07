@@ -1,26 +1,20 @@
 import random
-from typing import Any
+from typing import Any, Callable
 
 import torch
 
 # Import centralized distributed components
 from torch.distributed._distributed_c10d import (
     _resolve_process_group,
-    _Work as Work,
+    FakeWork,
     HAS_DISTRIBUTED,
     ProcessGroup,
+    Work,
 )
 
 
 # In distributed builds, assume operators always exist
 OPERATORS_AVAILABLE = HAS_DISTRIBUTED
-
-
-# Use centralized FakeWork implementation
-class FakeWork(Work):
-    def __init__(self):
-        super().__init__()
-        self.seq_id = 0
 
 
 from torch.utils._pytree import tree_map_only
@@ -80,16 +74,16 @@ _META_FUNCTIONS = {
 
 
 # Register operators when C++ implementations are not available
-def _create_fake_op_impl(op_name, default_impl):
+def _create_fake_op_impl(op_name: str, default_impl: Callable) -> Callable:
     """Create a fake implementation for an operator that raises a descriptive error."""
 
-    def _impl(*args, **kwargs):
+    def _impl(*args: Any, **kwargs: Any) -> Any:
         try:
             return default_impl(*args, **kwargs)
-        except Exception:
+        except Exception as e:
             raise RuntimeError(
                 f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
-            )
+            ) from e
 
     return _impl
 
@@ -101,34 +95,33 @@ try:
 except (AttributeError, RuntimeError):
     # Define missing c10d operators
     try:
-        lib_def = torch.library.Library("c10d", "DEF")
+        with torch.library._scoped_library("c10d", "DEF") as lib_def:
+            # Define basic signatures for the operators we need
+            op_signatures = {
+                "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+                "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+                "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+                "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',  # noqa: B950
+                "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
+                "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
+                "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
+            }
 
-        # Define basic signatures for the operators we need
-        op_signatures = {
-            "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',
-            "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
-            "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
-            "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
-        }
-
-        for op_name, signature in op_signatures.items():
-            try:
-                lib_def.define(signature)
-            except Exception:
-                # Skip if already defined or can't define
-                pass
+            for signature in op_signatures.values():
+                try:
+                    lib_def.define(signature)
+                except Exception:
+                    # Skip if already defined or can't define
+                    pass
     except Exception:
         # Failed to create library, continue
         pass
@@ -140,8 +133,7 @@ try:
 except (AttributeError, RuntimeError):
     # Register the operators from Python when C++ is not built
     try:
-        functional_lib_def = torch.library.Library("_c10d_functional", "DEF")
-
+        functional_lib_def = torch.library.Library("_c10d_functional", "DEF")  # noqa: TOR901
         # Core functional collective operators (same as in _functional_collectives.py)
         functional_lib_def.define(
             "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor"
@@ -188,7 +180,7 @@ try:
     torch.ops._dtensor.shard_dim_alltoall
 except (AttributeError, RuntimeError):
     try:
-        dtensor_lib_def = torch.library.Library("_dtensor", "DEF")
+        dtensor_lib_def = torch.library.Library("_dtensor", "DEF")  # noqa: TOR901
         dtensor_lib_def.define(
             "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
         )
@@ -200,7 +192,7 @@ try:
     torch.ops._c10d_functional_autograd.all_to_all_single
 except (AttributeError, RuntimeError):
     try:
-        autograd_lib_def = torch.library.Library("_c10d_functional_autograd", "DEF")
+        autograd_lib_def = torch.library.Library("_c10d_functional_autograd", "DEF")  # noqa: TOR901
         autograd_lib_def.define(
             "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
         )
@@ -269,7 +261,7 @@ try:
     }
 except (AttributeError, RuntimeError):
     # Fallback for non-distributed builds
-    functional_collectives: set[torch._ops.OpOverload] = set()
+    functional_collectives: set[torch._ops.OpOverload] = set()  # type: ignore[no-redef]
 
 try:
     sync_ops: set[torch._ops.OpOverload] = {
@@ -279,7 +271,7 @@ try:
     }
 except (AttributeError, RuntimeError):
     # Fallback for non-distributed builds
-    sync_ops: set[torch._ops.OpOverload] = set()
+    sync_ops: set[torch._ops.OpOverload] = set()  # type: ignore[no-redef]
 
 collective_ops = set.union(functional_collectives, non_functional_collectives)
 

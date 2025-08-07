@@ -1,22 +1,7 @@
 # mypy: allow-untyped-defs
 
 import torch.distributed as dist
-
-
-try:
-    from torch.distributed._distributed_c10d import FakeProcessGroup
-except ImportError:
-    # Fallback for non-distributed builds
-    class FakeProcessGroup:
-        def __init__(self, rank: int, world_size: int):
-            self._rank = rank
-            self._world_size = world_size
-
-        def rank(self):
-            return self._rank
-
-        def size(self):
-            return self._world_size
+from torch.distributed._distributed_c10d import FakeProcessGroup
 
 
 class FakeStore(dist.Store):

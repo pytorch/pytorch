@@ -16,14 +16,10 @@ from torch._C._autograd import DeviceType
 from torch.distributed._distributed_c10d import (
     _register_work,
     _SymmetricMemory,
-    _Work,
     HAS_DISTRIBUTED,
     ProcessGroup,
+    Work as _Work,
 )
-
-
-# Set Work alias
-Work = _Work
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}

@@ -377,22 +377,22 @@ try:
     torch.ops._dtensor.shard_dim_alltoall
 except (AttributeError, RuntimeError):
     # Define the missing operator - match what C implementation would do
-    lib = torch.library.Library("_dtensor", "DEF")
-    lib.define(
-        "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
-    )
+    with torch.library._scoped_library("_dtensor", "DEF") as lib:
+        lib.define(
+            "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
+        )
 
-    # Provide a Python implementation for CPU
-    @torch.library.impl(lib, "shard_dim_alltoall", "CPU")
-    def _shard_dim_alltoall_cpu_impl(input, gather_dim, shard_dim, group_name):
-        # Simple stub implementation for testing
-        return input.clone()
+        # Provide a Python implementation for CPU
+        @torch.library.impl(lib, "shard_dim_alltoall", "CPU")
+        def _shard_dim_alltoall_cpu_impl(input, gather_dim, shard_dim, group_name):
+            # Simple stub implementation for testing
+            return input.clone()
 
-    # Provide a Python implementation for CUDA
-    @torch.library.impl(lib, "shard_dim_alltoall", "CUDA")
-    def _shard_dim_alltoall_cuda_impl(input, gather_dim, shard_dim, group_name):
-        # Simple stub implementation for testing
-        return input.clone()
+        # Provide a Python implementation for CUDA
+        @torch.library.impl(lib, "shard_dim_alltoall", "CUDA")
+        def _shard_dim_alltoall_cuda_impl(input, gather_dim, shard_dim, group_name):
+            # Simple stub implementation for testing
+            return input.clone()
 
 
 # Now register the fake implementation

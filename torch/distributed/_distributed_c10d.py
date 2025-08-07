@@ -2,12 +2,25 @@
 """
 Centralized module for importing and re-exporting torch._C._distributed_c10d components.
 This module provides fallback stubs when distributed components are not available.
+
+IMPORTANT PATTERN:
+Never access torch._C._distributed_c10d directly in code. Always import from and use
+torch.distributed._distributed_c10d which is guaranteed to have all functions available
+either from the C extension (when distributed is built) or from Python stubs (when not built).
+
+Example:
+    # WRONG: torch._C._distributed_c10d._set_global_rank(rank)
+    # RIGHT:
+    from torch.distributed._distributed_c10d import _set_global_rank
+    _set_global_rank(rank)
+
+This ensures code works regardless of whether distributed components are available.
 """
 
 import sys
 from datetime import timedelta
 from enum import Enum
-from typing import List
+from typing import Optional
 
 import torch
 from torch.futures import Future
@@ -38,11 +51,12 @@ try:
         AllreduceCoalescedOptions,
         AllreduceOptions,
         AllToAllOptions,
-        Backend as _Backend,
+        Backend,
         BarrierOptions,
         BroadcastOptions,
         BuiltinCommHookType,
         DebugLevel,
+        FakeWork,
         FileStore,
         GatherOptions,
         get_debug_level,
@@ -59,20 +73,20 @@ try:
         set_debug_level_from_env,
         Store,
         TCPStore,
-        Work as _Work,
+        Work,
     )
 
     # Try to import NCCL-specific components
     try:
         from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
     except ImportError:
-        _DEFAULT_PG_NCCL_TIMEOUT = None
+        _DEFAULT_PG_NCCL_TIMEOUT: Optional[timedelta] = None  # type: ignore[no-redef]
 
     # Try to import optional components that may not be available in all builds
     try:
         from torch._C._distributed_c10d import FakeProcessGroup
     except ImportError:
-        FakeProcessGroup = None
+        FakeProcessGroup: Optional[type] = None  # type: ignore[misc,no-redef]
 
     # Import platform-specific components
     if sys.platform != "win32":
@@ -99,10 +113,10 @@ try:
         )
     except ImportError:
         # Provide fallback stubs if not available
-        def _is_nvshmem_available():
+        def _is_nvshmem_available() -> bool:
             return False
 
-        class _SymmetricMemory:
+        class _SymmetricMemory:  # type: ignore[no-redef]
             def __init__(self, *args, **kwargs):
                 pass
 
@@ -139,10 +153,10 @@ except (ImportError, AttributeError):
 
     # Constants
     _DEFAULT_FIRST_BUCKET_BYTES = 1024 * 1024
-    _DEFAULT_PG_TIMEOUT = timedelta(seconds=30 * 60)
-    _DEFAULT_PG_NCCL_TIMEOUT = None
+    _DEFAULT_PG_TIMEOUT: timedelta = timedelta(seconds=30 * 60)
+    _DEFAULT_PG_NCCL_TIMEOUT: Optional[timedelta] = None  # type: ignore[no-redef]
 
-    class DebugLevel(Enum):
+    class DebugLevel(Enum):  # type: ignore[no-redef]
         OFF = "off"
         INFO = "info"
         DETAIL = "detail"
@@ -156,11 +170,11 @@ except (ImportError, AttributeError):
     def set_debug_level_from_env():
         pass
 
-    class BuiltinCommHookType(Enum):
+    class BuiltinCommHookType(Enum):  # type: ignore[no-redef]
         ALLREDUCE = "allreduce"
         FP16_COMPRESS = "fp16_compress"
 
-    class ReduceOp:
+    class ReduceOp:  # type: ignore[no-redef]
         class RedOpType(Enum):
             SUM = "sum"
             AVG = "avg"
@@ -187,7 +201,7 @@ except (ImportError, AttributeError):
         PREMUL_SUM = RedOpType.PREMUL_SUM
         UNUSED = RedOpType.UNUSED
 
-    class Store:
+    class Store:  # type: ignore[no-redef]
         def __init__(self):
             self._data = {}
 
@@ -203,7 +217,7 @@ except (ImportError, AttributeError):
             self._data[key] = str(current)
             return current
 
-        def check(self, keys: List[str]) -> bool:
+        def check(self, keys: list[str]) -> bool:
             return all(key in self._data for key in keys)
 
         def compare_set(
@@ -227,37 +241,37 @@ except (ImportError, AttributeError):
         def set_timeout(self, timeout: timedelta):
             pass
 
-        def wait(self, keys: List[str], timeout=None):
+        def wait(self, keys: list[str], timeout=None):
             pass
 
-    class FileStore(Store):
+    class FileStore(Store):  # type: ignore[no-redef]
         def __init__(self, path: str, numWorkers: int = 1):
             super().__init__()
             self.path = path
             self.numWorkers = numWorkers
 
-    class TCPStore(Store):
+    class TCPStore(Store):  # type: ignore[no-redef]
         def __init__(
             self,
             host_name: str,
             port: int,
-            world_size: int = None,
+            world_size: Optional[int] = None,
             is_master: bool = False,
-            timeout: timedelta = None,
+            timeout: Optional[timedelta] = None,
             wait_for_workers: bool = False,
             multi_tenant: bool = False,
-            master_listen_fd: int = None,
-            use_libuv: bool = None,
+            master_listen_fd: Optional[int] = None,
+            use_libuv: Optional[bool] = None,
         ):
             super().__init__()
             self.host_name = host_name
             self.port = port
 
-    class HashStore(Store):
+    class HashStore(Store):  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             super().__init__()
 
-    class PrefixStore(Store):
+    class PrefixStore(Store):  # type: ignore[no-redef]
         def __init__(self, prefix: str, store: Store):
             super().__init__()
             self.prefix = prefix
@@ -267,7 +281,7 @@ except (ImportError, AttributeError):
         def underlying_store(self):
             return self.store
 
-    class _Work:
+    class Work:  # type: ignore[no-redef]
         def __init__(self):
             self._completed = True
             self._success = True
@@ -287,7 +301,7 @@ except (ImportError, AttributeError):
             return True
 
         def get_future(self):
-            future = Future()
+            future: Future = Future()
             future.set_result(self._result)
             return future
 
@@ -303,7 +317,12 @@ except (ImportError, AttributeError):
         def synchronize(self):
             pass
 
-    class FakeProcessGroup:
+    class FakeWork(Work):  # type: ignore[no-redef]
+        def __init__(self):
+            super().__init__()
+            self.seq_id = 0
+
+    class FakeProcessGroup:  # type: ignore[no-redef]
         def __init__(self, rank: int = 0, world_size: int = 1):
             self._rank = rank
             self._world_size = world_size
@@ -314,7 +333,7 @@ except (ImportError, AttributeError):
         def size(self):
             return self._world_size
 
-    class ProcessGroup:
+    class ProcessGroup:  # type: ignore[no-redef]
         class BackendType(Enum):
             UNDEFINED = "undefined"
             GLOO = "gloo"
@@ -324,11 +343,12 @@ except (ImportError, AttributeError):
             XCCL = "xccl"
             CUSTOM = "custom"
 
-        def __init__(self, store: Store = None, rank: int = 0, size: int = 1):
+        def __init__(self, store: Optional[Store] = None, rank: int = 0, size: int = 1):
             self._store = store or Store()
             self._rank = rank
             self._size = size
             self.group_name = f"stub_group_{id(self)}"
+            self.bound_device_id = None
 
         def rank(self):
             return self._rank
@@ -349,31 +369,42 @@ except (ImportError, AttributeError):
             pass
 
         def broadcast(self, tensor_or_tensors, root=0, timeout=None, **kwargs):
-            work = _Work()
+            work = Work()
             if isinstance(tensor_or_tensors, torch.Tensor):
-                work._result = [tensor_or_tensors]
+                work._result = [tensor_or_tensors]  # type: ignore[attr-defined]
             else:
-                work._result = tensor_or_tensors
+                work._result = tensor_or_tensors  # type: ignore[attr-defined]
             return work
 
         def allreduce(self, tensor_or_tensors, op=None, timeout=None, **kwargs):
-            work = _Work()
+            work = Work()
             if isinstance(tensor_or_tensors, torch.Tensor):
-                work._result = [tensor_or_tensors]
+                work._result = [tensor_or_tensors]  # type: ignore[attr-defined]
             else:
-                work._result = tensor_or_tensors
+                work._result = tensor_or_tensors  # type: ignore[attr-defined]
             return work
 
         def barrier(self, timeout=None, **kwargs):
-            return _Work()
+            return Work()
 
-    class _Backend:
-        def __init__(self, rank: int, size: int):
-            self._rank = rank
-            self._size = size
+        def _set_default_backend(self, backend_type):
+            """Mock _set_default_backend method that does nothing in stub implementation."""
 
-    class Backend(str):
+        def _register_backend(self, device, backend_type, backend_class):
+            """Mock _register_backend method that does nothing in stub implementation."""
+
+        def _set_group_name(self, group_name):
+            """Mock _set_group_name method that does nothing in stub implementation."""
+            self.group_name = group_name
+
+        def _set_group_desc(self, group_desc):
+            """Mock _set_group_desc method that does nothing in stub implementation."""
+            self.group_desc = group_desc
+
+    class Backend(str):  # type: ignore[no-redef]
         """Mock Backend class for non-distributed builds."""
+
+        __slots__ = ()
 
         UNDEFINED = "undefined"
         GLOO = "gloo"
@@ -389,7 +420,7 @@ except (ImportError, AttributeError):
         def register_backend(cls, name, func, extended_api=False, devices=None):
             """Mock register_backend method."""
 
-    class GradBucket:
+    class GradBucket:  # type: ignore[no-redef]
         def index(self):
             return 0
 
@@ -402,62 +433,82 @@ except (ImportError, AttributeError):
         def is_last(self):
             return True
 
-    class Reducer:
+    class Reducer:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             pass
 
-    class Logger:
+    class Logger:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             pass
 
-    class _ControlCollectives:
+    class _ControlCollectives:  # type: ignore[no-redef]
         pass
 
-    class _StoreCollectives:
+    class _StoreCollectives:  # type: ignore[no-redef]
         def __init__(self, store: Store, rank: int, world_size: int):
             pass
 
     # Function stubs
-    def _broadcast_coalesced(*args, **kwargs):
+    def _broadcast_coalesced(
+        process_group: ProcessGroup,
+        tensors: list[torch.Tensor],
+        buffer_size: int,
+        src: int,
+    ):  # type: ignore[misc]
         pass
 
-    def _compute_bucket_assignment_by_size(
-        tensors, bucket_size_limits, expect_sparse_gradient=None, tensor_indices=None
-    ):
+    def _compute_bucket_assignment_by_size(  # type: ignore[misc]
+        tensors: list[torch.Tensor],
+        bucket_size_limits: list[int],
+        expect_sparse_gradient: Optional[list[bool]] = None,
+        tensor_indices: Optional[list[int]] = None,
+    ) -> tuple[list[list[int]], list[int]]:
         if tensor_indices is None:
             tensor_indices = list(range(len(tensors)))
         return [tensor_indices], [sum(t.numel() * t.element_size() for t in tensors)]
 
-    def _make_nccl_premul_sum(factor):
+    def _make_nccl_premul_sum(factor) -> ReduceOp:  # type: ignore[misc]
+        # Return a dummy ReduceOp instance
+        return ReduceOp(ReduceOp.RedOpType.SUM)  # type: ignore[attr-defined]
+
+    def _register_builtin_comm_hook(
+        reducer: Reducer,
+        comm_hook_type: BuiltinCommHookType,
+    ):  # type: ignore[misc]
         pass
 
-    def _register_builtin_comm_hook(*args, **kwargs):
+    def _register_comm_hook(reducer: Reducer, state, comm_hook) -> None:  # type: ignore[misc]
         pass
 
-    def _register_comm_hook(*args, **kwargs):
+    def _test_python_store(store: Store) -> None:  # type: ignore[misc]
         pass
 
-    def _test_python_store(store):
-        pass
-
-    def _allow_inflight_collective_as_graph_input():
+    def _allow_inflight_collective_as_graph_input() -> bool:
         """Mock function that returns False to indicate no inflight collectives are allowed."""
         return False
 
-    def _set_allow_inflight_collective_as_graph_input(value: bool):
+    def _set_allow_inflight_collective_as_graph_input(value: bool) -> None:
         """Mock function that does nothing in non-distributed builds."""
 
-    def _register_work(tensor, work):
+    def _register_work(tensor: torch.Tensor, work: Work) -> ProcessGroup:
         """Mock function to register work with tensor - does nothing in non-distributed builds."""
+        return ProcessGroup(store=Store(), rank=0, size=1)
 
-    def _is_nvshmem_available():
+    def _set_global_rank(rank):
+        """Mock function to set global rank - does nothing in non-distributed builds."""
+
+    def _hash_tensors(tensors):
+        """Mock function to hash tensors - returns dummy hash in non-distributed builds."""
+        return 0
+
+    def _is_nvshmem_available() -> bool:
         """Mock function that returns False indicating NVSHMEM is not available."""
         return False
 
-    def _nvshmemx_cumodule_init(module):
+    def _nvshmemx_cumodule_init(module: int) -> None:
         """Mock function for NVSHMEM CU module initialization - does nothing in non-distributed builds."""
 
-    class _SymmetricMemory:
+    class _SymmetricMemory:  # type: ignore[no-redef]
         """Mock _SymmetricMemory class for non-distributed builds."""
 
         def __init__(self, *args, **kwargs):
@@ -491,30 +542,34 @@ except (ImportError, AttributeError):
             """Mock has_multicast_support that returns False."""
             return False
 
-    def _verify_params_across_processes(*args, **kwargs):
+    def _verify_params_across_processes(
+        process_group: ProcessGroup,
+        params: list[torch.Tensor],
+        logger: Logger | None,
+    ):  # type: ignore[misc]
         pass
 
     # Additional distributed_c10d function stubs
-    def _register_process_group(name, group):
+    def _register_process_group(group_name: str, process_group: ProcessGroup) -> None:
         pass
 
-    def _resolve_process_group(name):
-        return ProcessGroup()
+    def _resolve_process_group(group_name: str) -> ProcessGroup:
+        return ProcessGroup(store=Store(), rank=0, size=1)
 
-    def _unregister_all_process_groups():
+    def _unregister_all_process_groups() -> None:
         pass
 
-    def _unregister_process_group(name):
+    def _unregister_process_group(group_name: str) -> None:
         pass
 
-    def _current_process_group():
+    def _current_process_group() -> ProcessGroup:
         """Mock function that returns the default process group."""
-        return ProcessGroup()
+        return ProcessGroup(store=Store(), rank=0, size=1)
 
-    def _set_process_group(group):
+    def _set_process_group(pg: ProcessGroup) -> None:
         """Mock function that does nothing in non-distributed builds."""
 
-    class _WorkerServer:
+    class _WorkerServer:  # type: ignore[no-redef]
         """Mock _WorkerServer for non-distributed builds."""
 
         def __init__(self, socket_path: str):
@@ -524,56 +579,56 @@ except (ImportError, AttributeError):
             """Mock shutdown method that does nothing."""
 
     # Option classes stubs
-    class _DistributedBackendOptions:
+    class _DistributedBackendOptions:  # type: ignore[no-redef]
         def __init__(self):
             pass
 
-    class AllgatherOptions:
+    class AllgatherOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.asyncOp = True
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class AllreduceCoalescedOptions:
+    class AllreduceCoalescedOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class AllreduceOptions:
+    class AllreduceOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.reduceOp = ReduceOp.SUM
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class AllToAllOptions:
+    class AllToAllOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class BarrierOptions:
+    class BarrierOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class BroadcastOptions:
+    class BroadcastOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.rootRank = 0
             self.rootTensor = 0
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class GatherOptions:
+    class GatherOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.rootRank = 0
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class ReduceOptions:
+    class ReduceOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.reduceOp = ReduceOp.SUM
             self.rootRank = 0
             self.rootTensor = 0
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class ReduceScatterOptions:
+    class ReduceScatterOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.reduceOp = ReduceOp.SUM
             self.timeout = _DEFAULT_PG_TIMEOUT
 
-    class ScatterOptions:
+    class ScatterOptions:  # type: ignore[no-redef]
         def __init__(self):
             self.rootRank = 0
             self.timeout = _DEFAULT_PG_TIMEOUT
@@ -600,7 +655,6 @@ __all__ = [
     "_is_nvshmem_available",
     "_nvshmemx_cumodule_init",
     "_SymmetricMemory",
-    "_Backend",
     "Backend",
     "BuiltinCommHookType",
     "DebugLevel",
@@ -618,7 +672,8 @@ __all__ = [
     "set_debug_level_from_env",
     "Store",
     "TCPStore",
-    "_Work",
+    "Work",
+    "FakeWork",
     # Additional distributed_c10d components
     "_DistributedBackendOptions",
     "_register_process_group",

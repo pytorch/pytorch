@@ -17,6 +17,15 @@ from torch.fx.experimental.proxy_tensor import get_proxy_mode
 from . import _functional_collectives_impl as fun_col_impl
 
 
+def _raise_not_implemented(op_name):
+    def _impl(*args, **kwargs):
+        raise RuntimeError(
+            f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
+        )
+
+    return _impl
+
+
 try:
     from torch.utils._cxx_pytree import tree_map_only
 except ImportError:
@@ -987,14 +996,6 @@ try:
     torch.ops._c10d_functional.wait_tensor
 except (AttributeError, RuntimeError):
     # Register the operators from Python when C++ is not built
-
-    def _raise_not_implemented(op_name):
-        def _impl(*args, **kwargs):
-            raise RuntimeError(
-                f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
-            )
-
-        return _impl
 
     # Define the operator library and schemas based on C++ implementation
     try:
