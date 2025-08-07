@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sysconfig
-from typing import Optional
+from typing import Any, Optional
 
 from torch.utils._triton import has_triton
 
@@ -115,8 +115,8 @@ if has_triton():
     import triton.language as tl
     from triton.language import core
 
-    @triton.jit
-    def put(dest, source, nelems, pe):
+    @triton.jit  # type: ignore[misc]
+    def put(dest: Any, source: Any, nelems: Any, pe: Any) -> None:
         """
         Put tensor data from local PE to a remote PE.
 
@@ -169,8 +169,8 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit
-    def get(dest, source, nelems, pe):
+    @triton.jit  # type: ignore[misc]
+    def get(dest: Any, source: Any, nelems: Any, pe: Any) -> None:
         """
         Get tensor data from a remote PE to local PE.
 
@@ -292,10 +292,10 @@ if has_triton():
             _semantic=_semantic,
         )
 
-
     # Wait and Signal Operations
-    @triton.jit
-    def wait_until(ivar, cmp_op, cmp_val):
+
+    @triton.jit  # type: ignore[misc]
+    def wait_until(ivar: Any, cmp_op: Any, cmp_val: Any) -> None:
         """
         Wait until a tensor variable meets a specified condition.
 
@@ -734,8 +734,8 @@ if has_triton():
         )
 
     # Collective Operations (mem-based APIs - sizes in bytes)
-    @triton.jit
-    def alltoall(team, dest, source, nelems_per_pe):
+    @triton.jit  # type: ignore[misc]
+    def alltoall(team: Any, dest: Any, source: Any, nelems_per_pe: Any) -> None:
         """
         All-to-all tensor exchange between PEs in a team.
 
@@ -767,8 +767,10 @@ if has_triton():
             team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe
         )
 
-    @core.extern
-    def alltoallmem_block_extern_wrapper(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
+    @core.extern  # type: ignore[misc]
+    def alltoallmem_block_extern_wrapper(
+        team: Any, dest: Any, source: Any, size_bytes: Any, _semantic: Any = None
+    ) -> None:
         """Low-level extern wrapper for NVSHMEM alltoall"""
         return core.extern_elementwise(
             "",
@@ -786,8 +788,8 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @triton.jit
-    def broadcast(team, dest, source, nelems, pe_root):
+    @triton.jit  # type: ignore[misc]
+    def broadcast(team: Any, dest: Any, source: Any, nelems: Any, pe_root: Any) -> None:
         """
         Broadcast tensor data from a root PE to all other PEs in a team.
 
@@ -820,8 +822,15 @@ if has_triton():
             team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root
         )
 
-    @core.extern
-    def broadcastmem_block_extern_wrapper(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
+    @core.extern  # type: ignore[misc]
+    def broadcastmem_block_extern_wrapper(
+        team: Any,
+        dest: Any,
+        source: Any,
+        size_bytes: Any,
+        pe_root: Any,
+        _semantic: Any = None,
+    ) -> None:
         """Low-level extern wrapper for NVSHMEM broadcast"""
         return core.extern_elementwise(
             "",
@@ -841,8 +850,10 @@ if has_triton():
         )
 
     # Reduction Operation
-    @triton.jit
-    def reduce(team, dest, source, nreduce, operation: tl.constexpr):
+    @triton.jit  # type: ignore[misc]
+    def reduce(
+        team: Any, dest: Any, source: Any, nreduce: Any, operation: tl.constexpr
+    ) -> None:
         """
         Performs a collective reduction on tensors across a team of PEs.
 
@@ -880,7 +891,15 @@ if has_triton():
         )
 
     @core.extern  # type: ignore[misc]
-    def reduce_extern_wrapper(team, dest, source, nreduce, operation: str, dtype_id, _semantic=None):  # type: ignore[no-untyped-def]
+    def reduce_extern_wrapper(
+        team: Any,
+        dest: Any,
+        source: Any,
+        nreduce: Any,
+        operation: str,
+        dtype_id: Any,
+        _semantic: Any = None,
+    ) -> None:
         """
         Low-level extern wrapper for NVSHMEM reduction operations.
 

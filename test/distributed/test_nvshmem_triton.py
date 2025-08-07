@@ -2,11 +2,12 @@
 # To run:
 # python test/distributed/test_nvshmem_triton.py
 
+import triton.language as tl
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
-import triton.language as tl
 from torch._inductor.runtime.triton_compat import triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
@@ -58,6 +59,7 @@ def nvshmem_get_kernel(
     pe,
 ):
     nvshmem.get(dest, src, nelems, pe)
+
 
 @triton.jit
 def nvshmem_putmem_signal_block_kernel(
@@ -1206,6 +1208,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         torch.testing.assert_close(
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
+
 
 if __name__ == "__main__":
     run_tests()
