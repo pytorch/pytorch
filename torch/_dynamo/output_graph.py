@@ -96,8 +96,9 @@ from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .side_effects import AttributeMutationExisting, SideEffects
+from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
 from .source import (
+    _get_source_debug_name,
     AttrSource,
     BackwardStateSource,
     ConstantSource,
@@ -152,6 +153,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -1481,6 +1483,35 @@ class OutputGraph(OutputGraphGuardsState):
             self.add_output_instructions(
                 [local_restore_cg.create_delete(graph_output_var)]
             )
+
+        if self.export:
+            from torch.export._trace import _ExportModuleSpecTrackerDict
+
+            potential_side_effects = []
+            for var in self.side_effects._get_modified_vars():
+                if hasattr(var, "mutation_type"):
+                    mut_type = var.mutation_type
+                    # Make sure to skip codegen specific mutations
+                    if isinstance(
+                        mut_type, (AttributeMutationExisting, ValueMutationExisting)
+                    ):
+                        # export uses tracepoint pass to dump submodule inp/out spec
+                        # into global state, so we filter it here
+                        if not (
+                            isinstance(var, UserDefinedDictVariable)
+                            and isinstance(var.value, _ExportModuleSpecTrackerDict)
+                        ):
+                            potential_side_effects.append(var)
+
+            side_effect_refs = [
+                _get_source_debug_name(var.source) for var in potential_side_effects
+            ]
+
+            if len(side_effect_refs):
+                raise RuntimeError(
+                    f"While exporting, we found certain side effects happened in the model.forward. "
+                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                )
 
         return all_stack_locals_metas
 
