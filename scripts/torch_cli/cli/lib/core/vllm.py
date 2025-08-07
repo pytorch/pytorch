@@ -86,15 +86,11 @@ class VllmBuildRunner(BuildRunner):
 
     def _to_vllm_build_config(self):
         external_build_config = self.get_external_build_config()
-
         base_image = external_build_config.get("base_image", "")
-
         artifact_dir = self.get_result_path(
             external_build_config.get("artifact_dir", "")
         )
-
         abs_whl_dir = get_abs_path(external_build_config.get("torch_whl_dir", ""))
-
         dockerfile_path = get_abs_path(external_build_config.get("dockerfile_path", ""))
 
         return VllmBuildConfig(
