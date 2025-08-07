@@ -1355,13 +1355,13 @@ class TestPatternMatcher(TestCase):
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_addmm_dtype_mismatch(self):
-        a = torch.nn.Linear(1024, 1024, bias=False).cuda()
+        a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
         a = a.to(dtype=torch.float16)
 
-        w = torch.randn(1024, 1024, device="cuda")
+        w = torch.randn(1024, 1024, device=GPU_TYPE)
 
         def func():
-            x = torch.ones(1024, 1024, device="cuda", dtype=torch.float16)
+            x = torch.ones(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
             x = a(x)
             x = x + w
             return x

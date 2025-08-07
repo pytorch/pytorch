@@ -445,6 +445,9 @@ def stack_op(fn: typing.Callable[..., object]):
 
 
 def is_stdlib(mod):
+    if sys.version_info < (3, 10):
+        # For < 3.10, no easy way to identify a stdlib module name.
+        return False
     if not isinstance(mod, types.ModuleType):
         return False
     return mod.__name__.split(".")[0] in sys.stdlib_module_names
