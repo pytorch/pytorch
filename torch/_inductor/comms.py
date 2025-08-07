@@ -235,7 +235,6 @@ def _reorder_communication_preserving_peak_memory_internal(
             ]
         ),
     )
-    return snodes, {}
 
     # snodes_allocfree: dict {snode -> (size_alloc, size_free)}
     # snodes_curr_memory: list [(mem_post_output_alloc, mem_post_free)]
@@ -381,6 +380,8 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 candidate_allocfree = snodes_allocfree[candidate]
                 candidate_delta_mem = candidate_allocfree.size_alloc - candidate_allocfree.size_free
+                # print(f"XXX candidate_allocfree:{candidate_allocfree}")
+                # print(f"XXX candidate_delta_mem:{candidate_delta_mem}")
 
                 potential_peak_after_reorder = max(
                     group_peak_memory - candidate_delta_mem,
@@ -426,9 +427,98 @@ def _reorder_communication_preserving_peak_memory_internal(
                 for n in _group_nodes(group_head, group_tail):
                     cm = _curr_memory[n]
                     _curr_memory[n] = (cm[0] - candidate_delta_mem, cm[1] - candidate_delta_mem)
+                candidate_cm_pre_swap = _curr_memory[candidate]
                 candidate_post_alloc_mem = _curr_memory[group_tail][1] + candidate_allocfree.size_alloc
-                candidate_post_free_mem = candidate_post_alloc_mem + candidate_allocfree.size_free
+                candidate_post_free_mem = candidate_post_alloc_mem - candidate_allocfree.size_free
                 _curr_memory[candidate] = (candidate_post_alloc_mem, candidate_post_free_mem)
+                # DEBUG ITERATIVE RECOMPUTE CURR_MEMORY
+                # new_nodes = _group_nodes(_head, None)
+                # _peak_memory, _snodes_curr_memory, _snodes_allocfree = estimate_peak_memory_debug(
+                #     new_nodes, name_to_freeable_input_buf, graph_outputs
+                # )
+                # __curr_memory = dict(zip(new_nodes, _snodes_curr_memory))
+
+                # cg_log = (
+                #     f"XXX CANDIDATE:{candidate.get_name()}"
+                #     f"\nXXX GROUP:{_group_names(group_head, group_tail)}"
+                #     f"\nXXX PEAK_MEMORY_BEFORE:{peak_memory}"
+                #     f"\nXXX PEAK_MEMORY_AFTER_SWAP:{_peak_memory}"
+                # )
+                # print(cg_log)
+                # iter_cm = _curr_memory[candidate]
+                # new_cm = __curr_memory[candidate]
+                # recalculate_fail = False
+                # if iter_cm != new_cm:
+                #     print(f"XXX CANDIDATE:{candidate.debug_str()}")
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] ITER_CURR_MEMORY = {iter_cm}")
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] NEW__CURR_MEMORY = {new_cm}")
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] ITER_PRE_SWAP = {candidate_cm_pre_swap}")
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] ITER_ALLOCFREE:{candidate_allocfree}")
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] NEW_ALLOCFREE:{_snodes_allocfree[candidate]}")
+                #     recalculate_fail = True
+                # else:
+                #     print(f"XXX CANDIDATE[{candidate.get_name()}] OK")
+                # for gn in _group_nodes(group_head, group_tail):
+                #     iter_gnm = _curr_memory[gn]
+                #     new_gnm = __curr_memory[gn]
+                #     if iter_gnm != new_gnm:
+                #         print(f"XXX GN:{gn.debug_str()}")
+                #         print(f"XXX GN ITER_GNM[{gn.get_name()}] = {iter_gnm}")
+                #         print(f"XXX GN NEW__GNM[{gn.get_name()}] = {new_gnm}")
+                #         recalculate_fail = True
+                #     else:
+                #         print(f"XXX GN ITER_GNM[{gn.get_name()}] = OK")
+                # if recalculate_fail:
+                #     log = "\n\n".join(
+                #         [
+                #             f"SNODE[{i}]"
+                #             + n.debug_str()
+                #             + f" buffer_names:{n.get_buffer_names()}"
+                #             + f" ITER_cur_mem:{_curr_memory[n]}"
+                #             + f" ESTM_cur_mem:{__curr_memory[n]}"
+                #             for i, n in enumerate(new_nodes)
+                #         ]
+                #     )
+                #     trace_structured(
+                #         "artifact",
+                #         metadata_fn=lambda: {
+                #             "name": "DEBUG_RECALCULATE_PROBLEM",
+                #             "encoding": "string",
+                #         },
+                #         payload_fn=lambda: log,
+                #     )
+                #     assert False
+
+                # if _peak_memory > peak_memory:
+                #     peak_log = ""
+                #     for i, (pre, post) in enumerate(_snodes_curr_memory):
+                #         if _peak_memory == pre:
+                #             n = new_nodes[i]
+                #             peak_log = f"XXX NEW_PEAK_AT[{i}]: NODE:{n.get_name()} {n.debug_str()}"
+                #             break
+                #     print(f"\nXXX PEAK_LOG:{peak_log}")
+
+                #     log = "\n\n".join(
+                #         [
+                #             f"SNODE[{i}]"
+                #             + n.debug_str()
+                #             + f" buffer_names:{n.get_buffer_names()}"
+                #             + f" ITER_cur_mem:{_curr_memory[n]}"
+                #             + f" ESTM_cur_mem:{__curr_memory[n]}"
+                #             for i, n in enumerate(new_nodes)
+                #         ]
+                #     )
+                #     log = cg_log + peak_log + log
+                #     trace_structured(
+                #         "artifact",
+                #         metadata_fn=lambda: {
+                #             "name": "DEBUG_PEAK_PROBLEM",
+                #             "encoding": "string",
+                #         },
+                #         payload_fn=lambda: log,
+                #     )
+                #     assert False
+                # DEBUG
 
                 candidate = _prev[group_head]
         curr = _next[curr]  # type: ignore[assignment]

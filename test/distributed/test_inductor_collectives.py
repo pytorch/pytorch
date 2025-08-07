@@ -1640,6 +1640,23 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         comm from moving due to data dependency.
         """
 
+        # _mems = []
+        # def _reset():
+        #     _mems.clear()
+
+        # def foo():
+        #     _mems.append(torch.cuda.memory_allocated())
+        # lib = torch.library.Library("_test", "FRAGMENT")
+        # lib.define("foo() -> ()")
+        # lib.impl("foo", foo, "BackendSelect")
+        # from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        # _register_effectful_op(
+        #     torch.ops._test.foo.default,
+        #     _EffectType.ORDERED,
+        # )
+        torch._inductor.config.debug_test_memory_node = True
+
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1733,6 +1750,39 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ) = _reorder_communication_preserving_peak_memory_internal(snodes)
             return reordered_snodes
 
+        from torch._inductor.virtualized import V
+        from torch._inductor.memory import estimate_peak_memory_debug, FreeableInputBuffer, get_freeable_input_buf
+        from torch.utils._ordered_set import OrderedSet
+        import copy
+        peak_memory_out = []
+        estimate_outs = []
+        snodes_curr_memory_outs = []
+        snodes_allocfree_outs = []
+        nodes = []
+        def _estimate_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+            graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+            name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
+                snodes, graph_inputs
+            )
+            peak_memory, snodes_curr_memory, snodes_allocfree = estimate_peak_memory_debug(
+                snodes, name_to_freeable_input_buf, graph_outputs
+            )
+            nonlocal peak_memory_out
+            peak_memory_out.append(peak_memory)
+
+            nonlocal snodes_curr_memory_outs
+            snodes_curr_memory_outs.append(snodes_curr_memory)
+
+            nonlocal snodes_allocfree_outs
+            snodes_allocfree_outs.append(snodes_allocfree)
+
+            nonlocal nodes
+            nodes = copy.copy(snodes)
+            return snodes
+
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
@@ -1741,8 +1791,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    sink_waits_iterative,
                     _reorder_communication_preserving_peak_memory,
+                    _estimate_peak_memory,
+                    # sink_waits_iterative,
                 ],
                 "allow_buffer_reuse": False,
                 "test_configs.track_memory_lifecycle": "error",
@@ -1750,6 +1801,40 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         ):
             compiled = torch.compile(func, fullgraph=True)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        torch._inductor.memory._reset()
+        _est_mems = snodes_curr_memory_outs[0]
+        _est_mems = [(0, 0)] + _est_mems
+
+        compiled(*inputs, **self.get_world_trs())
+        _mems = torch._inductor.memory._get_mems()
+        _mems_norm = [m - _mems[0] for m in _mems]
+        _nodes_allocfree = snodes_allocfree_outs[0]
+        _est_mems_norm = _est_mems
+        print("--------------------------------------")
+        print(f"XXX FOO_MEMS_NORMS {len(_mems_norm)}:{_mems_norm}")
+        print(f"XXX _EST_MEMS_NORMS {len(_est_mems_norm)}:{_est_mems_norm}")
+        print(f"XXX NODES_LEN:{len(nodes)}")
+        print("--------------------------------------")
+        peak_real = max(_mems_norm)
+        peak_est = peak_memory_out[0]
+        print(f"XXX PEAK_REAL:{peak_real}")
+        print(f"XXX PEAK_EST :{peak_est}")
+        mem_prev = 0
+        emem_prev = (0, 0)
+        for i in range(len(_est_mems) - 1):
+            mem = _mems_norm[i]
+            mem_delta = mem - mem_prev
+            emem = _est_mems_norm[i]
+            # delta aligned with mem_delta after node deallocates unused
+            emem_delta = emem[1] - emem_prev[1]
+            print(f"XXX {i:2} EST_MEM:{str(emem):18} EST_MEM_DELTA:{emem_delta:7}")
+            print(f"XXX {i:2}     MEM:{mem:17}      MEM_DELTA:{mem_delta:7}")
+            mem_prev = mem
+            emem_prev = emem
+            if i < len(nodes):
+                node = nodes[i]
+                print(f"XXX NODE[{i:2}]:{node.debug_str()} buf_names:{node.get_buffer_names()}")
 
         # make sure memory tracking is codegen. the ops will then do runtime checking with assertion.
         FileCheck().check("check_memory_step").check("tracked_empty_strided").run(code)
