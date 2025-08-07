@@ -257,7 +257,7 @@ class TestDynamoTimed(TestCase):
             stack_trace_list.append(e.stack_trace)
 
         self.assertTrue(len(stack_trace_list) > 0)
-        
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
