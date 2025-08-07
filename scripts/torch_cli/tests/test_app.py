@@ -1,12 +1,10 @@
 # tests/test_cli.py
 import io
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-import yaml
 from cli.run import main
 
 from utils import create_temp_yaml
