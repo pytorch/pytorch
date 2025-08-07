@@ -67,6 +67,12 @@ on:
         required: false
         type: number
         default: 1
+      additional-artifact-name:
+        description: |
+              additional artifacts needed to be downloaded for testing
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -76,7 +82,10 @@ on:
         required: false
         description: |
           FB app token to write to scribe endpoint
-
+      VLLM_TEST_HUGGING_FACE_TOKEN:
+        required: false
+        description: |
+          HF Auth token to test vllm
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -216,6 +225,14 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ inputs.use-gha }}
 
+      - name: Download additional build artifacts
+        if: ${{ inputs.additional-artifact-name != ''}}
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.additional-artifact-name }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ inputs.use-gha }}
+
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
@@ -287,6 +304,7 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
         run: |
@@ -362,6 +380,7 @@ jobs:
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e HUGGING_FACE_HUB_TOKEN \
+            -e VLLM_TEST_HUGGING_FACE_TOKEN \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
@@ -388,7 +407,6 @@ jobs:
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
           fi
-
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
