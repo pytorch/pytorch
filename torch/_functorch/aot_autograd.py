@@ -637,10 +637,15 @@ def create_aot_state(
 
     if fw_metadata.num_intermediate_bases > 0:
         assert not req_subclass_dispatch, f"""\
-torch.compile is currently being used with tensor subclass inputs:
-{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
-that alias one another, which is currently unsupported in the subclass use case. If you run into this,
-please file a github issue"""
+torch.compile is currently being used with tensor subclass inputs.
+We are attempting to a compile a graph with two graph outputs
+that alias one another, specifically output indices:
+
+    {[i for i, x in enumerate(fw_metadata.output_info) if x.output_type == OutputType.alias_of_intermediate]}
+
+ANY output aliasing (even for regular tensors) is currently unsupported if
+there are any subclass outputs. If you run into this, please file a github
+issue"""
 
     if aot_config.is_export:
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
@@ -1149,6 +1154,8 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1226,8 +1233,8 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        boxed_nop_preserve_node_meta,
-        boxed_nop_preserve_node_meta,
+        fw_compiler,
+        bw_compiler,
         default_partition,
         decompositions,
         keep_inference_input_mutations,
