@@ -49,6 +49,7 @@ cc_library(
             "onnx/*.cc",
             "onnx/common/*.cc",
             "onnx/defs/**/*.cc",
+            "onnx/inliner/*.cc",
             "onnx/shape_inference/*.cc",
             "onnx/version_converter/*.cc",
         ],
@@ -61,6 +62,7 @@ cc_library(
         "onnx/version_converter/*.h",
         "onnx/common/*.h",
         "onnx/defs/**/*.h",
+        "onnx/inliner/*.h",
         "onnx/shape_inference/*.h",
         "onnx/version_converter/adapters/*.h",
     ]) + [
