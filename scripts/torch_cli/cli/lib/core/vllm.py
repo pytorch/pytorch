@@ -103,12 +103,12 @@ class VllmBuildRunner(BuildRunner):
     def cp_torch_whls_if_exist(self):
         if not self.cfg.torch_whl_dir:
             logger.info(
-                "torch whl dir not provided, using default setting in dockerfile"
+                "torch whl dir not provided, using default setting when build vllm with torch nightly"
             )
             return
         if not is_path_exist(self.cfg.torch_whl_dir):
             raise ValueError(
-                f"torch whl dir is provided as {self.cfg.torch_whl_dir}, but it does not exist"
+                f"torch whl dir is provided: {self.cfg.torch_whl_dir}, but it does not exist"
             )
         tmp_dir = f"./{self.work_directory}/{_VLLM_TEMP_FOLDER}"
         force_create_dir(tmp_dir)
@@ -124,6 +124,9 @@ class VllmBuildRunner(BuildRunner):
             logger.info("using vllm default dockerfile.torch_nightly for build")
 
     def get_result_path(self, path):
+        """
+        Get the absolute path of the result path
+        """
         if not path:
             path = _DEFAULT_RESULT_PATH
         abs_path = get_abs_path(path)
