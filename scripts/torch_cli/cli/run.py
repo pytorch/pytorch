@@ -4,7 +4,7 @@ import argparse
 import logging
 
 from cli.build_cli.register_build import register_build_commands
-from cli.lib.logger import setup_logging
+from cli.lib.common.logger import setup_logging
 
 
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 import logging
 
-from cli.lib.vllm import build_vllm
+from cli.lib.core.vllm import build_vllm
 
 
 logger = logging.getLogger(__name__)

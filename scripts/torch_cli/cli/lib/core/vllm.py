@@ -1,6 +1,6 @@
 import logging
 
-from cli.lib.utils import read_yaml_file
+from cli.lib.common.utils import read_yaml_file
 
 
 logger = logging.getLogger(__name__)
