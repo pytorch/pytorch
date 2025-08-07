@@ -2644,6 +2644,18 @@ class CPUReproTests(TestCase):
             self.common(fn, inps)
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_large_mean(self):
+        size = (30000, 100000)
+        t = torch.rand(size, dtype=torch.float)
+        op = torch.mean
+        expected = op(t)
+        actual = torch.compile(op)(t)
+        self.assertEqual(expected, actual)
+        with set_num_threads(1):
+            expected = op(t)
+            actual = torch.compile(op)(t)
+            self.assertEqual(expected, actual)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3104,6 +3116,30 @@ class CPUReproTests(TestCase):
         get_traj_idx(lengths, num_slices=4)
         lengths = torch.zeros(11, dtype=torch.long)
         get_traj_idx(lengths, num_slices=4)
+
+    def test_store_reduction(self):
+        # fix https://github.com/pytorch/pytorch/issues/157683
+        def fn(x, y):
+            r1 = x.amax(dim=0)
+            r2 = y.amax(dim=0)
+            return r1, r2
+
+        device = "cpu"
+        for int_dypte, float_dtype in zip(
+            [torch.int64, torch.int32, torch.int16, torch.int8],
+            [torch.float64, torch.float32, torch.float16, torch.bfloat16],
+        ):
+            x = torch.randint(
+                low=0, high=100, size=(16, 24, 59), dtype=int_dypte, device=device
+            )
+            y = torch.randn(16, 24, 59, dtype=float_dtype, device=device)
+            self.common(
+                fn,
+                (
+                    x,
+                    y,
+                ),
+            )
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)

@@ -1,12 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
 import dataclasses
+import os
+import tempfile
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard as ShardedTensorShard,
+    ShardedTensor,
+    ShardMetadata,
+)
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
+from torch.distributed.checkpoint.staging import _ReplicationStager
+from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -816,6 +827,524 @@ class TestDTensorStateDictStager(DTensorTestBase):
         )
         self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
         self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
+
+
+class TestReplicationStager(DTensorTestBase):
+    """
+    Test suite for _ReplicationStager functionality.
+    Tests replication of state_dict across training ranks using CPU tensors only.
+    """
+
+    @property
+    def backend(self) -> str:
+        return "cpu:gloo,cuda:nccl"
+
+    def _create_simple_state_dict(self, rank: int) -> dict:
+        """
+        Create a simple state_dict with CPU tensors, deterministically unique per rank.
+
+        Args:
+            rank: The rank number to create unique tensors for
+
+        Returns:
+            dict: A state dictionary with CPU tensors
+        """
+        # Create unique tensors for each rank
+        torch.manual_seed(42 + rank)  # Different seed per rank
+
+        return {
+            "layer1.weight": torch.randn(64, 128, device="cpu"),
+            "layer1.bias": torch.randn(64, device="cpu"),
+            "layer2.weight": torch.randn(32, 64, device="cpu"),
+            "layer2.bias": torch.randn(32, device="cpu"),
+            "nested": {
+                "param": torch.randn(16, 16, device="cpu"),
+                "buffer": torch.randn(8, device="cpu"),
+            },
+            "scalar": torch.tensor(float(rank), device="cpu"),
+        }
+
+    def _verify_simple_state_dict_replication(
+        self, replicated_dict: dict, rank: int, partner_rank: int
+    ):
+        """
+        Verify that replication worked correctly.
+
+        Args:
+            replicated_dict: The replicated state_dict received from partner
+            rank: Current rank
+            partner_rank: Partner rank we should have received from
+        """
+        # Create expected state_dict (what partner rank would have created)
+        expected_dict = self._create_simple_state_dict(partner_rank)
+
+        def compare_tensors(actual, expected, path=""):
+            if isinstance(actual, dict) and isinstance(expected, dict):
+                self.assertEqual(
+                    actual.keys(), expected.keys(), f"Keys mismatch at {path}"
+                )
+                for key in actual:
+                    compare_tensors(
+                        actual[key], expected[key], f"{path}.{key}" if path else key
+                    )
+            elif isinstance(actual, torch.Tensor) and isinstance(
+                expected, torch.Tensor
+            ):
+                self.assertEqual(
+                    actual.device.type, "cpu", f"Tensor at {path} should be on CPU"
+                )
+                self.assertEqual(
+                    actual.shape, expected.shape, f"Shape mismatch at {path}"
+                )
+                self.assertEqual(
+                    actual.dtype, expected.dtype, f"Dtype mismatch at {path}"
+                )
+                self.assertTrue(
+                    torch.equal(actual, expected), f"Values mismatch at {path}"
+                )
+            else:
+                self.assertEqual(actual, expected, f"Value mismatch at {path}")
+
+        compare_tensors(replicated_dict, expected_dict)
+
+    def _create_dtensor_state_dict(self, rank: int, device_mesh: DeviceMesh) -> dict:
+        """
+        Create state_dict with DTensor and regular tensors for deterministic testing
+        due to DTensor Shard, Replicate placements.
+
+        Args:
+            rank: Current rank
+            device_mesh: DeviceMesh for DTensor creation
+
+        Returns:
+            dict: State dictionary with DTensors
+        """
+        # Create a large global tensor with deterministic values
+        # Each position contains a unique value that encodes both position and rank info
+        global_size = 128
+        global_tensor = torch.arange(0, global_size * 16, dtype=torch.float32).reshape(
+            global_size, 16
+        )
+
+        # Create DTensor with Shard(0) - each rank gets different rows
+        sharded_dtensor = distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+
+        # Create DTensor with Replicate() - all ranks have the same data
+        replicated_global = torch.full(
+            (8, 8), float(global_size * 100), dtype=torch.float32, device="cpu"
+        )
+        replicated_dtensor = distribute_tensor(
+            replicated_global, device_mesh, [Replicate()]
+        )
+
+        return {
+            "sharded_param": sharded_dtensor,
+            "replicated_param": replicated_dtensor,
+            "rank_scalar": torch.tensor(float(rank), device="cpu"),
+        }
+
+    def _verify_dtensor_replication(
+        self, replicated_dict: dict, rank: int, partner_rank: int
+    ):
+        """
+        Verify DTensor replication accuracy by checking local shards and global reconstruction.
+
+        Args:
+            replicated_dict: Replicated state_dict received from partner
+            rank: Current rank
+            partner_rank: Partner rank we should have received from
+        """
+        # Verify sharded DTensor
+        if "sharded_param" in replicated_dict:
+            replicated_sharded = replicated_dict["sharded_param"]
+            self.assertIsInstance(replicated_sharded, DTensor, "Should receive DTensor")
+
+            # Get local shard from replicated DTensor
+            replicated_local = replicated_sharded.to_local()
+
+            # Create expected local shard (what partner rank would have)
+            expected_global = torch.arange(0, 128 * 16, dtype=torch.float32).reshape(
+                128, 16
+            )
+
+            # Calculate expected shard for this rank's position
+            world_size = dist.get_world_size()
+            shard_size = 128 // world_size
+            start_idx = partner_rank * shard_size
+            end_idx = (partner_rank + 1) * shard_size
+            expected_local = expected_global[start_idx:end_idx]
+
+            self.assertTrue(
+                torch.equal(replicated_local, expected_local),
+                "Sharded DTensor value mismatch",
+            )
+
+            # Verify DTensor metadata is preserved
+            self.assertEqual(
+                replicated_sharded._spec.placements[0].__class__.__name__,
+                "Shard",
+                "DTensor should maintain Shard placement",
+            )
+
+        # Verify replicated DTensor
+        if "replicated_param" in replicated_dict:
+            replicated_replicated = replicated_dict["replicated_param"]
+            self.assertIsInstance(
+                replicated_replicated, DTensor, "Should receive DTensor"
+            )
+
+            # Get local data from replicated DTensor
+            replicated_local = replicated_replicated.to_local()
+
+            # Expected value should be global_size * 100
+            expected_value = float(128 * 100)
+            expected_tensor = torch.full(
+                (8, 8), expected_value, dtype=torch.float32, device="cpu"
+            )
+
+            self.assertTrue(
+                torch.equal(replicated_local, expected_tensor),
+                "Replicated DTensor value mismatch",
+            )
+
+            # Verify DTensor metadata is preserved
+            self.assertEqual(
+                replicated_replicated._spec.placements[0].__class__.__name__,
+                "Replicate",
+                "DTensor should maintain Replicate placement",
+            )
+
+        # Verify regular tensors
+        if "rank_scalar" in replicated_dict:
+            self.assertEqual(
+                replicated_dict["rank_scalar"].item(),
+                float(partner_rank),
+                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+            )
+
+    def _create_sharded_tensor_state_dict(self, rank: int, world_size: int) -> dict:
+        """
+        Create state_dict with ShardedTensor for deterministic testing.
+
+        Args:
+            rank: Current rank
+            world_size: Total world size
+
+        Returns:
+            dict: State dictionary with ShardedTensor
+        """
+        # Create deterministic local shard for this rank
+        global_size = 64
+        shard_size = global_size // world_size
+        start_idx = rank * shard_size
+        end_idx = (rank + 1) * shard_size
+
+        # Create local tensor with deterministic values
+        local_tensor = torch.arange(
+            start_idx * 8, end_idx * 8, dtype=torch.float32, device="cpu"
+        ).reshape(shard_size, 8)
+
+        # Create ShardedTensor using init_from_local_shards
+        sharded_tensor = init_from_local_shards(
+            [
+                ShardedTensorShard(
+                    tensor=local_tensor,
+                    metadata=ShardMetadata(
+                        shard_offsets=[start_idx, 0],
+                        shard_sizes=[shard_size, 8],
+                        placement=f"rank:{rank}/cpu",
+                    ),
+                )
+            ],
+            global_size,
+            8,
+        )
+
+        return {
+            "sharded_tensor": sharded_tensor,
+            "rank_scalar": torch.tensor(float(rank), device="cpu"),
+        }
+
+    def _verify_sharded_tensor_replication(
+        self, replicated_dict: dict, rank: int, partner_rank: int
+    ):
+        """
+        Verify ShardedTensor replication accuracy by checking local shards and metadata.
+
+        Args:
+            replicated_dict: Replicated state_dict received from partner
+            rank: Current rank
+            partner_rank: Partner rank we should have received from
+        """
+        # Verify sharded tensor
+        if "sharded_tensor" in replicated_dict:
+            replicated_sharded = replicated_dict["sharded_tensor"]
+            self.assertIsInstance(
+                replicated_sharded, ShardedTensor, "Should receive ShardedTensor"
+            )
+
+            # Get local shard from replicated ShardedTensor
+            local_shards = replicated_sharded.local_shards()
+            self.assertEqual(
+                len(local_shards), 1, "Should have exactly one local shard"
+            )
+
+            local_shard = local_shards[0]
+            replicated_local = local_shard.tensor
+
+            # Create expected local shard (what partner rank would have)
+            world_size = dist.get_world_size()
+            global_size = 64
+            shard_size = global_size // world_size
+            start_idx = partner_rank * shard_size
+            end_idx = (partner_rank + 1) * shard_size
+
+            expected_local = torch.arange(
+                start_idx * 8, end_idx * 8, dtype=torch.float32, device="cpu"
+            ).reshape(shard_size, 8)
+
+            self.assertTrue(
+                torch.equal(replicated_local, expected_local),
+                "Sharded tensor value mismatch",
+            )
+
+            # Verify shard metadata is preserved
+            expected_metadata = ShardMetadata(
+                shard_offsets=[start_idx, 0],
+                shard_sizes=[shard_size, 8],
+                placement=f"rank:{partner_rank}/cpu",
+            )
+            self.assertEqual(
+                local_shard.metadata.shard_offsets,
+                expected_metadata.shard_offsets,
+                "Shard offsets should match",
+            )
+            self.assertEqual(
+                local_shard.metadata.shard_sizes,
+                expected_metadata.shard_sizes,
+                "Shard sizes should match",
+            )
+
+        # Verify regular tensors
+        if "rank_scalar" in replicated_dict:
+            self.assertEqual(
+                replicated_dict["rank_scalar"].item(),
+                float(partner_rank),
+                f"Rank scalar should be {partner_rank}, got {replicated_dict['rank_scalar'].item()}",
+            )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_replication_basic(self):
+        """Test basic replication functionality with world_size=16"""
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Create unique DTensor state_dict for this rank
+        state_dict = self._create_simple_state_dict(current_rank)
+
+        # Initialize replication stager
+        stager = _ReplicationStager(
+            pg=dist.new_group(backend=dist.Backend.GLOO),
+            timeout=timedelta(seconds=30),
+            device=torch.device("cpu"),
+        )
+
+        # Perform replication
+        replicated_dict = stager.stage(state_dict)
+
+        # Calculate expected partner rank
+        partner_rank = (current_rank + world_size // 2) % world_size
+
+        # Verify DTensor replication
+        self._verify_simple_state_dict_replication(
+            replicated_dict, current_rank, partner_rank
+        )
+
+        # Clean up
+        stager.close()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_replication_dtensors(self):
+        """Test replication with DTensor and mixed tensor types"""
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Create CPU-based DeviceMesh for DTensor
+        device_mesh = DeviceMesh("cpu", list(range(world_size)))
+
+        # Create DTensor state_dict which includes different tensor types
+        state_dict = self._create_dtensor_state_dict(current_rank, device_mesh)
+
+        # Initialize replication stager
+        stager = _ReplicationStager(
+            pg=dist.group.WORLD,
+            timeout=timedelta(seconds=30),
+            device=torch.device("cpu"),
+        )
+
+        # Perform replication
+        result = stager.stage(state_dict)
+
+        # Wait for completion
+        from concurrent.futures import Future
+
+        if isinstance(result, Future):
+            replicated_dict = result.result()
+        else:
+            replicated_dict = result
+
+        # Calculate expected partner
+        partner_rank = (current_rank + world_size // 2) % world_size
+
+        # Verify all DTensor types are correctly replicated
+        self._verify_dtensor_replication(replicated_dict, current_rank, partner_rank)
+
+        # Clean up
+        stager.close()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_replication_sharded_tensors(self):
+        """Test replication with ShardedTensor and mixed tensor types"""
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Create ShardedTensor state_dict for this rank
+        state_dict = self._create_sharded_tensor_state_dict(current_rank, world_size)
+
+        # Initialize replication stager
+        stager = _ReplicationStager(
+            pg=dist.group.WORLD,
+            timeout=timedelta(seconds=30),
+            device=torch.device("cpu"),
+        )
+
+        # Perform replication
+        result = stager.stage(state_dict)
+
+        # Wait for completion
+        from concurrent.futures import Future
+
+        if isinstance(result, Future):
+            replicated_dict = result.result()
+        else:
+            replicated_dict = result
+
+        # Calculate expected partner
+        partner_rank = (current_rank + world_size // 2) % world_size
+
+        # Verify all ShardedTensor types are correctly replicated
+        self._verify_sharded_tensor_replication(
+            replicated_dict, current_rank, partner_rank
+        )
+
+        # Clean up
+        stager.close()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_replication_persistence(self):
+        """Test persistence functionality in _ReplicationStager"""
+        world_size = dist.get_world_size()
+
+        current_rank = dist.get_rank()
+
+        # Test 1: Default storage directory (auto-generated tempdir)
+        with tempfile.TemporaryDirectory() as _:
+            # Create state_dict for this rank
+            state_dict = self._create_simple_state_dict(current_rank)
+
+            # Initialize stager with default storage_dir (None)
+            stager = _ReplicationStager(
+                pg=dist.group.WORLD,
+                timeout=timedelta(seconds=30),
+                device=torch.device("cpu"),
+                storage_dir=None,  # Let it create its own tempdir
+            )
+
+            # Perform replication to trigger persistence
+            stager.stage(state_dict)
+
+            # Calculate expected partner rank
+            partner_rank = (current_rank + world_size // 2) % world_size
+
+            # Verify file was created with correct naming convention
+            expected_path = stager._get_persisted_path(current_rank, partner_rank)
+
+            self.assertTrue(
+                os.path.exists(expected_path),
+                f"Persisted file should exist at {expected_path}",
+            )
+
+            # Verify the storage directory was created
+            self.assertTrue(
+                os.path.isdir(stager._storage_dir), "Storage directory should exist"
+            )
+            self.assertTrue(
+                stager._storage_dir.startswith(tempfile.gettempdir()),
+                "Default storage directory should be in system temp directory",
+            )
+
+            # Load and verify the persisted state_dict matches the received one
+            loaded_state_dict = torch.load(expected_path)
+            self._verify_simple_state_dict_replication(
+                loaded_state_dict, current_rank, partner_rank
+            )
+
+            # Clean up
+            stager.close()
+
+        # Test 2: Custom storage directory
+        with tempfile.TemporaryDirectory() as custom_storage_dir:
+            # Create custom subdirectory
+            custom_subdir = os.path.join(custom_storage_dir, "custom_replication_test")
+
+            # Create state_dict for this rank
+            state_dict = self._create_simple_state_dict(current_rank)
+
+            # Initialize stager with custom storage_dir
+            stager = _ReplicationStager(
+                pg=dist.group.WORLD,
+                timeout=timedelta(seconds=30),
+                device=torch.device("cpu"),
+                storage_dir=custom_subdir,
+            )
+
+            # Perform replication to trigger persistence
+            stager.stage(state_dict)
+
+            # Verify custom storage directory was created and used
+            self.assertEqual(
+                stager._storage_dir,
+                custom_subdir,
+                "Should use custom storage directory",
+            )
+            self.assertTrue(
+                os.path.isdir(custom_subdir),
+                "Custom storage directory should be created",
+            )
+
+            # Verify file was created in custom directory
+            expected_path = stager._get_persisted_path(current_rank, partner_rank)
+
+            self.assertTrue(
+                os.path.exists(expected_path),
+                f"Persisted file should exist in custom directory at {expected_path}",
+            )
+
+            # Load and verify the persisted state_dict
+            loaded_state_dict = torch.load(expected_path)
+            self._verify_simple_state_dict_replication(
+                loaded_state_dict, current_rank, partner_rank
+            )
+
+            # Clean up
+            stager.close()
 
 
 if __name__ == "__main__":
