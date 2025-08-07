@@ -19,8 +19,12 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
+import torch.distributed._distributed_c10d as _c10d
 from torch._C import _DistStoreError as DistStoreError
-from torch._C._distributed_c10d import (
+from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
+
+# Import from centralized fallback module - no ImportError handling needed
+from torch.distributed._distributed_c10d import (
     _DistributedBackendOptions,
     _register_process_group,
     _resolve_process_group,
@@ -44,7 +48,6 @@ from torch._C._distributed_c10d import (
     Store,
     Work,
 )
-from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
@@ -1325,7 +1328,9 @@ def _get_default_store() -> Store:
 def _update_default_pg(pg) -> None:
     _world.default_pg = pg
     rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
-    torch._C._distributed_c10d._set_global_rank(rank)
+    from torch.distributed._distributed_c10d import _set_global_rank
+
+    _set_global_rank(rank)
 
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
@@ -1957,7 +1962,7 @@ def _new_process_group_helper(
 
     if device_id:
         pg.bound_device_id = device_id
-    backend_class: torch._C._distributed_c10d.Backend
+    backend_class: _c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -3068,7 +3073,9 @@ def _object_to_tensor(obj, device, group):
         if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
             backend = get_backend(group)
             if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+                from torch.distributed._distributed_c10d import _hash_tensors
+
+                hash = _hash_tensors([byte_tensor])
                 logger.warning(
                     "_object_to_tensor size: %s hash value: %s",
                     byte_tensor.numel(),
@@ -3083,7 +3090,9 @@ def _tensor_to_object(tensor, tensor_size, group):
         if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
             backend = get_backend(group)
             if backend == Backend.NCCL:
-                hash = torch._C._distributed_c10d._hash_tensors([tensor])
+                from torch.distributed._distributed_c10d import _hash_tensors
+
+                hash = _hash_tensors([tensor])
                 logger.warning(
                     "_tensor_to_object size: %s hash value: %s", tensor.numel(), hash
                 )
@@ -4906,7 +4915,7 @@ def monitored_barrier(
 
 
 def _create_process_group_wrapper(
-    wrapped_pg: torch._C._distributed_c10d.Backend,
+    wrapped_pg: _c10d.Backend,
     store_prefix: str,
     store: Store,
     rank: int,

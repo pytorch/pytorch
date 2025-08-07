@@ -21,7 +21,7 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
     """
     from triton.runtime.jit import JITFunction
 
-    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+    from torch.distributed._distributed_c10d import _nvshmemx_cumodule_init
 
     # Detect NVSHMEM device library path from python library path
     if lib_dir is None:

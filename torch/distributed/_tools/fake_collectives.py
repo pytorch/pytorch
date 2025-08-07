@@ -2,12 +2,21 @@ import random
 from typing import Any
 
 import torch
-from torch._C._distributed_c10d import (
+
+# Import centralized distributed components
+from torch.distributed._distributed_c10d import (
     _resolve_process_group,
     FakeWork,
+    HAS_DISTRIBUTED,
     ProcessGroup,
     Work,
 )
+
+
+# In distributed builds, assume operators always exist
+OPERATORS_AVAILABLE = HAS_DISTRIBUTED
+
+
 from torch.utils._pytree import tree_map_only
 
 
@@ -63,6 +72,7 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
+
 lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
 for op, meta_func in _META_FUNCTIONS.items():
     lib_impl.impl(op, meta_func, "Meta")
@@ -93,6 +103,7 @@ non_functional_collectives: set[torch._ops.OpOverload] = {
     c10d.barrier.default,
     c10d.monitored_barrier_.default,
 }
+
 functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.broadcast.default,
     _c10d_functional.all_reduce.default,
