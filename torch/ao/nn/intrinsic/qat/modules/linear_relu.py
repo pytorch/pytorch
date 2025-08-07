@@ -36,7 +36,7 @@ class LinearReLU(nnqat.Linear, _FusedModule):
         torch.Size([128, 30])
     """
 
-    _FLOAT_MODULE = nni.LinearReLU
+    _FLOAT_MODULE = nni.LinearReLU  # type: ignore[assignment]
 
     def __init__(
         self,

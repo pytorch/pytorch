@@ -67,7 +67,8 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
-if TEST_WITH_TORCHINDUCTOR:
+from typing import TYPE_CHECKING
+if TEST_WITH_TORCHINDUCTOR or TYPE_CHECKING:
     from torch._inductor.test_case import TestCase
 else:
     from torch.testing._internal.common_utils import TestCase  # type: ignore[assignment]
