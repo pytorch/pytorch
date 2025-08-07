@@ -28,7 +28,6 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import aoti_model_name_from_config
 from torch.torch_version import TorchVersion
 
 
@@ -638,7 +637,7 @@ def _get_optimization_cflags(
         return cflags
 
 
-def _get_shared_cflag(do_link: bool) -> list[str]:
+def _get_shared_cflags(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -651,6 +650,25 @@ def _get_shared_cflag(do_link: bool) -> list[str]:
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     return ["shared", "fPIC"]
+
+
+def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+    """
+    When we turn on generate debug symbol.
+    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+    On Linux, it should create some debug sections in binary file.
+    """
+    cflags: list[str] = []
+    ldflags: list[str] = []
+    b_enable_debug_symbol = os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+    if b_enable_debug_symbol:
+        if _IS_WINDOWS:
+            cflags = ["Z7", "_DEBUG", "OD"]
+            ldflags = ["DEBUG", "OPT:REF", "OPT:ICF"]
+        else:
+            cflags.append("g")
+
+    return cflags, ldflags
 
 
 def get_cpp_options(
@@ -668,12 +686,15 @@ def get_cpp_options(
     libraries: list[str] = []
     passthrough_args: list[str] = []
 
+    dbg_cflags, dbg_ldflags = _get_inductor_debug_symbol_cflags()
+
     cflags = (
-        _get_shared_cflag(do_link)
+        _get_shared_cflags(do_link)
         + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
+        + dbg_cflags
     )
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
@@ -686,7 +707,7 @@ def get_cpp_options(
         definitions,
         include_dirs,
         cflags,
-        ldflags,
+        ldflags + dbg_ldflags,
         libraries_dirs,
         libraries,
         passthrough_args,
@@ -1545,7 +1566,9 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
-        self._target_name = aoti_model_name_from_config()
+        self._target_name = (
+            config.aot_inductor.model_name_for_generated_files or "aoti_model"
+        )
 
         # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
@@ -1781,22 +1804,54 @@ class CppBuilder:
             project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
+            # Set a library target
             add_library({self._target_name} {target_library_type})
-
-            # Add macro definitions
-            target_compile_definitions({self._target_name} PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options({self._target_name} PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )
+
+        if (
+            not config.aot_inductor.compile_standalone
+            or config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, the generated cpp project should
+            # not use Torch. But for unit testing purpose, we need to use Torch here.
+            contents += textwrap.dedent(
+                """
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
+
+                """
+            )
+            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
+            # will make the generated CMake file more portable and won't really hurt performance.
+            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
+            # be still needed.
+            contents += textwrap.dedent(
+                f"""
+                # Add macro definitions
+                target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+                # Backend-specific flags
+                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+                """
+            )
+        else:
+            # When compile_standalone is True, use TorchStandalone instead of Torch
+            contents += textwrap.dedent(
+                f"""
+                find_package(TorchStandalone REQUIRED)
+                # Set up include directories to find headers at the correct paths
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}})
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}}/standalone)
+
+                """
+            )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
@@ -1804,7 +1859,11 @@ class CppBuilder:
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
+                set(CMAKE_CUDA_STANDARD 17)
                 find_package(CUDAToolkit REQUIRED)
+                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
+                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
+                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1833,7 +1892,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_80,code=compute_80
+                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
                                 -gencode arch=compute_{current_arch},code=sm_{current_arch}
                         DEPENDS ${{PTX_FILE}}
                     )
@@ -1882,12 +1941,20 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
-            f.write(
-                f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
-            )
+            if asm_files:
+                f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
+                f.write(
+                    f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
+                )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        if (
+            config.aot_inductor.compile_standalone
+            and not config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, do not link with libtorch
+            return
+
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(

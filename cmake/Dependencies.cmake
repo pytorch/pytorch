@@ -576,7 +576,7 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   find_library(microkernels-prod_LIBRARY microkernels-prod)
   set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
   set_property(TARGET microkernels-prod PROPERTY IMPORTED_LOCATION "${microkernels-prod_LIBRARY}")
-  if(NOT XNNPACK_LIBRARY or NOT microkernels-prod_LIBRARY)
+  if(NOT XNNPACK_LIBRARY OR NOT microkernels-prod_LIBRARY)
     message(FATAL_ERROR "Cannot find XNNPACK")
   endif()
   message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
@@ -1143,7 +1143,7 @@ if(USE_UCC)
 endif()
 
 # ---[ CUB
-if(USE_CUDA)
+if(USE_CUDA AND CUDA_VERSION VERSION_LESS 13.0)
   find_package(CUB)
   if(NOT CUB_FOUND)
     message(FATAL_ERROR "Cannot find CUB.")
@@ -1166,17 +1166,10 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     # Tensorpipe uses cuda_add_library
     torch_update_find_cuda_flags()
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      message(WARNING "Archived TensorPipe forces CMake compatibility mode")
-      set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
-      unset(CMAKE_POLICY_VERSION_MINIMUM)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
