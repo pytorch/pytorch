@@ -34,6 +34,7 @@ from torch._dynamo.utils import (
     identity,
     preserve_rng_state,
 )
+from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -2280,6 +2281,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
+        best_config_future=None,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2387,6 +2389,35 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
             autotune_start_ts = time.time()
+
+            if best_config_future is not None:
+                best_config = await_sync(best_config_future)
+
+                important_keys = [
+                    "ACC_TYPE",
+                    "ALLOW_TF32",
+                    "BLOCK_K",
+                    "BLOCK_M",
+                    "BLOCK_N",
+                    "EVEN_K",
+                    "GROUP_M",
+                    "USE_FAST_ACCUM",
+                    "num_stages",
+                    "num_warps",
+                    "num_consumer_groups",
+                    "num_buffers_warp_spec",
+                ]
+                choices = [
+                    choice
+                    for choice in choices
+                    if all(
+                        f"{k}={best_config[k]}" in choice.description
+                        for k in important_keys
+                    )
+                    for k in important_keys
+                ]
+                log.info("Filtered to %d choices based on best_config", len(choices))
+
             timings = self.lookup(
                 choices,
                 name,
