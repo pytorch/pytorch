@@ -4,6 +4,58 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/Stream.h>
 
+namespace c10 {
+
+using CaptureId_t = unsigned long long;
+
+// first is set if the instance is created by Graph mode capture_begin.
+// second is set if the instance is created by Graph mode graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+struct C10_API DeviceAllocator : public c10::Allocator {
+  DeviceAllocator();
+  ~DeviceAllocator() override;
+
+  // Returns true if the allocator has been properly initialized and is ready
+  // for use
+  virtual bool initialized() = 0;
+
+  // Releases all cached device memory from the specified memory pool back to
+  // the system
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
+
+  // Associates a memory allocation with a stream to establish dependency
+  // tracking. Prevents memory reuse until all operations on the specified
+  // stream complete
+  virtual void recordStream(const DataPtr& ptr, c10::Stream stream) = 0;
+
+  // Retrieves comprehensive memory statistics for the specified device,
+  // including allocation patterns, usage metrics
+  virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
+
+  // Resets cumulative allocation statistics for the specified device to zero
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+
+  // Resets peak memory usage statistics for the specified device
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+};
+
+// This function is used to get the DeviceAllocator for a specific device type
+// and keep backward compatibility with c10::GetAllocator.
+C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
+  TORCH_CHECK(
+      t != DeviceType::CPU,
+      "getDeviceAllocator is not supported for CPU device type.");
+  auto* allocator = c10::GetAllocator(t);
+  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
+  TORCH_INTERNAL_ASSERT(
+      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
+  return device_allocator;
+}
+
+} // namespace c10
+
 namespace c10::CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
@@ -39,22 +91,26 @@ struct BlockComparatorAddress {
 template <typename BlockT>
 struct PrivatePool;
 
+/**
+ * BlockPool is a memory pool that manages reusable memory blocks of a single
+ * type, such as DeviceBlock. Each instance only could contain one kind of block
+ * size category (small or large).
+ *
+ * It is templated on BlockT, representing the type of memory block being
+ * managed. The pool maintains two sets: one for currently allocated and
+ * reusable blocks backed by physical memory, and another for unmapped but
+ * reusable blocks managed via expandable segments.
+ *
+ * BlockPool also keeps track of whether it manages small or large blocks, and
+ * optionally, the PrivatePool it is associated with.
+ */
 template <typename BlockT>
 struct BlockPool {
   BlockPool(bool small, PrivatePool<BlockT>* private_pool = nullptr)
       : blocks(BlockComparatorSize<BlockT>()),
         unmapped(BlockComparatorAddress<BlockT>()),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
-
-  // Do not insert a Block to blocks directly; use insert_into_blocks(),
-  // instead.
-  std::set<BlockT*, BlockComparatorSize<BlockT>> blocks{};
-  std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped{};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const bool is_small;
-  PrivatePool<BlockT>* owner_PrivatePool;
-  size_t get_free_blocks_call_count{0};
+        is_small_(small),
+        owner_PrivatePool_(private_pool) {}
 
   // Add a Block into blocks set with updating gc counter.
   std::pair<
@@ -66,30 +122,55 @@ struct BlockPool {
   }
 
   MempoolId_t owner_MempoolId() const {
-    if (owner_PrivatePool) {
-      return owner_PrivatePool->id;
+    if (owner_PrivatePool_) {
+      return owner_PrivatePool_->id();
     } else {
       return {0, 0};
     }
   }
 
-  StatTypes get_stat_types() {
+  bool is_small() const {
+    return is_small_;
+  }
+
+  // Returns the statistic types tracked by this BlockPool based on its size
+  // category (small or large).
+  StatTypes get_stat_types() const {
     StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
     stat_types[static_cast<size_t>(
-        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+        is_small_ ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
     return stat_types;
   }
+
+  // Currently allocated and reusable blocks backed by physical memory. Do not
+  // insert block directly into this set. Use `insert_into_blocks` instead to
+  // ensure proper handling by the garbage collection mechanism.
+  std::set<BlockT*, BlockComparatorSize<BlockT>> blocks{};
+  // Unmapped but reusable blocks to support expandable segments.
+  std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped{};
+
+ private:
+  // Indicates whether this pool manages small or large blocks.
+  bool is_small_;
+  // Pointer to the PrivatePool that owns this BlockPool, if any.
+  PrivatePool<BlockT>* owner_PrivatePool_;
+  // Counter for the number of get_free_blocks made. This is used to track gc.
+  size_t get_free_blocks_call_count{0};
 };
 
+// Forward declaration
 template <typename StreamT>
 struct ExpandableSegment;
 
 /**
- * DeviceBlock is typically a fundamental memory block used in device caching
- * allocator. It is represented a memory block allocated on a specific device
- * with Stream. It is probably a base struct or interface that can be inherited
- * and extended by each backend.
+ * DeviceBlock is typically a fundamental unit of memory used in device caching
+ * allocator. It corresponds to a memory block allocated on a specific device
+ * and associated with a particular stream.
+ *
+ * A DeviceBlock may also track which BlockPool it belongs to. This struct is
+ * intended to serve as a base type or interface that can be extended by
+ * specific backend implementations.
  */
 template <typename StreamT>
 struct DeviceBlock {
@@ -194,11 +275,11 @@ struct DeviceBlock {
   // Always true unless part of expandable segment.
   // When false, block alignment matches segment size.
   bool mapped{true};
-  BlockT* prev{nullptr}; // Prevous block if split from a larger allocation
+  BlockT* prev{nullptr}; // Previous block if split from a larger allocation
   BlockT* next{nullptr}; // Next block if split from a larger allocation
   int event_count{0}; // Number of outstanding events referencing block
   size_t gc_count_base{0}; // Pool's gc count at block insertion time
-  // Records the last time we handed this memory out from our cache.
+  // Records the last time we handed this memory out from our cache
   std::shared_ptr<GatheredContext> context_when_allocated;
   // Only set for the first block in the segment (when prev == null).
   // This records the frame information when device allocation was called,
@@ -207,11 +288,17 @@ struct DeviceBlock {
   ExpandableSegment<StreamT>* expandable_segment_{nullptr};
 };
 
+/**
+ * PrivatePool manages BlockPool and their associated allocator. It maintains
+ * separate BlockPools for small and large blocks, and tracks allocation usage
+ * for lifecycle management.
+ */
 template <typename BlockT>
 struct PrivatePool {
   using BlockPoolT = BlockPool<BlockT>;
+
   PrivatePool(MempoolId_t id, DeviceAllocator* allocator = nullptr)
-      : id(std::move(id)),
+      : id_(std::move(id)),
         allocator_(allocator),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
@@ -220,32 +307,47 @@ struct PrivatePool {
   PrivatePool& operator=(PrivatePool&&) = delete;
   ~PrivatePool() = default;
 
-  MempoolId_t id{0, 0};
+  DeviceAllocator* allocator() const {
+    return allocator_;
+  }
+
+  MempoolId_t id() const {
+    return id_;
+  }
+
+  BlockPoolT large_blocks; // Large blocks pool this PrivatePool manages
+  BlockPoolT small_blocks; // Small blocks pool this PrivatePool manages
   // Number of live graphs using this pool
   int use_count{1};
   // Number of unfreed device allocation made for this pool. When use_count and
   // deviceMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
   int deviceMalloc_count{0};
+
+ private:
+  // ID of this private pool, used to identify it in the allocator.
+  MempoolId_t id_;
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
   // check in BlockComparator. BlockComparator is performance- critical though,
   // I'd rather not add more logic to it.
   DeviceAllocator* allocator_;
-  BlockPoolT large_blocks;
-  BlockPoolT small_blocks;
-
- public:
-  DeviceAllocator* allocator() {
-    return allocator_;
-  }
 };
 
 // Represents a contiguous virtual memory segment mapped for allocation.
 struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr_(static_cast<char*>(p)), size_(s) {}
 
+  char* begin() const {
+    return ptr_;
+  }
+
+  char* end() const {
+    return ptr_ + size_;
+  }
+
+ private:
   char* ptr_; // Starting address of the mapped range.
   size_t size_; // Size in bytes of the mapped range.
 };
@@ -262,6 +364,27 @@ struct ExpandableSegmentTraits {
       "ExpandableSegmentTraits must be specialized for this StreamT");
 };
 
+/**
+ * ExpandableSegment is an abstract base class that manages a virtual memory
+ * segment composed of multiple equally-sized sub-segments (e.g., 2MB or 20MB)
+ * on a specific device.
+ *
+ * It provides mechanisms for:
+ * - Reserving a large virtual memory region
+ * - Mapping/unmapping physical memory into sub-ranges on demand
+ * - Granting access to peer devices
+ * - Tracking which parts of the segment are currently allocated
+ *
+ * Each segment is parameterized by a Stream type (StreamT), and uses a
+ * backend-specific HandleT (defined by ExpandableSegmentTraits) to represent
+ * physical memory handles.
+ *
+ * This class is intended to be extended by backends (e.g., CUDA, XPU, etc.) to
+ * implement memory mapping and access control policies. It is useful for
+ * caching allocators that want to reuse virtual address ranges efficiently,
+ * grow allocations dynamically, and support multi-device access through peer
+ * mappings.
+ */
 template <typename StreamT>
 struct ExpandableSegment {
   using HandleT = typename ExpandableSegmentTraits<StreamT>::HandleT;
@@ -287,9 +410,9 @@ struct ExpandableSegment {
 
   // Maps a virtual memory range to physical memory.
   virtual SegmentRange map(SegmentRange range) {
-    auto begin = segmentLeft(range.ptr_);
-    auto end = segmentRight(range.ptr_ + range.size_);
-    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr_);
+    auto begin = segmentLeft(range.begin());
+    auto end = segmentRight(range.end());
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.begin());
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
@@ -303,10 +426,10 @@ struct ExpandableSegment {
 
   // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
-    auto begin = segmentRight(range.ptr_);
-    auto end = segmentLeft(range.ptr_ + range.size_);
+    auto begin = segmentRight(range.begin());
+    auto end = segmentLeft(range.end());
     if (begin >= end) {
-      return SegmentRange{range.ptr_, 0};
+      return SegmentRange{range.begin(), 0};
     }
     unmapHandles(begin, end);
     return rangeFromHandles(begin, end);
@@ -516,56 +639,3 @@ inline size_t get_allocation_size(size_t size) {
 }
 
 } // namespace c10::CachingDeviceAllocator
-
-namespace c10 {
-
-using CaptureId_t = unsigned long long;
-
-// first is set if the instance is created by Graph mode capture_begin.
-// second is set if the instance is created by Graph mode graph_pool_handle.
-using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
-
-struct C10_API DeviceAllocator : public c10::Allocator {
-  DeviceAllocator();
-  ~DeviceAllocator() override;
-
-  // Returns true if the allocator has been properly initialized and is ready
-  // for use
-  virtual bool initialized() = 0;
-
-  // Releases all cached device memory from the specified memory pool back to
-  // the system
-  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
-
-  // Associates a memory allocation with a stream to establish dependency
-  // tracking. Prevents memory reuse until all operations on the specified
-  // stream complete
-  virtual void recordStream(const DataPtr& ptr, c10::Stream stream) = 0;
-
-  // Retrieves comprehensive memory statistics for the specified device,
-  // including allocation patterns, usage metrics
-  virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) = 0;
-
-  // Resets cumulative allocation statistics for the specified device to zero
-  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
-
-  // Resets peak memory usage statistics for the specified device
-  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
-};
-
-// This function is used to get the DeviceAllocator for a specific device type
-// and keep backward compatibility with c10::GetAllocator.
-C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
-  TORCH_CHECK(
-      t != DeviceType::CPU,
-      "getDeviceAllocator is not supported for CPU device type.");
-  auto* allocator = c10::GetAllocator(t);
-  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
-  TORCH_INTERNAL_ASSERT(
-      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
-  return device_allocator;
-}
-
-} // namespace c10
- 
