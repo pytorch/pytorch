@@ -381,7 +381,7 @@ namespace {
     TYPED_TEST(Hyperbolic, Tanh) {
         using vec = TypeParam;
 // NOTE: Because SVE uses ACL logic, the precision changes, hence the adjusted tolerance.
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         test_unary<vec>(
@@ -586,7 +586,7 @@ namespace {
         }
       }
     }
-#if defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#if (defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)) && defined(__ARM_FEATURE_BF16)
     TEST(NanBfloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::BFloat16 val(ii, c10::BFloat16::from_bits());
@@ -2122,7 +2122,7 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
     template <typename vec, typename dst_t>
     void test_convert_to(const char* dst_t_name) {
       using src_t = ValueType<vec>;
@@ -2248,6 +2248,18 @@ namespace {
                 x_vec.store(y);                                                 \
                 break; \
               } \
+              case 8: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 8>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
+              case 16: \
+              { \
+                auto x_vec = vec_mask.template loadu<dst_t, 16>(x);          \
+                x_vec.store(y);                                                 \
+                break; \
+              } \
               default: \
                 throw std::out_of_range("Unexpected rnd_n call to vec_mask"); \
             } \
@@ -2287,7 +2299,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -2312,7 +2324,7 @@ namespace {
     #undef TEST_MASK_CHECK_N
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -2339,7 +2351,7 @@ namespace {
       }
     }
 #endif
-#if !defined(CPU_CAPABILITY_SVE256)
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;

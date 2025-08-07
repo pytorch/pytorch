@@ -1203,12 +1203,15 @@ void test_ternary(
           auto input1 = vec_type::loadu(vals1);
           auto input2 = vec_type::loadu(vals2);
           auto actual = actualFunction(input0, input1, input2);
+          CACHE_ALIGN VT actual_[vec_type::size()];
+          actual.store(actual_);
           auto vec_expected = vec_type::loadu(expected);
+
           AssertVectorized<vec_type> vecAssert(
               testNameInfo, seed, vec_expected, actual, input0, input1, input2);
           if (vecAssert.check(
                   bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
-            return;
+                    return;
         } // trial
         changeSeedBy += 1;
     }
