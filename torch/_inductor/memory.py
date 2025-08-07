@@ -4,6 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
+import torch
 from typing import Callable, TYPE_CHECKING, TypedDict, Union
 
 from torch._utils_internal import signpost_event
@@ -400,6 +401,7 @@ def estimate_peak_memory(
         snodes_curr_memory.append(cur_memory)
         max_memory = max(max_memory, cur_memory)
 
+
     return (max_memory, snodes_curr_memory)
 
 @dataclasses.dataclass
@@ -437,7 +439,6 @@ def estimate_peak_memory_debug(
     for i, node in enumerate(nodes):
         snodes_allocfree[node] = step_idx_allocfree[i]
 
-    torch.distributed.breakpoint()
     # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0
@@ -451,6 +452,18 @@ def estimate_peak_memory_debug(
         cur_memory -= free
         post_free = cur_memory
         snodes_curr_memory.append((post_alloc, post_free))
+    if max_memory == 0:
+        print(f"XXX ZERO_PEAK!!! len(nodes):{len(nodes)}")
+        for i, buf_info in enumerate(buf_info_list):
+            print(f"XXX BUF_INFO[{i}]:{buf_info}")
+        for i, af in enumerate(step_idx_allocfree):
+            print(f"XXX AF[{i}]:{af}")
+        for i, m in enumerate(snodes_curr_memory):
+            print(f"SNODE_CURR_MEMORY[{i}]:{m}")
+        for i, af in enumerate(snodes_allocfree.values()):
+            print(f"SNODE_ALLOCFREE[{i}]:{af}")
+        import sys
+        sys.exit(1)
 
     return (max_memory, snodes_curr_memory, snodes_allocfree)
 
@@ -788,3 +801,22 @@ def reorder_for_peak_memory(
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
     return best_result.order
+
+_mems = []
+def _reset():
+    _mems.clear()
+
+def _get_mems():
+    return _mems
+
+def foo():
+    _mems.append(torch.cuda.memory_allocated())
+lib = torch.library.Library("_test", "FRAGMENT")
+lib.define("foo() -> ()")
+lib.impl("foo", foo, "BackendSelect")
+from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+_register_effectful_op(
+    torch.ops._test.foo.default,
+    _EffectType.ORDERED,
+)

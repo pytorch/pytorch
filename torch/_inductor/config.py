@@ -390,6 +390,8 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
     None
 )
 
+debug_test_memory_node = False
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"

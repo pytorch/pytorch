@@ -71,7 +71,7 @@ from .utils import (
     maybe_log_cudagraph_partition,
     sympy_product,
 )
-from .virtualized import V
+from .virtualized import V, NullHandler
 
 
 log = logging.getLogger(__name__)
@@ -1140,7 +1140,7 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.sizes = {self._sizes}",
         ]
         for dep in self.read_writes.reads_and_writes():
-            if not isinstance(dep, WeakDep):
+            if not isinstance(dep, WeakDep) and not isinstance(V.graph, NullHandler):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 if not isinstance(buf, ir.TorchBindObject):
@@ -2159,6 +2159,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                # XXX TODO: Find out robust way to identify if memory planning was not run
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2177,6 +2183,31 @@ class Scheduler:
                 ),
             )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        def _insert_debug_nodes():
+            def new_foo_node():
+                node = ir.FallbackKernel(
+                    layout = NoneLayout(device=torch.device("cpu")),
+                    kernel = torch.ops._test.foo.default,
+                    tensor_args = [],
+                    nontensor_args = [],
+                    unflatten_args = lambda x, y: ([], {}),
+                )
+                node.operation_name = "foo_op"
+                debug_node = ExternKernelSchedulerNode(
+                    self,
+                    node
+                )
+                return debug_node
+            new_nodes = []
+            new_nodes.append(new_foo_node())
+            for node in self.nodes:
+                new_nodes.append(node)
+                new_nodes.append(new_foo_node())
+            self.nodes = new_nodes
+        if torch._inductor.config.debug_test_memory_node:
+            _insert_debug_nodes()
+
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
