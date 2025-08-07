@@ -20,12 +20,12 @@ test:
       env_vars:
         - VLLM_WORKER_MULTIPROC_METHOD=spawn
       steps:
-      - step: pytest -v -s basic_correctness/test_cumem.py
-      - step: pytest -v -s basic_correctness/test_basic_correctness.py
-      - step: pytest -v -s basic_correctness/test_cpu_offload.py
-      - step: pytest -v -s basic_correctness/test_preemption.py
-        env_vars:
-          - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level
+        - step: pytest -v -s basic_correctness/test_cumem.py
+        - step: pytest -v -s basic_correctness/test_basic_correctness.py
+        - step: pytest -v -s basic_correctness/test_cpu_offload.py
+        - step: pytest -v -s basic_correctness/test_preemption.py
+          env_vars:
+            - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level
     - name: Basic Models Test # 24min
       id: vllm_basic_models_test
       steps:
