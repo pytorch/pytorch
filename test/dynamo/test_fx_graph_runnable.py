@@ -11,14 +11,16 @@ import torch.distributed as dist
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.utils._triton import has_triton
 
 
 if torch.distributed.is_available():
     from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
-import triton
-import triton.language as tl
+if has_triton():
+    import triton
+    import triton.language as tl
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -106,6 +108,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @requires_gpu
     def test_user_defined_triton_kernel_autotune(self):
         def init_to_zero(name):
@@ -153,6 +156,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(add)(x, y)
         self._exec_and_verify_payload()
 
+    @unittest.skipUnless(has_triton(), "Triton not available")
     @requires_gpu
     def test_user_defined_triton_kernel(self):
         @triton.jit
