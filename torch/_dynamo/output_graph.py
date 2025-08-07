@@ -153,6 +153,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -1497,7 +1498,7 @@ class OutputGraph(OutputGraphGuardsState):
                         # export uses tracepoint pass to dump submodule inp/out spec
                         # into global state, so we filter it here
                         if not (
-                            hasattr(var, "value")
+                            isinstance(var, UserDefinedDictVariable)
                             and isinstance(var.value, _ExportModuleSpecTrackerDict)
                         ):
                             potential_side_effects.append(var)
