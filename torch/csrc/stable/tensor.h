@@ -107,7 +107,7 @@ class Tensor {
     STD_TORCH_CHECK(
         device_index >= std::numeric_limits<int8_t>::min() &&
             device_index <= std::numeric_limits<int8_t>::max(),
-        "The returned device index is out of range of return type int8_t, please use get_device_index() instead.");
+        "Device index is out of range of return type int8_t, please use get_device_index() instead.");
     return static_cast<int8_t>(device_index);
   }
 
@@ -120,7 +120,7 @@ class Tensor {
     int32_t device_index;
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
-    return static_cast<DeviceIndex>(device_index);
+    return device_index;
   }
 
   bool is_cuda() const {
