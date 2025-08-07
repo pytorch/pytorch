@@ -13,27 +13,387 @@ import torch
 from torch._C._distributed_c10d import (
     _current_process_group,
     _set_process_group,
+    Backend,
+    AllgatherOptions,
+    AllreduceCoalescedOptions,
+    AllreduceOptions,
+    AllToAllOptions,
+    BarrierOptions,
+    BroadcastOptions,
+    GatherOptions,
     ProcessGroup,
     ReduceOp,
+    ReduceOp,
+    ReduceOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
     Store,
 )
 from torch.distributed.rendezvous import rendezvous
 
 
-_BACKENDS: dict[str, "ProcessGroupFactory"] = {}
+_BACKENDS: dict[str, "CommunicatorFactory"] = {}
 
 __all__ = [
-    "ProcessGroup",
+    "Communicator",
     "ReduceOp",
-    "ProcessGroupFactory",
+    "CommunicatorFactory",
     "register_backend",
-    "new_group",
-    "current_process_group",
-    "process_group",
+    "new_comm",
+    "current_comm",
+    "comm",
 ]
 
 
-class ProcessGroupFactory(Protocol):
+class Communicator:
+    """
+    A communicator allows for communication between processes. This maps 1:1
+    with a single device and underlying Backend communicator.
+    """
+
+    def __init__(self, *, _pg: ProcessGroup) -> None:
+        """
+        Initialize a new communicator.
+
+        This is an internal only API and should not be used directly.
+
+        Args:
+            pg: The process group to use.
+        """
+        self._pg = _pg
+
+    @property
+    def rank(self) -> int:
+        """Get the rank of the current process."""
+        return self._pg.rank()
+
+    @property
+    def size(self) -> int:
+        """Get the size of the communicator."""
+        return self._pg.size()
+
+    @property
+    def name(self) -> str:
+        """Get the name of the communicator."""
+        return self._pg.group_name
+
+    @property
+    def unsafe_backend(self) -> Backend:
+        """
+        This returns the raw backend implementation for experimentation and debugging purposes.
+
+        WARNING: This provides no backwards compatibility guarantees nor
+        compatibility across multiple backends.
+        """
+        return self._pg._get_default_backend()
+
+    def shutdown(self) -> None:
+        self._pg.shutdown()
+
+    def abort(self) -> None:
+        self._pg.abort()
+
+    def broadcast(
+        self, tensor: torch.Tensor, root: int, timeout: timedelta | None = None
+    ) -> None:
+        """
+        Broadcasts the tensor to all processes in the group.
+
+        Args:
+            tensor: The tensor to broadcast.
+            root: The root process to broadcast from.
+            timeout: Optional timeout for the operation.
+        """
+        opts = BroadcastOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.rootRank = root
+        opts.rootTensor = 0
+        opts.asyncOp = False
+        work = self._pg.broadcast([tensor], opts)
+        return work
+
+    def allreduce(
+        self,
+        tensor: torch.Tensor,
+        op: ReduceOp = ReduceOp.SUM,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Reduces the tensor data across all processes in a group in-place.
+
+        Args:
+            tensor: Input and output of the collective. The function operates
+                in-place.
+            op: One of the values from
+                ``torch.distributed.ReduceOp``
+                enum.  Specifies an operation used for element-wise
+                reductions.
+            timeout: Optional timeout for the operation.
+        """
+        opts = AllreduceOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.reduceOp = op
+        opts.asyncOp = False
+        work = self._pg.allreduce([tensor], opts)
+        return work
+
+    def allgather(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensor: torch.Tensor,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Gathers tensors from all processes and distributes them to all processes.
+
+        Args:
+            output_tensors: List of tensors to be filled with the gathered tensors.
+            input_tensor: Tensor to be gathered from all processes.
+            timeout: Optional timeout for the operation.
+        """
+        opts = AllgatherOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.asyncOp = False
+        work = self._pg.allgather([output_tensors], [input_tensor], opts)
+        return work
+
+    def reduce(
+        self,
+        tensor: torch.Tensor,
+        root: int,
+        op: ReduceOp = ReduceOp.SUM,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Reduces the tensor data across all processes in a group to the root process.
+
+        Args:
+            tensor: Input and output of the collective. The function operates
+                in-place.
+            root: The root process to reduce to.
+            op: One of the values from
+                ``torch.distributed.ReduceOp``
+                enum.  Specifies an operation used for element-wise
+                reductions.
+            timeout: Optional timeout for the operation.
+        """
+        opts = ReduceOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.reduceOp = op
+        opts.rootRank = root
+        opts.rootTensor = 0
+        opts.asyncOp = False
+        work = self._pg.reduce([tensor], opts)
+        return work
+
+    def reduce_scatter(
+        self,
+        output: torch.Tensor,
+        input_list: list[torch.Tensor],
+        op: ReduceOp = ReduceOp.SUM,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Reduces, then scatters a list of tensors to all processes in a group.
+
+        Args:
+            output: Output tensor.
+            input_list: List of tensors to reduce and scatter.
+            op: One of the values from ``torch.distributed.ReduceOp`` enum.
+                Specifies an operation used for element-wise reductions.
+            timeout: Optional timeout for the operation.
+        """
+        opts = ReduceScatterOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.reduceOp = op
+        opts.asyncOp = False
+        work = self._pg.reduce_scatter([output], [input_list], opts)
+        return work
+
+    def barrier(self, timeout: timedelta | None = None) -> None:
+        """
+        Synchronizes all processes.
+
+        This collective blocks processes until the whole group enters this function.
+
+        Args:
+            timeout: Optional timeout for the operation.
+        """
+        opts = BarrierOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.asyncOp = False
+        work = self._pg.barrier(opts)
+        return work
+
+    def gather(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensor: torch.Tensor,
+        root: int,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Gathers a list of tensors from a single source process.
+
+        Args:
+            output_tensors: List of tensors to be filled with the gathered tensors.
+                Only meaningful on the root process.
+            input_tensor: Tensor to be gathered from all processes.
+            root: The root process to gather to.
+            timeout: Optional timeout for the operation.
+        """
+        opts = GatherOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.rootRank = root
+        opts.asyncOp = False
+        work = self._pg.gather(
+            [output_tensors] if self.rank == root else [], [input_tensor], opts
+        )
+        return work
+
+    def scatter(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensors: list[torch.Tensor],
+        root: int,
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Scatters a list of tensors to all processes in a group.
+
+        Args:
+            output_tensor: Output tensor.
+            input_tensors: List of tensors to scatter.
+                Only meaningful on the root process.
+            root: The root process to scatter from.
+            timeout: Optional timeout for the operation.
+        """
+        opts = ScatterOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.rootRank = root
+        opts.asyncOp = False
+        work = self._pg.scatter(
+            [output_tensor], [input_tensors] if self.rank == root else [], opts
+        )
+        return work
+
+    def all_to_all_single(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Each process splits input tensor and then scatters the split list
+        to all processes in the group. Then concatenates the received
+        tensors from all processes in the group and returns a single tensor.
+
+        Args:
+            output_tensor: Output tensor.
+            input_tensor: Input tensor to scatter.
+            output_split_sizes: Split sizes for the output tensor.
+            input_split_sizes: Split sizes for the input tensor.
+            timeout: Optional timeout for the operation.
+        """
+        opts = AllToAllOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.asyncOp = False
+        work = self._pg.alltoall_base(
+            output_tensor, input_tensor, output_split_sizes, input_split_sizes, opts
+        )
+        return work
+
+    def all_to_all(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensors: list[torch.Tensor],
+        timeout: timedelta | None = None,
+    ) -> None:
+        """
+        Each process scatters a list of input tensors to all processes in the group,
+        then gathers the received tensors from all processes into a list of output tensors.
+
+        Args:
+            output_tensors: List of output tensors.
+            input_tensors: List of input tensors to scatter.
+            timeout: Optional timeout for the operation.
+        """
+        opts = AllToAllOptions()
+        if timeout is not None:
+            opts.timeout = timeout
+        opts.asyncOp = False
+        work = self._pg.alltoall(output_tensors, input_tensors, opts)
+        return work
+    
+
+    def split_comm(
+        self,
+        ranks: list[int],
+        timeout: timedelta | None = None,
+        opts: object | None = None,
+        name: str | None = None,
+    ) -> "Communicator | None":
+        """
+        Creates a new communicator from a subset of ranks.
+
+        Args:
+            ranks: List of ranks to include in the new communicator.
+            timeout: Optional timeout for operations on the new communicator.
+            group_name: Optional name for the new communicator.
+
+        Returns:
+            A new communicator containing the specified ranks, or None if this rank is not part of the group.
+        """
+
+        # Convert list of lists to a list of vectors of ints
+        group = self._pg.split_group(
+            ranks=ranks, 
+            timeout=timeout,
+            opts=opts,
+            group_name=name,
+        )
+        if group is None:
+            return None
+        return Communicator(_pg=group)
+
+    def merge_remote_comm(
+        self,
+        store: Store,
+        size: int,
+        timeout: timedelta,
+        name: str,
+    ) -> "Communicator":
+        """
+        Creates a new communicator by bootstrapping using the store.
+
+        Args:
+            store: The store to use for the new communicator.
+            size: The world size of the new communicator.
+            timeout: The timeout for operations on the new communicator.
+            name: The name of the new communicator.
+        """
+
+        group = self._pg.merge_remote_group(
+            store=store,
+            size=size,
+            timeout=timeout,
+            group_name=name,
+        )
+        return Communicator(_pg=group)
+
+
+class CommunicatorFactory(Protocol):
     """Protocol for process group factories."""
 
     def __call__(
@@ -44,10 +404,10 @@ class ProcessGroupFactory(Protocol):
         timeout: timedelta,
         device: torch.device,
         **kwargs: object,
-    ) -> ProcessGroup: ...
+    ) -> Communicator: ...
 
 
-def register_backend(name: str, func: ProcessGroupFactory) -> None:
+def register_backend(name: str, func: CommunicatorFactory) -> None:
     """
     Register a new process group backend.
 
@@ -68,7 +428,7 @@ def _gloo_factory(
     timeout: timedelta,
     device: torch.device,
     **kwargs: object,
-) -> ProcessGroup:
+) -> Communicator:
     from torch.distributed import ProcessGroupGloo
 
     assert len(kwargs) == 0, "Gloo backend received unexpected kwargs"
@@ -88,7 +448,7 @@ def _gloo_factory(
         pg._register_backend(
             torch.device("cuda"), ProcessGroup.BackendType.GLOO, backend_class
         )
-    return pg
+    return Communicator(_pg=pg)
 
 
 def _nccl_factory(
@@ -98,7 +458,7 @@ def _nccl_factory(
     timeout: timedelta,
     device: torch.device,
     **kwargs: object,
-) -> ProcessGroup:
+) -> Communicator:
     from torch.distributed import ProcessGroupNCCL
 
     opts = ProcessGroupNCCL.Options()
@@ -116,21 +476,21 @@ def _nccl_factory(
     pg._set_default_backend(ProcessGroup.BackendType.NCCL)
     pg._register_backend(device, ProcessGroup.BackendType.NCCL, backend_class)
 
-    return pg
+    return Communicator(_pg=pg)
 
 
 register_backend("gloo", _gloo_factory)
 register_backend("nccl", _nccl_factory)
 
 
-def new_group(
+def new_comm(
     backend: str,
     timeout: timedelta,
     device: Union[str, torch.device],
     **kwargs: object,
-) -> ProcessGroup:
+) -> Communicator:
     """
-    Create a new process group with the given backend and options. This group is
+    Create a new communicator with the given backend and options. This group is
     independent and will not be globally registered and thus not usable via the
     standard torch.distributed.* APIs.
 
@@ -142,7 +502,7 @@ def new_group(
                   See the backend specific documentation for details.
 
     Returns:
-        A new process group.
+        A new communicator.
     """
     if backend not in _BACKENDS:
         raise ValueError(f"Backend {backend} not registered")
@@ -155,28 +515,40 @@ def new_group(
     return _BACKENDS[backend](store, rank, world_size, timeout, device, **kwargs)
 
 
-def current_process_group() -> ProcessGroup:
+_CURRENT_COMMUNICATOR: Communicator | None = None
+
+
+def current_comm() -> Communicator:
     """
     Get the current process group. Thread local method.
 
     Returns:
         The current process group.
     """
-    return _current_process_group()
+    return _CURRENT_COMMUNICATOR
 
 
 @contextmanager
-def process_group(pg: ProcessGroup) -> Generator[None, None, None]:
+def comm(comm: Communicator) -> Generator[None, None, None]:
     """
-    Context manager for process groups. Thread local method.
+    Context manager for communicators. Thread local method.
+
+    When entered, current_comm() will return the given communicator. When the
+    context manager exits, the previous communicator will be restored.
 
     Args:
         pg: The process group to use.
     """
-    prev_pg = current_process_group()
+    global _CURRENT_COMMUNICATOR
 
+    prev_pg = _current_process_group()
+    prev_comm = _CURRENT_COMMUNICATOR
+
+    pg = comm._pg
     _set_process_group(pg)
+    _CURRENT_COMMUNICATOR = comm
     try:
         yield
     finally:
         _set_process_group(prev_pg)
+        _CURRENT_COMMUNICATOR = prev_comm
