@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 from unittest.mock import patch
 
-from cli.lib.utils import read_yaml_file
+from cli.lib.common.utils import read_yaml_file
 
 from utils import create_temp_yaml
 
