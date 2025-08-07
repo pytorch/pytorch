@@ -689,7 +689,7 @@ def get_version_detail(version: str) -> tuple[int, int]:
     return major, minor
 
 
-def add_trace_id_in_entries(
+def add_stack_id_in_entries(
     entries: dict[int, list[dict[str, Any]]],
 ) -> tuple[dict[int, list[dict[str, Any]]], dict[str, int]]:
     stack_id = 0

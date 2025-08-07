@@ -24,7 +24,7 @@ from tools.flight_recorder.components.types import (
     Traceback,
 )
 from tools.flight_recorder.components.utils import (
-    add_trace_id_in_entries,
+    add_stack_id_in_entries,
     align_trace_from_beginning,
     check_current_entry_match,
     check_no_missing_dump_files,
@@ -394,7 +394,7 @@ def build_db(
     entries = align_trace_from_beginning(entries)
     stack_id_trace_map: dict[str, int] = {}
     if args.just_print_entries:
-        entries, stack_id_trace_map = add_trace_id_in_entries(entries)
+        entries, stack_id_trace_map = add_stack_id_in_entries(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
