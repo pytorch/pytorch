@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU_AND_TRITON
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -35,7 +35,9 @@ from torch.testing._internal.logging_utils import (
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
+requires_gpu = unittest.skipUnless(
+    HAS_CUDA or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
+)
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -717,10 +719,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
-+- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- __SHAPE_GUARD__: L['z'].size()[0] == L['y'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- __SHAPE_GUARD__: ((2*L['y'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
