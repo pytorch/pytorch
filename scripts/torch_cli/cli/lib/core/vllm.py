@@ -1,9 +1,7 @@
 import logging
 import os
 import textwrap
-from dataclasses import dataclass
-from subprocess import run
-from typing import Any, Dict
+from dataclasses import dataclass, field
 
 from cli.lib.type.build import BuildRunner, LinuxExternalBuildBaseConfig
 
@@ -40,6 +38,7 @@ class VllmBuildConfig(LinuxExternalBuildBaseConfig):
     torch_whl_dir: str = ""
     base_image: str = ""
     dockerfile_path: str = ""
+    target: str = field(default_factory=lambda: get_env("TARGET", "export-wheels"))
 
 
 class VllmBuildRunner(BuildRunner):

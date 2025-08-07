@@ -1,7 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
 
 from cli.lib.common.file_utils import read_yaml_file
 from cli.lib.common.utils import get_env
@@ -14,15 +13,17 @@ logger = logging.getLogger(__name__)
 class LinuxExternalBuildBaseConfig:
     """
     Base configuration for external builds, derived from environment variables.
+    These values are fetched at instance creation time.
     """
 
-    cuda: str = get_env("CUDA_VERSION", "12.8.1")
-    py: str = get_env("PYTHON_VERSION", "3.12")
-    max_jobs: str = get_env("MAX_JOBS", "64")
-    target: str = get_env("TARGET", "export-wheels")
-    sccache_bucket: str = get_env("SCCACHE_BUCKET", "")
-    sccache_region: str = get_env("SCCACHE_REGION", "")
-    torch_cuda_arch_list: str = get_env("TORCH_CUDA_ARCH_LIST", "8.0 9.0")
+    cuda: str = field(default_factory=lambda: get_env("CUDA_VERSION", "12.8.1"))
+    py: str = field(default_factory=lambda: get_env("PYTHON_VERSION", "3.12"))
+    max_jobs: str = field(default_factory=lambda: get_env("MAX_JOBS", "64"))
+    sccache_bucket: str = field(default_factory=lambda: get_env("SCCACHE_BUCKET", ""))
+    sccache_region: str = field(default_factory=lambda: get_env("SCCACHE_REGION", ""))
+    torch_cuda_arch_list: str = field(
+        default_factory=lambda: get_env("TORCH_CUDA_ARCH_LIST", "8.0 9.0")
+    )
 
 
 class BuildRunner(ABC):
