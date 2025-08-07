@@ -13678,7 +13678,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
 
         input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=self.device)
-        input = torch.arange(1, 2**nd + 1, dtype=dtype, device=self.device).reshape([2] * nd)
+        input = torch.arange(1, 2**nd + 1, dtype=dtype, device=self.device).reshape(
+            [2] * nd
+        )
         repeat = torch.tensor([1, 2], device=self.device)
 
         if input.device.type == "mps" and dtype == torch.int64:
