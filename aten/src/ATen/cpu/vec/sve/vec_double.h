@@ -55,10 +55,11 @@ class Vectorized<double> {
   operator svfloat64_t() const {
     return values;
   }
-  template <uint64_t mask>
   static Vectorized<double> blend(
       const Vectorized<double>& a,
-      const Vectorized<double>& b) {
+      const Vectorized<double>& b,
+      int64_t mask
+    ) {
     // Build an array of flags: each element is 1 if the corresponding bit in
     // 'mask' is set, 0 otherwise.
     __at_align__ int64_t flag_arr[size()];
