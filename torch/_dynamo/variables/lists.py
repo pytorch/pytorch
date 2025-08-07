@@ -1257,6 +1257,42 @@ class NamedTupleVariable(TupleVariable):
                 tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
+        elif name == "_replace":
+            # NamedTuple._replace should create a new instance with replaced fields
+            if args:
+                raise_observed_exception(TypeError, tx, args=[
+                    ConstantVariable.create("_replace() takes no positional arguments")
+                ])
+            
+            # Get the field names for validation
+            fields = self.fields()
+            
+            # Start with current items (copy them)
+            new_items = list(self.items)
+            
+            # Replace fields specified in kwargs
+            for field_name, new_value in kwargs.items():
+                if field_name not in fields:
+                    raise_observed_exception(ValueError, tx, args=[
+                        ConstantVariable.create(f"Got unexpected field name: '{field_name}'")
+                    ])
+                
+                # Replace the item at the field's index
+                field_index = fields.index(field_name)
+                new_items[field_index] = new_value
+            
+            # Create new NamedTupleVariable with replaced items
+            # Copy dynamic attributes if any
+            new_dynamic_attributes = dict(self.dynamic_attributes) if self.dynamic_attributes else {}
+            
+            return NamedTupleVariable(
+                new_items,
+                self.tuple_cls,
+                dynamic_attributes=new_dynamic_attributes,
+                source=None,  # New object, no source
+                mutation_type=ValueMutationNew() if self.mutation_type else None
+            )
+        
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
@@ -1274,6 +1310,17 @@ class NamedTupleVariable(TupleVariable):
                 return UserMethodVariable(method, self)
             else:
                 return None
+        
+        if name == "_replace":
+            # Return a BuiltinVariable for the _replace method
+            # Get the actual _replace method from the tuple class
+            actual_replace_method = getattr(self.tuple_cls, "_replace", None)
+            if actual_replace_method:
+                from ..source import AttrSource
+                source = AttrSource(self.source, name) if self.source else None
+                return variables.GetAttrVariable(self, name, source=source)
+            # Fallback if _replace doesn't exist (shouldn't happen for proper NamedTuples)
+            return super().var_getattr(tx, name)
 
         if name == "_fields":
             source = NamedTupleFieldsSource(self.source) if self.source else None
