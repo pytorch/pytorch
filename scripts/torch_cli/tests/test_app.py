@@ -9,9 +9,7 @@ from unittest.mock import patch
 import yaml
 from cli.run import main
 
-from utils import (
-    create_temp_yaml
-)
+from utils import create_temp_yaml
 
 
 class TestArgparseCLI(unittest.TestCase):
