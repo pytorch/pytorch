@@ -87,20 +87,17 @@ class CuteDSLTemplate(KernelTemplate):
 
     def generate(self, **kwargs: Any) -> ChoiceCaller:
         """Generate the CuteDSL kernel caller."""
-        # Extract required arguments from kwargs
         input_nodes = kwargs.pop("input_nodes")
         layout = kwargs.pop("layout")
 
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
-        # Check template compilation
         if self.template is None:
+
             raise RuntimeError("Template compilation failed (Jinja2 required)")
 
-        # Create a fake output node for rendering
         output_node = Buffer(name="buf_out", layout=layout)
 
-        # Create kernel instance to provide template functions
         kernel = self.kernel_type(
             kernel_name=kernel_name,
             input_nodes=input_nodes,
