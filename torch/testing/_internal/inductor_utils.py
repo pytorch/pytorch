@@ -75,7 +75,7 @@ HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU_AND_TRITON
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 
 
 GPU_TYPE = get_gpu_type()
