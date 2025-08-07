@@ -342,7 +342,7 @@ class DeviceMeshTest(DTensorTestBase):
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, device_count)
+        return 8
 
     @with_comms
     def test_device_mesh_nd(self):
