@@ -628,6 +628,7 @@ class AllocateLine(MemoryPlanningLine):
     node: BufferLike
 
     def __post_init__(self):
+        assert V.graph.scheduler.current_node is not None
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -683,6 +684,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def __post_init__(self):
+        assert V.graph.scheduler.current_node is not None
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )

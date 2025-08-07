@@ -2073,7 +2073,7 @@ class Scheduler:
         )
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        self.current_node: Optional[SchedulerNode] = None
+        self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
