@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
-from torch.testing._internal.logging_utils import log_settings, logs_to_string
+from torch.testing._internal.logging_utils import log_settings, logs_to_string, LoggingTestCase
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -3533,6 +3533,29 @@ if HAS_GPU:
 
         setattr(MutationTests, name, fn)
 
+class CodegenTest(LoggingTestCase):
+
+    def test_triton_max_codegen(self):
+
+        @torch.compile(dynamic=True)
+        def f(x):
+            return torch.max(x, -1)
+
+        log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+
+        x = torch.randn(1000, requires_grad=True, device=GPU_TYPE)
+        with ctx():
+            y = f(x)
+
+        output_code = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
+
+        code_search = re.search('def\s*triton_red_fused_max(.*)\s*device_str=\'cuda\'\)', output_code, re.IGNORECASE|re.S)
+
+        self.assertIsNotNone(code_search)
+
+        if code_search:
+            trition_code = code_search.group(1)
+            self.assertNotIn('triton_helpers.max2',trition_code)
 
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
