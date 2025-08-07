@@ -1572,6 +1572,13 @@ def cat(inputs, dim=0):
             inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat.default)(inputs, dim)
 
+    # When we have unbacked symints, we can't eagerly allocate the result
+    # buffer since the buffer size is data dependent. Maybe we can do a better
+    # fix by doing something clever and hoisting all the data dependent ops
+    # to the top... but for now let's fix broken behavior and use the fallback.
+    if any(has_free_unbacked_symbols(input.get_size()) for input in inputs):
+        return fallback_handler(aten.cat.default)(inputs, dim)
+
     if len(inputs) == 1:
         return clone(inputs[0])
 
