@@ -4,8 +4,6 @@ import unittest
 from collections import namedtuple
 from functools import partial
 
-import torch_openreg  # noqa: F401
-
 import torch
 from torch.nn.attention import SDPBackend
 from torch.testing._internal.common_nn import NNTestCase
