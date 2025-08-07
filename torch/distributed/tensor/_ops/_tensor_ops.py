@@ -596,7 +596,7 @@ def scatter_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_op_strategy(aten.scatter_add.default, schema_info=RuntimeSchemaInfo(2))
+@register_op_strategy(aten.scatter_add.default, schema_info=RuntimeSchemaInfo(1))
 def scatter_add_strategy(op_schema: OpSchema) -> StrategyType:
     input_strategy = op_schema.args_schema[0]
     dim = op_schema.args_schema[1]
@@ -628,7 +628,7 @@ def scatter_add_strategy(op_schema: OpSchema) -> StrategyType:
     )
 
 
-@register_op_strategy(aten.gather.default, schema_info=RuntimeSchemaInfo(2))
+@register_op_strategy(aten.gather.default, schema_info=RuntimeSchemaInfo(1))
 def gather_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = op_schema.get_mesh_from_args()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
