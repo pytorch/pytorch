@@ -273,7 +273,6 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[list[str]] = None,
     python_versions: Optional[list[str]] = None,
-    use_split_build: bool = False,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
@@ -321,15 +320,6 @@ def generate_wheels_matrix(
             ):
                 continue
 
-            if use_split_build and (
-                arch_version not in ["12.6", "12.8", "12.9", "cpu"] or os != "linux"
-            ):
-                raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12* and cpu.\n"
-                    f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
-                    "Please modify the matrix generation to exclude this combination."
-                )
-
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
@@ -344,7 +334,6 @@ def generate_wheels_matrix(
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
                         "desired_cuda": desired_cuda,
-                        "use_split_build": "True" if use_split_build else "False",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
@@ -377,7 +366,6 @@ def generate_wheels_matrix(
                             "desired_cuda": translate_desired_cuda(
                                 gpu_arch_type, gpu_arch_version
                             ),
-                            "use_split_build": "True" if use_split_build else "False",
                             "container_image": WHEEL_CONTAINER_IMAGES[
                                 arch_version
                             ].split(":")[0],
@@ -400,7 +388,6 @@ def generate_wheels_matrix(
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
-                        "use_split_build": "True" if use_split_build else "False",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],

@@ -48,7 +48,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA,
     has_triton,
-    HAS_XPU,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -1116,7 +1116,9 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
