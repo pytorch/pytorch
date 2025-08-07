@@ -306,7 +306,6 @@ jobs:
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
-            -e USE_SPLIT_BUILD \
             -e BUILD_ADDITIONAL_PACKAGES \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
