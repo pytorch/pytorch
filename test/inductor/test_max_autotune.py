@@ -44,8 +44,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
-    TEST_WITH_ROCM,
     skipIfRocmNotEnoughMemory,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import has_triton_tma_device
