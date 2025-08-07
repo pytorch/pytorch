@@ -192,7 +192,7 @@ class ItertoolsVariable(VariableTracker):
             )
         elif (
             self.value is itertools.permutations
-            and (len(args) == 1 or len(args) == 2 and args[1].is_python_constant())
+            and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
             and not kwargs
         ):
             if len(args) == 2:

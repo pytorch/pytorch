@@ -271,7 +271,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_itertools_product_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(*args, **kwargs):
-            itertools.product(*args, **kwargs)
+            return torch.tensor(list(itertools.product(*args, **kwargs)))
 
         self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
 
@@ -287,7 +287,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_itertools_permutations_basic(self):
         def fn():
-            return list(itertools.permutations([1, 2, 3], 2))
+            return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
 
         actual = torch.compile(fn, backend="eager", fullgraph=True)()
         expected = fn()
@@ -296,7 +296,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_itertools_permutations_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(*args, **kwargs):
-            itertools.permutations(*args, **kwargs)
+            return torch.tensor(list(itertools.permutations(*args, **kwargs)))
 
         self.assertRaises(Unsupported, fn)
         self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
