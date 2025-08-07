@@ -1,5 +1,7 @@
-from ._distributed_c10d import HAS_DISTRIBUTED
 import torch.library
+
+from ._distributed_c10d import HAS_DISTRIBUTED
+
 
 # NB: This is separate from _distributed_c10d because the other module is
 # imported too early before operator registrations are ready.  Import this
