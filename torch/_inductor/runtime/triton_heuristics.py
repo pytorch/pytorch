@@ -196,8 +196,7 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
             call_kwargs[k] = v
         else:
             call_kwargs[k] = v
-    if not triton_version_uses_attrs_dict():
-        call_kwargs.update(launcher.config.kwargs)
+    call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
     if HAS_WARP_SPEC:
@@ -1271,6 +1270,10 @@ class _ConstRepr:
 
 
 class CompileResult(Generic[_T]):
+    """
+    Base class representing compiled result.
+    """
+
     def __init__(
         self,
         kernel: _T,
@@ -1296,6 +1299,7 @@ class CompileResult(Generic[_T]):
             f"    grid_2 = {grid.z_grid}",
             f"    runner({', '.join(runner_args)})",
         ]
+        breakpoint()
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)
         return scope["launcher"]
@@ -1334,7 +1338,6 @@ class CompileResult(Generic[_T]):
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
-
         def _convert_constant(constant):
             if isinstance(constant, str):
                 return "r'" + constant + "'"
@@ -1344,16 +1347,18 @@ class CompileResult(Generic[_T]):
         if triton_version_uses_attrs_dict():
             call_args = arg_names
             def_args = arg_names
-            implicit_constants = {
-                "num_warps",
-                "num_stages",
-            }.union({k for k in known_constants})
-            if implicit_constants := implicit_constants & set(compile_meta["constants"].keys()):
+            implicit_constants = OrderedSet(
+                (
+                    "num_warps",
+                    "num_stages",
+                )
+            ).union(OrderedSet(k for k in known_constants))
+            if implicit_constants := implicit_constants & OrderedSet(
+                compile_meta["constants"].keys()
+            ):
                 # num_warps/num_stages are special implicit args that are not in the signature
                 # see test_triton_kernel_special_params
-                def_args = [
-                    arg for arg in def_args if arg not in implicit_constants
-                ]
+                def_args = [arg for arg in def_args if arg not in implicit_constants]
                 repl = {
                     k: _convert_constant(compile_meta["constants"].get(k))
                     for k in implicit_constants
@@ -1636,9 +1641,9 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
         import math as math_lib
 
-        import torch as torch_lib
-
         import triton as triton_lib
+
+        import torch as torch_lib
 
         scope = {
             "grid_meta": cfg.kwargs,
