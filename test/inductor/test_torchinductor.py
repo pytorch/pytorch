@@ -6360,6 +6360,9 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "native matmul has better precision"
+    )
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
@@ -6385,11 +6388,7 @@ class CommonTemplate:
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
             else :
-                if config.triton.enable_native_matmul: 
-                    FileCheck().check("triton.jit").run(source_codes[0])
-                    #atol, rtol = 1e-2, 1e-2
-                else :
-                    FileCheck().check_not("triton.jit").run(source_codes[0])
+                FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:

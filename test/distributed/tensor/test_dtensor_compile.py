@@ -912,7 +912,8 @@ def forward(self, primals_1):
         FileCheck().check(
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
-            "extern_kernels.mm(buf0,"
+            "extern_kernels.mm(buf0," if not config.triton.enable_native_matmul
+            else "triton_per_fused_add_addmm_0.run(buf6"
         ).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
