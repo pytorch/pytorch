@@ -209,6 +209,9 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
               "Expected padding_side to be one of left or right, but got ", padding_side, ".");
   const Tensor& first_seq = sequences[0];
   if (first_seq.scalar_type() == at::kLong) {
+    TORCH_CHECK(padding_value <= static_cast<double>(std::numeric_limits<int64_t>::max()) ||
+                    padding_value >= static_cast<double>(std::numeric_limits<int64_t>::min()),
+                "cannot be exactly represented as int64_t");
     int64_t padding_value_int64 = static_cast<int64_t>(padding_value);
     TORCH_CHECK(
         static_cast<double>(padding_value_int64) == padding_value,
