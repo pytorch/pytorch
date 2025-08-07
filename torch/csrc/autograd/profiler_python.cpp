@@ -48,8 +48,8 @@ struct CodeLocation {
   explicit CodeLocation(PyFrameObject* frame)
       : line_number_{PyFrame_GetLineNumber(frame)} {
     auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
-    filename_ = THPUtils_unpackStringView(code->co_filename).data();
-    name_ = THPUtils_unpackStringView(code->co_name).data();
+    filename_ = THPUtils_unpackString(code->co_filename);
+    name_ = THPUtils_unpackString(code->co_name);
   }
 
   bool operator==(const CodeLocation& other) const {
@@ -57,8 +57,8 @@ struct CodeLocation {
         line_number_ == other.line_number_;
   }
 
-  const char* filename_{nullptr};
-  const char* name_{nullptr};
+  std::string filename_;
+  std::string name_;
   int line_number_{0};
 };
 
@@ -367,11 +367,15 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
 template <>
 void ValueCache::store<CallType::PyCall>(const PyCallKey& key, no_ephemeral_t) {
   auto& locations = std::get<CallType::PyCall>(state_);
-  if (C10_UNLIKELY(locations.find(key) == locations.end())) {
-    locations[key] = {
-        key.line_number_,
-        at::StringView(key.filename_),
-        at::StringView(key.name_)};
+  auto it = locations.find(key);
+  if (C10_UNLIKELY(it == locations.end())) {
+    auto emplaced = locations.emplace(
+        key,
+        PyFrameState{key.line_number_, at::StringView(), at::StringView()});
+    auto& stored_key = emplaced.first->first;
+    auto& state = emplaced.first->second;
+    state.filename_ = at::StringView(stored_key.filename_);
+    state.funcname_ = at::StringView(stored_key.name_);
   }
 }
 
@@ -495,11 +499,11 @@ void ValueCache::trimPrefixes() {
   }();
 
   for (auto& it : std::get<CallType::PyCall>(state_)) {
-    std::string filename = it.second.filename_.str();
+    auto& key = it.first;
     for (const auto& p : prefixes) {
-      if (filename.compare(0, p.size(), p) == 0) {
-        filename.erase(0, p.size());
-        it.second.filename_ = at::StringView(filename);
+      if (key.filename_.compare(0, p.size(), p) == 0) {
+        key.filename_.erase(0, p.size());
+        it.second.filename_ = at::StringView(key.filename_);
         break;
       }
     }
