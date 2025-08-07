@@ -34,8 +34,29 @@ PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    r"""
+    Returns a function that applies the Exponential Moving Average (EMA) to a list of model parameters.
 
+    The EMA update follows the equation:
+
+        W_0^{EMA} = W_0^{model}
+        W_{t+1}^{EMA} = α · W_t^{EMA} + (1 - α) · W_{t+1}^{model}
+
+    where:
+        - W^{EMA} are the exponentially averaged weights,
+        - W^{model} are the model weights *after* the optimizer step,
+        - α ∈ [0, 1] is the decay factor (e.g., 0.999).
+
+    This function returns an `ema_update` function that performs this operation in-place
+    on a list of EMA parameters.
+
+    Args:
+        decay (float): EMA decay factor. Must be in the range [0, 1].
+
+    Returns:
+        Callable: A function that updates EMA weights given a list of EMA parameters,
+        model parameters, and a placeholder for number of updates (unused).
+    """
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
             f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
