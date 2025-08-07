@@ -140,7 +140,10 @@ class FxGraphRunnableTest(TestCase):
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
             n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
             add_kernel[grid](x, y, output, n_elements)
             return output
 

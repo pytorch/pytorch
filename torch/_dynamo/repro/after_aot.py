@@ -34,8 +34,20 @@ from tempfile import TemporaryFile
 from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
-from triton.runtime import Autotuner
-from triton.runtime.jit import JITFunction
+from torch.utils._triton import has_triton
+
+
+if has_triton():
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+else:
+
+    class Autotuner:  # type: ignore[no-redef]
+        pass
+
+    class JITFunction:  # type: ignore[no-redef]
+        pass
+
 
 import torch
 import torch.fx as fx
