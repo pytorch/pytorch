@@ -115,13 +115,19 @@ def match_coalesced_groups(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -244,13 +250,19 @@ def match_coalesced_groups_with_non_p2p(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
