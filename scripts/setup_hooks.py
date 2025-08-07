@@ -3,21 +3,41 @@
 Bootstrap Git pre‑push hook with isolated virtual environment.
 
 ✓ Requires uv to be installed (fails if not available)
-✓ Creates isolated venv in .git/hooks/venv/ for hook dependencies
+✓ Creates isolated venv in .git/hooks/linter/.venv/ for hook dependencies
 ✓ Installs lintrunner only in the isolated environment
 ✓ Creates direct git hook that bypasses pre-commit
 
 Run this from the repo root (inside or outside any project venv):
 
     python scripts/setup_hooks.py
+
+IMPORTANT: The generated git hook references scripts/lintrunner.py. If users checkout
+branches that don't have this file, git push will fail with "No such file or directory".
+Users would need to either:
+1. Re-run the old setup_hooks.py from that branch, or
+2. Manually delete .git/hooks/pre-push to disable hooks temporarily, or
+3. Switch back to a branch with the new scripts/lintrunner.py
 """
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+# Add scripts directory to Python path so we can import lintrunner module
+scripts_dir = Path(__file__).parent
+sys.path.insert(0, str(scripts_dir))
+
+# Import shared functions from lintrunner module
+from lintrunner import find_repo_root, get_hook_venv_path
+
+
+# Restore sys.path to avoid affecting other imports
+sys.path.pop(0)
 
 
 # ───────────────────────────────────────────
@@ -44,17 +64,6 @@ def ensure_uv() -> None:
     )
 
 
-def find_repo_root() -> Path:
-    """Find the repository root directory and validate it's a git repo."""
-    repo_root = Path(__file__).resolve().parents[1]  # Go up from scripts/ to repo root
-    
-    # Verify we're in a git repo
-    if not (repo_root / ".git").exists():
-        sys.exit(f"❌ Not a git repository. Expected .git directory at {repo_root / '.git'}")
-    
-    return repo_root
-
-
 if sys.platform.startswith("win"):
     print(
         "\n⚠️  Lintrunner is not supported on Windows, so there are no pre-push hooks to add. Exiting setup.\n"
@@ -69,8 +78,9 @@ ensure_uv()
 
 # Find repo root and setup hook directory
 repo_root = find_repo_root()
-hooks_dir = repo_root / ".git" / "hooks"
-venv_dir = hooks_dir / ".venv"
+venv_dir = get_hook_venv_path()
+hooks_dir = venv_dir.parent.parent  # Go from .git/hooks/linter/.venv to .git/hooks
+
 
 print(f"Setting up isolated hook environment in {venv_dir}")
 
@@ -83,7 +93,9 @@ run(["uv", "venv", str(venv_dir), "--python", "3.9"])
 
 # Install lintrunner in the isolated environment
 print("Installing lintrunner in isolated environment...")
-run(["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), "lintrunner"])
+run(
+    ["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), "lintrunner"]
+)
 
 # ───────────────────────────────────────────
 # 2. Create direct git pre-push hook
@@ -91,19 +103,18 @@ run(["uv", "pip", "install", "--python", str(venv_dir / "bin" / "python"), "lint
 
 pre_push_hook = hooks_dir / "pre-push"
 
-hook_script = f'''#!/bin/bash
+hook_script = f"""#!/bin/bash
 set -e
 
-HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$HOOK_DIR/.venv"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Check if lintrunner script exists (user might be on older commit)
+if [ ! -f "{repo_root}/scripts/lintrunner.py" ]; then
+    echo "⚠️  {repo_root}/scripts/lintrunner.py not found - skipping linting (likely on an older commit)"
+    exit 0
+fi
 
-# Activate the isolated hook environment
-source "$VENV_DIR/bin/activate"
-
-# Run lintrunner wrapper
-python "$REPO_ROOT/scripts/run_lintrunner.py"
-'''
+# Run lintrunner wrapper using the isolated venv's Python
+"{venv_dir}/bin/python" "{repo_root}/scripts/lintrunner.py"
+"""
 
 print(f"Creating git pre-push hook at {pre_push_hook}")
 pre_push_hook.write_text(hook_script)
