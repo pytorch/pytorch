@@ -171,13 +171,9 @@ class DeviceMeshTest(DTensorTestBase):
         # when eager init is used, the subgroup is created from nccl comm split and
         # there would be bound_device_id immediately assigned for the subgroup.
         if self.backend == "nccl":
-            curr_device = torch.accelerator.current_accelerator()
-            self.assertEqual(
-                mesh_2d.get_group(0).bound_device_id.index, curr_device.index
-            )
-            self.assertEqual(
-                mesh_2d.get_group(1).bound_device_id.index, curr_device.index
-            )
+            curr_device = torch.cuda.current_device()
+            self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
+            self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
@@ -346,7 +342,7 @@ class DeviceMeshTest(DTensorTestBase):
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
     def world_size(self):
-        return min(8, device_count)
+        return 8
 
     @with_comms
     def test_device_mesh_nd(self):
