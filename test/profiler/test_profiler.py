@@ -1304,6 +1304,18 @@ class TestProfiler(TestCase):
             with open(fname) as f:
                 json.load(f)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_chrome_trace_with_stack_has_valid_names(self):
+        with profile(with_stack=True) as prof:
+            pass
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+            for evt in trace.get("traceEvents", []):
+                name = evt.get("name", "")
+                self.assertTrue(all(ord(c) < 128 for c in name), msg=name)
+
     def test_profiler_tracing(self):
         self._test_profiler_tracing(False)
         if kineto_available():
