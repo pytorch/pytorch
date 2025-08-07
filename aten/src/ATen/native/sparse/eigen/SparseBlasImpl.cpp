@@ -25,12 +25,12 @@ void inline sparse_indices_to_result_dtype_inplace(
     const at::Tensor& input) {
   auto [compressed_indices, plain_indices] =
       at::sparse_csr::getCompressedPlainIndices(input);
-	  static_cast<at::SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-	      ->set_member_tensors(
-	          compressed_indices.to(dtype),
-	          plain_indices.to(dtype),
-	          input.values(),
-	          input.sizes());
+      static_cast<at::SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+          ->set_member_tensors(
+              compressed_indices.to(dtype),
+              plain_indices.to(dtype),
+              input.values(),
+              input.sizes());
 }
 
 void inline sparse_indices_and_values_resize(
@@ -38,12 +38,12 @@ void inline sparse_indices_and_values_resize(
     int64_t nnz) {
   auto [compressed_indices, plain_indices] =
       at::sparse_csr::getCompressedPlainIndices(input);
-	  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-	      ->set_member_tensors(
-	          compressed_indices,
-	          plain_indices.resize_({nnz}),
-	          input.values().resize_({nnz}),
-	          input.sizes());
+      static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+          ->set_member_tensors(
+              compressed_indices,
+              plain_indices.resize_({nnz}),
+              input.values().resize_({nnz}),
+              input.sizes());
 }
 
 template <typename scalar_t, int eigen_options, typename index_t>
@@ -245,7 +245,7 @@ void addmm_out_sparse_eigen(
       });
 }
 
-} // anonymus namespace
+} // anonymous namespace
 
 void addmm_out_sparse(
     const at::Tensor& mat1,
