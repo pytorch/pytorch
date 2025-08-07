@@ -12,6 +12,8 @@ jobs:
       pull-requests: read
       checks: read
       actions: read
+      metadata: read
+      repository-projects: read
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:

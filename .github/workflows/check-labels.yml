@@ -35,6 +35,8 @@ jobs:
       pull-requests: write
       checks: read
       actions: read
+      metadata: read
+      repository-projects: read
     name: Check labels
     if: github.repository_owner == 'pytorch'
     runs-on: linux.24_04.4x
