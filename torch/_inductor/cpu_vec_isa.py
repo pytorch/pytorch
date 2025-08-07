@@ -6,7 +6,6 @@ import platform
 import re
 import subprocess
 import sys
-import sysconfig
 import warnings
 from typing import Any, Callable, Union
 
@@ -134,12 +133,9 @@ cdll.LoadLibrary("__lib_path__")
                     stderr=subprocess.DEVNULL,
                     env={
                         **os.environ,
-                        # We need to set the PYTHONPATH so the subprocess can find torch.
                         "PYTHONPATH": os.environ.get(
                             "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
                         ),
-                        # Need to set this for internal builds that bundle the runtime.
-                        "PYTHONHOME": sysconfig.get_path("data"),
                     },
                 )
             except Exception:
