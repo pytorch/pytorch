@@ -1274,6 +1274,48 @@ graph():
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
 
+    def test_detect_leak_strict(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        global_list = []
+
+        class ReferenceControl:
+            def __init__(self, mod):
+                self.bank = []
+                self.bank_dict = {}
+                self.mod = mod
+
+                def hacked_up_forward(self_, x, y):
+                    self.bank.append(x.clone())
+                    self.bank_dict["x"] = x.clone()
+                    global_list.append(x.clone())
+                    return x + y
+
+                self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
+
+            def __call__(self, x, y):
+                ep = torch.export.export(self.mod, (x, y), strict=True).module()
+                out = ep(x, y)
+                return out
+
+            def update(self):
+                print(self.bank)
+
+        foo = Foo()
+        ref = ReferenceControl(foo)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "While exporting, we found certain side effects happened in the model.forward. "
+            "Here are the list of potential sources you can double check: "
+            "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
+        ):
+            ref(torch.randn(4, 4), torch.randn(4, 4))
+
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):
             def forward(self, seq_embeddings, mask, exp):
