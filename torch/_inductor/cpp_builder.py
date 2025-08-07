@@ -611,8 +611,8 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     ldflags: list[str] = []
 
     if _IS_WINDOWS:
-        cflags = ["Z7", "_DEBUG", "OD"]
-        ldflags = ["DEBUG", "OPT:REF", "OPT:ICF"]
+        cflags = ["ZI", "_DEBUG"]
+        ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
     else:
         cflags.append("g")
 
@@ -633,7 +633,10 @@ def _get_optimization_cflags(
 
     if b_debug_build:
         cflags, ldflags = _get_inductor_debug_symbol_cflags()
-        cflags.append("O0")
+        if _IS_WINDOWS:
+            cflags += ["Od", "Ob0", "Oy-"]
+        else:
+            cflags.append("O0")
     else:
         if _IS_WINDOWS:
             cflags = ["O1" if min_optimize else "O2"]
