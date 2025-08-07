@@ -2,6 +2,7 @@ external_build:
   build_target: vllm
   torch_whl_dir: dist
   work_directory: vllm
+  vllm_fa_cmake_gpu_arches: "80-real"
   artifact_dir: shared
   # if set, overrides the base image used in vllm build
   base_image: ${DOCKER_IMAGE} # replace with the env_var DOCKER_IMAGE
