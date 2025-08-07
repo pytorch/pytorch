@@ -1535,10 +1535,12 @@ def flex_attention_backward(*args, **kwargs):
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
-        kernel_options.setdefault("IS_DIVISIBLE", False)
-    else:
+    seq_q_divisible = V.graph.sizevars.statically_known_true(seq_len_q % 128 == 0)
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(seq_len_kv % 128 == 0)
+    if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
 
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
