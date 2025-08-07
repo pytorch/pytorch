@@ -715,7 +715,7 @@ class OrderedShardingTest(DTensorTestBase):
         sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec_dp_first)
         local_tensor = sharded_dtensor.to_local()
         gathered_1 = [
-            torch.zeros(local_tensor.shape, dtype=torch.float, device="cuda")
+            torch.zeros(local_tensor.shape, dtype=torch.float, device=self.device_type)
             for _ in range(self.world_size)
         ]
         torch.distributed.all_gather(gathered_1, local_tensor)
@@ -723,7 +723,7 @@ class OrderedShardingTest(DTensorTestBase):
         sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec_tp_first)
         local_tensor = sharded_dtensor.to_local()
         gathered_2 = [
-            torch.zeros(local_tensor.shape, dtype=torch.float, device="cuda")
+            torch.zeros(local_tensor.shape, dtype=torch.float, device=self.device_type)
             for _ in range(self.world_size)
         ]
         torch.distributed.all_gather(gathered_2, local_tensor)
