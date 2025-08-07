@@ -15,7 +15,6 @@ from cli.lib.common.file_utils import (
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
-    get_existing_abs_path,
     is_path_exist,
     local_image_exists,
 )
