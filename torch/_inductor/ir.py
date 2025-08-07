@@ -5053,6 +5053,22 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class CuteDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
+    Similar to other template buffers but specialized for CuteDSL operations.
+    """
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,  # CuteDSLTemplate - using Any to avoid circular import
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+
+
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
 ) -> TypeIs[Sequence[IRNode]]:
