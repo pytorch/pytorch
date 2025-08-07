@@ -3,18 +3,21 @@ import dataclasses
 import itertools
 import logging
 import re
-from collections.abc import Sequence
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
+from collections.abc import Iterable, Sequence
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch._inductor.utils import get_free_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
+from .ops_handler import DefaultHandler
 from .utils import (
     get_dtype_size,
     reduction_num_outputs,
@@ -23,7 +26,7 @@ from .utils import (
     sympy_subs,
     VarRanges,
 )
-from .virtualized import OpsHandler, ReductionType, V
+from .virtualized import ReductionType, V
 
 
 T = TypeVar("T")
@@ -37,7 +40,13 @@ class Dep(abc.ABC):
     index: sympy.Expr
 
     @abc.abstractmethod
-    def rename(self, renames: dict[str, str]) -> "Dep":
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        pass
+
+    @abc.abstractmethod
+    def rename(self, renames: dict[str, str]) -> Self:
         pass
 
     @abc.abstractmethod
@@ -56,7 +65,7 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
-    def normalize_with_stride_order(self, prefix: str = "t") -> "Dep":
+    def normalize_with_stride_order(self, prefix: str = "t") -> Self:
         return self
 
 
@@ -68,6 +77,15 @@ class MemoryDep(Dep):
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return (
+            get_free_symbols(self.index, unbacked_only)
+            | get_free_symbols(self.size, unbacked_only)
+            | get_free_symbols(self.var_names, unbacked_only)
+        )
+
     def __repr__(self) -> str:
         maybe_mode = ""
         if self.mode is not None:
@@ -78,7 +96,7 @@ class MemoryDep(Dep):
     def num_vars(self) -> int:
         return len(self.var_names)
 
-    def decide_loop_order_to_match(self, other: "MemoryDep") -> Optional[List[int]]:
+    def decide_loop_order_to_match(self, other: "MemoryDep") -> Optional[list[int]]:
         """
         Can return None if not able to decide loop orders.
         """
@@ -123,7 +141,7 @@ class MemoryDep(Dep):
             )
             return None
 
-        # May hanppen if self and other are as follows
+        # May happen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
         # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
         if OrderedSet(self_strides) != OrderedSet(other_strides):
@@ -192,7 +210,9 @@ class MemoryDep(Dep):
         )
         new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
 
-        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        out = MemoryDep(
+            self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values())
+        )  # type: ignore[arg-type]
         return out
 
     @property
@@ -303,6 +323,11 @@ class StarDep(Dep):
             return StarDep(renames[self.name], self.mode)
         return self
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
     def numbytes_hint(self) -> int:
         try:
             return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
@@ -338,6 +363,17 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
+    # WeakDep's are also used to add dependencies to prevent some specific reordering,
+    # E.g. collectives global ordering.
+    # But if other pass guarantees proper ordering by its logic,
+    # This additional "fake" deps will be holding optimizations.
+    # This flag is used to identify those additional deps.
+    is_fake: bool = False
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @property
     def index(self) -> sympy.Expr:
@@ -348,7 +384,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf)
+            return WeakDep(renames[self.name], self.mutating_buf, self.is_fake)
         return self
 
     def numbytes_hint(self) -> int:
@@ -436,6 +472,15 @@ class ReadWrites:
                 names.add(dep.name)
         return names
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        result: OrderedSet[sympy.Symbol] = OrderedSet()
+
+        for dep in self.reads_and_writes():
+            result |= dep.get_free_symbol_uses(unbacked_only)
+        return result
+
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool) -> None:
@@ -449,8 +494,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     @staticmethod
     def drop_unused_symbols(
         index: Union[int, sympy.Expr],
-        var_names: List[sympy.Expr],
-        sizes: List[sympy.Expr],
+        var_names: list[sympy.Expr],
+        sizes: list[sympy.Expr],
     ) -> None:
         """
         Reduction has last (reduced) dim in its sizes, but
@@ -569,7 +614,7 @@ def var_builder(prefix: str) -> tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
 
 def index_vars_no_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str
-) -> Tuple[List[List[sympy.Symbol]], VarRanges]:
+) -> tuple[list[list[sympy.Symbol]], VarRanges]:
     var_ranges, add_var = var_builder(prefix)
     args: list[list[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
@@ -577,12 +622,12 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> Tuple[List[List[sympy.Expr]], VarRanges]:
+) -> tuple[list[Sequence[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: list[list[sympy.Expr]] = []
-    new_sizes: list[list[sympy.Expr]] = []
+    args: list[Sequence[sympy.Expr]] = []
+    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -595,7 +640,7 @@ def extract_read_writes(
     *argsizes: Sequence[sympy.Expr],
     normalize: bool = False,
     prefix: str = "d",
-    hidden_args: Sequence[List[sympy.Expr]] = (),
+    hidden_args: Sequence[list[sympy.Expr]] = (),
 ) -> ReadWrites:
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
 
@@ -603,7 +648,10 @@ def extract_read_writes(
 
     if isinstance(fn, LoopBody):
         inner = extract_loop_body_with_args(
-            fn, [*args, *hidden_args], var_ranges, normalize
+            fn,
+            [*args, *hidden_args],  # type: ignore[list-item]
+            var_ranges,
+            normalize,
         )
     else:
         # Slow path tracing the function
@@ -628,7 +676,7 @@ def extract_read_writes(
 
 def extract_loop_body_with_args(
     fn: Any,
-    args: List[List[sympy.Expr]],
+    args: list[list[sympy.Expr]],
     var_ranges: VarRanges,
     normalize: bool = False,
 ) -> _RecordLoadStoreInner:
@@ -647,11 +695,16 @@ def extract_loop_body_with_args(
         inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
     for entry in fn.memory_usage[MemoryUsageType.STORE]:
         inner.store(
-            entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+            entry.buffer_name,
+            name_to_index[entry.index_name],
+            None,  # type: ignore[arg-type]
+            entry.mode,
         )
     for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
         inner.store_reduction(
-            entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+            entry.buffer_name,
+            name_to_index[entry.index_name],
+            None,  # type: ignore[arg-type]
         )
     for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
         inner.index_expr(name_to_index[entry.index_name], None)
@@ -659,7 +712,11 @@ def extract_loop_body_with_args(
         # All that matters is that we record the buffer name, so place it in the
         # "boundaries" name position to ensure that it's recorded.
         inner.bucketize(
-            None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
+            None,
+            (entry.buffer_name, None, None, None),
+            None,
+            None,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
         )
     # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     return inner
@@ -695,7 +752,7 @@ def extract_input_node_reduction_ranges(
 
     # There is one issue: what if there are views / permutations between the input node and its dependent realized nodes?
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
-    # Is there a way to check whether there are permutations inbetween?
+    # Is there a way to check whether there are permutations in between?
     reads = input_node.get_reads()
     reduction_size: Optional[list[sympy.Expr]] = None
     size: Optional[list[sympy.Expr]] = None
@@ -736,20 +793,18 @@ def canonicalization_prefix() -> str:
     return "c"
 
 
-# ops handler which computes all the free unbacked symbols for an IR
-class FreeUnbackedSymbolsOpsHandler:
+# ops handler which computes all the free symbols for an IR
+class FreeSymbolsOpsHandler(DefaultHandler):
     symbols: OrderedSet[sympy.Symbol]
 
-    def __init__(self) -> None:
+    def __init__(self, unbacked_only: bool = True) -> None:
         self.symbols = OrderedSet()
+        self.get_symbols = free_unbacked_symbols if unbacked_only else free_symbols
 
-    def __getattr__(self, name: str) -> Callable[..., Any]:
-        def inner(*args: Sequence[Any], **kwargs: Dict[Any, Any]) -> None:
-            for a in itertools.chain(args, kwargs.values()):
-                if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
-                    self.symbols |= free_unbacked_symbols(a)
-
-        return inner
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        for a in itertools.chain(args, kwargs.values()):
+            if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
+                self.symbols |= self.get_symbols(a)
 
     def indirect_indexing(
         self,
@@ -759,20 +814,20 @@ class FreeUnbackedSymbolsOpsHandler:
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
-        self.symbols |= free_unbacked_symbols(size)
+        self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
-    def frexp(self, x: Any) -> Tuple[None, ...]:
+    def frexp(self, x: Any) -> tuple[None, ...]:
         return (None,) * 2
 
     def scan(
         self, dtypes: Any, combine_fn: Any, values: Sequence[Any]
-    ) -> Tuple[None, ...]:
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def sort(
         self, dtypes: Any, values: Sequence[Any], stable: Any, descending: Any
-    ) -> Tuple[None, ...]:
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def reduction(
@@ -791,25 +846,21 @@ class FreeUnbackedSymbolsOpsHandler:
         body()
 
 
-def _typecheck_FreeUnbackedSymbolsOpsHandler(
-    h: FreeUnbackedSymbolsOpsHandler,
-) -> OpsHandler[None]:
-    return h
-
-
-def extract_free_unbacked_symbols(
+def extract_free_symbols(
     fn: Callable[..., Any],
     index: Sequence[sympy.Expr],
     rindex: Optional[Sequence[sympy.Expr]] = None,
+    unbacked_only: bool = True,
 ) -> OrderedSet[sympy.Symbol]:
     from .ir import FlexibleLayout
 
     args = [index, rindex] if rindex is not None else [index]
-    handler = FreeUnbackedSymbolsOpsHandler()
+    handler = FreeSymbolsOpsHandler(unbacked_only)
     # NB: I cargo culted the allow_indexing patch here, I don't understand why
     # people do this all over
-    with V.set_ops_handler(handler), patch.object(
-        FlexibleLayout, "allow_indexing", True
+    with (
+        V.set_ops_handler(handler),
+        patch.object(FlexibleLayout, "allow_indexing", True),
     ):
         fn(*args)
     return handler.symbols

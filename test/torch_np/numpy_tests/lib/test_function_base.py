@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 import math
@@ -2256,7 +2255,7 @@ class Test_I0(TestCase):
             (TypeError, RuntimeError),
             # match="i0 not supported for complex values"
         ):
-            res = i0(a)
+            i0(a)
 
 
 class TestKaiser(TestCase):
@@ -2882,7 +2881,8 @@ class TestPercentile(TestCase):
         np.testing.assert_equal(res.dtype, arr.dtype)
 
     H_F_TYPE_CODES = [
-        (int_type, np.float64) for int_type in "Bbhil"  # np.typecodes["AllInteger"]
+        (int_type, np.float64)
+        for int_type in "Bbhil"  # np.typecodes["AllInteger"]
     ] + [
         (np.float16, np.float16),
         (np.float32, np.float32),
@@ -3597,8 +3597,6 @@ class TestQuantile(TestCase):
     def test_quantile_scalar_nan(self):
         a = np.array([[10.0, 7.0, 4.0], [3.0, 2.0, 1.0]])
         a[0][1] = np.nan
-        actual = np.quantile(a, 0.5)
-        # assert np.isscalar(actual)    # XXX: our isscalar follows pytorch
         assert_equal(np.quantile(a, 0.5), np.nan)
 
 

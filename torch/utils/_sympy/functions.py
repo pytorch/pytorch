@@ -291,6 +291,11 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -337,9 +342,9 @@ class ModularIndexing(sympy.Function):
                         and isinstance(term.args[0], sympy.Integer)
                         and term.args[0] < 0
                     ):
-                        # workaround for https://github.com/openai/triton/issues/619,
+                        # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
                         all_positive = False
                         break
@@ -357,10 +362,6 @@ class ModularIndexing(sympy.Function):
     def _eval_is_nonnegative(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
-
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):
@@ -454,6 +455,12 @@ class PythonMod(sympy.Function):
     def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
+    def _ccode(self, printer):
+        p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
+        return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
+
 
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
@@ -530,17 +537,22 @@ class CeilToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
 
+    def _ccode(self, printer):
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
+
 
 class FloorToInt(sympy.Function):
     is_integer = True
 
     @classmethod
     def eval(cls, number):
-        # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, int_oo):
             return -int_oo
+        if isinstance(number, sympy.Integer):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -578,7 +590,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return base // 2**shift
+        return FloorDiv(base, 2**shift)
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -1049,7 +1061,7 @@ class PowByNatural(sympy.Function):
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
-# occuring
+# occurring
 class FloatPow(sympy.Function):
     is_real = True
 
@@ -1120,6 +1132,11 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(float(base) / float(divisor))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
+
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
 
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
@@ -1285,6 +1302,16 @@ class Identity(sympy.Function):
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
 
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        return self.args[0]
+
+    def __int__(self) -> int:
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        return float(self.args[0])
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
@@ -1294,11 +1321,12 @@ def make_opaque_unary_fn(name):
         constant propagation.  This helps avoid performing transformations
         that are valid for real numbers but are invalid for floating point;
         in particular, while we are willing to make optimizations that change
-        numerics for Tensor compute, we are NOT willing to make optimziations
+        numerics for Tensor compute, we are NOT willing to make optimizations
         that change numerics for size compute.
         """
 
         _torch_handler_name = name
+        _torch_unpickler = make_opaque_unary_fn
 
         @classmethod
         def eval(cls, a):
@@ -1359,6 +1387,9 @@ def make_opaque_bitwise_fn(name, real_op_name):
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
         precedence: int = prec
+        _torch_unpickler = functools.partial(
+            make_opaque_bitwise_fn, real_op_name=real_op_name
+        )
 
         @classmethod
         def eval(cls, a, b):

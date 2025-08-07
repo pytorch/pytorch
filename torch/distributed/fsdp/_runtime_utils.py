@@ -518,7 +518,7 @@ def _root_pre_forward(
         _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
         if not state._is_root:
             # Always cast forward inputs in the root of this local FSDP unit for mixed
-            # precision, as this is where mixed precision could be configed.
+            # precision, as this is where mixed precision could be configured.
             # This is more useful for auto wrapping that is recommended in composable path.
             # For manual wrapping, cast forward inputs on each local FSDP unit root will
             # increase some overhead, so not turned on for model wrapper path right now where
@@ -596,8 +596,8 @@ def _root_pre_forward(
             args_tuple, kwargs_tuple = _to_kwargs(
                 args, kwargs, state.compute_device, False
             )
-        args = args_tuple[0]
-        kwargs = kwargs_tuple[0]
+        args = args_tuple[0] if args_tuple else tuple()
+        kwargs = kwargs_tuple[0] if kwargs_tuple else {}
 
         return _root_cast_forward_input(state, module, args, kwargs)
 

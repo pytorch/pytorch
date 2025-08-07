@@ -19,6 +19,8 @@ import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
+from torch._utils import try_import
+from torch._utils_internal import deprecated
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -58,6 +60,9 @@ HAS_CUDA = torch.cuda.is_available()
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -1059,18 +1064,33 @@ class TestDeviceUtils(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
-        torch.set_default_device("cuda")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+        try:
+            torch.set_default_device("cuda")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda")
-        torch.cuda.set_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda")
+            torch.cuda.set_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
+
+            torch.set_default_device("cuda:1")
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            torch.set_default_device("cpu")
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+        finally:
+            # Reset the device at the end.
+            torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)
@@ -1161,6 +1181,39 @@ def f(x):
         rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
+
+
+class TestTryImport(TestCase):
+    def test_import_imported(self):
+        self.assertIn("os", sys.modules)
+        os_module = try_import("os")
+        self.assertIs(os_module, os)
+
+    def test_import_existing(self):
+        self.assertNotIn("imaplib", sys.modules)
+        imaplib_module = try_import("imaplib")
+        self.assertIsNotNone(imaplib_module)
+        self.assertFalse(hasattr(imaplib_module, "not_attribute"))
+        self.assertTrue(hasattr(imaplib_module, "IMAP4"))
+
+    def test_import_missing(self):
+        missing_module = try_import("missing_module")
+        self.assertIsNone(missing_module)
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
 
 
 if __name__ == "__main__":

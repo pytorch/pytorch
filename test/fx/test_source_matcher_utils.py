@@ -18,6 +18,8 @@ from torch.fx.passes.utils.source_matcher_utils import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -212,6 +214,9 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions[torch.nn.functional.linear]), 4)
         self.assertEqual(len(module_partitions[torch.nn.functional.relu]), 2)
 
+    @skipIfTorchDynamo(
+        "unexplained 3.13 failure: weakref inlining raises dynamic shape error only in 3.13"
+    )
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_legalize_slice(self):
         class M(torch.nn.Module):
@@ -477,3 +482,6 @@ class TestSourceMatcher(JitTestCase):
 
 
 instantiate_parametrized_tests(TestSourceMatcher)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

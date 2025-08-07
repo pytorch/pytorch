@@ -135,8 +135,7 @@ class _NodeReporterReruns(_NodeReporter):
         else:
             assert isinstance(report.longrepr, tuple)
             filename, lineno, skipreason = report.longrepr
-            if skipreason.startswith("Skipped: "):
-                skipreason = skipreason[9:]
+            skipreason = skipreason.removeprefix("Skipped: ")
             details = f"{filename}:{lineno}: {skipreason}"
 
             skipped = ET.Element(
@@ -342,5 +341,5 @@ class StepcurrentPlugin:
         self.cache.set(self.directory, self.lastrun)
 
     def pytest_sessionfinish(self, session, exitstatus):
-        if exitstatus == 0 and not self.run_single:
+        if exitstatus == 0:
             self.cache.set(self.directory, self.initial_val)

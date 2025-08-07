@@ -1,13 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
-    distribute_tensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-    zeros,
-)
+from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -58,7 +54,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    @parametrize("extensions", [None, [Rot13Example()]])
+    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
     def test_1d_to_1d_reshard_placement_change(self, extensions) -> None:
         CHECKPOINT_DIR = self.temp_dir
 

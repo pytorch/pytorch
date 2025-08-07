@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 A Python script that logging the system-level utilization usage in json format.
-Data collected: CPU, memory, GPU memeory utilzation, and GPU utilization if available.
+Data collected: CPU, memory, GPU memory utilization, and GPU utilization if available.
 
 Usage:
 - To run the script with default data collect time setting, use the following command:
     python3 monitor.py
 
 - To run the script in the local machine with debug mode and customized data collect time, use the following command:
-    python3 monitor.py --debug --log-interval 10 --data-collect-interval 0.5
+    python3 monitor.py --debug --log-interval 10 --data-collect-interval 2
 
 - To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
@@ -28,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
 import copy
 import dataclasses
-import datetime
 import os
 import signal
 import threading
@@ -40,6 +39,7 @@ import psutil  # type: ignore[import]
 
 from tools.stats.utilization_stats_lib import (
     getDataModelVersion,
+    getTsNow,
     GpuUsage,
     RecordData,
     UtilizationMetadata,
@@ -78,6 +78,9 @@ class GpuData:
     uuid: str
     utilization: float
     mem_utilization: float
+    allocated_mem: float
+    allocated_mem_value: float
+    total_mem_value: float
 
 
 try:
@@ -117,8 +120,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-collect-interval",
         type=float,
-        default=0.5,
-        help="set time interval to collect data, default is 0.5 second, this should not longer than log_interval",
+        default=1,
+        help="set time interval to collect data, default is 1 second, this should not longer than log_interval",
     )
     args = parser.parse_args()
     return args
@@ -135,20 +138,25 @@ class SharedResource:
     def __init__(self, is_debug_mode: bool = False) -> None:
         self._data_list: list[UsageData] = []
         self._data_errors: list[str] = []
+        self._data_logs: list[str] = []
         self._lock = threading.Lock()
 
-    def get_and_reset(self) -> tuple[list[UsageData], list[str]]:
+    def get_and_reset(self) -> tuple[list[UsageData], list[str], list[str]]:
         """
         get deepcopy of list of usageData and list of string errors
         """
         copy_data = []
         copy_errors = []
+        copy_logs = []
         with self._lock:
             copy_data = copy.deepcopy(self._data_list)
             copy_errors = copy.deepcopy(self._data_errors)
+            copy_logs = copy.deepcopy(self._data_logs)
+
             self._data_list.clear()
             self._data_errors.clear()
-        return copy_data, copy_errors
+            self._data_logs.clear()
+        return copy_data, copy_errors, copy_logs
 
     def add_data(self, data: UsageData) -> None:
         with self._lock:
@@ -158,19 +166,24 @@ class SharedResource:
         with self._lock:
             self._data_errors.append(str(error))
 
+    def add_log(self, log: str) -> None:
+        with self._lock:
+            print("here log")
+            self._data_logs.append(log)
+
 
 class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    By default, data is collected every 0.5 seconds, and log
+    By default, data is collected every 1 seconds, and log
     the aggregated result every 5 seconds.
     """
 
     def __init__(
         self,
         log_interval: float = 5,
-        data_collect_interval: float = 0.5,
+        data_collect_interval: float = 1,
         is_debug_mode: bool = False,
         pynvml_enabled: bool = False,
         amdsmi_enabled: bool = False,
@@ -182,16 +195,18 @@ class UsageLogger:
             in a pretty format with more information.
         """
         self._log_interval = log_interval
+        self._data_collect_interval = data_collect_interval
         self._metadata = UtilizationMetadata(
             level="metadata",
-            usage_collect_interval=self._log_interval,
+            usage_collect_interval=self._data_collect_interval,
             data_model_version=getDataModelVersion(),
             job_id=_job_id,
             job_name=_job_name,
             workflow_id=_workflow_run_id,
             workflow_name=_workflow_name,
+            start_at=getTsNow(),
         )
-        self._data_collect_interval = data_collect_interval
+
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
         self._gpu_handles: list[Any] = []
@@ -225,6 +240,7 @@ class UsageLogger:
                     print(f"collecting data {data}")
 
                 self.shared_resource.add_data(data)
+
             except Exception as e:
                 if self._debug_mode:
                     print(f"error detected: {str(e)}")
@@ -246,23 +262,28 @@ class UsageLogger:
         return UtilizationStats(
             avg=round(avg, 2),
             max=round(maxi, 2),
+            raw=data_list,
         )
 
     def _output_data(self) -> None:
         """
         output the data.
         """
-        self._metadata.start_at = datetime.datetime.now().timestamp()
+        self._metadata.start_at = getTsNow()
         self.log_json(self._metadata.to_json())
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
-            stats = UtilizationRecord()
+            stats = UtilizationRecord(
+                level="record",
+                timestamp=getTsNow(),
+            )
+
             try:
-                data_list, error_list = self.shared_resource.get_and_reset()
+                data_list, error_list, log_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
                     print(
-                        f"collected data: {len(data_list)}, errors found: {len(error_list)}"
+                        f"collected data: {len(data_list)}, errors found: {len(error_list)}, logs {len(log_list)}"
                     )
                 # records and clears found errors
                 errors = list(set(error_list))
@@ -270,13 +291,11 @@ class UsageLogger:
                 # if has errors but data list is None, a bug may exist in the monitor code, log the errors
                 if not data_list and len(errors) > 0:
                     raise ValueError(
-                        f"no data is collected but detected errors during the interval: {errors}"
+                        f"no data is collected but detected errors during the interval: {errors}, logs: {log_list}"
                     )
                 if not data_list:
                     # pass since no data is collected
                     continue
-                stats.level = "record"
-                stats.timestamp = datetime.datetime.now().timestamp()
 
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
@@ -300,11 +319,10 @@ class UsageLogger:
                     gpu_list = self._calculate_gpu_utilization(data_list)
                     record.gpu_usage = gpu_list
                 stats.data = record
+                stats.logs = log_list
             except Exception as e:
                 stats = UtilizationRecord(
-                    level="record",
-                    timestamp=datetime.datetime.now().timestamp(),
-                    error=str(e),
+                    level="record", timestamp=getTsNow(), error=str(e)
                 )
             finally:
                 collecting_end_time = time.time()
@@ -324,20 +342,33 @@ class UsageLogger:
         calculate_gpu = []
         gpu_mem_utilization = defaultdict(list)
         gpu_utilization = defaultdict(list)
+        gpu_allocated_mem = defaultdict(list)
+        gpu_allocated_mem_values = defaultdict(list)
+        gpu_total_mem_values = defaultdict(float)
 
         for data in data_list:
             for gpu in data.gpu_list:
                 gpu_mem_utilization[gpu.uuid].append(gpu.mem_utilization)
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
+                gpu_allocated_mem[gpu.uuid].append(gpu.allocated_mem)
+                gpu_allocated_mem_values[gpu.uuid].append(gpu.allocated_mem_value)
+                gpu_total_mem_values[gpu.uuid] = gpu.total_mem_value
 
         for gpu_uuid in gpu_utilization.keys():
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
             gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
+            gpu_allocated_mem_stats = self._generate_stats(gpu_allocated_mem[gpu_uuid])
+            gpu_allocated_mem_value_stats = self._generate_stats(
+                gpu_allocated_mem_values[gpu_uuid]
+            )
             calculate_gpu.append(
                 GpuUsage(
                     uuid=gpu_uuid,
                     util_percent=gpu_util_stats,
                     mem_util_percent=gpu_mem_util_stats,
+                    allocated_mem_percent=gpu_allocated_mem_stats,
+                    allocated_mem_value=gpu_allocated_mem_value_stats,
+                    total_mem_value=gpu_total_mem_values[gpu_uuid],
                 )
             )
         return calculate_gpu
@@ -368,11 +399,21 @@ class UsageLogger:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
+                gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(gpu_handle)
+                mem_utilization = gpu_utilization.memory
+
+                allocate_mem_MB = gpu_memory_info.used / 1024**2
+                total_mem_MB = gpu_memory_info.total / 1024**2
+                allocate_mem_percent = allocate_mem_MB / total_mem_MB * 100
+
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
                         utilization=gpu_utilization.gpu,
-                        mem_utilization=gpu_utilization.memory,
+                        mem_utilization=mem_utilization,
+                        allocated_mem=allocate_mem_percent,
+                        allocated_mem_value=allocate_mem_MB,
+                        total_mem_value=total_mem_MB,
                     )
                 )
         elif self._has_amdsmi:
@@ -383,11 +424,20 @@ class UsageLogger:
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
+                mem_info = amdsmi.amdsmi_get_gpu_memory_usage(handle)
+
+                allocate_mem_MB = mem_info["vram_usage"] / 1024**2
+                total_mem_MB = mem_info["vram_total"] / 1024**2
+                allocate_mem_percent = allocate_mem_MB / total_mem_MB * 100
+
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
                         utilization=gpu_utilization,
                         mem_utilization=gpu_mem_utilization,
+                        allocated_mem=allocate_mem_percent,
+                        allocated_mem_value=allocate_mem_MB,
+                        total_mem_value=total_mem_MB,
                     )
                 )
         return gpu_data_list
@@ -409,12 +459,16 @@ class UsageLogger:
                 self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
-            self._num_of_cpus = psutil.cpu_count(logical=False)
+            self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
-            self._metadata.gpu_type = self._gpu_lib_detected
             self._metadata.gpu_count = len(self._gpu_handles)
             self._metadata.cpu_count = self._num_of_cpus
 
+            if self._has_pynvml or self._has_amdsmi:
+                if len(self._gpu_handles) == 0:
+                    self._metadata.gpu_type = ""
+                else:
+                    self._metadata.gpu_type = self._gpu_lib_detected
         except Exception as e:
             self._metadata.error = str(e)
 
@@ -481,7 +535,9 @@ class UsageLogger:
                     cmd = " ".join(process.cmdline())
                     processName = process.name()
                     pid = process.pid
-                    if "python" in processName and cmd.startswith("python"):
+                    is_python = "python" in processName and "python" in cmd
+                    is_pytest = "pytest" in cmd
+                    if is_python or is_pytest:
                         python_test_processes.append({"pid": pid, "cmd": cmd})
                 except Exception:
                     pass

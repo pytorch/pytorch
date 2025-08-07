@@ -20,7 +20,7 @@ import types
 import typing
 import warnings
 import weakref
-from typing import (  # noqa: F401  # (Dict, List, Tuple) imported by torch.jit.annotations
+from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by torch.jit.annotations
     Any,
     Callable,
     Dict,
@@ -31,8 +31,10 @@ from typing import (  # noqa: F401  # (Dict, List, Tuple) imported by torch.jit.
     List,
     Optional,
     Tuple,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -47,7 +49,9 @@ from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
 
-IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
 
 BuiltinUnionType: Union[type, tuple[type, ...]]
@@ -167,7 +171,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, normalize the package manging here.
+    # each other, normalize the package managing here.
     if package_mangling.is_mangled(module_name):
         module_name = module_name.replace("<", "_")
         module_name = module_name.replace(">", "_")
@@ -255,9 +259,9 @@ def createResolutionCallbackFromEnv(lookup_base):
     def parseExpr(expr, module):
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(
-                expr
-            ), "whole expression was not parsed, falling back to c++ parser"
+            assert len_parsed == len(expr), (
+                "whole expression was not parsed, falling back to c++ parser"
+            )
             return value
         except Exception:
             """
@@ -378,7 +382,7 @@ def get_closure(fn):
 # values global in the function.
 # In Python 3.9 declaring class as global will make it invisible to
 # `inspect.getsource`, see https://bugs.python.org/issue42666 .
-# This could be worked around by manualy adding it to `global()` dictionary.
+# This could be worked around by manually adding it to `global()` dictionary.
 
 
 def createResolutionCallbackFromClosure(fn):
@@ -465,8 +469,8 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if IS_PY39_PLUS else annotation.slice.value  # type: ignore[attr-defined]
+        # In Python3.9+ subscript indices are not wrapped in ast.Index
+        subscript_slice = annotation.slice
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
@@ -666,7 +670,7 @@ class FunctionModifiers:
     _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
-def export(fn):
+def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -708,11 +712,11 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+    fn._torchscript_modifier = FunctionModifiers.EXPORT  # type:ignore[attr-defined]
     return fn
 
 
-def unused(fn):
+def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
@@ -765,7 +769,7 @@ def unused(fn):
 
         return prop
 
-    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
 
 
@@ -853,8 +857,7 @@ def ignore(drop=False, **kwargs):
 
     if not isinstance(drop, bool):
         raise RuntimeError(
-            "Argument to @torch.jit.ignore must be a bool or "
-            f"a function but got {drop}"
+            f"Argument to @torch.jit.ignore must be a bool or a function but got {drop}"
         )
 
     # for backwards compat
@@ -884,13 +887,13 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
-def _drop(fn):
-    fn._torchscript_modifier = FunctionModifiers._DROP
+def _drop(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    fn._torchscript_modifier = FunctionModifiers._DROP  # type: ignore[attr-defined]
     return fn
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+def _copy_to_script_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore[attr-defined]
     return fn
 
 
@@ -1118,14 +1121,15 @@ def _get_overloaded_methods(method, mod_class):
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
         raise AssertionError(
-            "Overloads are not useable when a module is redeclared within the same file: "
+            "Overloads are not usable when a module is redeclared within the same file: "
             + str(method)
         )
     return overloads
 
 
 def is_tuple(ann) -> bool:
-    if ann is Tuple:
+    # Check for typing.Tuple missing args (but `tuple` is fine)
+    if ann is typing.Tuple:  # noqa: UP006
         raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -1133,35 +1137,31 @@ def is_tuple(ann) -> bool:
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is tuple
 
 
 def is_list(ann) -> bool:
-    if ann is List:
+    # Check for typing.List missing args (but `list` is fine)
+    if ann is typing.List:  # noqa: UP006
         raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, "__module__"):
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is list
 
 
 def is_dict(ann) -> bool:
-    if ann is Dict:
+    # Check for typing.Dict missing args (but `dict` is fine)
+    if ann is typing.Dict:  # noqa: UP006
         raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, "__module__"):
         return False
 
     ann_origin = get_origin(ann)
-    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
-        return True
-    return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
+    return ann.__module__ in ("builtins", "typing") and ann_origin is dict
 
 
 def is_union(ann):
@@ -1271,7 +1271,7 @@ def _get_named_tuple_properties(
             # [Note: ForwardRef annotations in NamedTuple attributes]
             # NamedTuple types are slightly different from normal types.
             #
-            # Normally, annotations are evaluted like this (during jit.script):
+            # Normally, annotations are evaluated like this (during jit.script):
             # 1. Load strings of python code into c++ and parse.
             # 2. Get annotations as strings
             # 3. Use the PythonResolver's resolution callback (rcb) to convert
@@ -1357,11 +1357,11 @@ def _is_exception(obj) -> bool:
 
 
 def raise_error_container_parameter_missing(target_type) -> None:
-    if target_type == "Dict":
+    if target_type.endswith("ict"):
         raise RuntimeError(
-            "Attempted to use Dict without "
+            f"Attempted to use {target_type} without "
             "contained types. Please add contained type, e.g. "
-            "Dict[int, int]"
+            f"{target_type}[int, int]"
         )
     raise RuntimeError(
         f"Attempted to use {target_type} without a "
@@ -1370,15 +1370,20 @@ def raise_error_container_parameter_missing(target_type) -> None:
     )
 
 
+_RAW_TYPE_NAME_MAPPING = {
+    dict: "dict",
+    list: "list",
+    tuple: "tuple",
+    typing.Dict: "Dict",  # noqa: UP006
+    typing.List: "List",  # noqa: UP006
+    typing.Optional: "Optional",
+    typing.Tuple: "Tuple",  # noqa: UP006
+}
+
+
 def check_args_exist(target_type) -> None:
-    if target_type is List or target_type is list:
-        raise_error_container_parameter_missing("List")
-    elif target_type is Tuple or target_type is tuple:
-        raise_error_container_parameter_missing("Tuple")
-    elif target_type is Dict or target_type is dict:
-        raise_error_container_parameter_missing("Dict")
-    elif target_type is None or target_type is Optional:
-        raise_error_container_parameter_missing("Optional")
+    if name := _RAW_TYPE_NAME_MAPPING.get(target_type):
+        raise_error_container_parameter_missing(name)
 
 
 def check_empty_containers(obj) -> None:
@@ -1399,7 +1404,7 @@ def container_checker(obj, target_type) -> bool:
     check_args_exist(target_type)
     if origin_type is None:
         return False
-    elif origin_type is list or origin_type is List:
+    elif origin_type is list or origin_type is typing.List:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
@@ -1413,7 +1418,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, arg_type):
                 return False
         return True
-    elif origin_type is Dict or origin_type is dict:
+    elif origin_type is typing.Dict or origin_type is dict:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
@@ -1430,7 +1435,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(val, val_type):
                 return False
         return True
-    elif origin_type is Tuple or origin_type is tuple:
+    elif origin_type is typing.Tuple or origin_type is tuple:  # noqa: UP006
         check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
@@ -1498,7 +1503,7 @@ class _TensorExtractor(pickle.Pickler):
         # unpicklable if it doesn't contain tensors, as we can just ignore/skip
         # it. To play it safe, we only do so for common objects that we're sure
         # don't contain tensors. Feel free to add new types here. Note also that
-        # even if a type isn't listed here this won't block users, since thet
+        # even if a type isn't listed here this won't block users, since they
         # can just add a __getstate__ or __reduce__ method to their class.
         if isinstance(obj, LockType):
             return ""
@@ -1540,7 +1545,7 @@ def _get_model_id(obj) -> Optional[str]:
 # In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
 # that were previously dropped. To preserve the behavior, explicitly drop them there
 
-if sys.version_info > (3, 10):
+if sys.version_info >= (3, 11):
     _drop(enum.Enum.__new__)
     _drop(enum.Enum.__format__)
     _drop(enum.Enum.__repr__)

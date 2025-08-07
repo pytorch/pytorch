@@ -7,6 +7,8 @@ import typing
 from enum import auto, Enum
 from typing import Optional, Union
 
+from torch.utils._triton import has_triton_package
+
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
@@ -32,17 +34,9 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available() -> bool:
-    try:
-        import triton  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
-if _is_triton_available():
+if has_triton_package():
+    import triton
     import triton.backends.compiler
     import triton.compiler.compiler
 
@@ -95,9 +89,7 @@ if _is_triton_available():
             divisible_by_16=None,
             equal_to_1=None,
         ):
-            return {
-                tuple((x,) for x in divisible_by_16): [["tt.divisibility", 16]],
-            }
+            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
@@ -144,7 +136,7 @@ class DeviceProperties(typing.NamedTuple):
     warp_size: Optional[int] = None
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
@@ -164,6 +156,8 @@ class DeviceProperties(typing.NamedTuple):
             elif device_type == "mps":
                 # TODO: Fetch the actual value from ioreg
                 multi_processor_count = 8
+            elif device_type == "mtia":
+                multi_processor_count = 64
             else:
                 raise
         return cls(
@@ -189,14 +183,14 @@ class HalideInputSpec(typing.NamedTuple):
     alias_of: Optional[str] = None
 
     def bindings_type(self) -> str:
-        if self.ctype in ("half*", "bfloat16*"):
+        if self.ctype in ("at::Half*", "at::BFloat16*"):
             return "uint16_t*"  # half not defined
         return self.ctype
 
     def halide_type(self) -> str:
-        if self.ctype == "half*":
+        if self.ctype == "at::Half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
-        if self.ctype == "bfloat16*":
+        if self.ctype == "at::BFloat16*":
             return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 

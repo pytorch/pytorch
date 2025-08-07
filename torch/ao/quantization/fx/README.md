@@ -296,7 +296,7 @@ BackendConfig(nniqat.LinearReLU)
 
 Pattern in this case is the same as before, it defines the pattern for the subgraph we are dealing with
 
-`set_observation_type`: sets the observation type for the patter, currently only two types:
+`set_observation_type`: sets the observation type for the pattern, currently only two types:
 
 `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` means the output observer instance will be different from the input, which is the most common type of observer placement.
 
@@ -446,4 +446,4 @@ However, for some operator based backends, like the current pytorch native backe
 
 ## Extensibility
 
-FX graph mode quantization can be extended to work with different backends, which may have different sets of supported quantized operator patterns and different requirements for each pattern. For more detail, please refer to the [BackendConfig README](/torch/ao/quantization/backend_config/README.md).
+FX graph mode quantization can be extended to work with different backends, which may have different sets of supported quantized operator patterns and different requirements for each pattern. For more detail, please refer to the [BackendConfig README](../backend_config/README.md).

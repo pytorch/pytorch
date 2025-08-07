@@ -108,6 +108,7 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
+    "torch/csrc/stable/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
@@ -145,13 +146,11 @@ ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 
 # Check if the compiler is hip-clang.
+#
+# This used to be a useful function but now we can safely always assume hip-clang.
+# Leaving the function here avoids bc-linter errors.
 def is_hip_clang() -> bool:
-    try:
-        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
-        with open(hip_path + "/lib/.hipInfo") as f:
-            return "HIP_COMPILER=clang" in f.read()
-    except OSError:
-        return False
+    return True
 
 
 # TODO Remove once the following submodules are updated
@@ -208,6 +207,7 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     extra_files=[
+        "torch/_inductor/codegen/cuda/device_op_overrides.py",
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
         "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",

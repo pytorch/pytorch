@@ -15,6 +15,7 @@ from . import amp
 
 __all__ = [
     "is_available",
+    "is_initialized",
     "synchronize",
     "current_device",
     "current_stream",
@@ -65,11 +66,6 @@ def _init_amx() -> bool:
     return torch._C._cpu._init_amx()
 
 
-def _is_arm_sve_supported() -> bool:
-    r"""Returns a bool indicating if CPU supports Arm SVE."""
-    return torch._C._cpu._is_arm_sve_supported()
-
-
 def is_available() -> bool:
     r"""Returns a bool indicating if CPU is currently available.
 
@@ -98,6 +94,12 @@ class Stream:
         pass
 
     def wait_stream(self, stream) -> None:
+        pass
+
+    def record_event(self) -> None:
+        pass
+
+    def wait_event(self, event) -> None:
         pass
 
 
@@ -192,3 +194,11 @@ def current_device() -> str:
     N.B. This function only exists to facilitate device-agnostic code
     """
     return "cpu"
+
+
+def is_initialized() -> bool:
+    r"""Returns True if the CPU is initialized. Always True.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    return True

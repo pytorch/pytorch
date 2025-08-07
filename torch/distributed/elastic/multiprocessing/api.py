@@ -37,6 +37,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.distributed.numa.binding import maybe_wrap_with_numa_bindings, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -165,9 +166,11 @@ def to_map(
     Example:
     ::
 
-     to_map(Std.OUT, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
-     to_map({1: Std.OUT}, local_world_size=2) # returns: {0: Std.NONE, 1: Std.OUT}
-     to_map({0: Std.OUT, 1: Std.OUT}, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
+     to_map(Std.OUT, local_world_size=2)  # returns: {0: Std.OUT, 1: Std.OUT}
+     to_map({1: Std.OUT}, local_world_size=2)  # returns: {0: Std.NONE, 1: Std.OUT}
+     to_map(
+         {0: Std.OUT, 1: Std.OUT}, local_world_size=2
+     )  # returns: {0: Std.OUT, 1: Std.OUT}
     """
     if isinstance(val_or_map, Std):
         return dict.fromkeys(range(local_world_size), val_or_map)
@@ -288,7 +291,7 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
         """
         nprocs = len(envs)
-        global_env = {}  # use only to query properies that are not dependent on a rank
+        global_env = {}  # use only to query properties that are not dependent on a rank
         if nprocs > 0:
             global_env = envs[0]
         else:
@@ -304,7 +307,9 @@ class DefaultLogsSpecs(LogsSpecs):
             if not self._run_log_dir:
                 self._run_log_dir = self._make_log_dir(self._root_log_dir, run_id)
 
-            attempt_log_dir = os.path.join(self._run_log_dir, f"attempt_{restart_count}")  # type: ignore[call-overload]
+            attempt_log_dir = os.path.join(
+                self._run_log_dir, f"attempt_{restart_count}"
+            )  # type: ignore[call-overload]
             shutil.rmtree(attempt_log_dir, ignore_errors=True)
             os.makedirs(attempt_log_dir)
 
@@ -448,7 +453,7 @@ class PContext(abc.ABC):
         # all local ranks are accounted for
         nprocs = len(args)
 
-        # TODO log_line_prefixes can be exanded too
+        # TODO log_line_prefixes can be expanded too
         logs_dest = logs_specs.reify(envs)
 
         _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
@@ -807,7 +812,12 @@ class SubprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
+        numa_options: Optional[NumaOptions] = None,
     ):
+        entrypoint, args = maybe_wrap_with_numa_bindings(
+            entrypoint=entrypoint, local_rank_to_args=args, numa_options=numa_options
+        )
+
         super().__init__(
             name,
             entrypoint,
@@ -868,9 +878,7 @@ class SubprocessContext(PContext):
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
                 logger.error(
-                    "failed (exitcode: %s)"
-                    " local_rank: %s (pid: %s)"
-                    " of binary: %s",
+                    "failed (exitcode: %s) local_rank: %s (pid: %s) of binary: %s",
                     first_failure.exitcode,
                     first_failure.local_rank,
                     first_failure.pid,

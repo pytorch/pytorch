@@ -212,12 +212,12 @@ def main() -> None:
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
 
-        assert os.path.isfile(
-            ts_backend_yaml
-        ), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
-        assert os.path.isfile(
-            ts_native_functions
-        ), f"Unable to access {ts_native_functions}"
+        assert os.path.isfile(ts_backend_yaml), (
+            f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        )
+        assert os.path.isfile(ts_native_functions), (
+            f"Unable to access {ts_native_functions}"
+        )
         from torchgen.dest.lazy_ir import GenTSLazyIR
         from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 

@@ -33,14 +33,14 @@ runs:
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
-    - name: Start docker if docker deamon is not running
+    - name: Start docker if docker daemon is not running
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
         if systemctl is-active --quiet docker; then
             echo "Docker daemon is running...";
         else
-            echo "Starting docker deamon..." && sudo systemctl start docker;
+            echo "Starting docker daemon..." && sudo systemctl start docker;
         fi
 
     - name: Log in to ECR

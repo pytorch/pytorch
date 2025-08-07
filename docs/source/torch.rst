@@ -122,6 +122,7 @@ Indexing, Slicing, Joining, Mutating Ops
     slice_scatter
     scatter_add
     scatter_reduce
+    segment_reduce
     split
     squeeze
     stack
@@ -152,7 +153,19 @@ us to use the current accelerator as the default device for relevant concepts su
 Stream device_type, FSDP, etc.
 
 As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
-:doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
+:doc:`"XPU" <xpu>`, :doc:`"MPS" <mps>`, "HPU", and PrivateUse1 (many device not in the PyTorch repo itself).
+
+Many tools in the PyTorch Ecosystem use fork to create subprocesses (for example dataloading
+or intra-op parallelism), it is thus important to delay as much as possible any
+operation that would prevent further forks. This is especially important here as most accelerator's initialization has such effect.
+In practice, you should keep in mind that checking :func:`torch.accelerator.current_accelerator`
+is a compile-time check by default, it is thus always fork-safe.
+On the contrary, passing the ``check_available=True`` flag to this function or calling
+:func:`torch.accelerator.is_available()` will usually prevent later fork.
+
+Some backends provide an experimental opt-in option to make the runtime availability
+check fork-safe. When using the CUDA device ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` can be
+used for example.
 
 .. autosummary::
     :toctree: generated
@@ -462,6 +475,7 @@ Reduction Ops
     var
     var_mean
     count_nonzero
+    hash_tensor
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -792,7 +806,6 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-.. py:module:: torch.functional
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
 .. py:module:: torch.serialization
@@ -802,3 +815,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
+   be visible only.
+.. toctree::
+    :hidden:
+
+    torch.aliases.md

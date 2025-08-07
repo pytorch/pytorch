@@ -12,7 +12,7 @@ namespace c10 {
 
 using std::string;
 
-C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&);
+C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&)
 
 namespace {
 static bool gCommandLineFlagsParsed = false;

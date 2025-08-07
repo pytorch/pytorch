@@ -1,12 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Union
 
 import sympy
 
 from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot, prefix_is_reduction
-from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
-from torch._inductor.runtime.triton_heuristics import split_scan_grid
+from torch._inductor.codegen.triton import (
+    triton_compute_type,
+    TritonCSEVariable,
+    TritonKernel,
+)
+from torch._inductor.runtime.triton_heuristics import SplitScanGrid
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
@@ -52,9 +57,9 @@ class TritonSplitScanKernel(TritonKernel):
 
     def initialize_range_tree(self, pid_cache):
         prefixes = ["y", "x", "r0_"]
-        assert len(self.numels) <= len(
-            prefixes
-        ), "z dimension not supported for split scan"
+        assert len(self.numels) <= len(prefixes), (
+            "z dimension not supported for split scan"
+        )
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
         grid_dims = {"r0_": 0, "x": 1, "y": 2}
@@ -68,7 +73,7 @@ class TritonSplitScanKernel(TritonKernel):
                     numel,
                     prefix,
                     grid_dim,
-                    self,
+                    self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
                     is_loop=False,
                     tensor_dim=tensor_dim,
@@ -115,6 +120,7 @@ class TritonSplitScanKernel(TritonKernel):
         )
         max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
+        scratch_base: Union[str, TritonCSEVariable]
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
             scratch_base = cse_load(f"{scratch_base} + {self.index_to_str(offset)}")
@@ -197,8 +203,5 @@ class TritonSplitScanKernel(TritonKernel):
     def _get_heuristic(self):
         return "split_scan"
 
-    def _get_grid_fn_str(self):
-        return "split_scan_grid"
-
-    def _get_grid_fn(self):
-        return split_scan_grid
+    def _get_grid_type(self) -> type[SplitScanGrid]:
+        return SplitScanGrid

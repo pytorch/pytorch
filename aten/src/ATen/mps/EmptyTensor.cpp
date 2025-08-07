@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#include <c10/metal/common.h>
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -35,7 +35,7 @@ TensorBase empty_mps(
         layout_or_default(layout_opt) == Layout::Strided,
         "only strided tensors are supported on MPS");
 
-    TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
+    TORCH_CHECK(size.size() <= c10::metal::max_ndim, "MPS supports tensors with dimensions <= ", c10::metal::max_ndim, ", but got ", size.size(), ".");
 
     check_size_nonnegative(size);
 
@@ -43,7 +43,6 @@ TensorBase empty_mps(
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
-    TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16 || is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_14_0_PLUS), "MPS BFloat16 is only supported on MacOS 14 or newer");
 
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);

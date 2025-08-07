@@ -126,9 +126,9 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
-                        assert (
-                            event.cpu_parent is None
-                        ), f"There is already a CPU parent event for {event.key}"
+                        assert event.cpu_parent is None, (
+                            f"There is already a CPU parent event for {event.key}"
+                        )
                         event.set_cpu_parent(parent)
                         break
 
@@ -173,6 +173,7 @@ class EventList(list):
         max_shapes_column_width=80,
         header=None,
         top_level_events_only=False,
+        time_unit=None,
     ):
         """Print an EventList as a nicely formatted table.
 
@@ -189,6 +190,8 @@ class EventList(list):
                 display events at top level like top-level invocation of python
                 `lstm`, python `add` or other functions, nested events like low-level
                 cpu/cuda/xpu ops events are omitted for profiler result readability.
+            time_unit(str, optional): A time unit to be used for all values in the
+                table. Valid options are: ``s``, ``ms`` and ``us``.
 
         Returns:
             A string containing the table.
@@ -204,6 +207,7 @@ class EventList(list):
             profile_memory=self._profile_memory,
             with_flops=self._with_flops,
             top_level_events_only=top_level_events_only,
+            time_unit=time_unit,
         )
 
     def export_chrome_trace(self, path):
@@ -294,7 +298,12 @@ class EventList(list):
                         stack_str = stack_str[:-1] + " " + str(int(metric_value))
                         f.write(stack_str + "\n")
 
-    def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
+    def key_averages(
+        self,
+        group_by_input_shapes=False,
+        group_by_stack_n=0,
+        group_by_overload_name=False,
+    ):
         """Averages all function events over their keys.
 
         Args:
@@ -306,13 +315,18 @@ class EventList(list):
 
             group_by_stack_n: group by top n stack trace entries
 
+            group_by_overload_name: Differentiate operators by their overload name e.g. aten::add.Tensor
+            and aten::add.out will be aggregated separately
+
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
         assert self._tree_built
         stats: dict[tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes, group_by_stack_n) -> tuple[str, ...]:
+        def get_key(
+            event, group_by_input_shapes, group_by_stack_n, group_by_overload_name
+        ) -> tuple[str, ...]:
             key = [
                 str(event.key),
                 str(event.node_id),
@@ -320,6 +334,8 @@ class EventList(list):
                 str(event.is_legacy),
                 str(event.is_user_annotation),
             ]
+            if group_by_overload_name:
+                key.append(evt.overload_name)
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
             if group_by_stack_n > 0:
@@ -327,7 +343,11 @@ class EventList(list):
             return tuple(key)
 
         for evt in self:
-            stats[get_key(evt, group_by_input_shapes, group_by_stack_n)].add(evt)
+            stats[
+                get_key(
+                    evt, group_by_input_shapes, group_by_stack_n, group_by_overload_name
+                )
+            ].add(evt)
 
         avg_list = EventList(
             stats.values(),
@@ -339,6 +359,8 @@ class EventList(list):
             evt.stack = evt.stack[:group_by_stack_n]
             if not group_by_input_shapes:
                 evt.input_shapes = ""
+            if not group_by_overload_name:
+                evt.overload_name = ""
         return avg_list
 
     def total_average(self):
@@ -380,13 +402,13 @@ def _format_memory(nbytes):
     MB = 1024 * KB
     GB = 1024 * MB
     if abs(nbytes) >= GB:
-        return f"{nbytes * 1.0 / GB:.2f} Gb"
+        return f"{nbytes * 1.0 / GB:.2f} GB"
     elif abs(nbytes) >= MB:
-        return f"{nbytes * 1.0 / MB:.2f} Mb"
+        return f"{nbytes * 1.0 / MB:.2f} MB"
     elif abs(nbytes) >= KB:
-        return f"{nbytes * 1.0 / KB:.2f} Kb"
+        return f"{nbytes * 1.0 / KB:.2f} KB"
     else:
-        return str(nbytes) + " b"
+        return str(nbytes) + " B"
 
 
 def _attr_formatter(name):
@@ -448,6 +470,7 @@ class FunctionEvent(FormattedTimesMixin):
         thread,
         start_us,
         end_us,
+        overload_name=None,
         fwd_thread=None,
         input_shapes=None,
         stack=None,
@@ -472,6 +495,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
+        self.overload_name: str = overload_name
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
@@ -589,6 +613,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.HPU,
             ]
             return self.time_range.elapsed_us()
 
@@ -613,6 +638,7 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.HPU,
             ]
             return self.device_time_total
 
@@ -633,8 +659,9 @@ class FunctionEvent(FormattedTimesMixin):
         device_time = self.device_time_str
         device_memory_usage = self.device_memory_usage
         return (
-            f"<FunctionEvent id={self.id} name={self.name} device_type={self.device_type} node_id={self.node_id} "
-            f"cpu_time={self.cpu_time_str} start_us={self.time_range.start} end_us={self.time_range.end} "
+            f"<FunctionEvent id={self.id} name={self.name} overload_name={self.overload_name} "
+            f"device_type={self.device_type} node_id={self.node_id} cpu_time={self.cpu_time_str} "
+            f"start_us={self.time_range.start} end_us={self.time_range.end} "
             f"cpu_children={str([child.id for child in self.cpu_children])} {device_name}_time={device_time} "
             f"name={self.name} thread={self.thread} input_shapes={str(self.input_shapes)} "
             f"cpu_memory_usage={self.cpu_memory_usage} {device_name}_memory_usage={device_memory_usage} "
@@ -657,6 +684,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_cpu_time_total: int = 0
         self.self_device_time_total: int = 0
         self.input_shapes: Optional[list[list[int]]] = None
+        self.overload_name: Optional[str] = None
         self.stack: Optional[list] = None
         self.scope: Optional[int] = None
         self.cpu_memory_usage: int = 0
@@ -680,6 +708,7 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.cpu_parent = other.cpu_parent
             self.cpu_children = other.cpu_children
 
+            self.overload_name = other.overload_name
             self.input_shapes = other.input_shapes
             self.stack = other.stack
             self.scope = other.scope
@@ -690,6 +719,7 @@ class FunctionEventAvg(FormattedTimesMixin):
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
+
         self.cpu_time_total += other.cpu_time_total
         self.device_time_total += other.device_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
@@ -806,6 +836,7 @@ def _build_table(
     with_flops=False,
     profile_memory=False,
     top_level_events_only=False,
+    time_unit=None,
 ):
     """Print a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
@@ -822,6 +853,11 @@ def _build_table(
 
     has_input_shapes = any(
         (event.input_shapes is not None and len(event.input_shapes) > 0)
+        for event in events
+    )
+
+    has_overload_names = any(
+        (event.overload_name is not None and len(event.overload_name) > 0)
         for event in events
     )
 
@@ -865,14 +901,17 @@ def _build_table(
         if max_src_column_width is not None:
             src_column_width = min(src_column_width, max_src_column_width)
 
-    headers = [
-        "Name",
+    headers = ["Name"]
+    if has_overload_names:
+        headers.append("Overload Name")
+    headers += [
         "Self CPU %",
         "Self CPU",
         "CPU total %",
         "CPU total",
         "CPU time avg",
     ]
+
     device_name = use_device.upper() if use_device is not None else "None"
     if has_device_time:
         headers.extend(
@@ -931,7 +970,9 @@ def _build_table(
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
 
     add_column(name_column_width)
-    for _ in headers[1:]:
+    if has_overload_names:
+        add_column(name_column_width)
+    for _ in headers[1 + has_overload_names :]:
         add_column(DEFAULT_COLUMN_WIDTH)
 
     if has_input_shapes:
@@ -1003,6 +1044,18 @@ def _build_table(
                 path = "..." + path[3:]
         return path
 
+    def override_time_unit(time_us, default_str, time_unit):
+        US_IN_SECOND = 1000.0 * 1000.0
+        US_IN_MS = 1000.0
+        if time_unit == "s":
+            return f"{time_us / US_IN_SECOND:.3f}s"
+        elif time_unit == "ms":
+            return f"{time_us / US_IN_MS:.3f}ms"
+        elif time_unit == "us":
+            return f"{time_us:.3f}us"
+        else:
+            return default_str
+
     event_limit = 0
     for evt in events:
         if event_limit == row_limit:
@@ -1014,6 +1067,7 @@ def _build_table(
         name = evt.key
         if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
             name = name[: (max_name_column_width - 3)] + "..."
+
         evt.self_cpu_percent = _format_time_share(
             evt.self_cpu_time_total, sum_self_cpu_time_total
         )
@@ -1022,15 +1076,30 @@ def _build_table(
             if not evt.is_async
             else 0
         )
-        row_values = [
-            name,
+
+        row_values = [name]
+        if has_overload_names:
+            overload_name = evt.overload_name
+            if (
+                max_name_column_width is not None
+                and len(overload_name) >= max_name_column_width - 3
+            ):
+                overload_name = overload_name[: (max_name_column_width - 3)] + "..."
+            row_values += [overload_name]
+        row_values += [
             # Self CPU total %, 0 for async events.
             evt.self_cpu_percent,
-            evt.self_cpu_time_total_str,  # Self CPU total
+            override_time_unit(
+                evt.self_cpu_time_total, evt.self_cpu_time_total_str, time_unit
+            ),  # Self CPU total
             # CPU total %, 0 for async events.
             evt.total_cpu_percent,
-            evt.cpu_time_total_str,  # CPU total
-            evt.cpu_time_str,  # CPU time avg
+            override_time_unit(
+                evt.cpu_time_total, evt.cpu_time_total_str, time_unit
+            ),  # CPU total
+            override_time_unit(
+                evt.cpu_time, evt.cpu_time_str, time_unit
+            ),  # CPU time avg
         ]
         if has_device_time:
             evt.total_device_percent = _format_time_share(
@@ -1038,11 +1107,19 @@ def _build_table(
             )
             row_values.extend(
                 [
-                    evt.self_device_time_total_str,
+                    override_time_unit(
+                        evt.self_device_time_total,
+                        evt.self_device_time_total_str,
+                        time_unit,
+                    ),
                     # device time total %
                     evt.total_device_percent,
-                    evt.device_time_total_str,
-                    evt.device_time_str,  # device time avg
+                    override_time_unit(
+                        evt.device_time_total, evt.device_time_total_str, time_unit
+                    ),
+                    override_time_unit(
+                        evt.device_time, evt.device_time_str, time_unit
+                    ),  # device time avg
                 ]
             )
         if profile_memory:
@@ -1095,10 +1172,12 @@ def _build_table(
             append(row_format.format(*empty_headers))
 
     append(header_sep)
-    append(f"Self CPU time total: {_format_time(sum_self_cpu_time_total)}")
+    append(
+        f"Self CPU time total: {override_time_unit(sum_self_cpu_time_total, _format_time(sum_self_cpu_time_total), time_unit)}"
+    )
     if has_device_time:
         append(
             f"Self {use_device.upper() if use_device is not None else 'None'} "
-            f"time total: {_format_time(sum_self_device_time_total)}"
+            f"time total: {override_time_unit(sum_self_device_time_total, _format_time(sum_self_device_time_total), time_unit)}"
         )
     return "".join(result)

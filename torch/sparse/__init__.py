@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
@@ -54,7 +54,7 @@ When inputs are COO tensors, this function also supports backward for both input
 Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivaties with respect to CSR matrices.
+    This function doesn't support computing derivatives with respect to CSR matrices.
 
 Args:
     mat (Tensor): a dense matrix to be added
@@ -79,7 +79,7 @@ mm = _add_docstr(
     Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivaties with respect to CSR matrices.
+    This function doesn't support computing derivatives with respect to CSR matrices.
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:
@@ -598,7 +598,10 @@ def as_sparse_gradcheck(gradcheck):
                     and obj.requires_grad
                     and obj.layout in sparse_layouts
                 ):
-                    d = dict(layout=obj.layout, shape=obj.shape)
+                    d = {
+                        "layout": obj.layout,
+                        "shape": obj.shape,
+                    }
                     if not masked:
                         # Materialize unspecified elements with zero values
                         batch_dim = obj.ndim - obj.dense_dim() - obj.sparse_dim()

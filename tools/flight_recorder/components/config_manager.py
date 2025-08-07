@@ -73,13 +73,13 @@ class JobConfig:
     ) -> argparse.Namespace:
         args = self.parser.parse_args(args)
         if args.selected_ranks is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting ranks without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting ranks without printing entries"
+            )
         if args.pg_filters is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting pg filters without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting pg filters without printing entries"
+            )
         if args.verbose:
             logger.set_log_level(logging.DEBUG)
         return args

@@ -214,8 +214,7 @@ class MemorySplitProtocol(Protocol):
     get_size_hint: CachedMethod[[], int]
     get_symbolic_size: CachedMethod[[], sympy.Expr]
 
-    def _allocate(self, block: Allocation, is_last: bool) -> bool:
-        ...
+    def _allocate(self, block: Allocation, is_last: bool) -> bool: ...
 
 
 class ClearCacheOnAllocateMixin(MemorySplitProtocol):

@@ -11,14 +11,6 @@ from torch.fx.traceback import NodeSourceAction
 from torch.testing._internal.common_utils import TestCase
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_fx.py TESTNAME\n\n"
-        "instead."
-    )
-
-
 class TestGraphTransformObserver(TestCase):
     def test_graph_transform_observer(self):
         class M(torch.nn.Module):
@@ -63,7 +55,7 @@ class TestGraphTransformObserver(TestCase):
             )
         )
 
-    @torch._inductor.config.patch("trace.enabled", True)
+    @torch._inductor.config.patch("trace.provenance_tracking", True)
     def test_graph_transform_observer_node_tracking(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -144,7 +136,7 @@ class TestGraphTransformObserver(TestCase):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             add_node = gm.graph.call_function(torch.ops.aten.add.default, (1, 1))
@@ -164,14 +156,14 @@ class TestGraphTransformObserver(TestCase):
             [NodeSourceAction.REPLACE, NodeSourceAction.CREATE],
         )
 
-    @torch._inductor.config.patch("trace.enabled", True)
+    @torch._inductor.config.patch("trace.provenance_tracking", True)
     def test_graph_transform_observer_deepcopy(self):
         class SimpleLinearModel(torch.nn.Module):
             def forward(self, x):
                 return torch.neg(x)
 
         model = SimpleLinearModel()
-        gm = torch.export.export(model, (torch.rand(10),)).module()
+        gm = torch.export.export(model, (torch.rand(10),), strict=True).module()
 
         with GraphTransformObserver(gm, "test"):
             gm2 = copy.deepcopy(gm)
@@ -186,3 +178,36 @@ class TestGraphTransformObserver(TestCase):
         self.assertEqual(len(gm2._create_node_hooks), 0)
         self.assertEqual(len(gm2._erase_node_hooks), 0)
         self.assertEqual(len(gm2._deepcopy_hooks), 0)
+
+    @torch._inductor.config.patch("trace.provenance_tracking", True)
+    def test_graph_transform_observer_replace(self):
+        # the node sohuld should not be duplicated
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                z = y * 2
+                w = y * 3
+                return z, w
+
+        model = Model()
+        gm = symbolic_trace(model)
+
+        with GraphTransformObserver(gm, "test"):
+            for node in gm.graph.nodes:
+                if node.name == "add":
+                    new_node = gm.graph.call_function(
+                        torch.ops.aten.add.Tensor, (node.args[0], node.args[1])
+                    )
+                    node.replace_all_uses_with(new_node)
+                    new_node.name = "new_add"
+
+        self.assertEqual(len(new_node.meta["from_node"]), 1)
+        self.assertEqual(new_node.meta["from_node"][0].name, "add")
+        self.assertEqual(new_node.meta["from_node"][0].pass_name, "test")
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

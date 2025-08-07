@@ -16,7 +16,6 @@ except ImportError:
     from common import PackageTestCase
 
 
-@skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
 class TestResources(PackageTestCase):
     """Tests for access APIs for packaged resources."""
 
