@@ -162,8 +162,16 @@ class TestHfStorage(TestCase):
             )
 
     def test_read_data_hf(self) -> None:
-        # Create test tensors
         tensor_0 = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+        mock_safe_open = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__.return_value.get_slice.return_value = tensor_0
+        mock_safe_open.return_value = mock_context
+
+        sys.modules["safetensors"] = MagicMock()
+        sys.modules["safetensors"].safe_open = mock_safe_open
+
         with tempfile.TemporaryDirectory() as path:
             # Create the reader
             reader = HuggingFaceStorageReader(path=path)
@@ -259,6 +267,9 @@ class TestHfStorage(TestCase):
 
             # Verify results - the target tensors should now contain the values from our test tensor
             self.assertTrue(torch.equal(state_dict["tensor_0"], tensor_0))
+
+            mock_safe_open.assert_called_once_with(filename=file_path, framework="pt")
+            mock_context.__enter__.return_value.get_slice.assert_called_with("tensor_0")
 
     def test_write_metadata_hf(self) -> None:
         mock_module = MagicMock()

@@ -6,7 +6,6 @@ import queue
 from typing import Any, Optional
 
 import torch
-from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files,
@@ -219,6 +218,8 @@ class HuggingFaceStorageReader(FileSystemReader):
         super().__init__(path=path)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        from safetensors import safe_open  # type: ignore[import]
+
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -227,21 +228,16 @@ class HuggingFaceStorageReader(FileSystemReader):
             per_file.setdefault(file_name, []).append(read_item)
 
         for file_name, reqs in per_file.items():
-            with self.fs.create_stream(file_name, "rb") as stream:
+            with safe_open(filename=file_name, framework="pt") as f:
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
 
-                    stream.seek(item_md.offset)
-                    tensor_bytes = stream.read(item_md.length)
-
-                    tensor = torch.frombuffer(
-                        tensor_bytes,
-                        dtype=item_md.dtype,
+                    # Create slices for each dimension based on offsets and lengths
+                    slices = tuple(
+                        slice(offset, offset + length)
+                        for offset, length in zip(req.storage_offsets, req.lengths)
                     )
-                    tensor = tensor.reshape(item_md.shape)
-                    tensor = narrow_tensor_by_index(
-                        tensor, req.storage_offsets, req.lengths
-                    )
+                    tensor = f.get_slice(req.storage_index.fqn)[slices]
                     target_tensor = planner.resolve_tensor(req).detach()
 
                     assert target_tensor.size() == tensor.size(), (
