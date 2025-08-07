@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 9)
+SCHEMA_VERSION = (8, 10)
 TREESPEC_VERSION = 1
 
 
@@ -328,6 +328,12 @@ class BufferMutationSpec:
 
 
 @dataclass
+class ParameterMutationSpec:
+    arg: Annotated[TensorArgument, 10]
+    parameter_name: Annotated[str, 20]
+
+
+@dataclass
 class GradientToParameterSpec:
     arg: Annotated[TensorArgument, 10]
     parameter_name: Annotated[str, 20]
@@ -359,6 +365,7 @@ class OutputSpec(_Union):
     gradient_to_user_input: Annotated[GradientToUserInputSpec, 50]
     user_input_mutation: Annotated[UserInputMutationSpec, 60]
     token: Annotated[OutputTokenSpec, 70]
+    parameter_mutation: Annotated[Optional[ParameterMutationSpec], 80]
 
 
 @dataclass

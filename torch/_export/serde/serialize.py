@@ -69,6 +69,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     OutputSpec,
     OutputTokenSpec,
+    ParameterMutationSpec,
     RangeConstraint,
     ScalarType,
     SCHEMA_VERSION,
@@ -1239,6 +1240,15 @@ class GraphModuleSerializer(metaclass=Final):
                 buffer_mutation=BufferMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
+                )
+            )
+        elif spec.kind == ep.OutputKind.PARAMETER_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                parameter_mutation=ParameterMutationSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    parameter_name=spec.target,
                 )
             )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_PARAMETER:
