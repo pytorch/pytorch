@@ -3172,11 +3172,16 @@ class NcclRegistrationTest(MultiProcessTestCase):
     @requires_multicast_support()
     def test_nccl_window_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
-        device = torch.device(f"cuda:{self.rank}")
         torch.cuda.set_device(self.rank)
+        device = torch.device(f"cuda:{self.rank}")
+        # Eager init the nccl comm so that we don't implicitly create one during register_mem_pool
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            device_id=device,
+        )
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
 

@@ -1098,6 +1098,11 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
+    if (pool->is_symmetric()) {
+      C10_THROW_ERROR(
+          DistBackendError,
+          "Register symmetric memory with an implicitly created nccl comm is not supported. Please create nccl comm explicitly first.");
+    }
     // HACK: currently we are using this function for NVLS
     // reductions, and that's why using OpType::ALLREDUCE.
     // If we end up using this API for zero-copy P2P, we might
