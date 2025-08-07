@@ -310,7 +310,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
-            for node in module.graph.find_nodes(op="call_function"):
+            for node in module.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverloadPacket):
                     attrs = node.target._dir
                     for attr in attrs:

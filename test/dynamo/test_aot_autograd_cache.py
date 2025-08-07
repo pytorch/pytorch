@@ -928,12 +928,12 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_triton_op_cache_invalidation(self):
         @triton.jit
-        def my_jit(x):
+        def my_jit(x):  # noqa: F811
             arg_0 = tl.load(x)
             tl.store(x, arg_0 + 1)
 
         @torch._library.triton_op("test::my_triton_op", mutates_args=())
-        def my_triton_op(x: torch.Tensor) -> torch.Tensor:
+        def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
             y = x.clone().detach_().requires_grad_(True)
             torch._library.capture_triton(my_jit)[1,](y)
             return y
@@ -964,6 +964,81 @@ class AOTAutogradCacheTests(InductorTestCase):
         def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
             y = x.clone().detach_().requires_grad_(True)
             torch._library.capture_triton(my_jit)[1,](y)
+            return y
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a2)
+
+        # Second run should still miss
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        self.assertEqual(fn(a2), result)
+
+    @requires_cuda
+    @requires_triton()
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @unittest.expectedFailure  # Currently ops that call other ops does not properly invalidate cache
+    def test_triton_op_cache_multiple_ops_invalidation(self):
+        @triton.jit
+        def my_jit(x):
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 1)
+
+        @triton.jit
+        def my_jit2(x):
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 1)
+
+        @torch._library.triton_op("test::my_triton_op", mutates_args=())
+        def my_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone().detach_().requires_grad_(True)
+            torch._library.capture_triton(my_jit)[1,](y)
+            torch._library.capture_triton(my_jit2)[1,](y)
+            return y
+
+        @torch._library.triton_op("test::my_triton_op2", mutates_args=())
+        def my_triton_op2(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone().detach_().requires_grad_(True)
+            torch.ops.test.my_triton_op(y)
+            return y
+
+        def fn(a):
+            return torch.ops.test.my_triton_op2(a)
+
+        a = torch.randn(5, device="cuda")
+        a2 = a.clone().detach_()
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a)
+        self.assertEqual(fn(a), result)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        # Redefine the triton op
+
+        @triton.jit
+        def my_jit(x):  # noqa: F811
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 2)
+
+        @torch._library.triton_op("test::my_triton_op", mutates_args=())
+        def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            y = x.clone().detach_().requires_grad_(True)
+            torch._library.capture_triton(my_jit)[1,](y)
+            torch._library.capture_triton(my_jit2)[1,](y)
+            return y
+
+        @torch._library.triton_op("test::my_triton_op2", mutates_args=())
+        def my_triton_op2(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            y = x.clone().detach_().requires_grad_(True)
+            torch.ops.test.my_triton_op(y)
             return y
 
         compiled_fn = torch.compile(fn, backend="inductor")
