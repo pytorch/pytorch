@@ -1111,3 +1111,16 @@ if __name__ == "__main__":
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
+        
+def test_foreach_where_basic_cpu():
+    import torch
+    from torch._foreach_where import _foreach_where
+
+    conds = [torch.tensor([True, False]), torch.tensor([False, True])]
+    xs = [torch.tensor([1, 2]), torch.tensor([3, 4])]
+    ys = [torch.tensor([9, 9]), torch.tensor([9, 9])]
+
+    result = _foreach_where(conds, xs, ys)
+    expected = [torch.where(c, x, y) for c, x, y in zip(conds, xs, ys)]
+
+    assert all(torch.equal(r, e) for r, e in zip(result, expected))
