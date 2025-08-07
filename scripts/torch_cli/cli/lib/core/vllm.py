@@ -31,15 +31,13 @@ class VllmBuildConfig(LinuxExternalBuildBaseConfig):
     """
     Configuration specific to vLLM build jobs.
     """
-
-    tag_name: str = get_env("TAG", "vllm-wheels")
-    vllm_fa_cmake_gpu_arches: str = get_env("VLLM_FA_CMAKE_GPU_ARCHES", "80-real")
     artifact_dir: str = ""
     torch_whl_dir: str = ""
     base_image: str = ""
     dockerfile_path: str = ""
     target: str = field(default_factory=lambda: get_env("TARGET", "export-wheels"))
-
+    tag_name: str = field(default_factory=lambda: get_env("TAG", "vllm-wheels"))
+    vllm_fa_cmake_gpu_arches: str = "80-real;90-real"
 
 class VllmBuildRunner(BuildRunner):
     def __init__(self, config_path: str = ""):
@@ -58,7 +56,6 @@ class VllmBuildRunner(BuildRunner):
         """
         clone_vllm()
         cfg = self._to_vllm_build_config()
-
         self.cfg = cfg
 
         ensure_dir_exists(self.cfg.artifact_dir)
@@ -96,6 +93,7 @@ class VllmBuildRunner(BuildRunner):
             torch_whl_dir=abs_whl_dir,
             base_image=base_image,
             dockerfile_path=dockerfile_path,
+            vllm_fa_cmake_gpu_arches=external_build_config.get("vllm_fa_cmake_gpu_arches", "")
         )
 
     def cp_torch_whls_if_exist(self):
