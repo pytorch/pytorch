@@ -23,139 +23,75 @@ namespace {
 void inline sparse_indices_to_result_dtype_inplace(
     const c10::ScalarType& dtype,
     const at::Tensor& input) {
-  if (input.layout() == kSparseCsr) {
-    static_cast<at::SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            input.crow_indices().to(dtype),
-            input.col_indices().to(dtype),
-            input.values(),
-            input.sizes());
-  } else {
-    static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            input.ccol_indices().to(dtype),
-            input.row_indices().to(dtype),
-            input.values(),
-            input.sizes());
-  }
+  auto [compressed_indices, plain_indices] =
+      at::sparse_csr::getCompressedPlainIndices(input);
+	  static_cast<at::SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+	      ->set_member_tensors(
+	          compressed_indices.to(dtype),
+	          plain_indices.to(dtype),
+	          input.values(),
+	          input.sizes());
 }
 
 void inline sparse_indices_and_values_resize(
     const at::Tensor& input,
     int64_t nnz) {
-  if (input.layout() == kSparseCsr) {
-    static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            input.crow_indices(),
-            input.col_indices().resize_({nnz}),
-            input.values().resize_({nnz}),
-            input.sizes());
-  } else {
-    static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            input.ccol_indices(),
-            input.row_indices().resize_({nnz}),
-            input.values().resize_({nnz}),
-            input.sizes());
-  }
+  auto [compressed_indices, plain_indices] =
+      at::sparse_csr::getCompressedPlainIndices(input);
+	  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+	      ->set_member_tensors(
+	          compressed_indices,
+	          plain_indices.resize_({nnz}),
+	          input.values().resize_({nnz}),
+	          input.sizes());
 }
 
-template <typename scalar_t, typename index_t>
-const Eigen::Map<Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t>>
-Tensor_to_EigenCsc(const at::Tensor& tensor) {
+template <typename scalar_t, int eigen_options, typename index_t>
+const Eigen::Map<Eigen::SparseMatrix<scalar_t, eigen_options, index_t>>
+Tensor_to_Eigen(const at::Tensor& tensor) {
   int64_t rows = tensor.size(0);
   int64_t cols = tensor.size(1);
   int64_t nnz = tensor._nnz();
-
-  TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensors");
-
-  index_t* ccol_indices_ptr = tensor.ccol_indices().data_ptr<index_t>();
-  index_t* row_indices_ptr = tensor.row_indices().data_ptr<index_t>();
+  TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensor values");
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(tensor);
+  index_t* c_indices_ptr = compressed_indices.data_ptr<index_t>();
+  index_t* p_indices_ptr = plain_indices.data_ptr<index_t>();
   scalar_t* values_ptr = tensor.values().data_ptr<scalar_t>();
-  Eigen::Map<Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t>> map(
-      rows, cols, nnz, ccol_indices_ptr, row_indices_ptr, values_ptr);
+  Eigen::Map<Eigen::SparseMatrix<scalar_t, eigen_options, index_t>> map(
+      rows, cols, nnz, c_indices_ptr, p_indices_ptr, values_ptr);
   return map;
 }
 
-template <typename scalar_t, typename index_t>
-const Eigen::Map<Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>>
-Tensor_to_EigenCsr(const at::Tensor& tensor) {
-  int64_t rows = tensor.size(0);
-  int64_t cols = tensor.size(1);
-  int64_t nnz = tensor._nnz();
-
-  TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensors");
-
-  index_t* crow_indices_ptr = tensor.crow_indices().data_ptr<index_t>();
-  index_t* col_indices_ptr = tensor.col_indices().data_ptr<index_t>();
-  scalar_t* values_ptr = tensor.values().data_ptr<scalar_t>();
-  Eigen::Map<Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>> map(
-      rows, cols, nnz, crow_indices_ptr, col_indices_ptr, values_ptr);
-  return map;
-}
-
-template <typename scalar_t, typename index_t>
-void EigenCsr_to_Tensor(
+template <typename scalar_t, int eigen_options, typename index_t>
+void Eigen_to_Tensor(
     const at::Tensor& tensor,
-    const Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>& matrix) {
+    const Eigen::SparseMatrix<scalar_t, eigen_options, index_t>& matrix) {
+  const Layout eigen_layout = (eigen_options == Eigen::RowMajor ? kSparseCsr : kSparseCsc);
   TORCH_CHECK(
-      tensor.layout() == kSparseCsr,
-      "EigenCsr_to_Tensor, expected tensor be kSparseCsr, but got",
+      tensor.layout() == eigen_layout,
+      "Eigen_to_Tensor, expected tensor be ", eigen_layout, ", but got ",
       tensor.layout());
-
   int64_t nnz = matrix.nonZeros();
-  int64_t rows = matrix.outerSize();
+  int64_t csize = matrix.outerSize();
   sparse_indices_and_values_resize(tensor, nnz);
-
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(tensor);
   if (nnz > 0) {
     std::memcpy(
         tensor.values().mutable_data_ptr<scalar_t>(),
         matrix.valuePtr(),
         nnz * sizeof(scalar_t));
     std::memcpy(
-        tensor.col_indices().mutable_data_ptr<index_t>(),
+        plain_indices.mutable_data_ptr<index_t>(),
         matrix.innerIndexPtr(),
         nnz * sizeof(index_t));
   }
-  if (rows > 0) {
+  if (csize > 0) {
     std::memcpy(
-        tensor.crow_indices().mutable_data_ptr<index_t>(),
+        compressed_indices.mutable_data_ptr<index_t>(),
         matrix.outerIndexPtr(),
-        rows * sizeof(index_t));
+        csize * sizeof(index_t));
   }
-  tensor.crow_indices().mutable_data_ptr<index_t>()[rows] = nnz;
-}
-
-template <typename scalar_t, typename index_t>
-void EigenCsc_to_Tensor(
-    const at::Tensor& tensor,
-    const Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t>& matrix) {
-  TORCH_CHECK(
-      tensor.layout() == kSparseCsc,
-      "EigenCsr_to_Tensor, expected tensor be kSparseCsc, but got",
-      tensor.layout());
-
-  int64_t nnz = matrix.nonZeros();
-  int64_t cols = matrix.outerSize();
-  sparse_indices_and_values_resize(tensor, nnz);
-
-  if (nnz > 0) {
-    std::memcpy(
-        tensor.values().mutable_data_ptr<scalar_t>(),
-        matrix.valuePtr(),
-        nnz * sizeof(scalar_t));
-    std::memcpy(
-        tensor.row_indices().mutable_data_ptr<index_t>(),
-        matrix.innerIndexPtr(),
-        nnz * sizeof(index_t));
-  }
-  if (cols > 0) {
-    std::memcpy(
-        tensor.ccol_indices().mutable_data_ptr<index_t>(),
-        matrix.outerIndexPtr(),
-        cols * sizeof(index_t));
-  }
-  tensor.ccol_indices().mutable_data_ptr<index_t>()[cols] = nnz;
+  compressed_indices.mutable_data_ptr<index_t>()[csize] = nnz;
 }
 
 template <typename scalar_t>
@@ -188,29 +124,17 @@ void add_out_sparse_eigen(
   AT_DISPATCH_INDEX_TYPES(
       result_index_dtype, "eigen_sparse_add", [&]() {
         scalar_t _alpha = alpha.to<scalar_t>();
-        typedef Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t>
-            EigenCscMatrix;
-        typedef Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>
-            EigenCsrMatrix;
 
         if (result.layout() == kSparseCsr) {
-          const Eigen::Map<EigenCsrMatrix> mat1_eigen =
-              Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
-          const Eigen::Map<EigenCsrMatrix> mat2_eigen =
-              Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
-          const EigenCsrMatrix mat1_mat2_eigen =
-              (mat1_eigen + _alpha * mat2_eigen);
-
-          EigenCsr_to_Tensor<scalar_t, index_t>(result, mat1_mat2_eigen);
+          auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat1);
+          auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
+          auto mat1_mat2_eigen = (mat1_eigen + _alpha * mat2_eigen);
+          Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(result, mat1_mat2_eigen);
         } else {
-          const Eigen::Map<EigenCscMatrix> mat1_eigen =
-              Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
-          const Eigen::Map<EigenCscMatrix> mat2_eigen =
-              Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
-          const EigenCscMatrix mat1_mat2_eigen =
-              (mat1_eigen + _alpha * mat2_eigen);
-
-          EigenCsc_to_Tensor<scalar_t, index_t>(result, mat1_mat2_eigen);
+          auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat1);
+          auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
+          auto mat1_mat2_eigen = (mat1_eigen + _alpha * mat2_eigen);
+          Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(result, mat1_mat2_eigen);
         }
       });
 }
@@ -244,11 +168,6 @@ void addmm_out_sparse_eigen(
 
   AT_DISPATCH_INDEX_TYPES(
       result_index_dtype, "eigen_sparse_mm", [&]() {
-        typedef Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t>
-            EigenCscMatrix;
-        typedef Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t>
-            EigenCsrMatrix;
-
         at::Tensor mat1_mat2;
         if (is_beta_zero) {
           mat1_mat2 = result;
@@ -258,62 +177,62 @@ void addmm_out_sparse_eigen(
 
         if (mat1_mat2.layout() == kSparseCsr) {
           if (mat1.layout() == kSparseCsr) {
-            const Eigen::Map<EigenCsrMatrix> mat1_eigen =
-                Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
+            const auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat1);
             if (mat2.layout() == kSparseCsr) {
-              const Eigen::Map<EigenCsrMatrix> mat2_eigen =
-                  Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
-              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csr = M1_csr * M2_csr
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
-              const Eigen::Map<EigenCscMatrix> mat2_eigen =
-                  Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
-              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csr = M1_csr * M2_csc
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           } else {
-            const Eigen::Map<EigenCscMatrix> mat1_eigen =
-                Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
-            if (mat2.layout() == kSparseCsc) {
-              const Eigen::Map<EigenCscMatrix> mat2_eigen =
-                  Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
-              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+            const auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat1);
+            if (mat2.layout() == kSparseCsr) {
+              // Out_csr = M1_csc * M2_csr
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
-              const Eigen::Map<EigenCsrMatrix> mat2_eigen =
-                  Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
-              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csr = M1_csc * M2_csc
+              // This multiplication will be computationally inefficient, as it will require
+              // additional conversion of the output matrix from CSC to CSR format.
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           }
         } else {
           if (mat1.layout() == kSparseCsr) {
-            const Eigen::Map<EigenCsrMatrix> mat1_eigen =
-                Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
+            const auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat1);
             if (mat2.layout() == kSparseCsr) {
-              const Eigen::Map<EigenCsrMatrix> mat2_eigen =
-                  Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
-              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csc = M1_csr * M2_csr
+              // This multiplication will be computationally inefficient, as it will require
+              // additional conversion of the output matrix from CSR to CSC format.
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
-              const Eigen::Map<EigenCscMatrix> mat2_eigen =
-                  Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
-              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csc = M1_csr * M2_csc
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           } else {
-            const Eigen::Map<EigenCscMatrix> mat1_eigen =
-                Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
-            if (mat2.layout() == kSparseCsc) {
-              const Eigen::Map<EigenCscMatrix> mat2_eigen =
-                  Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
-              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+            const auto mat1_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat1);
+            if (mat2.layout() == kSparseCsr) {
+              // Out_csc = M1_csc * M2_csr
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
-              const Eigen::Map<EigenCsrMatrix> mat2_eigen =
-                  Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
-              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
-              EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
+              // Out_csc = M1_csc * M2_csc
+              const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
+              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           }
         }
