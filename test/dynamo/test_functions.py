@@ -268,6 +268,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             v = v + x * i
         return v
 
+    def test_itertools_product_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            itertools.product(*args, **kwargs)
+
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
     @make_test
     def test_itertools_product_various_iterators(a, b):
         itertools.product(
@@ -276,6 +283,31 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             map(lambda x: x, [1, 2]),
             filter(lambda x: True, [1, 2]),
         )
+        return a
+
+    def test_itertools_permutations_basic(self):
+        def fn():
+            return list(itertools.permutations([1, 2, 3], 2))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertEqual(actual, expected)
+
+    def test_itertools_permutations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            itertools.permutations(*args, **kwargs)
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_permutations_various_iterators(a, b):
+        itertools.permutations([a, b])
+        itertools.permutations(zip([1, 2], [3, 4]))
+        itertools.permutations(map(lambda x: x, [1, 2]))
+        itertools.permutations(filter(lambda x: True, [1, 2]))
         return a
 
     @make_test

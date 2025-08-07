@@ -25,7 +25,6 @@ __all__ = [
     "cycle",
     "dropwhile",
     "islice",
-    "permutations",
     "tee",
     "zip_longest",
 ]
@@ -168,41 +167,6 @@ if sys.version_info >= (3, 10):
             a = b
 
     __all__ += ["pairwise"]
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.permutations
-@substitute_in_graph(itertools.permutations, is_embedded_type=True)  # type: ignore[arg-type]
-def permutations(
-    iterable: Iterable[_T], r: Optional[int] = None
-) -> Iterator[tuple[_T, ...]]:
-    pool = tuple(iterable)
-
-    def _permutations(pool: tuple[_T, ...]) -> Iterator[tuple[_T, ...]]:
-        n = len(pool)
-        nonlocal r
-        r = n if r is None else r
-        if r > n:
-            return
-
-        indices = list(range(n))
-        cycles = list(range(n, n - r, -1))
-        yield tuple(pool[i] for i in indices[:r])
-
-        while n:
-            for i in reversed(range(r)):
-                cycles[i] -= 1
-                if cycles[i] == 0:
-                    indices[i:] = indices[i + 1 :] + indices[i : i + 1]
-                    cycles[i] = n - i
-                else:
-                    j = cycles[i]
-                    indices[i], indices[-j] = indices[-j], indices[i]
-                    yield tuple(pool[i] for i in indices[:r])
-                    break
-            else:
-                return
-
-    return _permutations(pool)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
