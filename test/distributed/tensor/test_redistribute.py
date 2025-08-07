@@ -695,5 +695,44 @@ class MultiDimRedistributeTest(DTensorTestBase):
             self.assertEqual(local_out_dt, local_expected_dt)
 
 
+class OrderedShardingTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @with_comms
+    def test_order_shard_specification(self):
+        # 2d mesh with dp and tp dim
+        mesh_row = 2
+        mesh_col = self.world_size // mesh_row
+        mesh = init_device_mesh(
+            self.device_type, (mesh_row, mesh_col), mesh_dim_names=("dp", "tp")
+        )
+
+        shard_spec_dp_first = [Shard(0, 0), Shard(0, 1)]  # shard on dp axis first
+        shard_spec_tp_first = [Shard(0, 1), Shard(0, 0)]  # shard on tp axis first
+        global_tensor = torch.randn(8, 4, requires_grad=True)
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec_dp_first)
+        local_tensor = sharded_dtensor.to_local()
+        gathered_1 = [
+            torch.zeros(local_tensor.shape, dtype=torch.float, device=self.device_type)
+            for _ in range(self.world_size)
+        ]
+        torch.distributed.all_gather(gathered_1, local_tensor)
+
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec_tp_first)
+        local_tensor = sharded_dtensor.to_local()
+        gathered_2 = [
+            torch.zeros(local_tensor.shape, dtype=torch.float, device=self.device_type)
+            for _ in range(self.world_size)
+        ]
+        torch.distributed.all_gather(gathered_2, local_tensor)
+        for i in range(mesh_row):
+            for j in range(mesh_col):
+                self.assertEqual(
+                    gathered_1[i * mesh_col + j], gathered_2[i + j * mesh_row]
+                )
+
+
 if __name__ == "__main__":
     run_tests()

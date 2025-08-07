@@ -761,19 +761,32 @@ def distribute_tensor(
 
     local_tensor = tensor.detach()
 
-    # TODO(xilun): address sharding order
-    # distribute the tensor according to the placements.
     placements = list(placements)
+    # order the device axes if shard a tensor dim on multiple device axes based
+    # on shard priority
+    tensor_dim_to_device_axis: dict[int, list[tuple[int, Placement]]] = {}
     for idx, placement in enumerate(placements):
         if placement.is_shard():
+            placement = cast(Shard, placement)
+            if placement.dim not in tensor_dim_to_device_axis:
+                tensor_dim_to_device_axis[placement.dim] = []
+            tensor_dim_to_device_axis[placement.dim].append((idx, placement))
+    # sort the device axes based on shard priority
+    for device_axes in tensor_dim_to_device_axis.values():
+        device_axes.sort(key=lambda x: getattr(x[1], "priority", 0))
+        for device_axis, placement in device_axes:
             placement = cast(Shard, placement)
             if placement.dim < 0:
                 # normalize shard placement dim
                 placement = Shard(placement.dim + tensor.ndim)
-                placements[idx] = placement
+                placements[device_axis] = placement
             local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+                local_tensor, device_mesh, device_axis, src_data_rank
             )
+
+    for idx, placement in enumerate(placements):
+        if placement.is_shard():
+            continue
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(
