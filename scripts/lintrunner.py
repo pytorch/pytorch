@@ -129,7 +129,6 @@ def initialize_lintrunner_if_needed(venv_dir: Path) -> None:
         print("⚠️ No .lintrunner.toml found. Skipping init.")
         return
 
-    print(f"INITIALIZED_LINTRUNNER_TOML_HASH_PATH = {initialized_hash_path}")
     current_hash = compute_file_hash(lintrunner_toml_path)
     stored_hash = read_stored_hash(initialized_hash_path)
 

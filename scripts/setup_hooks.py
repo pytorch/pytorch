@@ -102,18 +102,22 @@ run(
 # ───────────────────────────────────────────
 
 pre_push_hook = hooks_dir / "pre-push"
+python_exe = venv_dir / "bin" / "python"
+lintrunner_script_path_quoted = shlex.quote(
+    str(repo_root / "scripts" / "lintrunner.py")
+)
 
 hook_script = f"""#!/bin/bash
 set -e
 
 # Check if lintrunner script exists (user might be on older commit)
-if [ ! -f "{repo_root}/scripts/lintrunner.py" ]; then
-    echo "⚠️  {repo_root}/scripts/lintrunner.py not found - skipping linting (likely on an older commit)"
+if [ ! -f {lintrunner_script_path_quoted} ]; then
+    echo "⚠️  {lintrunner_script_path_quoted} not found - skipping linting (likely on an older commit)"
     exit 0
 fi
 
 # Run lintrunner wrapper using the isolated venv's Python
-"{venv_dir}/bin/python" "{repo_root}/scripts/lintrunner.py"
+{shlex.quote(str(python_exe))} {lintrunner_script_path_quoted}
 """
 
 print(f"Creating git pre-push hook at {pre_push_hook}")
