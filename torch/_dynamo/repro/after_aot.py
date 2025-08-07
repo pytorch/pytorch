@@ -318,12 +318,15 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
         """
         ).strip()
 
-    triton_imports = textwrap.dedent(
-        """
+    triton_imports = ""
+    
+    if len(kernel_side_table.id_to_kernel) > 0:
+        triton_imports = textwrap.dedent(
+            """
 import triton
 import triton.language as tl
-    """
-    ).strip()
+        """
+        ).strip()
 
     model_str = textwrap.dedent(
         f"""
