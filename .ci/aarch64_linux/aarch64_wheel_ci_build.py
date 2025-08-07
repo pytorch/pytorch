@@ -13,49 +13,6 @@ def list_dir(path: str) -> list[str]:
     return check_output(["ls", "-1", path]).decode().split("\n")
 
 
-def build_ArmComputeLibrary() -> None:
-    """
-    Using ArmComputeLibrary for aarch64 PyTorch
-    """
-    print("Building Arm Compute Library")
-    acl_build_flags = [
-        "debug=0",
-        "neon=1",
-        "opencl=0",
-        "os=linux",
-        "openmp=1",
-        "cppthreads=0",
-        "arch=armv8a",
-        "multi_isa=1",
-        "fixed_format_kernels=1",
-        "build=native",
-    ]
-    acl_install_dir = "/acl"
-    acl_checkout_dir = os.getenv("ACL_SOURCE_DIR", "ComputeLibrary")
-    if os.path.isdir(acl_install_dir):
-        shutil.rmtree(acl_install_dir)
-    if not os.path.isdir(acl_checkout_dir) or not len(os.listdir(acl_checkout_dir)):
-        check_call(
-            [
-                "git",
-                "clone",
-                "https://github.com/ARM-software/ComputeLibrary.git",
-                "-b",
-                "v25.02",
-                "--depth",
-                "1",
-                "--shallow-submodules",
-            ]
-        )
-
-    check_call(
-        ["scons", "Werror=1", f"-j{os.cpu_count()}"] + acl_build_flags,
-        cwd=acl_checkout_dir,
-    )
-    for d in ["arm_compute", "include", "utils", "support", "src", "build"]:
-        shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
-
-
 def replace_tag(filename) -> None:
     with open(filename) as f:
         lines = f.readlines()
@@ -232,19 +189,13 @@ if __name__ == "__main__":
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
 
     if enable_mkldnn:
-        build_ArmComputeLibrary()
         print("build pytorch with mkldnn+acl backend")
-        build_vars += (
-            "USE_MKLDNN=ON USE_MKLDNN_ACL=ON "
-            "ACL_ROOT_DIR=/acl "
-            "LD_LIBRARY_PATH=/pytorch/build/lib:/acl/build:$LD_LIBRARY_PATH "
-            "ACL_INCLUDE_DIR=/acl/build "
-            "ACL_LIBRARY=/acl/build "
-        )
+        build_vars += "USE_MKLDNN=ON USE_MKLDNN_ACL=ON "
+        build_vars += "ACL_ROOT_DIR=/acl "
         if enable_cuda:
             build_vars += "BLAS=NVPL "
         else:
-            build_vars += "BLAS=OpenBLAS OpenBLAS_HOME=/OpenBLAS "
+            build_vars += "BLAS=OpenBLAS OpenBLAS_HOME=/opt/OpenBLAS "
     else:
         print("build pytorch without mkldnn backend")
 
