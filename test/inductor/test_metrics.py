@@ -50,9 +50,7 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-""".replace(
-    "GPU_TYPE", GPU_TYPE
-)
+""".replace("GPU_TYPE", GPU_TYPE)
 
 
 class TestMetrics(TestCase):
@@ -95,7 +93,7 @@ class TestMetrics(TestCase):
         kernel_code = kernel_list[0]
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
-    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE)
+    @largeTensorTest(25e7 * 2 * 4, device=GPU_TYPE, inductor=True)
     @config.patch("fx_graph_remote_cache", False)
     @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):

@@ -50,7 +50,7 @@ class TestSortAndSelect(TestCase):
                 return ((b != b) | (a <= b)).all().item()
 
         else:
-            error(  # noqa: F821
+            raise ValueError(
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
@@ -175,6 +175,14 @@ class TestSortAndSelect(TestCase):
         y = x.sort(stable=None).values
         self.assertTrue(torch.all(y == torch.ones(10)).item())
 
+    @onlyCPU
+    def test_complex_unsupported_cpu(self):
+        x = torch.tensor([3.0 + 2j, 4.0 + 3j])
+        with self.assertRaisesRegex(
+            ValueError, "Sort currently does not support complex dtypes on CPU."
+        ):
+            torch.sort(input=x)
+
     @onlyCUDA
     def test_sort_large_slice(self, device):
         # tests direct cub path
@@ -214,14 +222,14 @@ class TestSortAndSelect(TestCase):
         t = t0.view(1, 8192).expand(2**18 + 1, -1).contiguous()
         v, i = t.sort()
         del t
-        iv, im = i.var_mean(dim=0)
+        iv, im = torch.var_mean(i.to(dtype), dim=0)
         del i
-        vv, vm = v.var_mean(dim=0)
+        vv, vm = torch.var_mean(v.to(dtype), dim=0)
         del v
         self.assertEqual(vv, torch.zeros_like(vv))
         self.assertEqual(iv, torch.zeros_like(iv))
-        self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
-        self.assertEqual(im, t0.sort().indices)
+        self.assertEqual(vm, torch.arange(8192, dtype=dtype, device=device))
+        self.assertEqual(im, t0.sort().indices, exact_dtype=False)
 
     @dtypes(torch.float32)
     def test_sort_restride(self, device, dtype):

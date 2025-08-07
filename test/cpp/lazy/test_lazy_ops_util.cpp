@@ -140,7 +140,7 @@ void TestBackward(
     const torch::Tensor& input = inputs[i];
     if (input.defined()) {
       torch::Tensor oinput =
-          input.clone().detach().set_requires_grad(input.requires_grad());
+          input.detach().clone().set_requires_grad(input.requires_grad());
       input_vars.push_back(oinput);
 
       torch::Tensor xinput = CopyToDevice(input, device)

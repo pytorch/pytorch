@@ -12,6 +12,11 @@
 #  MKL_SOLVER_LIBRARIES - list of libraries to add for the solvers
 #  MKL_CDFT_LIBRARIES - list of libraries to add for the solvers
 
+# Do nothing if on ARM
+IF (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+RETURN()
+ENDIF()
+
 # Do nothing if MKL_FOUND was set before!
 IF (NOT MKL_FOUND)
 

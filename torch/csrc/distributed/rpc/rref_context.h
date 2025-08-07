@@ -318,7 +318,7 @@ class TORCH_API RRefContext {
   //     RRef is forwarded to the callee as new UserRRefs (if the callee is not
   //     the owner). In this case, we block running the user function until all
   //     UserRRefs are confirmed by the owner.
-  // This contract gurantees that no UserRRefs can be used remotely without
+  // This contract guarantees that no UserRRefs can be used remotely without
   // confirmation. Note that, however, the UserRRef created by rpc.remote can
   // still be passed to local functions as arguments and used there. This is by
   // design, because this feature is especially useful when, say a master node

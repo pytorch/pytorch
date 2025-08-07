@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .quantizer import QuantizationAnnotation, Quantizer
 
@@ -28,16 +28,20 @@ class ComposableQuantizer(Quantizer):
     ```
     embedding_quantizer = EmbeddingQuantizer()
     linear_quantizer = MyLinearQuantizer()
-    xnnpack_quantizer = XNNPackQuantizer() # to handle ops not quantized by previous two quantizers
-    composed_quantizer = ComposableQuantizer([embedding_quantizer, linear_quantizer, xnnpack_quantizer])
+    xnnpack_quantizer = (
+        XNNPackQuantizer()
+    )  # to handle ops not quantized by previous two quantizers
+    composed_quantizer = ComposableQuantizer(
+        [embedding_quantizer, linear_quantizer, xnnpack_quantizer]
+    )
     prepared_m = prepare_pt2e(model, composed_quantizer)
     ```
     """
 
-    def __init__(self, quantizers: List[Quantizer]):
+    def __init__(self, quantizers: list[Quantizer]):
         super().__init__()
         self.quantizers = quantizers
-        self._graph_annotations: Dict[Node, QuantizationAnnotation] = {}
+        self._graph_annotations: dict[Node, QuantizationAnnotation] = {}
 
     def _record_and_validate_annotations(
         self, gm: torch.fx.GraphModule, quantizer: Quantizer

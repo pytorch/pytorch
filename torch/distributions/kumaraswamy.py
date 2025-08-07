@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
@@ -37,6 +39,7 @@ class Kumaraswamy(TransformedDistribution):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
+
     arg_constraints = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
@@ -44,7 +47,12 @@ class Kumaraswamy(TransformedDistribution):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: Union[Tensor, float],
+        concentration0: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0
         )
@@ -67,11 +75,11 @@ class Kumaraswamy(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return _moments(self.concentration1, self.concentration0, 1)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         # Evaluate in log-space for numerical stability.
         log_mode = (
             self.concentration0.reciprocal() * (-self.concentration0).log1p()
@@ -81,7 +89,7 @@ class Kumaraswamy(TransformedDistribution):
         return log_mode.exp()
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return _moments(self.concentration1, self.concentration0, 2) - torch.pow(
             self.mean, 2
         )

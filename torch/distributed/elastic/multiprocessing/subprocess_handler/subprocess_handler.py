@@ -7,9 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 import os
 import signal
-import subprocess
 import sys
-from typing import Any, Dict, Optional, Tuple
+from subprocess import Popen
+from typing import Any, Optional
 
 
 __all__ = ["SubprocessHandler"]
@@ -34,8 +34,8 @@ class SubprocessHandler:
     def __init__(
         self,
         entrypoint: str,
-        args: Tuple,
-        env: Dict[str, str],
+        args: tuple,
+        env: dict[str, str],
         stdout: Optional[str],
         stderr: Optional[str],
         local_rank_id: int,
@@ -48,13 +48,13 @@ class SubprocessHandler:
 
         args_str = (entrypoint, *[str(e) for e in args])
         self.local_rank_id = local_rank_id
-        self.proc: subprocess.Popen = self._popen(args_str, env_vars)
+        self.proc: Popen = self._popen(args_str, env_vars)
 
-    def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
-        kwargs: Dict[str, Any] = {}
+    def _popen(self, args: tuple, env: dict[str, str]) -> Popen:
+        kwargs: dict[str, Any] = {}
         if not IS_WINDOWS:
             kwargs["start_new_session"] = True
-        return subprocess.Popen(
+        return Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
             #  `Tuple[str, *Tuple[Any, ...]]`.

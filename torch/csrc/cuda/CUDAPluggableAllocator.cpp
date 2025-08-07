@@ -1,7 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -29,8 +28,7 @@ int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
 
-_AllocationMetadata::_AllocationMetadata()
-    : size(0), device_idx(-1), stream{} {}
+_AllocationMetadata::_AllocationMetadata() : size(0), device_idx(-1) {}
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
@@ -186,7 +184,8 @@ void CUDAPluggableAllocator::setMemoryFraction(
   }
 }
 
-void CUDAPluggableAllocator::emptyCache() {
+void CUDAPluggableAllocator::emptyCache(
+    /*unused*/ c10::cuda::MempoolId_t mempool_id) {
   if (reset_fn_) {
     return reset_fn_();
   }
@@ -239,8 +238,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
-    snapshot() {
+c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
+    c10::cuda::MempoolId_t mempool_id) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -292,7 +291,8 @@ void CUDAPluggableAllocator::recordHistory(
     bool enabled,
     c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    c10::cuda::CUDACachingAllocator::RecordContext when) {
+    c10::cuda::CUDACachingAllocator::RecordContext when,
+    bool clearHistory) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support recordHistory. "

@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -333,6 +334,16 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
+// Microsoft's STL has a problem with integer overloads of std::fpclassify used
+// by std::isnan and std::isinf, as described here:
+// https://stackoverflow.com/questions/61646166/how-to-resolve-fpclassify-ambiguous-call-to-overloaded-function
+// This macro provides a workaround for this problem.
+#if defined(USE_ROCM) && defined(_MSC_VER)
+#define STL_CAST_BUG(value) static_cast<double>(value)
+#else
+#define STL_CAST_BUG(value) value
+#endif
+
 #if !defined(USE_ROCM)
   TORCH_CHECK(
       !(at::_isinf(minvalue) || at::_isinf(maxvalue) ||
@@ -344,8 +355,10 @@ Tensor _histc_cuda_template(
       "] is not finite");
 #else
   TORCH_CHECK(
-      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
-        std::isnan(maxvalue)),
+      !(std::isinf(STL_CAST_BUG(minvalue)) ||
+        std::isinf(STL_CAST_BUG(maxvalue)) ||
+        std::isnan(STL_CAST_BUG(minvalue)) ||
+        std::isnan(STL_CAST_BUG(maxvalue))),
       "range of [",
       minvalue,
       ", ",
@@ -392,8 +405,10 @@ Tensor _histc_cuda(
     TORCH_CHECK(false, "HalfTensor is not supported");
   }
   // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("_histc_cuda");
+  // Nondeterministic for floating types because of atomicAdd usage
+  if (at::isFloatingType(self.scalar_type())){
+    globalContext().alertNotDeterministic("_histc_cuda with floating point input");
+  }
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     using bounds_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
     return _histc_cuda_template<scalar_t>(

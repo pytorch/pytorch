@@ -924,6 +924,20 @@ def forward(self, x_1):
                 continue
             self.assertTrue('val' in n.meta)
 
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
+        from torch._guards import detect_fake_mode
+
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
@@ -1070,7 +1084,7 @@ def forward(self, x_1, y_1):
         test_inputs.append([(6, 8)])
         gm = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
-        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
+        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s75: 4, s96: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] <= 19""")
 
@@ -1204,7 +1218,7 @@ def forward(self, x_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
         # Guards to rule out batch_size == sys.maxsize (wobbling between 2 and
         # 1 ok)
-        self.assertEqual(len(gm.shape_env.guards), 1)
+        self.assertEqual(len(gm.shape_env.guards), 0)
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -1356,8 +1370,8 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul_4 = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
+    mul_9 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_9, 3]);  view_2 = mul_9 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
@@ -1703,7 +1717,7 @@ def forward(self, a_1):
         gm = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(eval_guards(gm, torch.randn(1, 2), torch.randn(4, 1)))
-        self.assertExpectedInline(show_guards(gm), """2*L['a'].size()[1]*L['b'].size()[0] > 20""")
+        self.assertExpectedInline(show_guards(gm), """2*L['b'].size()[0]*L['a'].size()[1] > 20""")
 
     def test_new_empty(self):
         def f(a, b):
@@ -1997,27 +2011,8 @@ symbolic_tensor_failures = {
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
-
-    # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
-    xfail('stft', '')
 }
 symbolic_tensor_segfaults = {
     skip('nn.functional.batch_norm')  # Segfault??
@@ -2044,22 +2039,15 @@ out_symbolic_tensor_failures = {
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('fft.fft2', ''),
-    xfail('fft.fftn', ''),
-    xfail('fft.ifft2', ''),
-    xfail('fft.ifftn', ''),
     xfail('gather', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('lu', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
 
     # SymIntArrayRef expected to contain only concrete
-    xfail('ones', ''),
     xfail('randn', ''),
-    xfail('zeros', ''),
 
     # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
     xfail('index_reduce', 'prod'),

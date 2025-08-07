@@ -18,12 +18,10 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-PLATFORM="manylinux2014_x86_64"
+PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
     PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
@@ -33,9 +31,11 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
     # shellcheck disable=SC2046
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'
@@ -79,8 +79,6 @@ if [[ -e /opt/openssl ]]; then
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
 fi
 
-
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
@@ -99,6 +97,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
@@ -110,12 +109,6 @@ case ${DESIRED_PYTHON} in
     retry pip install -q --pre numpy==2.0.2
     ;;
 esac
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -145,28 +138,11 @@ fi
 
 echo "Calling setup.py bdist at $(date)"
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 \
+time CMAKE_ARGS=${CMAKE_ARGS[@]} \
+    EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 \
-    BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
-    USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR --cmake
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
-    time CMAKE_ARGS=${CMAKE_ARGS[@]} \
-        EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
-        BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
-        USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-        python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
-fi
 echo "Finished setup.py bdist at $(date)"
 
 # Build libtorch packages
@@ -208,12 +184,6 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
     echo "$(pushd $PYTORCH_ROOT && git rev-parse HEAD)" > libtorch/build-hash
 
     mkdir -p /tmp/$LIBTORCH_HOUSE_DIR
-
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-        LIBTORCH_ABI="cxx11-abi-"
-    else
-        LIBTORCH_ABI=
-    fi
 
     zip -rq /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip libtorch
     cp /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip \
@@ -285,10 +255,6 @@ ls /tmp/$WHEELHOUSE_DIR
 mkdir -p "/$WHEELHOUSE_DIR"
 mv /tmp/$WHEELHOUSE_DIR/torch*linux*.whl /$WHEELHOUSE_DIR/
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    mv /tmp/$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/ || true
-fi
-
 if [[ -n "$BUILD_PYTHONLESS" ]]; then
     mkdir -p /$LIBTORCH_HOUSE_DIR
     mv /tmp/$LIBTORCH_HOUSE_DIR/*.zip /$LIBTORCH_HOUSE_DIR
@@ -333,8 +299,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies
-            elif [[ "$DESIRED_CUDA" == *"xpu"* ]]; then
+            # Keep the so number for XPU dependencies and libgomp.so.1 to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)
@@ -465,15 +431,7 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   pushd $PYTORCH_ROOT/test
 
   # Install the wheel for this Python version
-  if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    pip uninstall -y "$TORCH_NO_PYTHON_PACKAGE_NAME" || true
-  fi
-
   pip uninstall -y "$TORCH_PACKAGE_NAME"
-
-  if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    pip install "$TORCH_NO_PYTHON_PACKAGE_NAME" --no-index -f /$WHEELHOUSE_DIR --no-dependencies -v
-  fi
 
   pip install "$TORCH_PACKAGE_NAME" --no-index -f /$WHEELHOUSE_DIR --no-dependencies -v
 

@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Callable, cast, Optional, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -41,23 +41,25 @@ from .utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.distributed._shard.metadata import ShardMetadata
 
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, weakref.ReferenceType[ShardedTensor]] = {}
+_sharded_tensor_map: dict[int, weakref.ReferenceType[ShardedTensor]] = {}
 
 # Default sharded ops
-_SHARDED_OPS: Dict[Callable, Callable] = {}
+_SHARDED_OPS: dict[Callable, Callable] = {}
 
 # Customized user ops
-_CUSTOM_SHARDED_OPS: Dict[Callable, Callable] = {}
+_CUSTOM_SHARDED_OPS: dict[Callable, Callable] = {}
 
 
 def _register_remote_shards(
-    sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int
+    sharded_tensor_id: int, rrefs: list[rpc.RRef[Shard]], rpc_rank: int
 ):
     with _sharded_tensor_lock:
         if sharded_tensor_id not in _sharded_tensor_map:
@@ -75,7 +77,7 @@ def _register_remote_shards(
 class ShardedTensorBase(torch.Tensor):
     _sharding_spec: shard_spec.ShardingSpec
     _metadata: ShardedTensorMetadata
-    _local_shards: List[Shard]
+    _local_shards: list[Shard]
 
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
         # Use __new__ to construct a wrapper tensor, for recording tensor
@@ -102,7 +104,7 @@ class ShardedTensorBase(torch.Tensor):
             sizes, tensor_properties=tensor_properties
         )
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             sizes,
             dtype=dtype,
@@ -125,7 +127,7 @@ class ShardedTensorBase(torch.Tensor):
         """
         return self._metadata
 
-    def local_shards(self) -> List[Shard]:
+    def local_shards(self) -> list[Shard]:
         """
         Returns a list of :class:`Shard' corresponding to the
         local shards for this rank. Returns an empty list if the current rank
@@ -136,7 +138,7 @@ class ShardedTensorBase(torch.Tensor):
     @classmethod
     def _init_from_local_shards_and_global_metadata(
         cls,
-        local_shards: List[Shard],
+        local_shards: list[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
     ) -> ShardedTensorBase:
@@ -182,7 +184,7 @@ class ShardedTensorBase(torch.Tensor):
         return sharded_tensor_base
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         raise RuntimeError(
             f"A {cls.__name__} object is being used from c++ while calling {func.__module__}.{func.__name__} "
             "but the there is no custom __torch_dispatch__ implementation for it."
@@ -290,7 +292,7 @@ class ShardedTensor(ShardedTensorBase):
         self._sharded_tensor_id = None
 
         self._process_group = self._normalize_pg(process_group)
-        self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
+        self._remote_shards: dict[int, list[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
         # Initialize RPC if available.
@@ -351,7 +353,7 @@ class ShardedTensor(ShardedTensorBase):
                 continue
 
             if len(self.local_shards()) != 0:
-                rrefs: List[rpc.RRef[Shard]] = [
+                rrefs: list[rpc.RRef[Shard]] = [
                     rpc.RRef(shard) for shard in self.local_shards()
                 ]
                 fut = rpc.rpc_async(
@@ -430,7 +432,7 @@ class ShardedTensor(ShardedTensorBase):
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = {}
+        shard_placement: dict[ShardMetadata, tuple[int, int]] = {}
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
@@ -440,7 +442,7 @@ class ShardedTensor(ShardedTensorBase):
             rank_sizes[shard_rank] += shard_size(shard_md)
             max_rank_size = max(max_rank_size, rank_sizes[shard_rank])
 
-        gather_list: Optional[List[torch.Tensor]]
+        gather_list: Optional[list[torch.Tensor]]
         if rank == dst:
             assert out is not None
             if enforce_dtype:
@@ -468,7 +470,7 @@ class ShardedTensor(ShardedTensorBase):
                     warnings.warn(
                         "Gathering a tensor with zero elements on rank " + str(rank)
                     )
-                    return
+                    continue
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset : shard_offset + src.numel()].copy_(src)
 
@@ -513,7 +515,7 @@ class ShardedTensor(ShardedTensorBase):
 
         .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with CPU.
         """
         # TODO: make this a __torch_function__ op once ShardedTensor becomes a
@@ -535,7 +537,7 @@ class ShardedTensor(ShardedTensorBase):
             return self
 
         # if not, returns a copy of this object on CPU
-        list_shards: List[Shard] = []
+        list_shards: list[Shard] = []
         # move all local shards to cpu, and change metadata
         for shard in self._local_shards:
             cpu_tensor = shard.tensor.cpu(memory_format=memory_format)  # type: ignore[call-arg]
@@ -573,7 +575,7 @@ class ShardedTensor(ShardedTensorBase):
         metadata, but no underlying data movements are performed.
         .. note:: When moving a ShardedTensor from CPU to GPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupNCCL),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with GPU.
         """
         if (
@@ -590,11 +592,13 @@ class ShardedTensor(ShardedTensorBase):
             assert (
                 isinstance(device, torch.device)
                 and device.index == torch.cuda.current_device()
-            ), """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+            ), (
+                """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+            )
 
         current_device = torch.device(torch.cuda.current_device())
         # returns a copy of ShardedTensor on CUDA current device
-        list_shards: List[Shard] = []
+        list_shards: list[Shard] = []
         # move all local shards to current device, and change metadata
         # if local shards already on the current device, there's no
         # real data movement, only the metadata are copied.
@@ -683,7 +687,7 @@ class ShardedTensor(ShardedTensorBase):
             return self
 
         # returns a copy of ShardedTensor on CUDA current device
-        list_shards: List[Shard] = []
+        list_shards: list[Shard] = []
 
         for shard in self._local_shards:
             new_tensor = shard.tensor.to(  # type: ignore[call-overload]
@@ -726,11 +730,25 @@ class ShardedTensor(ShardedTensorBase):
     @classmethod
     def _init_from_local_shards(
         cls,
-        local_shards: List[Shard],
+        local_shards: list[Shard],
         *global_size,
         process_group=None,
         init_rrefs=False,
     ):
+        # recalc metadata handles special ST creation cases like each rank only has tensor available
+        # caller need to provide None on the unknown dimension of the global size
+        # We will change None into zeros and go through the same amount of checks as before to create ST
+        # and use all_gather to calculate the offsets and global size for metadata
+        # It is compatible with the current use case since, conventionally we don't pass None as global size
+        # Therefore the old path won't trigger the new feature
+        recalc_metadata = False
+        for dim in global_size:
+            if dim is None:
+                recalc_metadata = True
+        if recalc_metadata:
+            global_size = tuple(
+                0 if dim_size is None else dim_size for dim_size in global_size
+            )
         # STEP 1: Validate the Shardmetadatas locally
         process_group = cls._normalize_pg(process_group)
         current_rank = dist.get_rank()  # intentional to get global rank
@@ -746,7 +764,7 @@ class ShardedTensor(ShardedTensorBase):
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata
-        gathered_metadatas: List[Optional[ShardedTensorMetadata]] = []
+        gathered_metadatas: list[Optional[ShardedTensorMetadata]] = []
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
@@ -756,7 +774,29 @@ class ShardedTensor(ShardedTensorBase):
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
-        global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
+        global_sharded_tensor_metadata = build_global_metadata(
+            gathered_metadatas, recalc_metadata=recalc_metadata
+        )
+        if recalc_metadata:
+            # for recalc use cases, we only support rw for now, limit the blast radius
+            # will modify here once we support more sharding type
+            assert (
+                len(local_shards) > 0
+                and len(global_sharded_tensor_metadata.shards_metadata) > current_rank
+            ), (
+                f"# for metadata recalculation, local_shards must be larger than 0 "
+                f"actual:{len(local_shards)}, # glb metadata must be greater than any rank id, "
+                f"# metadata:{len(global_sharded_tensor_metadata.shards_metadata)}, rank id:{current_rank}"
+            )
+            local_md = [
+                shard_md
+                for shard_md in global_sharded_tensor_metadata.shards_metadata
+                if shard_md.placement.rank() == current_rank
+            ]
+            assert len(local_md) == 1, (
+                f"should has and only has one metadata for local rank, actual:{local_md}"
+            )
+            local_shards[0].metadata = local_md[0]
         tensor_properties = global_sharded_tensor_metadata.tensor_properties
 
         # STEP 3: Validation done, create the actual ShardedTensor and populate fields
@@ -829,7 +869,9 @@ class ShardedTensor(ShardedTensorBase):
                         "rank:1/cuda:1",
                     ],
                 )
-            >>> st = ShardedTensor._init_from_local_tensor(local_tensor, sharding_spec, [2, 4])
+            >>> st = ShardedTensor._init_from_local_tensor(
+            ...     local_tensor, sharding_spec, [2, 4]
+            ... )
             >>> st
             ShardedTensor(
                 ShardedTensorMetadata(
@@ -866,7 +908,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group = cls._normalize_pg(process_group)
         current_rank = dist.get_rank()  # intentional to get global rank
 
-        local_shards: List[Shard] = []
+        local_shards: list[Shard] = []
         for shard_metadata in sharded_tensor_metadata.shards_metadata:
             rank, _device = _parse_and_validate_remote_device(
                 process_group, shard_metadata.placement
@@ -887,7 +929,7 @@ class ShardedTensor(ShardedTensorBase):
     @classmethod
     def _init_from_local_shards_and_global_metadata(  # type: ignore[override]
         cls,
-        local_shards: List[Shard],
+        local_shards: list[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         process_group=None,
         init_rrefs=False,
@@ -1190,11 +1232,11 @@ class ShardedTensor(ShardedTensorBase):
         return self._metadata.tensor_properties.pin_memory
 
     def _register_remote_shards(
-        self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int
+        self, remote_shards: list[rpc.RRef[Shard]], rpc_rank: int
     ):
         self._remote_shards[rpc_rank] = remote_shards
 
-    def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
+    def remote_shards(self) -> dict[int, list[rpc.RRef[Shard]]]:
         """
         Returns a Dict[int, RRef] with keys being the RPC rank and values
         being RRefs to shards on that rank. Need to initialize the

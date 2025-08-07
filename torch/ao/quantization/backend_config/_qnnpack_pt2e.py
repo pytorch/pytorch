@@ -16,7 +16,6 @@ weighted_op_quint8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float,
 )
-from typing import List
 
 
 def get_linear_configs():
@@ -139,7 +138,7 @@ def get_relu_configs():
 
 
 def get_binary_op_configs():
-    binary_op_configs: List[BackendPatternConfig] = []
+    binary_op_configs: list[BackendPatternConfig] = []
     dtype_configs = [weighted_op_quint8_dtype_config]
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare

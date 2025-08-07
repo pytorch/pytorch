@@ -17,12 +17,15 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
+#define build_grouped_gemm
+#endif
+
+
+#ifdef build_grouped_gemm
 #include <cutlass/gemm/device/default_gemm_configuration.h>
 #include <cutlass/gemm/device/gemm_grouped.h>
 #include <cutlass/gemm/kernel/default_gemm_grouped.h>
-#endif
 #endif
 
 #include <ATen/NestedTensorImpl.h>
@@ -33,8 +36,7 @@
 namespace at {
 namespace native {
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#ifdef build_grouped_gemm
 namespace {
 
 template <
@@ -349,7 +351,6 @@ bool group_gemm_dispatch(
 } // namespace
 
 #endif
-#endif
 
 Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 
@@ -406,8 +407,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 
   const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().const_data_ptr<int64_t>();
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#ifdef build_grouped_gemm
   bool success = false;
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       self.scalar_type(), "group_gemm_dispatch", [&] {
@@ -460,7 +460,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   if (success) {
     return output;
   }
-#endif
 #endif
 
   std::vector<Tensor> output_unbind = output.unbind();

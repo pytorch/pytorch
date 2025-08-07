@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
+import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
 import torch.nn.functional as F
 
 # Makes sure that quantized_decomposed ops are registered
@@ -53,7 +54,7 @@ def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
 
 def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
-) -> Tuple[Any, Any]:
+) -> tuple[Any, Any]:
     """
     Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
@@ -84,10 +85,11 @@ def _find_q_dq_node_for_user(
 
     q_node = None
     if (
-        dq_node.args[0].op == "call_function"  # type: ignore[union-attr]
-        and dq_node.args[0].target in _QUANTIZE_OPS  # type: ignore[union-attr]
+        isinstance(arg := dq_node.args[0], torch.fx.Node)
+        and arg.op == "call_function"
+        and arg.target in _QUANTIZE_OPS
     ):
-        q_node = dq_node.args[0]
+        q_node = arg
     return (q_node, dq_node)
 
 
@@ -101,7 +103,7 @@ def _is_sym_size_node(node: Node):
     )
 
 
-def _filter_sym_size_users(node: torch.fx.Node) -> List[torch.fx.Node]:
+def _filter_sym_size_users(node: torch.fx.Node) -> list[torch.fx.Node]:
     node_users = list(filter((lambda x: (_is_sym_size_node(x) is False)), node.users))
     return node_users
 
@@ -166,7 +168,11 @@ def _is_conv_node(n: Node):
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv1d.padding,
         torch.ops.aten.conv2d.default,
+        torch.ops.aten.conv2d.padding,
+        torch.ops.aten.conv3d.default,
+        torch.ops.aten.conv3d.padding,
     ]
 
 
@@ -323,9 +329,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.recompile()
 
 
-def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
+def _get_node_name_to_scope(model: GraphModule) -> dict[str, tuple[str, type]]:
     # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+    node_name_to_scope: dict[str, tuple[str, type]] = {}
     for n in model.graph.nodes:
         nn_module_stack = n.meta.get("nn_module_stack", None)
         current_scope = ("", type(None))
@@ -338,7 +344,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 
 def _get_aten_graph_module_for_pattern(
     pattern: Callable,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     is_cuda: bool = False,
     **kwargs,
 ) -> GraphModule:
@@ -354,6 +360,7 @@ def _get_aten_graph_module_for_pattern(
         pattern,  # type: ignore[arg-type]
         example_inputs,
         kwargs,
+        strict=True,
     ).module()
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
@@ -408,7 +415,7 @@ def _is_literal(arg):
 def _replace_literals_with_new_placeholders(
     gm: torch.fx.GraphModule,
     merge_dup: bool = False,
-    exclude_literals: Optional[List[Any]] = None,
+    exclude_literals: Optional[list[Any]] = None,
 ):
     """Replace the literals in the graph with placeholder nodes that's created on the fly while we
     traverse the graph, so that the literal arguments in the graph can be matched and replaced
@@ -459,7 +466,7 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
+    literal_to_ph: dict[Union[float, bool, int, torch.dtype], Node] = {}
     if exclude_literals is None:
         exclude_literals = []
 
@@ -497,8 +504,8 @@ def _replace_literals_with_new_placeholders(
 
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
-    exclude_literals: Optional[List[Any]] = None,
-    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None,
+    exclude_literals: Optional[list[Any]] = None,
+    literal_to_ph_idx: Optional[dict[Union[float, int, bool, torch.dtype], int]] = None,
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced

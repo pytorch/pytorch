@@ -5,7 +5,7 @@ import sys
 from collections import Counter
 from enum import auto, Enum
 from functools import partial
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -121,8 +121,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_save_load_state_dict(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
@@ -171,8 +172,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_sync_module_state(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
@@ -310,8 +312,9 @@ class TestFSDPHybridShard(FSDPTest):
         cntr = Counter()
         patched_allreduce = partial(patched_collective, orig_ar, cntr)
         patched_reduce_scatter = partial(patched_collective, orig_rs, cntr)
-        with patch_allreduce(patched_allreduce), patch_reduce_scatter(
-            patched_reduce_scatter
+        with (
+            patch_allreduce(patched_allreduce),
+            patch_reduce_scatter(patched_reduce_scatter),
         ):
             inp = hsdp_model.get_input(device=torch.cuda.current_device())
             out = hsdp_model(inp[0], inp[1])
@@ -355,15 +358,15 @@ class TestFSDPHybridShard(FSDPTest):
             use_orig_params,
             hsdp_process_groups=hsdp_pgs,
         )
-        assert (
-            hsdp_model._inter_node_pg.size() > 1
-        ), "HSDP model initialized without replication"
+        assert hsdp_model._inter_node_pg.size() > 1, (
+            "HSDP model initialized without replication"
+        )
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
         hsdp_optim = torch.optim.Adam(hsdp_model.parameters(), lr=1e-2)
         torch.manual_seed(global_pg.rank() + 1)
         for _ in range(5):
             inp = fsdp_model.module.get_input(torch.device("cuda"))
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for model, optim in ((fsdp_model, fsdp_optim), (hsdp_model, hsdp_optim)):
                 optim.zero_grad()
                 loss = model(*inp).sum()
@@ -396,7 +399,7 @@ class TestFSDPHybridShard(FSDPTest):
         sharding_strategy_mode: str,
         use_orig_params: bool,
         hsdp_process_groups: Optional[
-            Tuple[dist.ProcessGroup, dist.ProcessGroup]
+            tuple[dist.ProcessGroup, dist.ProcessGroup]
         ] = None,
         hsdp_device_mesh: Optional = None,
     ):

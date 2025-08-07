@@ -12,7 +12,7 @@
 #
 # The path hints include CUDA_TOOLKIT_ROOT_DIR seeing as some folks
 # install NCCL in the same location as the CUDA toolkit.
-# See https://github.com/caffe2/caffe2/issues/1601
+# See https://github.com/facebookarchive/caffe2/issues/1601
 
 set(NCCL_INCLUDE_DIR $ENV{NCCL_INCLUDE_DIR} CACHE PATH "Folder contains NVIDIA NCCL headers")
 set(NCCL_LIB_DIR $ENV{NCCL_LIB_DIR} CACHE PATH "Folder contains NVIDIA NCCL libraries")
@@ -57,7 +57,8 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
   include(CheckCXXSymbolExists)
   check_cxx_symbol_exists(NCCL_VERSION_CODE nccl.h NCCL_VERSION_DEFINED)
 
-  if (NCCL_VERSION_DEFINED)
+  # this condition check only works for non static NCCL linking
+  if (NCCL_VERSION_DEFINED AND NOT USE_STATIC_NCCL)
     set(file "${PROJECT_BINARY_DIR}/detect_nccl_version.cc")
     file(WRITE ${file} "
       #include <iostream>
@@ -65,7 +66,6 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
       int main()
       {
         std::cout << NCCL_MAJOR << '.' << NCCL_MINOR << '.' << NCCL_PATCH << std::endl;
-
         int x;
         ncclGetVersion(&x);
         return x == NCCL_VERSION_CODE;
@@ -80,11 +80,9 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
 (include: ${NCCL_INCLUDE_DIRS}, library: ${NCCL_LIBRARIES}) Please set NCCL_INCLUDE_DIR and NCCL_LIB_DIR manually.")
     endif()
     message(STATUS "NCCL version: ${NCCL_VERSION_FROM_HEADER}")
-  else()
-    message(STATUS "NCCL version < 2.3.5-5")
   endif ()
-  set (CMAKE_REQUIRED_INCLUDES ${OLD_CMAKE_REQUIRED_INCLUDES})
 
+  set (CMAKE_REQUIRED_INCLUDES ${OLD_CMAKE_REQUIRED_INCLUDES})
   message(STATUS "Found NCCL (include: ${NCCL_INCLUDE_DIRS}, library: ${NCCL_LIBRARIES})")
   mark_as_advanced(NCCL_ROOT_DIR NCCL_INCLUDE_DIRS NCCL_LIBRARIES)
 endif()

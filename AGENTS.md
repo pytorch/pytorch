@@ -1,0 +1,1 @@
+- This is the only AGENTS.md, there are no recursive AGENTS.md

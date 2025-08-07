@@ -193,9 +193,9 @@ def main():
     print(
         f"Train model on {args.epochs} epochs with backend {args.backend} and optimizer {args.optimizer}:"
     )
-    print(f"PyTorch spent {timedelta(seconds=native_elapsed/args.epochs)} per epoch")
+    print(f"PyTorch spent {timedelta(seconds=native_elapsed / args.epochs)} per epoch")
     print(
-        f"TorchDynamo spent {timedelta(seconds=dynamo_elapsed/args.epochs)} per epoch"
+        f"TorchDynamo spent {timedelta(seconds=dynamo_elapsed / args.epochs)} per epoch"
     )
 
 

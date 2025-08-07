@@ -526,7 +526,7 @@ namespace {
 
 
         // we are dealing with packed tensor here. max index is the same as numel.
-        // TODO: to really support input tensor large enought to go beyond int32,
+        // TODO: to really support input tensor large enough to go beyond int32,
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
@@ -608,6 +608,8 @@ namespace {
               input_arg{ input, "input", 3 };
 
     adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
+    TORCH_CHECK(input.dim() == gradOutput_.dim(),
+      __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
@@ -679,7 +681,7 @@ namespace {
           const dim3 grid(grid_x, grid_y, grid_z);
 
           // we are dealing with packed tensor here. max index is the same as numel.
-          // TODO: to really support input tensor large enought to go beyond int32,
+          // TODO: to really support input tensor large enough to go beyond int32,
           // we will need to restrict out shared memory usage and adjust the launch
           // config;
           AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());

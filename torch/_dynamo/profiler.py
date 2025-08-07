@@ -1,6 +1,20 @@
+"""
+Dynamo profiling implementation.
+
+This module provides profiling functionality for Dynamo, including:
+- ProfileMetrics: Class for collecting and aggregating performance metrics like
+  execution time, operator counts, and fusion statistics
+- ProfileResult: Class for analyzing and reporting profiling results
+- Utilities for tracking missed/uncaptured operations
+- Functions for instrumenting FX graphs with profiling capabilities
+
+The profiler helps measure and optimize the performance of Dynamo-compiled code
+by tracking both captured and total operations, timing, and graph statistics.
+"""
+
 import dataclasses
 import os
-from typing import Any, List
+from typing import Any
 from typing_extensions import Self
 
 import torch
@@ -41,7 +55,7 @@ class ProfileMetrics:
     def __str__(self) -> str:
         return f"{self.operators:4.0%} ops {self.microseconds:4.0%} time"
 
-    def tocsv(self) -> List[float]:
+    def tocsv(self) -> list[float]:
         return [self.operators, self.microseconds]
 
 
@@ -69,7 +83,7 @@ class ProfileResult:
             + str(self.percent())
         )
 
-    def tocsv(self) -> List[Any]:
+    def tocsv(self) -> list[Any]:
         return [
             self.unique_graphs,
             self.captured.graphs,
@@ -82,7 +96,7 @@ def should_print_missing() -> bool:
     return os.environ.get("TORCHDYNAMO_PRINT_MISSING") == "1"
 
 
-def print_missing(stack: List[str]) -> None:
+def print_missing(stack: list[str]) -> None:
     if any("/torch/autograd/profiler.py" in x for x in stack):
         return
     stack = [
@@ -149,7 +163,7 @@ class Profiler:
         )
 
 
-def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]) -> Any:
+def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: list[Any]) -> Any:
     def _wrapped(*args: Any) -> Any:
         with torch.profiler.record_function("TORCHDYNAMO"):
             return gm.forward(*args)

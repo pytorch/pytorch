@@ -71,8 +71,8 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
   };
 
   @autoreleasepool {
-    string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" + std::to_string(interpolation_mode) +
-        ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
+    std::string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" +
+        std::to_string(interpolation_mode) + ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -127,15 +127,6 @@ Tensor grid_sampler_2d_mps(const Tensor& input,
                            int64_t interpolation_mode,
                            int64_t padding_mode,
                            bool align_corners) {
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS)) {
-    TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.2. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    return at::grid_sampler_2d(input.to("cpu"), grid.to("cpu"), interpolation_mode, padding_mode, align_corners)
-        .clone()
-        .to("mps");
-  }
-
   auto in_size = input.sizes();
   auto grid_size = grid.sizes();
   auto output = at::empty({in_size[0], in_size[1], grid_size[1], grid_size[2]}, input.options());

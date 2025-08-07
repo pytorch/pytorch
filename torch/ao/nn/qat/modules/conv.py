@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import ClassVar, Tuple, Type, Union
+from typing import ClassVar, Literal, Union
 
 import torch
 import torch.nn as nn
@@ -12,21 +12,21 @@ __all__ = ["Conv1d", "Conv2d", "Conv3d"]
 
 
 class _ConvNd(nn.modules.conv._ConvNd):
-    _FLOAT_MODULE: ClassVar[Type[nn.modules.conv._ConvNd]]
+    _FLOAT_MODULE: ClassVar[type[nn.modules.conv._ConvNd]]
 
     def __init__(
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Tuple[int, ...],
-        stride: Tuple[int, ...],
-        padding: Union[str, Tuple[int, ...]],
-        dilation: Tuple[int, ...],
+        kernel_size: tuple[int, ...],
+        stride: tuple[int, ...],
+        padding: Union[str, tuple[int, ...]],
+        dilation: tuple[int, ...],
         transposed: bool,
-        output_padding: Tuple[int, ...],
+        output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: str,
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"],
         qconfig=None,
         device=None,
         dtype=None,
@@ -134,8 +134,9 @@ class Conv1d(_ConvNd, nn.Conv1d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
-    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
+
+    _FLOAT_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
+    _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
 
     def __init__(
         self,
@@ -147,7 +148,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
@@ -174,7 +175,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -195,8 +196,9 @@ class Conv2d(_ConvNd, nn.Conv2d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
-    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+
+    _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
+    _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
 
     def __init__(
         self,
@@ -208,7 +210,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
@@ -238,7 +240,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -259,8 +261,9 @@ class Conv3d(_ConvNd, nn.Conv3d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
-    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+
+    _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
+    _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
 
     def __init__(
         self,
@@ -272,7 +275,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
@@ -302,7 +305,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
