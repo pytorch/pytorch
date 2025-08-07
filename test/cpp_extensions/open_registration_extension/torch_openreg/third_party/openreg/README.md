@@ -34,25 +34,47 @@ OpenReg currently provides a set of APIs covering basic memory and device manage
 
 ### Device Management APIs
 
-| OpenReg              | CUDA                 | Feature Description                               |
-| :------------------- | :------------------- | :------------------------------------------------ |
-| `orGetDeviceCount`   | `cudaGetDeviceCount` | Get the number of devices                         |
-| `orSetDevice`        | `cudaSetDevice`      | Set the current device for the current thread     |
-| `orGetDevice`        | `cudaGetDevice`      | Get the current device for the current thread     |
+| OpenReg                          | CUDA                               | Feature Description                           |
+| :------------------------------- | :--------------------------------- | :-------------------------------------------- |
+| `orGetDeviceCount`               | `cudaGetDeviceCount`               | |
+| `orSetDevice`                    | `cudaSetDevice`                    | |
+| `orGetDevice`                    | `cudaGetDevice`                    | |
+| `orDeviceSynchronize`            | `cudaDeviceSynchronize`            | |
+| `orDeviceGetStreamPriorityRange` | `cudaDeviceGetStreamPriorityRange` | |
 
 ### Memory Management APIs
 
-| OpenReg                  | CUDA                         | Feature Description                        |
-| :----------------------- | :--------------------------- | :----------------------------------------- |
-| `orMalloc`               | `cudaMalloc`                 | Allocate device memory                     |
-| `orFree`                 | `cudaFree`                   | Free device memory                         |
-| `orMallocHost`           | `cudaMallocHost`             | Allocate page-locked (Pinned) host memory  |
-| `orFreeHost`             | `cudaFreeHost`               | Free page-locked host memory               |
-| `orMemcpy`               | `cudaMemcpy`                 | Synchronous memory copy                    |
-| `orMemcpyAsync`          | `cudaMemcpyAsync`            | Asynchronous memory copy                   |
-| `orPointerGetAttributes` | `cudaPointerGetAttributes`   | Get pointer attributes                     |
-| `orMemoryUnprotect`      | -                            | (Internal use) Unprotect memory            |
-| `orMemoryProtect`        | -                            | (Internal use) Restore memory protection   |
+| OpenReg                  | CUDA                       | Feature Description                       |
+| :----------------------- | :------------------------- | :---------------------------------------- |
+| `orMalloc`               | `cudaMalloc`               | Allocate device memory                    |
+| `orFree`                 | `cudaFree`                 | Free device memory                        |
+| `orMallocHost`           | `cudaMallocHost`           | Allocate page-locked (Pinned) host memory |
+| `orFreeHost`             | `cudaFreeHost`             | Free page-locked host memory              |
+| `orMemcpy`               | `cudaMemcpy`               | Synchronous memory copy                   |
+| `orPointerGetAttributes` | `cudaPointerGetAttributes` | Get pointer attributes                    |
+
+### Stream APIs
+
+| OpenReg                      | CUDA                           | Feature Description                        |
+| :--------------------------- | :----------------------------- | :----------------------------------------- |
+| `orStreamCreate`             | `cudaStreamCreate`             |  |
+| `orStreamCreateWithPriority` | `cudaStreamCreateWithPriority` |  |
+| `orStreamDestroy`            | `cudaStreamDestroy`            |  |
+| `orStreamQuery`              | `cudaStreamQuery`              |  |
+| `orStreamSynchronize`        | `cudaStreamSynchronize`        |  |
+| `orStreamWaitEvent`          | `cudaStreamWaitEvent`          |  |
+| `orStreamGetPriority`        | `cudaStreamGetPriority`        |  |
+
+### Event APIs
+
+| OpenReg                  | CUDA                       | Feature Description                        |
+| :----------------------- | :------------------------- | :----------------------------------------- |
+| `orEventCreateWithFlags` | `cudaEventCreateWithFlags` | |
+| `orEventDestroy`         | `cudaEventDestroy`         | |
+| `orEventRecord`          | `cudaEventRecord`          | |
+| `orEventSynchronize`     | `cudaEventSynchronize`     | |
+| `orEventQuery`           | `cudaEventQuery`           | |
+| `orEventElapsedTime`     | `cudaEventElapsedTime`     | |
 
 ## Implementation Principles
 
