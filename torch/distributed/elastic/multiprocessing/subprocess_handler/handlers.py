@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Dict, Tuple
 
 from torch.distributed.elastic.multiprocessing.subprocess_handler.subprocess_handler import (
     SubprocessHandler,
@@ -15,8 +14,8 @@ __all__ = ["get_subprocess_handler"]
 
 def get_subprocess_handler(
     entrypoint: str,
-    args: Tuple,
-    env: Dict[str, str],
+    args: tuple,
+    env: dict[str, str],
     stdout: str,
     stderr: str,
     local_rank_id: int,

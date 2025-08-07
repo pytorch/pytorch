@@ -13,4 +13,4 @@
 
     See the `cuDNN 8 Release Notes`_ for more information.
 
-.. _cuDNN 8 Release Notes: https://docs.nvidia.com/deeplearning/sdk/cudnn-release-notes/rel_8.html
+.. _cuDNN 8 Release Notes: https://docs.nvidia.com/deeplearning/cudnn/archives/cudnn-880/release-notes/rel_8.html

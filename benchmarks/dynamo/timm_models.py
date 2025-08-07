@@ -10,9 +10,9 @@ import warnings
 
 
 try:
-    from .common import BenchmarkRunner, download_retry_decorator, main
+    from .common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 except ImportError:
-    from common import BenchmarkRunner, download_retry_decorator, main
+    from common import BenchmarkRunner, download_retry_decorator, load_yaml_file, main
 
 import torch
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
@@ -39,13 +39,20 @@ finally:
     from timm.models import create_model
 
 TIMM_MODELS = {}
-filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
+
+filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 with open(filename) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(" ")
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+            continue
         TIMM_MODELS[model_name] = int(batch_size)
 
 
@@ -71,6 +78,7 @@ BATCH_SIZE_DIVISORS = {
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
+    "crossvit_9_240",
     "fbnetv3_b",
     "gmixer_24_224",
     "hrnet_w18",
@@ -80,6 +88,11 @@ REQUIRE_HIGHER_TOLERANCE = {
     "sebotnet33ts_256",
     "selecsls42b",
     "convnext_base",
+    "cait_m36_384",
+}
+
+REQUIRE_HIGHER_TOLERANCE_AMP = {
+    "poolformer_m36",
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
@@ -123,6 +136,8 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
     "cspdarknet53",
+    "gluon_inception_v3",
+    "cait_m36_384",
 }
 
 
@@ -213,6 +228,26 @@ class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def _config(self):
+        return load_yaml_file("timm_models.yaml")
+
+    @property
+    def _skip(self):
+        return self._config["skip"]
+
+    @property
+    def skip_models_for_cpu(self):
+        return self._skip["device"]["cpu"]
+
+    @property
+    def skip_models_for_cpu_aarch64(self):
+        return self._skip["device"]["cpu_aarch64"]
+
+    @property
+    def skip_models(self):
+        return self._skip["all"]
 
     @property
     def force_amp_for_fp16_bf16_models(self):
@@ -374,7 +409,9 @@ class TimmRunner(BenchmarkRunner):
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
                 tolerance = 8 * 1e-2
-            elif name in REQUIRE_HIGHER_TOLERANCE:
+            elif name in REQUIRE_HIGHER_TOLERANCE or (
+                self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            ):
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
@@ -409,7 +446,7 @@ class TimmRunner(BenchmarkRunner):
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

@@ -278,13 +278,21 @@ class TestNumPyInterop(TestCase):
     def test_from_numpy_no_leak_on_invalid_dtype(self):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
-        x = np.array("value".encode("ascii"))
+        x = np.array(b"value")
         for _ in range(1000):
             try:
                 torch.from_numpy(x)
             except TypeError:
                 pass
         self.assertTrue(sys.getrefcount(x) == 2)
+
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
+    @onlyCPU
+    def test_from_numpy_zero_element_type(self):
+        # This tests that dtype check happens before strides check
+        # which results in div-by-zero on-x86
+        x = np.ndarray((3, 3), dtype=str)
+        self.assertRaises(TypeError, lambda: torch.from_numpy(x))
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
@@ -480,7 +488,7 @@ class TestNumPyInterop(TestCase):
             )  # type: ignore[call-overload]
         else:
             self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "(Overflow|an integer is required)",
                 lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
             )  # type: ignore[call-overload]
@@ -630,6 +638,28 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(torch.mul(x, y).shape, y.shape)
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
         self.assertEqual(torch.div(x, y, rounding_mode="floor").shape, y.shape)
+
+    def test_ndarray_astype_object_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype("O")
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
+
+    def test_ndarray_astype_object_graph_break_2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype(object)
+
+        xs = np.array([1, 2])
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
+        ):
+            f(xs)
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())

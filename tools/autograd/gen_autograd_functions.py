@@ -67,7 +67,7 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -107,6 +107,17 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+inline variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
+{
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  auto packed_args = PackedArgs(args);
+  auto needs_input_grad = packed_args.unpack<std::array<bool, ${num_inputs}>>();
+  ${unpack_ivalues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+#endif
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
@@ -116,15 +127,39 @@ variable_list ${op}::apply(variable_list&& grads) {
   return ${op}_apply_functional(std::move(grads), needs_input_grad${,apply_functional_args});
 }
 
-void ${op}::compiled_args(CompiledNodeArgs& args) {
+void ${op}::compiled_args(CompiledNodeArgs& args) const {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
-    ${apply_with_saved_after}
-    return result;
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  ${apply_with_saved_before}
+
+  static bool called = false;
+  if (!called) {
+    called = true;
+    ${compute_schema}
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+    pyinterface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
+  }
+
+  variable_list output_result;
+
+  PackedArgs packed_args;
+  ${asserts}
+  ${unpacks}
+  ${compute_needs_input_grad}
+  packed_args.pack(needs_input_grad);
+  ${get_packed_args}
+
+  output_result = compiled_autograd_apply_functional(packed_args, next_edges(), saved, grads, name());
+
+  ${apply_with_saved_after}
+  return output_result;
+#endif
 }
+
 """
 )
 
@@ -237,7 +272,7 @@ PY_RAW_GETSETDEF_STRUCT = CodeTemplate(
 # Getter templates
 GETTER_DEFINITION = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto prop = static_cast<${op}*>(self->cdata.get())->${name};
   ${body}
@@ -248,7 +283,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -259,7 +294,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -270,7 +305,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -286,7 +321,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -302,7 +337,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.has_value()) {
@@ -317,7 +352,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT_ARRAYREF = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.list.has_value()) {
@@ -520,8 +555,7 @@ def gen_autograd_functions_lib(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "autograd_function_declarations": declarations,
                 "autograd_function_definitions": definitions,
             },
@@ -797,7 +831,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 CodeTemplate(
                     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name};
@@ -993,14 +1027,35 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         f"{T} {x}"
         for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
     ]
+    get_packed_args = "\n".join(
+        f"packed_args.pack({name});" for name in apply_functional_args
+    )
+    unpack_ivalues = []
+    for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
+        typ = typ.removesuffix("&")
+        unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
+
+    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    for typ in apply_functional_args_ref_types:
+        typ = typ.removesuffix("&")
+        typ = typ.removeprefix("const")
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for schema_arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{schema_arg}>::packed_type(),"
+        )
+    compute_schema.append("};")
 
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
+        compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
         num_inputs=len(input_name_to_idx),
+        unpack_ivalues="\n".join(unpack_ivalues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1015,4 +1070,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_packed_args=get_packed_args,
     )

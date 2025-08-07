@@ -1,5 +1,5 @@
 import collections
-from typing import Deque, Optional
+from typing import Optional
 
 import torch
 
@@ -12,7 +12,7 @@ class _FreeEventQueue:
     """
 
     def __init__(self) -> None:
-        self._queue: Deque[torch.Event] = collections.deque()
+        self._queue: collections.deque[torch.Event] = collections.deque()
         self._max_num_inflight_all_gathers = 2  # empirically chosen
 
     def enqueue(self, free_event: torch.Event) -> None:

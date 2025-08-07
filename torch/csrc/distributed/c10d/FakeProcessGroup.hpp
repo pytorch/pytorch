@@ -6,7 +6,8 @@ namespace c10d {
 
 class FakeWork : public Work {
  public:
-  bool wait(std::chrono::milliseconds timeout) override {
+  int seq_id = -1;
+  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
     return true;
   }
 
@@ -19,7 +20,25 @@ class FakeWork : public Work {
 
 class FakeProcessGroup : public Backend {
  public:
-  FakeProcessGroup(int rank, int size) : Backend(rank, size) {}
+  struct Options : Backend::Options {
+    explicit Options() : Backend::Options("fake") {}
+
+    int fake_option = 0;
+  };
+
+  FakeProcessGroup(
+      int rank,
+      int size,
+      c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>())
+      : Backend(rank, size), options_(std::move(options)) {}
+
+  const std::string getBackendName() const override {
+    return "fake";
+  }
+
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
@@ -177,10 +196,25 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
+  void startCoalescing() override {
+    // No-op
+  }
+
+  c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
+    return c10::make_intrusive<FakeWork>();
+  }
+
+  c10::intrusive_ptr<Work> endCoalescing() override {
+    return c10::make_intrusive<FakeWork>();
+  }
+
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) override {
     return c10::make_intrusive<FakeWork>();
   }
+
+ private:
+  c10::intrusive_ptr<Options> options_;
 };
 
 } // namespace c10d

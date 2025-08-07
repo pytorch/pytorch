@@ -53,7 +53,7 @@ static PyObject* THPDevice_pynew(
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
       {"device(Device device)",
-       "device(c10::string_view type, int64_t? index=-1)"});
+       "device(std::string_view type, int64_t? index=-1)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
@@ -141,9 +141,9 @@ static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
     case Py_LE:
     case Py_GT:
     case Py_GE:
-      throw torch::TypeError("comparison not implemented");
+      TORCH_CHECK_TYPE(false, "comparison not implemented");
     default:
-      throw torch::TypeError("unexpected comparison op");
+      TORCH_CHECK_TYPE(false, "unexpected comparison op");
   }
   END_HANDLE_TH_ERRORS
 }

@@ -1,5 +1,5 @@
 """
-Update commited CSV files used as reference points by dynamo/inductor CI.
+Update committed CSV files used as reference points by dynamo/inductor CI.
 
 Currently only cares about graph breaks, so only saves those columns.
 
@@ -67,7 +67,7 @@ ORDER BY
     workflowName, jobName
 """
 ARTIFACTS_QUERY_URL = (
-    "https://console-api.clickhouse.cloud/.api/query-endpoints/"
+    "https://console-api.clickhouse.cloud/.api/query-endpoints/"  # @lint-ignore
     "c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
 )
 CSV_LINTER = str(
@@ -111,8 +111,11 @@ def get_artifacts_urls(results, suites):
         if (
             r["workflowName"] in ("inductor", "inductor-periodic")
             and "test" in r["jobName"]
+            and "build" not in r["jobName"]
+            and "runner-determinator" not in r["jobName"]
+            and "unit-test" not in r["jobName"]
         ):
-            config_str, test_str = parse_job_name(r["jobName"])
+            *_, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]

@@ -11,6 +11,7 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
     CUDAExtension,
     ROCM_HOME,
+    SyclExtension,
 )
 
 
@@ -68,6 +69,15 @@ if torch.backends.mps.is_available():
         extra_compile_args=CXX_FLAGS,
     )
     ext_modules.append(extension)
+
+if torch.xpu.is_available() and USE_NINJA:
+    extension = SyclExtension(
+        "torch_test_cpp_extension.sycl",
+        ["xpu_extension.sycl"],
+        extra_compile_args={"cxx": CXX_FLAGS, "sycl": ["-O2"]},
+    )
+    ext_modules.append(extension)
+
 
 # todo(mkozuki): Figure out the root cause
 if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:

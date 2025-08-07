@@ -1,6 +1,6 @@
 import copy
 import operator
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 from torch.ao.quantization import (
@@ -18,7 +18,7 @@ from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_f
 # TODO: move all LSTM util functions from fx/utils.py to this file
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
-    example_inputs: Tuple[Any, ...],
+    example_inputs: tuple[Any, ...],
     backend_config: Optional[BackendConfig] = None,
     linear_output_obs_ctr: Optional[_PartialWrapper] = None,
     sigmoid_obs_ctr: Optional[_PartialWrapper] = None,
@@ -81,14 +81,14 @@ def _get_lstm_with_individually_observed_parts(
     quantizable_lstm.qconfig = float_lstm.qconfig
 
     for idx in range(float_lstm.num_layers):
-        quantizable_lstm.layers[
-            idx
-        ] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
-            float_lstm,
-            idx,
-            float_lstm.qconfig,
-            batch_first=False,
-            split_gates=split_gates,
+        quantizable_lstm.layers[idx] = (
+            torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
+                float_lstm,
+                idx,
+                float_lstm.qconfig,
+                batch_first=False,
+                split_gates=split_gates,
+            )
         )
 
     # Build QConfigMapping for the LSTM cell
@@ -104,7 +104,8 @@ def _get_lstm_with_individually_observed_parts(
     # Insert observers into each LSTM cell
     # TODO: maybe make this work for layer_bw as well
     for layer in quantizable_lstm.layers:
-        cell = layer.layer_fw.cell
+        cell = layer.layer_fw.cell  # type: ignore[union-attr]
+        assert isinstance(cell, torch.nn.Module), "cell should be a nn.Module"
         cell = prepare_fx(cell, cell_qm, example_inputs, backend_config=backend_config)
         # HACK: Manually replace the activation_post_process following these ops.
         # This is needed for FloatFunctional ops because there is currently no way
@@ -133,7 +134,7 @@ def _get_lstm_with_individually_observed_parts(
         add_count = 0
         mul_count = 0
         for node in cell.graph.nodes:
-            op_index: Optional[Tuple[Callable, int]] = None  # e.g. (torch.add, 1)
+            op_index: Optional[tuple[Callable, int]] = None  # e.g. (torch.add, 1)
             if node.target == torch.add:
                 op_index = (torch.add, add_count)
                 add_count += 1
@@ -154,7 +155,7 @@ def _get_lstm_with_individually_observed_parts(
                 setattr(
                     cell, activation_post_process_name, activation_post_process_ctr()
                 )
-        layer.layer_fw.cell = cell
+        layer.layer_fw.cell = cell  # type: ignore[union-attr]
     return quantizable_lstm
 
 
@@ -216,5 +217,5 @@ def _get_reference_quantized_lstm_module(
                         node.replace_input_with(arg, arg.args[0])
         cell.graph.eliminate_dead_code()
         cell.recompile()
-        layer.layer_fw.cell = cell
+        layer.layer_fw.cell = cell  # type: ignore[union-attr]
     return quantized_lstm

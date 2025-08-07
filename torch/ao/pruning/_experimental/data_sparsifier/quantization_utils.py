@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,7 +28,7 @@ def post_training_sparse_quantize(
     model,
     data_sparsifier_class,
     sparsify_first=True,
-    select_embeddings: Optional[List[nn.Module]] = None,
+    select_embeddings: Optional[list[nn.Module]] = None,
     **sparse_config,
 ):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
@@ -66,17 +66,17 @@ def post_training_sparse_quantize(
 
     else:
         embedding_modules = []
-        assert isinstance(
-            select_embeddings, List
-        ), "the embedding_modules must be a list of embedding modules"
+        assert isinstance(select_embeddings, list), (
+            "the embedding_modules must be a list of embedding modules"
+        )
         for emb in select_embeddings:
-            assert (
-                type(emb) in SUPPORTED_MODULES
-            ), "the embedding_modules list must be an embedding or embedding bags"
+            assert type(emb) in SUPPORTED_MODULES, (
+                "the embedding_modules list must be an embedding or embedding bags"
+            )
             fqn_name = module_to_fqn(model, emb)
-            assert (
-                fqn_name is not None
-            ), "the embedding modules must be part of input model"
+            assert fqn_name is not None, (
+                "the embedding modules must be part of input model"
+            )
             embedding_modules.append((fqn_name, emb))
 
     if sparsify_first:
@@ -104,7 +104,7 @@ def post_training_sparse_quantize(
         torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
-        quantize_params: Dict[str, Dict] = {
+        quantize_params: dict[str, dict] = {
             "scales": {},
             "zero_points": {},
             "dequant_weights": {},
@@ -118,9 +118,9 @@ def post_training_sparse_quantize(
 
             quantized_weight = quantized_emb.weight()  # type: ignore[operator]
             quantize_params["scales"][name] = quantized_weight.q_per_channel_scales()
-            quantize_params["zero_points"][
-                name
-            ] = quantized_weight.q_per_channel_zero_points()
+            quantize_params["zero_points"][name] = (
+                quantized_weight.q_per_channel_zero_points()
+            )
             quantize_params["dequant_weights"][name] = torch.dequantize(
                 quantized_weight
             )

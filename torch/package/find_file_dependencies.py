@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import ast
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from ._importlib import _resolve_name
 
@@ -11,7 +11,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
     """
 
     @classmethod
-    def run(cls, src: str, package: str) -> List[Tuple[str, Optional[str]]]:
+    def run(cls, src: str, package: str) -> list[tuple[str, Optional[str]]]:
         visitor = cls(package)
         tree = ast.parse(src)
         visitor.visit(tree)
@@ -53,7 +53,7 @@ class _ExtractModuleReferences(ast.NodeVisitor):
         if hasattr(node.func, "id") and node.func.id == "__import__":
             try:
                 name = self._grab_node_str(node.args[0])
-                fromlist: List[str] = []
+                fromlist: list[str] = []
                 level = 0
                 if len(node.args) > 3:
                     fromlist.extend(self._grab_node_str(v) for v in node.args[3].elts)

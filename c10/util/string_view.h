@@ -61,11 +61,7 @@ class basic_string_view final {
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
 
   constexpr basic_string_view& operator=(
-      const basic_string_view& rhs) noexcept {
-    begin_ = rhs.begin_;
-    size_ = rhs.size_;
-    return *this;
-  }
+      const basic_string_view& rhs) noexcept = default;
 
   constexpr operator ::std::basic_string_view<CharT>() const {
     return ::std::basic_string_view<CharT>(data(), size());
@@ -636,7 +632,7 @@ struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
     // The standard says that std::string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
-    // up to the implementer. So, to be conformant, we need to re-use and
+    // up to the implementer. So, to be conformant, we need to reuse and
     // existing STL type's hash function. The std::string fallback is probably
     // slow but the only way to be conformant.
 

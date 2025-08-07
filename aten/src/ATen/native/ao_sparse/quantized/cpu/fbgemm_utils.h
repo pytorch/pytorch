@@ -4,12 +4,14 @@
 #include <c10/core/QScheme.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmSparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+C10_DIAGNOSTIC_POP()
 
-namespace ao {
-namespace sparse {
+
+namespace ao::sparse {
 
 struct TORCH_API PackedLinearWeight
     : public LinearPackedParamsBase {
@@ -86,7 +88,7 @@ struct TORCH_API PackedLinearWeight
       int64_t output_zero_point);
 };
 
-}}  // namespace ao::sparse
+} // namespace ao::sparse
 
 #endif // USE_FBGEMM
 

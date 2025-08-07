@@ -3,7 +3,8 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import Callable, cast, List, Optional, Tuple
+
+from typing import Callable, cast, Optional
 
 import torch
 from torch import nn, Tensor
@@ -16,7 +17,7 @@ from .parametrization import BiasHook, FakeStructuredSparsity
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
-        bias_hooks: List[int] = []
+        bias_hooks: list[int] = []
         for key, hook in module._forward_hooks.items():
             if isinstance(hook, BiasHook):
                 bias_hooks.append(key)
@@ -245,7 +246,7 @@ def prune_conv2d_activation_conv2d(
     prune_bias = getattr(conv2d_1, "prune_bias", False)
     if (
         hasattr(conv2d_2, "padding")
-        and cast(Tuple[int], conv2d_2.padding) > (0, 0)
+        and cast(tuple[int], conv2d_2.padding) > (0, 0)
         and (conv2d_1.bias is not None or getattr(conv2d_1, "_bias", None) is not None)
     ):
         prune_conv2d_padded(conv2d_1)
@@ -265,7 +266,7 @@ def prune_conv2d_activation_conv2d(
         if (
             not (
                 hasattr(conv2d_2, "padding")
-                and cast(Tuple[int], conv2d_2.padding) > (0, 0)
+                and cast(tuple[int], conv2d_2.padding) > (0, 0)
             )
             or conv2d_1.bias is None
         ):
@@ -326,9 +327,9 @@ def prune_conv2d_pool_flatten_linear(
         linear_ic = linear.weight.shape[1]
 
     conv2d_oc = len(mask)
-    assert (
-        linear_ic % conv2d_oc == 0
-    ), f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+    assert linear_ic % conv2d_oc == 0, (
+        f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+    )
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(

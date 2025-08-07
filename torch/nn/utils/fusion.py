@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Optional, Tuple, TypeVar
+from typing import TypeVar
 
 import torch
 
@@ -55,14 +55,14 @@ def fuse_conv_bn_eval(
 
 def fuse_conv_bn_weights(
     conv_w: torch.Tensor,
-    conv_b: Optional[torch.Tensor],
+    conv_b: torch.Tensor | None,
     bn_rm: torch.Tensor,
     bn_rv: torch.Tensor,
     bn_eps: float,
-    bn_w: Optional[torch.Tensor],
-    bn_b: Optional[torch.Tensor],
+    bn_w: torch.Tensor | None,
+    bn_b: torch.Tensor | None,
     transpose: bool = False,
-) -> Tuple[torch.nn.Parameter, torch.nn.Parameter]:
+) -> tuple[torch.nn.Parameter, torch.nn.Parameter]:
     r"""Fuse convolutional module parameters and BatchNorm module parameters into new convolutional module parameters.
 
     Args:
@@ -135,9 +135,9 @@ def fuse_linear_bn_eval(
     2. the number of features in bn is 1
     Otherwise, skip the folding path
     """
-    assert (
-        linear.out_features == bn.num_features or bn.num_features == 1
-    ), "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"
+    assert linear.out_features == bn.num_features or bn.num_features == 1, (
+        "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"
+    )
 
     assert bn.running_mean is not None and bn.running_var is not None
     fused_linear.weight, fused_linear.bias = fuse_linear_bn_weights(
@@ -155,13 +155,13 @@ def fuse_linear_bn_eval(
 
 def fuse_linear_bn_weights(
     linear_w: torch.Tensor,
-    linear_b: Optional[torch.Tensor],
+    linear_b: torch.Tensor | None,
     bn_rm: torch.Tensor,
     bn_rv: torch.Tensor,
     bn_eps: float,
     bn_w: torch.Tensor,
     bn_b: torch.Tensor,
-) -> Tuple[torch.nn.Parameter, torch.nn.Parameter]:
+) -> tuple[torch.nn.Parameter, torch.nn.Parameter]:
     r"""Fuse linear module parameters and BatchNorm module parameters into new linear module parameters.
 
     Args:

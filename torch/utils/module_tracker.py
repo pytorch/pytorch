@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import weakref
-from typing import List, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -49,13 +49,14 @@ class ModuleTracker:
             def my_linear(m1, m2, bias):
                 print(f"Current modules: {tracker.parents}")
                 return torch.mm(m1, m2.t()) + bias
+
             torch.nn.functional.linear = my_linear
 
             mod(torch.rand(2, 2))
 
     """
 
-    parents: Set[str]
+    parents: set[str]
     """
     A Set containing the fqn for each module currently running their forward
     """
@@ -65,7 +66,7 @@ class ModuleTracker:
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
-        self._hooks: List[RemovableHandle] = []
+        self._hooks: list[RemovableHandle] = []
 
     def _maybe_set_engine_callback(self):
         # This assumes no concurrent calls to backward

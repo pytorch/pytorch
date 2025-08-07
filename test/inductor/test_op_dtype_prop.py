@@ -67,6 +67,7 @@ class TestCase(InductorTestCase):
     )
     # @config.patch("triton.codegen_upcast_to_fp32", False) # TODO enable
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @disable_cache_limit()
     def test_op_dtype_propagation(self, op, dtype):
         def run(op, args, kwargs):
@@ -77,7 +78,18 @@ class TestCase(InductorTestCase):
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
             out = run(op.get_op(), args, kwargs)
-            out_c = torch.compile(run)(op.get_op(), args, kwargs)
+
+            # test_configs.runtime_triton_dtype_assert does not work well with dynamic shape so far.
+            # Consider the following cases for torch.add:
+            #   both lhs/rhs are int32 tensor, there is also a integer alpha argument.
+            #   In dynamic shape case, alpha is passed in as an ks0 argument. To be safe,
+            #   we use tl.int64 for ks0's dtype.
+            #   But the dtype for alpha is also decided as tl.int32 during lowering when
+            #   we promote alpha to a ir.Constant.
+            #   Ideally to resolve this problem, we should track assignment like
+            #     alpha = ks0
+            #   so that we know alpha is actually tl.int64 rather than tl.int32.
+            out_c = torch.compile(run, dynamic=False)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
     @requires_gpu()
@@ -94,6 +106,35 @@ class TestCase(InductorTestCase):
             code = run_and_get_triton_code(func_opt, *inps)
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
+
+        @requires_gpu()
+        @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+        @parametrize(
+            "reduction_func",
+            [
+                torch.prod,
+                torch.sum,
+                torch.argmax,
+                torch.argmin,
+                torch.min,
+                torch.max,
+            ],
+        )
+        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+        @config.patch("triton.use_block_ptr", True)
+        def test_low_precision_reduction(
+            self, input_shape, reduction_func, input_dtype
+        ):
+            @torch.compile
+            def func(a, b, c, d):
+                return reduction_func(a * b * c * d)
+
+            inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", False):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                self.assertTrue(".to(tl.float32)" in code)
+                self.assertEqual(func(*inps), func_opt(*inps))
 
     def test_op_dtype_support(self):
         """
@@ -212,6 +253,7 @@ class TestCase(InductorTestCase):
         # There should be no downcast, since the input is promoted to float32.
         self.assertNotIn(".to(tl.float16)", code)
 
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     @config.patch("triton.codegen_upcast_to_fp32", False)
     def test_downcast_div_mod(self):
@@ -221,9 +263,11 @@ class TestCase(InductorTestCase):
         x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
 
         out, code = run_and_get_code(torch.compile(fn), x, y)
+
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(x, y), out)
 
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):
         def fn():
@@ -234,6 +278,7 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("triton.persistent_reductions", False)
     def test_any(self):
         def fn(x):
@@ -244,6 +289,7 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(x), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.static_cpp_dtype_assert", True)
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 

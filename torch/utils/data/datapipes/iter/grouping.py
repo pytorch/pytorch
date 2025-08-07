@@ -1,17 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Iterator,
-    List,
-    Optional,
-    Sized,
-    Type,
-    TypeVar,
-)
+from collections.abc import Iterator, Sized
+from typing import Any, Callable, Optional, TypeVar
 
 import torch.utils.data.datapipes.iter.sharding
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -76,7 +67,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: IterDataPipe,
         batch_size: int,
         drop_last: bool = False,
-        wrapper_class: Type[DataChunk] = DataChunk,
+        wrapper_class: type[DataChunk] = DataChunk,
     ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
@@ -86,7 +77,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:
-        batch: List = []
+        batch: list = []
         for x in self.datapipe:
             batch.append(x)
             if len(batch) == self.batch_size:
@@ -191,7 +182,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def group_fn(file):
         ...     return os.path.basename(file).split(".")[0]
-        >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
+        >>> source_dp = IterableWrapper(
+        ...     ["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"]
+        ... )
         >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
         >>> list(dp0)
         [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
@@ -200,7 +193,12 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> list(dp1)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
         >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
-        >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
+        >>> dp2 = source_dp.groupby(
+        ...     group_key_fn=group_fn,
+        ...     buffer_size=3,
+        ...     group_size=3,
+        ...     guaranteed_group_size=2,
+        ... )
         >>> list(dp2)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """
@@ -222,7 +220,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
 
         self.keep_key = keep_key
         self.max_buffer_size = buffer_size
-        self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
+        self.buffer_elements: defaultdict[Any, list] = defaultdict(list)
         self.curr_buffer_size = 0
         self.group_size = group_size
         self.guaranteed_group_size = None

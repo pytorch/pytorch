@@ -4,8 +4,8 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
-from typing_extensions import deprecated
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import Concatenate, deprecated, ParamSpec
 
 import torch
 import torch._C as _C
@@ -29,6 +29,10 @@ __all__ = [
 # This is incremented in FunctionMeta during class definition
 AUTOGRAD_FUNCTION_COUNTER = itertools.count()
 
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
+
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
@@ -42,6 +46,7 @@ class FunctionCtx:
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
+        See :ref:`extending-autograd` for more details.
 
         Note that if intermediary tensors, tensors that are neither inputs
         nor outputs of :func:`forward`, are saved for backward, your custom Function
@@ -63,6 +68,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
@@ -106,6 +112,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +SKIP
             >>> class Func(torch.autograd.Function):
             >>>     @staticmethod
@@ -233,6 +240,7 @@ class FunctionCtx:
         prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
@@ -331,9 +339,6 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
-        backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
-            "_compiled_autograd_should_lift", True
-        )
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -365,6 +370,7 @@ class _SingleLevelFunction(
             def forward(*args: Any, **kwargs: Any) -> Any:
                 pass
 
+
             @staticmethod
             def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
                 pass
@@ -389,7 +395,7 @@ class _SingleLevelFunction(
         )
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:
@@ -593,11 +599,13 @@ def _is_setup_context_defined(fn):
     return fn != _SingleLevelFunction.setup_context
 
 
-def once_differentiable(fn):
+def once_differentiable(
+    fn: Callable[Concatenate[_T, _P], _R],
+) -> Callable[Concatenate[_T, _P], _R]:
     @functools.wraps(fn)
-    def wrapper(ctx, *args):
+    def wrapper(ctx: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         with torch.no_grad():
-            outputs = fn(ctx, *args)
+            outputs = fn(ctx, *args, **kwargs)
 
         if not torch.is_grad_enabled():
             return outputs
@@ -618,12 +626,14 @@ def once_differentiable(fn):
             return outputs
 
         if not isinstance(outputs, tuple):
-            outputs = (outputs,)
+            outputs_ = (outputs,)
+        else:
+            outputs_ = outputs
 
         err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked "
             b"with @once_differentiable",
-            len(outputs),
+            len(outputs_),
         )
 
         # Create aliases of each output that has requires_grad=True. We need
@@ -635,7 +645,7 @@ def once_differentiable(fn):
                 var.requires_grad = True
             return var
 
-        return err_fn(*[fake_requires_grad(v) for v in outputs])
+        return err_fn(*[fake_requires_grad(v) for v in outputs_])  # type: ignore[return-value]
 
     return wrapper
 
@@ -722,7 +732,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: List[Optional[torch.Tensor]] = []
+        res: list[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
@@ -765,6 +775,7 @@ class NestedIOFunction(Function):
     This class is here only for backward compatibility reasons.
     Use :class:`Function` instead of this for any new use case.
     """
+
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
     # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
@@ -811,7 +822,7 @@ class NestedIOFunction(Function):
         self._to_save_nested = args
 
     @property
-    def saved_tensors(self):
+    def saved_tensors(self):  # type: ignore[override]
         r"""
         See :meth:`Function.saved_tensors`.
         """

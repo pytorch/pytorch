@@ -65,16 +65,8 @@ fi
 
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
-    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-      pkg_no_python="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
-      pkg_torch="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
-      # todo: after folder is populated use the pypi_pkg channel instead
-      pip install "\$pkg_no_python" "\$pkg_torch" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
-      retry pip install -q numpy protobuf typing-extensions
-    else
-      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-      retry pip install -q numpy protobuf typing-extensions
-    fi
+    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+    retry pip install -q numpy protobuf typing-extensions
   else
     pip install "\$pkg"
     retry pip install -q numpy protobuf typing-extensions
@@ -90,8 +82,22 @@ fi
 /pytorch/.ci/pytorch/check_binary.sh
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
-  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
-  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+
+  torch_pkg_size="$(ls -1 /final_pkgs/torch-* | sort |tail -1 |xargs wc -c |cut -d ' ' -f1)"
+  # todo: implement check for large binaries
+  # if the package is larger than 1.5GB, we disable the pypi check.
+  # this package contains all libraries packaged in torch libs folder
+  # example of such package is https://download.pytorch.org/whl/cu126_full/torch
+  if [[ "\$torch_pkg_size" -gt  1500000000 ]]; then
+    python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled --pypi-pkg-check disabled
+  else
+    python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled $extra_parameters
+  fi
+
+  if [[ "\$GPU_ARCH_TYPE" != *cpu-aarch64* ]]; then
+    # https://github.com/pytorch/pytorch/issues/149422
+    python /pytorch/.ci/pytorch/smoke_test/check_gomp.py
+  fi
 fi
 
 # Clean temp files

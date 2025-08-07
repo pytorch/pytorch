@@ -3,7 +3,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, cast, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
@@ -15,32 +15,24 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 _compiled_autograd_enabled: bool = False
 
-if torch._running_with_deploy():
 
-    def detect_compiled_autograd():
-        pass
+def detect_compiled_autograd():
+    assert not torch.compiler.is_compiling(), (
+        "`detect_compiled_autograd()` is designed to be called in eager mode"
+    )
+    global _compiled_autograd_enabled
+    import torch._dynamo.compiled_autograd as ca
 
-    def compiled_autograd_enabled():
-        return False
+    _compiled_autograd_enabled = (
+        ca.compiled_autograd_enabled
+        or ca.compiled_autograd_enabled_force_eager
+        or ca.in_compiled_autograd_region
+    )
 
-else:
 
-    def detect_compiled_autograd():
-        assert (
-            not torch.compiler.is_compiling()
-        ), "`detect_compiled_autograd()` is designed to be called in eager mode"
-        global _compiled_autograd_enabled
-        import torch._dynamo.compiled_autograd as ca
-
-        _compiled_autograd_enabled = (
-            ca.compiled_autograd_enabled
-            or ca.compiled_autograd_enabled_force_eager
-            or ca.in_compiled_autograd_region
-        )
-
-    def compiled_autograd_enabled():
-        global _compiled_autograd_enabled
-        return _compiled_autograd_enabled
+def compiled_autograd_enabled():
+    global _compiled_autograd_enabled
+    return _compiled_autograd_enabled
 
 
 @dataclass
@@ -115,12 +107,12 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
 
 def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
     padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
-    return cast(torch.Size, torch.Size([padded_dim0]) + tensor_size[1:])
+    return torch.Size([padded_dim0]) + tensor_size[1:]
 
 
 def _chunk_with_empty(
     tensor: torch.Tensor, num_chunks: int, dim: int
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
     while len(chunks) < num_chunks:
         chunks.append(chunks[0].new_empty(0))
@@ -133,9 +125,7 @@ def _get_dim_chunked_size(
     if chunk.numel() > 0:
         return chunk.size()
     # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
-    return cast(
-        torch.Size, unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
-    )
+    return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
 
 
 def _from_local_no_grad(

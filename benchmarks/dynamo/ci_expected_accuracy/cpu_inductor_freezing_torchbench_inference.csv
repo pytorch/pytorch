@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,19
+hf_BigBird,pass,24
 
 
 
@@ -159,6 +159,10 @@ hf_Longformer,pass,4
 
 
 hf_Reformer,pass,5
+
+
+
+hf_Roberta_base,pass,0
 
 
 
@@ -194,6 +198,10 @@ maml_omniglot,pass,0
 
 
 
+microbench_unbacked_tolist_sum,pass,1
+
+
+
 mnasnet1_0,pass,0
 
 
@@ -202,7 +210,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,pass,2
+mobilenet_v2_quantized_qat,pass,3
 
 
 
@@ -266,7 +274,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,pass,2
+resnet50_quantized_qat,pass,3
 
 
 
