@@ -10748,9 +10748,9 @@ Args:
 
 Keyword args:
     alpha (Number): the multiplier for :attr:`other`. Note that the type of :attr:`alpha`
-                    should meet with the dtype of :attr:`input`. Specially, for floating
-                    point input tensors, argument :attr:`alpha` could be either a floating
-                    point number or an integer.
+                    should be type-promotable with the dtype of :attr:`input`. See
+                    `here <https://docs.pytorch.org/docs/stable/tensor_attributes.html#type-promotion-doc>`_
+                    for more details.
     {out}
 
 Example::
