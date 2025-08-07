@@ -653,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
@@ -1615,17 +1618,6 @@ class ExportedProgram:
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 
-    def __deepcopy__(self, memo):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        for k, v in self.__dict__.items():
-            setattr(result, k, copy.deepcopy(v, memo))
-
-        graph_module, graph_signature = _copy_graph_module_and_signature(self)
-        result = result._update(graph_module, graph_signature)
-        return result
-
 
 def _get_shape_env(gm):
     vals = [
@@ -1641,30 +1633,6 @@ def _get_shape_env(gm):
     for v in vals:
         if isinstance(v, torch.SymInt):
             return v.node.shape_env
-
-
-def _copy_graph_module_and_signature(
-    ep: "ExportedProgram",
-) -> tuple[torch.fx.GraphModule, "ExportGraphSignature"]:
-    # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
-    # and this can break placeholder names in some particular cases.
-    # For example, node copying will avoid Python keywords like 'input', suffixing and renaming to 'input_1'.
-    # So we manually overwrite placeholder names by reading the old graph.
-    gm = copy.deepcopy(ep.graph_module)
-    new_graph_signature = copy.deepcopy(ep.graph_signature)
-
-    # iterate over old/new graph modules
-    for old_gm, new_gm in zip(ep.graph_module.modules(), gm.modules()):  # type: ignore[union-attr]
-        old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
-        new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
-        # iterate over placeholders
-        assert len(old_phs) == len(new_phs)
-        for old_node, new_node in zip(old_phs, new_phs):
-            if new_node.name != old_node.name:
-                new_node.name = old_node.name
-                new_node.target = old_node.target
-
-    return gm, new_graph_signature
 
 
 def _get_updated_range_constraints(
