@@ -927,6 +927,8 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_triton_op_cache_invalidation(self):
+        from torch._library import capture_triton
+
         @triton.jit
         def my_jit(x):  # noqa: F811
             arg_0 = tl.load(x)
@@ -935,7 +937,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         @torch._library.triton_op("test::my_triton_op", mutates_args=())
         def my_triton_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
             y = x.clone().detach_().requires_grad_(True)
-            torch._library.capture_triton(my_jit)[1,](y)
+            capture_triton(my_jit)[1,](y)
             return y
 
         def fn(a):

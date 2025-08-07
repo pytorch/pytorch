@@ -45,6 +45,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 self.triton_kernels: list[Any] = []
 
             def visit_Call(self, node: ast.Call) -> None:
+                triton_func_names = ("capture_triton", "wrap_triton")
                 if isinstance(node.func, ast.Attribute):
                     attr = node.func
                     if (
@@ -52,15 +53,24 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                         and isinstance(attr.value.value, ast.Name)
                         and attr.value.value.id == "torch"
                         and attr.value.attr == "_library"
-                        and attr.attr in ("capture_triton", "wrap_triton")
+                        and attr.attr in triton_func_names
                     ):
                         if node.args and isinstance(node.args[0], ast.Name):
                             self.triton_kernels.append(node.args[0].id)
+
+                # Catch capture_triton, wrap_triton that's been
+                # imported directly
+                elif isinstance(node.func, ast.Name):
+                    if node.func.id in triton_func_names:
+                        if node.args and isinstance(node.args[0], ast.Name):
+                            self.triton_kernels.append(node.args[0].id)
+
                 self.generic_visit(node)
 
         collector = Visitor()
         collector.visit(tree)
         closure_vars = inspect.getclosurevars(fn)
+        breakpoint()
         resolved = []
         # First, resolve triton kernel names
         for name in collector.triton_kernels:
