@@ -1243,12 +1243,27 @@ def main() -> None:
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
+    if (
+        os.getenv("USE_PRIORITIZED_TEXT_FOR_LD") is None
+        and platform.system() == "Linux"
+        and platform.processor() == "aarch64"
+    ):
+        os.environ["USE_PRIORITIZED_TEXT_FOR_LD"] = "1"
+        print_box(
+            """
+            Enabling prioritized text linker optimization for AArch64.
+            """
+        )
+
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
         )
         linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
+        os.environ["LDFLAGS"] = (
+            os.getenv("LDFLAGS", "")
+            + f" -Wl,-z,max-page-size=0x10000 -T{linker_script_path}"
+        )
         os.environ["CFLAGS"] = (
             os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
         )
@@ -1258,7 +1273,7 @@ def main() -> None:
     elif platform.system() == "Linux" and platform.processor() == "aarch64":
         print_box(
             """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            WARNING: we strongly recommend enabling linker script optimization for AArch64 + CUDA.
             To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
             """
         )
