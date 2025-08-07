@@ -591,7 +591,7 @@ class EfficientPeakEstimate:
     def __init__(self):
         from ..memory import estimate_peak_memory
 
-        self.overall_peak_memory, _ = estimate_peak_memory(
+        self.overall_peak_memory, peak_by_scheduler_node = estimate_peak_memory(
             V.graph.scheduler.nodes,
             {},
             OrderedSet(V.graph.get_output_names()),
@@ -600,63 +600,35 @@ class EfficientPeakEstimate:
         from .segmented_tree import SegmentedTree
 
         self.segmented_tree = SegmentedTree(
-            [0] * (2 + len(V.graph.wrapper_code.lines)), operator.add, max, 0
+            peak_by_scheduler_node, operator.add, max, 0
         )
-        self.current_position = 0
-        self.current_value = 0
-        self.free_line_indices = {}
 
     def _get_size(self, node: BufferLike) -> int:
         return V.graph.sizevars.size_hint(
             V.graph.get_allocation_storage_size(node), fallback=0
         ) * get_dtype_size(node.get_dtype())
 
-    def register_allocation(self, line: AllocateLine | int):
-        if isinstance(line, AllocateLine):
-            line = self._get_size(line.node)
+    def peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
+        return self.segmented_tree.summarize_range(line_a.scheduler_node_index+1, line_b.scheduler_node_index-1)
 
-        self.current_position += 1
-        self.current_value += line
-        assert self.current_position <= self.segmented_tree.n
-        self.segmented_tree.update_range(
-            self.current_position, self.current_position, self.current_value
-        )
-
-    def register_deallocation(self, line: FreeIfNotReusedLine | int):
-        if isinstance(line, FreeIfNotReusedLine):
-            self.free_line_indices[line.node.get_name()] = self.current_position + 1
-            line = self._get_size(line.node)
-
-        self.current_position += 1
-        self.current_value -= line
-        assert self.current_position <= self.segmented_tree.n
-        # graphs may reuse inputs, so their overall "current_value" may be negative
-        # assert self.current_value >= 0
-        self.segmented_tree.update_range(
-            self.current_position, self.current_position, self.current_value
-        )
-
-    def peak_since(self, line: FreeIfNotReusedLine):
-        return self.segmented_tree.summarize_range(
-            self.free_line_indices[line.node.get_name()], self.segmented_tree.n - 1
-        )
-
-    def deregister_deallocation(self, line: FreeIfNotReusedLine):
-        value = self._get_size(line.node)
-        self.current_value += value
-        return self.segmented_tree.update_range(
-            self.free_line_indices[line.node.get_name()], self.current_position, value
-        )
+    def update_peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
+        if line_a.scheduler_node_index + 1 == line_b.scheduler_node_index:
+            return
+        self.segmented_tree.update_range(line_a.scheduler_node_index+1, line_b.scheduler_node_index-1, self._get_size(line_b.node))
 
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
     node: BufferLike
 
+    def __post_init__(self):
+        self.scheduler_node_index = V.graph.scheduler.nodes.index(V.graph.scheduler.current_node)
+
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
-        # return True
+        if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
+            return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
-        peak_memory_in_range = self.wrapper.estimate_peak.peak_since(free_line)
+        peak_memory_in_range = self.wrapper.estimate_peak.peak_between(free_line, self)
         new_peak_memory = size + peak_memory_in_range
         return new_peak_memory <= overall_peak_memory
 
@@ -673,11 +645,10 @@ class AllocateLine(MemoryPlanningLine):
             ) * get_dtype_size(self.node.get_dtype())
             if self.should_reuse_buffer(free_line, size):
                 free_line.is_reused = True
-                self.wrapper.estimate_peak.deregister_deallocation(free_line)
+                self.wrapper.estimate_peak.update_peak_between(free_line, self)
                 return ReuseLine(self.wrapper, free_line.node, self.node)
             else:
                 state.push(key, free_line)
-                self.wrapper.estimate_peak.register_allocation(self)
                 return self
 
         if self.node.get_device_or_error().type == "cpu":
@@ -687,7 +658,6 @@ class AllocateLine(MemoryPlanningLine):
                     functools.reduce(operator.mul, static_shape, 1)
                 )
 
-        self.wrapper.estimate_peak.register_allocation(self)
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -704,6 +674,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     node: BufferLike
     is_reused: bool = False
 
+    def __post_init__(self):
+        self.scheduler_node_index = V.graph.scheduler.nodes.index(V.graph.scheduler.current_node)
+
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if len(self.node.get_inputs_that_alias_output()) > 0:
             return self
@@ -714,7 +687,6 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
             state.push(buffer_reuse_key(self.node), self)
-        self.wrapper.estimate_peak.register_deallocation(self)
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
