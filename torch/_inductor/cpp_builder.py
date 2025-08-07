@@ -33,14 +33,13 @@ from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb.build import _run_build_command, build_paths
-
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
+    from triton.fb.build import _run_build_command, build_paths
 else:
 
     def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
@@ -1094,6 +1093,15 @@ def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     return macros
 
 
+def get_caching_allocator_macro() -> list[str]:
+    from torch._inductor import config
+
+    macros = []
+    if config.aot_inductor.weight_use_caching_allocator:
+        macros.append(" AOT_INDUCTOR_USE_CACHING_ALLOCATOR")
+    return macros
+
+
 def get_cpp_torch_options(
     cpp_compiler: str,
     vec_isa: VecISA,
@@ -1150,6 +1158,7 @@ def get_cpp_torch_options(
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
         torch_cpp_wrapper_definitions
@@ -1157,6 +1166,7 @@ def get_cpp_torch_options(
         + isa_macros
         + fb_macro_passthrough_args
         + mmap_self_macros
+        + caching_allocator_macros
     )
     include_dirs = (
         sys_libs_include_dirs
@@ -1567,9 +1577,9 @@ class CppBuilder:
         # MSVC produces two files when precompiling: the actual .pch file, as well as an
         # object file which must be linked into the final library.  This class assumes
         # only one output file of note, so for now we'll error out here.
-        assert not _IS_WINDOWS or not self._precompiling, (
-            "Cannot currently precompile headers on Windows!"
-        )
+        assert (
+            not _IS_WINDOWS or not self._precompiling
+        ), "Cannot currently precompile headers on Windows!"
 
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
@@ -1900,9 +1910,9 @@ class CppBuilder:
          """
         )
 
-        assert os.path.exists(cmake_path), (
-            f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
-        )
+        assert os.path.exists(
+            cmake_path
+        ), f"save_link_cmd_to_cmakefile expects {cmake_path} to already exist"
         with open(cmake_path, "a") as f:
             f.write(contents)
 

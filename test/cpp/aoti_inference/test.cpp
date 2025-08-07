@@ -884,12 +884,24 @@ void test_cuda_alloc_test() {
   size_t initTorchActive = stats.active_bytes[0].current;
   auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
-  size_t torchActive = stats.active_bytes[0].current;
-
-  ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
 
   auto actual_output_tensors =
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
+
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t torchActive = stats.active_bytes[0].current;
+
+  // CUDACachingAllocator may round up allocations to larger block sizes
+  // We should see at least DATASIZE increase, but it might be more due to
+  // rounding
+  size_t actualIncrease = torchActive - initTorchActive;
+  ASSERT_GE(actualIncrease, DATASIZE)
+      << "Expected at least " << DATASIZE << " bytes increase, got "
+      << actualIncrease;
+  ASSERT_LE(actualIncrease, DATASIZE * 2)
+      << "Expected at most " << (DATASIZE * 2) << " bytes increase, got "
+      << actualIncrease;
+
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 #endif
@@ -1114,7 +1126,7 @@ TEST(AotInductorTest, MultiStreamTestCuda) {
 }
 
 // TODO: ENABLE CUDACachingAllocator Test
-TEST(DISABLED_AotInductorTest, CudaAllocTestCuda) {
+TEST(AotInductorTest, CudaAllocTestCuda) {
   test_cuda_alloc_test();
 }
 #endif
