@@ -1107,7 +1107,12 @@ endif()
 
 # ---[ NCCL
 if(USE_NCCL)
-  if(NOT (USE_CUDA OR USE_ROCM))
+  if(NOT USE_DISTRIBUTED)
+    message(WARNING
+        "Not using DISTRIBUTED, so disabling USE_NCCL. Suppress this warning with "
+        "-DUSE_NCCL=OFF.")
+    caffe2_update_option(USE_NCCL OFF)
+  elseif(NOT (USE_CUDA OR USE_ROCM))
     message(WARNING
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
