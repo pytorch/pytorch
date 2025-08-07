@@ -392,9 +392,9 @@ def build_db(
     # Ensure version is consistent across all ranks.
     check_version(version_by_ranks, version)
     entries = align_trace_from_beginning(entries)
-    stack_trace_id_map: dict[str, int] = {}
+    stack_id_trace_map: dict[str, int] = {}
     if args.just_print_entries:
-        entries, stack_trace_id_map = add_trace_id_in_entries(entries)
+        entries, stack_id_trace_map = add_trace_id_in_entries(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
@@ -407,7 +407,7 @@ def build_db(
 
     if args.just_print_entries:
         just_print_entries(
-            entries, _groups, _memberships, _pg_guids, args, stack_trace_id_map
+            entries, _groups, _memberships, _pg_guids, args, stack_id_trace_map
         )
         sys.exit(0)
 

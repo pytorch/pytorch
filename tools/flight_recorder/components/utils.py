@@ -616,7 +616,7 @@ def just_print_entries(
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
     args: argparse.Namespace,
-    stack_trace_id_map: dict[str, int],
+    stack_id_trace_map: dict[str, int],
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
@@ -651,14 +651,14 @@ def just_print_entries(
 
     logger.info(tabulate(rows, headers=headers))
 
-    if stack_trace_id_map and args.print_stack_trace:
-        headers = ["stack_trace_id", "frames"]
+    if stack_id_trace_map and args.print_stack_trace:
+        headers = ["stack_id", "frame_stack"]
         rows = []
 
-        for frame, trace_id in sorted(
-            stack_trace_id_map.items(), key=lambda item: item[1]
+        for frame, stack_id in sorted(
+            stack_id_trace_map.items(), key=lambda item: item[1]
         ):
-            rows.append([str(trace_id), frame])
+            rows.append([str(stack_id), frame])
 
         logger.info(tabulate(rows, headers=headers))
 
@@ -693,21 +693,21 @@ def add_trace_id_in_entries(
     entries: dict[int, list[dict[str, Any]]],
 ) -> tuple[dict[int, list[dict[str, Any]]], dict[str, int]]:
     stack_id = 0
-    stack_trace_id_map = {}
+    stack_id_trace_map = {}
     for rank in entries:
         for dump in entries[rank]:
             if dump.get("frames", []):
                 frames = str(dump["frames"])
-                if frames not in stack_trace_id_map:
-                    stack_trace_id_map[frames] = stack_id
-                    dump["trace_id"] = stack_id
+                if frames not in stack_id_trace_map:
+                    stack_id_trace_map[frames] = stack_id
+                    dump["stack_id"] = stack_id
                     stack_id += 1
                 else:
-                    dump["trace_id"] = stack_trace_id_map[frames]
+                    dump["stack_id"] = stack_id_trace_map[frames]
             else:
-                dump["trace_id"] = -1
+                dump["stack_id"] = -1
 
-    return entries, stack_trace_id_map
+    return entries, stack_id_trace_map
 
 
 def align_trace_from_beginning(
