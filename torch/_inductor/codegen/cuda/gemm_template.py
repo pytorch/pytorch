@@ -1317,7 +1317,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
     def _render_evt(
         self,
