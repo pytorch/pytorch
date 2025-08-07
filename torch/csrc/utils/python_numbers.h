@@ -221,7 +221,8 @@ inline T THPUtils_unpackInteger(PyObject* obj) {
   }
   // try unsigned
   const auto uvalue = PyLong_AsUnsignedLongLong(obj);
-  if (uvalue == static_cast<decltype(uvalue)>(-1) && PyErr_Occurred()) {
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
     throw python_error();
   }
   return static_cast<uint64_t>(value);

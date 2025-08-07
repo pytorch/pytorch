@@ -2513,6 +2513,19 @@ def forward(self, x_1):
             with Mode():
                 torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
 
+    def test_dispatch_uint64(self):
+        class DummyMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                self.last_args = args
+                return func(*args, **kwargs)
+
+        # Value that could not be intepreted as signed int64
+        uarg = 2**63 + 1
+        with DummyMode() as m:
+            a = torch.full((3, 3), uarg, dtype=torch.uint64)
+            self.assertEqual(m.last_args[1], uarg)
+        self.assertTrue((a == uarg).all().item())
+
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
