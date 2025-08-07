@@ -173,6 +173,19 @@ class CuteDSLTemplateKernel(CuteDSLKernel):
 
         # self.cse = SimpleCuteDSLCSE()
 
+    def gen_imports(self) -> str:
+        """Generate common imports for CuteDSL templates."""
+        imports = IndentedBuffer()
+        imports.splice(
+            """
+            import torch
+            import cutlass
+            import cutlass.cute as cute
+            from cutlass.cute.runtime import from_dlpack
+            """
+        )
+        return imports.getvalue()
+
     def render(self, template, **kwargs):
         """Render the kernel using the template, returning PartialRender object with hooks."""
         # Available {{}} hooks for jinja rendering
@@ -189,7 +202,12 @@ class CuteDSLTemplateKernel(CuteDSLKernel):
             **template_env,
             **kwargs
         )
-        return PartialRender(rendered_code, self.render_hooks)
+        
+        # Always prepend the common imports
+        imports = self.gen_imports()
+        full_code = imports + rendered_code
+        
+        return PartialRender(full_code, self.render_hooks)
 
     def __enter__(self):
         """TODO: Context manager entry - doesn't set anything yet"""
