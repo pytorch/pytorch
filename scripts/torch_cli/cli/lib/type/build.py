@@ -29,7 +29,7 @@ class BuildRunner(ABC):
     """
     Base class for defining a build runner.
 
-    Users should subclass this and implement the `prepare()` and `run()` methods.
+    Users should subclass this and implement the `run()` methods.
     """
 
     def __init__(self, config_path: str = ""):
