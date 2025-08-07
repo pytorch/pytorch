@@ -225,5 +225,5 @@ inline T THPUtils_unpackInteger(PyObject* obj) {
       PyErr_Occurred()) {
     throw python_error();
   }
-  return static_cast<uint64_t>(value);
+  return static_cast<uint64_t>(uvalue);
 }
