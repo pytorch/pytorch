@@ -609,12 +609,18 @@ class EfficientPeakEstimate:
         ) * get_dtype_size(node.get_dtype())
 
     def peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
-        return self.segmented_tree.summarize_range(line_a.scheduler_node_index+1, line_b.scheduler_node_index-1)
+        return self.segmented_tree.summarize_range(
+            line_a.scheduler_node_index + 1, line_b.scheduler_node_index - 1
+        )
 
     def update_peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
         if line_a.scheduler_node_index + 1 == line_b.scheduler_node_index:
             return
-        self.segmented_tree.update_range(line_a.scheduler_node_index+1, line_b.scheduler_node_index-1, self._get_size(line_b.node))
+        self.segmented_tree.update_range(
+            line_a.scheduler_node_index + 1,
+            line_b.scheduler_node_index - 1,
+            self._get_size(line_b.node),
+        )
 
 
 @dataclasses.dataclass
@@ -622,7 +628,9 @@ class AllocateLine(MemoryPlanningLine):
     node: BufferLike
 
     def __post_init__(self):
-        self.scheduler_node_index = V.graph.scheduler.nodes.index(V.graph.scheduler.current_node)
+        self.scheduler_node_index = V.graph.scheduler.nodes.index(
+            V.graph.scheduler.current_node
+        )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
@@ -675,7 +683,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def __post_init__(self):
-        self.scheduler_node_index = V.graph.scheduler.nodes.index(V.graph.scheduler.current_node)
+        self.scheduler_node_index = V.graph.scheduler.nodes.index(
+            V.graph.scheduler.current_node
+        )
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if len(self.node.get_inputs_that_alias_output()) > 0:
