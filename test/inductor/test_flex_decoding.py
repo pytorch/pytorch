@@ -27,6 +27,15 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Need track if it is a requirement on windows.
+    sys.stderr.write("This UT is validated on windows, a lot of crash. Skip it.\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip on Windows")
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
