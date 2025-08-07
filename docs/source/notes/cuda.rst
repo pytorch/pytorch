@@ -933,7 +933,6 @@ functions are:
     size_t padded_size;
     int device_id;
     std::vector<CUmemGenericAllocationHandle> handles;  // Handles to physical memory allocations
-    std::vector<CUmemGenericAllocationHandle> handles_redundant;  // Handles to redundant physical memory allocations which help truncate stride pattern in physical memory
   };
 
   // loop over pages
@@ -941,6 +940,9 @@ functions are:
       if (!info) return cudaErrorInvalidValue;
 
       CUdeviceptr dptr;
+
+      // Handles to redundant physical memory allocations which help truncate stride pattern in physical memory
+      std::vector<CUmemGenericAllocationHandle> handles_redundant;
 
       size_t granularity = 0;
       CUmemAllocationProp prop = {};
@@ -971,27 +973,28 @@ functions are:
               info->handles.push_back(allocHandle[shift]);
           }
 
-          CUdeviceptr offsetPtr[shift_size];
           for (int shift = 0; (shift < shift_size)&&(i+shift < iteration_count); shift++){
-              offsetPtr[shift] = dptr + (i+shift) * iter_granularity;
 
               // mapping makes the shift (shift -> (shift+1)%shift_size  )
-              CHECK_CUDA(cuMemMap(offsetPtr[shift], iter_granularity, 0, allocHandle[(shift+1)%shift_size], 0));
+              CHECK_CUDA(cuMemMap(dptr + (i+shift) * iter_granularity, iter_granularity, 0, allocHandle[(shift+1)%shift_size], 0));
 
-              setupMultiGPUAccess(offsetPtr[shift], iter_granularity, {0, 1, 2, 3, 4, 5, 6, 7}); // Enable access for all 8 GPUs
+              setupMultiGPUAccess(dptr + (i+shift) * iter_granularity, iter_granularity, {0, 1, 2, 3, 4, 5, 6, 7}); // Enable access for all 8 GPUs
           }
 
           // std::cout << "Here we allocate one redundant page (2MB)..." << std::endl;
+          // this is an extra optimization on top of the swizzling. It helps "break"
+          // the physical access pattern even more. It can be left out if workload is already
+          // performing at SOL with just swizzling.
           CUmemGenericAllocationHandle allocHandle_redundant;
           CHECK_CUDA(cuMemCreate(&allocHandle_redundant, granularity, &prop, 0));
-          info->handles_redundant.push_back(allocHandle_redundant);
+          handles_redundant.push_back(allocHandle_redundant);
       }
 
       *info->devPtr = (void*)dptr;
       info->dptr = dptr;
 
       // Release each redundant allocation
-      for (auto handle : info->handles_redundant) {
+      for (auto handle : handles_redundant) {
           // std::cout << "Here we release one redundant page (2MB)..." << std::endl;
           CHECK_CUDA(cuMemRelease(handle));
       }

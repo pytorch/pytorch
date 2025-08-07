@@ -173,6 +173,7 @@ class CodeState:
 
 _INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 _CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_LOGGED_DYNAMIC_ALLOWLIST: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -616,6 +617,7 @@ def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
 
 
 def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
+    global _LOGGED_DYNAMIC_ALLOWLIST
     code_id = CodeId.make(f_code)
     frame_state = get_code_state()[code_id]
     frame_whitelist = ",".join(_collect_dynamic_sources(frame_state))
@@ -624,6 +626,15 @@ def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
             CompileEventLogger.pt2_compile(
                 name, recompile_dynamic_whitelist=frame_whitelist
             )
+        if not _LOGGED_DYNAMIC_ALLOWLIST:
+            torch._utils_internal.add_mlhub_insight(
+                category="dynamic_shapes_analysis",
+                insight="Dynamic shapes detected",
+                insight_description="PGO detected a recompilation due to dynamic shapes. \
+                Please follow the instruction from the action link to reduce shape recompilations.",
+            )
+            # add mlhub insight only once per job
+            _LOGGED_DYNAMIC_ALLOWLIST = True
 
 
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
