@@ -8,6 +8,438 @@ namespace c10::CachingDeviceAllocator {
 
 using namespace c10::CachingAllocator;
 
+template <typename BlockT>
+struct BlockComparatorSize {
+  bool operator()(const BlockT* a, const BlockT* b) const {
+    if (a->size != b->size) {
+      return a->size < b->size;
+    }
+    if (a->stream != b->stream) {
+      return reinterpret_cast<uintptr_t>(a->stream) <
+          reinterpret_cast<uintptr_t>(b->stream);
+    }
+    return reinterpret_cast<uintptr_t>(a->ptr) <
+        reinterpret_cast<uintptr_t>(b->ptr);
+  }
+};
+
+template <typename BlockT>
+struct BlockComparatorAddress {
+  bool operator()(const BlockT* a, const BlockT* b) const {
+    if (a->stream != b->stream) {
+      return reinterpret_cast<uintptr_t>(a->stream) <
+          reinterpret_cast<uintptr_t>(b->stream);
+    }
+    return reinterpret_cast<uintptr_t>(a->ptr) <
+        reinterpret_cast<uintptr_t>(b->ptr);
+  }
+};
+
+// Forward declaration
+template <typename BlockT>
+struct PrivatePool;
+
+template <typename BlockT>
+struct BlockPool {
+  BlockPool(bool small, PrivatePool<BlockT>* private_pool = nullptr)
+      : blocks(BlockComparatorSize<BlockT>()),
+        unmapped(BlockComparatorAddress<BlockT>()),
+        is_small(small),
+        owner_PrivatePool(private_pool) {}
+
+  // Do not insert a Block to blocks directly; use insert_into_blocks(),
+  // instead.
+  std::set<BlockT*, BlockComparatorSize<BlockT>> blocks{};
+  std::set<BlockT*, BlockComparatorAddress<BlockT>> unmapped{};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const bool is_small;
+  PrivatePool<BlockT>* owner_PrivatePool;
+  size_t get_free_blocks_call_count{0};
+
+  // Add a Block into blocks set with updating gc counter.
+  std::pair<
+      typename std::set<BlockT*, BlockComparatorSize<BlockT>>::iterator,
+      bool>
+  insert_into_blocks(BlockT* block) {
+    block->gc_count_base = get_free_blocks_call_count;
+    return blocks.insert(block);
+  }
+
+  MempoolId_t owner_MempoolId() const {
+    if (owner_PrivatePool) {
+      return owner_PrivatePool->id;
+    } else {
+      return {0, 0};
+    }
+  }
+
+  StatTypes get_stat_types() {
+    StatTypes stat_types = {false};
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(
+        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    return stat_types;
+  }
+};
+
+template <typename StreamT>
+struct ExpandableSegment;
+
+/**
+ * DeviceBlock is typically a fundamental memory block used in device caching
+ * allocator. It is represented a memory block allocated on a specific device
+ * with Stream. It is probably a base struct or interface that can be inherited
+ * and extended by each backend.
+ */
+template <typename StreamT>
+struct DeviceBlock {
+  using BlockT = DeviceBlock<StreamT>;
+  using BlockPoolT = BlockPool<BlockT>;
+
+  DeviceBlock(
+      c10::DeviceIndex device,
+      StreamT stream,
+      size_t size,
+      BlockPoolT* pool,
+      void* ptr)
+      : device(device),
+        stream(stream),
+        size(size),
+        requested_size(0),
+        pool(pool),
+        ptr(ptr) {}
+
+  // Constructs a DeviceBlock as a search key
+  DeviceBlock(c10::DeviceIndex device, StreamT stream, size_t size)
+      : device(device), stream(stream), size(size), requested_size(0) {}
+
+  // Returns the garbage collection count since this block was created.
+  size_t gc_count() const {
+    TORCH_INTERNAL_ASSERT(pool);
+    TORCH_INTERNAL_ASSERT(pool->get_free_blocks_call_count >= gc_count_base);
+    return pool->get_free_blocks_call_count - gc_count_base;
+  }
+
+  // Checks if this block is part of a split allocation.
+  bool is_split() const {
+    return (prev != nullptr) || (next != nullptr);
+  }
+
+  // Inserts this block between two existing blocks with [before, this, after] .
+  void splice(BlockT* before, BlockT* after) {
+    if (before) {
+      TORCH_INTERNAL_ASSERT(before->next == after);
+      before->next = this;
+    }
+    prev = before;
+    if (after) {
+      TORCH_INTERNAL_ASSERT(after->prev == before);
+      after->prev = this;
+    }
+    next = after;
+  }
+
+  // Attempts to merge this block with an adjacent candidate block.And return
+  // size of the candidate block in bytes, or 0 if merge failed.
+  size_t try_merge(BlockT* candidate) {
+    if (!candidate || candidate->allocated || candidate->event_count > 0 ||
+        !candidate->stream_uses.empty() || this->mapped != candidate->mapped) {
+      return 0;
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        this->is_split() && candidate->is_split(),
+        "Both blocks must be part of split allocations");
+
+    if (this->prev == candidate) { // [candidate this]
+      // Merge with previous block: [candidate, this] -> [this]
+      this->ptr = candidate->ptr;
+      this->prev = candidate->prev;
+      if (this->prev) {
+        this->prev->next = this;
+      }
+      this->context_when_segment_allocated =
+          std::move(candidate->context_when_segment_allocated);
+    } else if (this->next == candidate) {
+      // Merge with next block: [this, candidate] -> [this]
+      this->next = candidate->next;
+      if (this->next) {
+        this->next->prev = this;
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Candidate must be adjacent block");
+    }
+    const size_t subsumed_size = candidate->size;
+    this->size += subsumed_size;
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    auto& pool = *this->pool;
+    auto erased = candidate->mapped ? pool.blocks.erase(candidate)
+                                    : pool.unmapped.erase(candidate);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
+    delete candidate;
+
+    return subsumed_size;
+  }
+
+  c10::DeviceIndex device;
+  StreamT stream; // Allocation stream for this block
+  ska::flat_hash_set<StreamT>
+      stream_uses{}; // Streams that have used this block
+  size_t size; // Actual block size (bytes)
+  size_t requested_size; // Originally requested size (bytes)
+  BlockPoolT* pool{nullptr}; // Owning memory pool
+  void* ptr{nullptr}; // Memory address
+  bool allocated{false}; // Whether block is currently in use
+  // Virtual memory mapped to physical memory.
+  // Always true unless part of expandable segment.
+  // When false, block alignment matches segment size.
+  bool mapped{true};
+  BlockT* prev{nullptr}; // Prevous block if split from a larger allocation
+  BlockT* next{nullptr}; // Next block if split from a larger allocation
+  int event_count{0}; // Number of outstanding events referencing block
+  size_t gc_count_base{0}; // Pool's gc count at block insertion time
+  // Records the last time we handed this memory out from our cache.
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // Only set for the first block in the segment (when prev == null).
+  // This records the frame information when device allocation was called,
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
+  // Expandble segment this block belongs to
+  ExpandableSegment<StreamT>* expandable_segment_{nullptr};
+};
+
+template <typename BlockT>
+struct PrivatePool {
+  using BlockPoolT = BlockPool<BlockT>;
+  PrivatePool(MempoolId_t id, DeviceAllocator* allocator = nullptr)
+      : id(std::move(id)),
+        allocator_(allocator),
+        large_blocks(/*small=*/false, this),
+        small_blocks(/*small=*/true, this) {}
+  C10_DISABLE_COPY_AND_ASSIGN(PrivatePool);
+  PrivatePool(PrivatePool&&) = delete;
+  PrivatePool& operator=(PrivatePool&&) = delete;
+  ~PrivatePool() = default;
+
+  MempoolId_t id{0, 0};
+  // Number of live graphs using this pool
+  int use_count{1};
+  // Number of unfreed device allocation made for this pool. When use_count and
+  // deviceMalloc_count drop to zero, we can delete this PrivatePool from
+  // graph_pools.
+  int deviceMalloc_count{0};
+  // Instead of maintaining private BlockPools here, I could stuff all blocks
+  // (private or no) into the top-level large_blocks and small_blocks, and
+  // distinguish private blocks by adding a "pool id" check above the stream
+  // check in BlockComparator. BlockComparator is performance- critical though,
+  // I'd rather not add more logic to it.
+  DeviceAllocator* allocator_;
+  BlockPoolT large_blocks;
+  BlockPoolT small_blocks;
+
+ public:
+  DeviceAllocator* allocator() {
+    return allocator_;
+  }
+};
+
+// Represents a contiguous virtual memory segment mapped for allocation.
+struct SegmentRange {
+  SegmentRange(void* p, size_t s) : ptr_(static_cast<char*>(p)), size_(s) {}
+
+  char* ptr_; // Starting address of the mapped range.
+  size_t size_; // Size in bytes of the mapped range.
+};
+
+// ExpandableSegment traits to map StreamT to its corresponding HandleT for
+// different backends. This must be specialized for each backend's stream type.
+// If the backend does not support expandable segments feature, it should define
+// HandleT as void* as a placeholder.
+template <typename StreamT>
+struct ExpandableSegmentTraits {
+  // Force specialization - this will trigger a compile error if used directly
+  static_assert(
+      sizeof(StreamT) == 0,
+      "ExpandableSegmentTraits must be specialized for this StreamT");
+};
+
+template <typename StreamT>
+struct ExpandableSegment {
+  using HandleT = typename ExpandableSegmentTraits<StreamT>::HandleT;
+
+  ExpandableSegment() = default;
+  C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
+  ExpandableSegment(ExpandableSegment&&) = delete;
+  ExpandableSegment& operator=(ExpandableSegment&&) = delete;
+
+  virtual void init(
+      c10::DeviceIndex device,
+      std::optional<StreamT> stream,
+      size_t segment_size,
+      std::vector<c10::DeviceIndex> peers) {
+    device_ = device;
+    stream_ = std::move(stream);
+    // 2MB for small pool, 20MB for large pool
+    segment_size_ = segment_size;
+    peers_ = std::move(peers);
+    max_handles_ = numSegments(getReservedVirtualMemorySize());
+    createVirtualMemoryAddress(&ptr_);
+  }
+
+  // Maps a virtual memory range to physical memory.
+  virtual SegmentRange map(SegmentRange range) {
+    auto begin = segmentLeft(range.ptr_);
+    auto end = segmentRight(range.ptr_ + range.size_);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr_);
+    if (begin == end) {
+      return rangeFromHandles(begin, end);
+    }
+    mapHandles(begin, end);
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+    return rangeFromHandles(begin, end);
+  }
+
+  // Unmap a virtual memory range from physical memory.
+  virtual SegmentRange unmap(SegmentRange range) {
+    auto begin = segmentRight(range.ptr_);
+    auto end = segmentLeft(range.ptr_ + range.size_);
+    if (begin >= end) {
+      return SegmentRange{range.ptr_, 0};
+    }
+    unmapHandles(begin, end);
+    return rangeFromHandles(begin, end);
+  }
+
+  // Returns the base pointer of the virtual memory segment.
+  char* ptr() const {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return reinterpret_cast<char*>(ptr_);
+  }
+
+  // Returns the total size of the virtual memory segment.
+  size_t size() const {
+    return max_handles_ * segment_size_;
+  }
+
+  // Registers a new peer device and updates access permissions.
+  virtual void addPeer(c10::DeviceIndex device) {
+    peers_.push_back(device);
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { setAccess(device, begin, end); });
+  }
+
+  virtual ~ExpandableSegment() {
+    forEachAllocatedRange(
+        [&](size_t begin, size_t end) { unmapHandles(begin, end); });
+    if (ptr_) {
+      releaseVirtualMemoryAddress(ptr_);
+    }
+  }
+
+ private:
+  // Runtime-related methods that must be implemented by derived classes.
+
+  // Returns the reserved virtual memory size for this segment, which may be
+  // larger than the total size if the segment is expandable.
+  virtual size_t getReservedVirtualMemorySize() = 0;
+
+  // Create virtual memory address for this segment for the reserved size.
+  virtual void createVirtualMemoryAddress(void** ptr) = 0;
+
+  // Release the virtual memory address associated with the segment.
+  virtual void releaseVirtualMemoryAddress(void* ptr) = 0;
+
+  // Maps the physical memory handles in the range [begin, end) to the segment.
+  virtual void mapHandles(size_t begin, size_t end) = 0;
+
+  // Unmaps the physical memory handles in the range [begin, end) from the
+  // segment.
+  virtual void unmapHandles(size_t begin, size_t end) = 0;
+
+  // Sets access permissions for the specified device on the segment range
+  // [begin, end).
+  virtual void setAccess(c10::DeviceIndex device, size_t begin, size_t end) = 0;
+
+  // Internal methods for segment calculations and iteration
+
+  // Returns the number of full segments required to cover `size` bytes.
+  // Rounds up to ensure partial segments are counted.
+  size_t numSegments(size_t size) const {
+    return (size + segment_size_ - 1) / segment_size_;
+  }
+
+  // Returns the index of the segment that contains the pointer `p`,
+  // relative to the base pointer `ptr_`. This is the *inclusive* lower bound
+  // of the segment that includes `p`.
+  size_t segmentLeft(char* p) const {
+    size_t offset = p - ptr();
+    return offset / segment_size_;
+  }
+
+  // Returns the index of the segment just *past* the one containing pointer
+  // `p`, relative to the base pointer `ptr_`. This is the *exclusive* upper
+  // bound, useful for [begin, end) style ranges.
+  // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
+  // Otherwise, it rounds up and returns segmentLeft(p) + 1.
+  size_t segmentRight(char* p) const {
+    size_t offset = p - ptr();
+    return numSegments(offset);
+  }
+
+  // Constructs a SegmentRange starting at [start, end) indices.
+  SegmentRange rangeFromHandles(size_t begin, size_t end) {
+    return SegmentRange(
+        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
+  }
+
+  // Iterates over all contiguous ranges of allocated segments in `handles_`,
+  // and invokes the provided function `fn(start, end)` for each range.
+  // Each range is defined as a half-open interval [start, end).
+  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
+    size_t start = 0;
+    for (auto i : c10::irange(handles_.size())) {
+      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
+        start = i;
+      }
+      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
+        fn(start, i + 1);
+      }
+    }
+  }
+
+  c10::DeviceIndex device_{-1};
+  std::optional<StreamT> stream_;
+  // Virtual memory address used in reserveVirtualMemory.
+  void* ptr_{nullptr};
+  // Size of each segment in bytes.
+  size_t segment_size_{0};
+  // Maximum number of segments that can be allocated in this segment.
+  size_t max_handles_{0};
+  // Physical memory handles for the segments.
+  std::vector<std::optional<HandleT>> handles_{};
+  // Peer devices on which this memory should be mapped and accessible.
+  std::vector<c10::DeviceIndex> peers_{};
+};
+
+// Factory function to create and initialize an ExpandableSegment instance.
+template <
+    typename ExpandableSegmentT,
+    typename = std::enable_if_t<std::is_base_of_v<
+        ExpandableSegment<typename ExpandableSegmentT::StreamT>,
+        xpandableSegmentT>>>
+ExpandableSegmentT* make_expandable_segment(
+    c10::DeviceIndex device,
+    std::optional<typename ExpandableSegmentT::StreamT> stream,
+    size_t segment_size,
+    std::vector<c10::DeviceIndex> peers) {
+  ExpandableSegmentT* ptr = new ExpandableSegmentT();
+  TORCH_INTERNAL_ASSERT(ptr, "Failed to allocate memory for ExpandableSegment");
+  ptr->init(device, std::move(stream), segment_size, std::move(peers));
+  return ptr;
+}
+
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
   // COUNT: allocations requested by client code
@@ -136,3 +568,4 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
 }
 
 } // namespace c10
+ 
