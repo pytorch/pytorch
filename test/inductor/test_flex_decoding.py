@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import sys
 import unittest
 from collections import namedtuple
 from typing import Callable, Optional, Union
