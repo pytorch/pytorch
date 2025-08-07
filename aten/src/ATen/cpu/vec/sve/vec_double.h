@@ -3,13 +3,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
 #include <cmath>
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#include <sleef.h>
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
-#endif
 
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
