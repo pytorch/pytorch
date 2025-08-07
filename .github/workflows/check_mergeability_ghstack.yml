@@ -7,6 +7,11 @@ on:
 
 jobs:
   ghstack-mergeability-check:
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
     # Disabling the job until https://github.com/pytorch/pytorch/issues/159825 is resolved
     if: github.repository_owner == 'pytorch' && false
     runs-on: ubuntu-latest

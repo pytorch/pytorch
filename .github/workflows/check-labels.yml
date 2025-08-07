@@ -33,6 +33,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      checks: read
+      actions: read
     name: Check labels
     # Disabling the job until https://github.com/pytorch/pytorch/issues/159825 is resolved
     if: github.repository_owner == 'pytorch' && false
