@@ -130,15 +130,6 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
-constexpr size_t kMinBlockSize =
-    512; // all sizes are rounded to at least 512 bytes
-constexpr size_t kSmallSize = 1048576; // largest "small" allocation is 1 MiB
-constexpr size_t kSmallBuffer =
-    2097152; // "small" allocations are packed in 2 MiB blocks
-constexpr size_t kMinLargeAlloc =
-    10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
-
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
@@ -1325,7 +1316,7 @@ class DeviceCachingAllocator {
       //    effect on memory use during capture should be small.
       process_events(context);
     }
-    size_t size = round_size(orig_size);
+    const size_t size = get_round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size);
@@ -2166,46 +2157,6 @@ class DeviceCachingAllocator {
     return result;
   }
 
-  // This function takes the size and number of divisions argument and rounds
-  // up the size argument for the nearest power-of-2 division.
-  // For example, if we need to round-up 1200 and number of divisions is 4,
-  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
-  // them, the values are 1024, 1280, 1536, and 1792. So the function will
-  // return 1280 as the nearest ceiling of power-2 division.
-  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (llvm::isPowerOf2_64(size)) {
-      return size;
-    }
-
-    TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
-
-    // divide the space between these 2's power into equal divisions
-    // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
-        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
-      return (power2_floor << 1);
-    }
-    size_t round_size_floor = size & (~(power2_divison - 1));
-    return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
-  }
-
-  static size_t round_size(size_t size) {
-    if (size < kMinBlockSize) {
-      return kMinBlockSize;
-    } else {
-      auto divisions =
-          AcceleratorAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
-        return roundup_power2_next_division(size, divisions);
-      } else {
-        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
-      }
-    }
-  }
-
   void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
@@ -2678,16 +2629,6 @@ class DeviceCachingAllocator {
     } else {
       return (size < AcceleratorAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
-    }
-  }
-
-  static size_t get_allocation_size(size_t size) {
-    if (size <= kSmallSize) {
-      return kSmallBuffer;
-    } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
-    } else {
-      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
     }
   }
 
