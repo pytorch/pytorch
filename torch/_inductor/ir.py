@@ -6581,6 +6581,7 @@ class UserDefinedTritonKernel(ExternKernel):
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
             if name in constexpr_names and triton_version_uses_attrs_dict():
+                # pass
                 continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)

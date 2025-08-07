@@ -1339,7 +1339,7 @@ class CompileResult(Generic[_T]):
             if isinstance(constant, str):
                 return "r'" + constant + "'"
             else:
-                return str(constant)
+                return repr(constant)
 
         if triton_version_uses_attrs_dict():
             call_args = arg_names
@@ -1638,6 +1638,8 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
         import torch as torch_lib
 
+        import triton as triton_lib
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
@@ -1670,6 +1672,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "runner": get_first_attr(binary, "run", "c_wrapper"),
             "math": math_lib,
             "torch": torch_lib,
+            "triton": triton_lib,
         }
 
         if not hasattr(binary, "launch_metadata"):
