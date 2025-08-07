@@ -257,11 +257,16 @@ class TestDynamoTimed(TestCase):
             stack_trace_list.append(e.stack_trace)
 
         self.assertGreater(len(stack_trace_list), 0)
-        result = '\n'.join(item for sublist in stack_trace_list if sublist for item in (sublist if isinstance(sublist, list) else [sublist]))
+        result = '\n'.join(
+            item
+            for sublist in stack_trace_list
+            if sublist
+            for item in (sublist if isinstance(sublist, list) else [sublist])
+        )
         self.assertIn(
             "test_stack_trace",
             result,
-            "Log file does not contain the expected string: 'test_stack_trace'"
+            "Log file does not contain the expected string: 'test_stack_trace'",
         )
 
     @dynamo_config.patch(
