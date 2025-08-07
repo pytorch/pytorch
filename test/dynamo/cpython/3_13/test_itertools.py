@@ -1322,7 +1322,6 @@ class TestBasicOps(__TestCase):
                 self.assertEqual(list(product(*(args*r))),
                                  list(product(*args, **dict(repeat=r))))
         self.assertEqual(len(list(product(*[range(7)]*6))), 7**6)
-        # self.assertRaises(TypeError, product, range(6), None)
 
         def product1(*args, **kwds):
             pools = list(map(tuple, args)) * kwds.get('repeat', 1)
