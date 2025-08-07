@@ -19,17 +19,8 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
-
-
-try:
-    from torch._C import _DistStoreError as DistStoreError
-except ImportError:
-
-    class DistStoreError(Exception):  # type: ignore[no-redef]
-        pass
-
-
 import torch.distributed._distributed_c10d as _c10d
+from torch._C import _DistStoreError as DistStoreError
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
 
 # Import from centralized fallback module - no ImportError handling needed

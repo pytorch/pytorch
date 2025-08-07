@@ -15,6 +15,9 @@ Example:
     _set_global_rank(rank)
 
 This ensures code works regardless of whether distributed components are available.
+
+IMPORTANT: This file should only have ONE try-catch block that imports torch._C._distributed_c10d.
+All other imports should be handled in the if HAS_DISTRIBUTED: ... else: ... block.
 """
 
 import sys
@@ -26,9 +29,19 @@ import torch
 from torch.futures import Future
 
 
-# Try to import from torch._C._distributed_c10d, providing fallbacks when not available
+# Single minimal try-catch block to import the C extension
 try:
+    import torch._C._distributed_c10d as _C
+except (ImportError, AttributeError):
+    _C = None  # type: ignore[assignment]
+
+# Set HAS_DISTRIBUTED based on whether C extension is available
+HAS_DISTRIBUTED = _C is not None
+
+if HAS_DISTRIBUTED:
+    # Distributed components are available - import from C extension
     from torch._C._distributed_c10d import (  # Basic components; Additional distributed_c10d components
+        _allow_inflight_collective_as_graph_input,
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _ControlCollectives,
@@ -39,7 +52,9 @@ try:
         _register_builtin_comm_hook,
         _register_comm_hook,
         _register_process_group,
+        _register_work,
         _resolve_process_group,
+        _set_allow_inflight_collective_as_graph_input,
         _set_process_group,
         _StoreCollectives,
         _test_python_store,
@@ -76,13 +91,13 @@ try:
         Work,
     )
 
-    # Try to import NCCL-specific components
+    # Import NCCL-specific components if available
     try:
         from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
     except ImportError:
         _DEFAULT_PG_NCCL_TIMEOUT: Optional[timedelta] = None  # type: ignore[no-redef]
 
-    # Try to import optional components that may not be available in all builds
+    # Import optional components that may not be available in all builds
     try:
         from torch._C._distributed_c10d import FakeProcessGroup
     except ImportError:
@@ -97,14 +112,7 @@ try:
             def __init__(self, *args, **kwargs):
                 super().__init__()
 
-    # Import graph input collective functions and symmetric memory components
-    from torch._C._distributed_c10d import (
-        _allow_inflight_collective_as_graph_input,
-        _register_work,
-        _set_allow_inflight_collective_as_graph_input,
-    )
-
-    # Try to import NVSHMEM and symmetric memory components
+    # Import NVSHMEM and symmetric memory components if available
     try:
         from torch._C._distributed_c10d import (
             _is_nvshmem_available,
@@ -144,12 +152,8 @@ try:
             def has_multicast_support(cls, device_type, device_index):
                 return False
 
-    # All imports successful, distributed components available
-    HAS_DISTRIBUTED = True
-
-except (ImportError, AttributeError):
+else:
     # Fallback mode: provide Python stubs for missing C++ components
-    HAS_DISTRIBUTED = False
 
     # Constants
     _DEFAULT_FIRST_BUCKET_BYTES = 1024 * 1024

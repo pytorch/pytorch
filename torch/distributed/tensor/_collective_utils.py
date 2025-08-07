@@ -27,6 +27,7 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
 def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
     group_size = _get_group_size_by_name(group_name)
     stacked_list = [torch.empty_like(input) for _ in range(group_size)]
@@ -369,33 +370,3 @@ def redistribute_cost(
             return float("inf")
 
     return cost
-
-
-# Create stub implementation for missing dtensor operators
-try:
-    # Check if the operator exists, if not, define it
-    torch.ops._dtensor.shard_dim_alltoall
-except (AttributeError, RuntimeError):
-    # Define the missing operator - match what C implementation would do
-    with torch.library._scoped_library("_dtensor", "DEF") as lib:
-        lib.define(
-            "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
-        )
-
-        # Provide a Python implementation for CPU
-        @torch.library.impl(lib, "shard_dim_alltoall", "CPU")
-        def _shard_dim_alltoall_cpu_impl(input, gather_dim, shard_dim, group_name):
-            # Simple stub implementation for testing
-            return input.clone()
-
-        # Provide a Python implementation for CUDA
-        @torch.library.impl(lib, "shard_dim_alltoall", "CUDA")
-        def _shard_dim_alltoall_cuda_impl(input, gather_dim, shard_dim, group_name):
-            # Simple stub implementation for testing
-            return input.clone()
-
-
-# Now register the fake implementation
-@torch.library.register_fake("_dtensor::shard_dim_alltoall")
-def _shard_dim_alltoall_meta_registered(input, gather_dim, shard_dim, group_name):
-    return _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name)
