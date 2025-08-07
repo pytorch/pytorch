@@ -3655,6 +3655,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "different dynamo counters"
+    )
     def test_free_symbol_dynamic(self, device):
         def batch_flip_causal(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (b % 2 == 0)
