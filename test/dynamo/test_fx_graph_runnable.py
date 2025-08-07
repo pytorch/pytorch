@@ -3,12 +3,12 @@ import io
 import logging
 import subprocess
 import sys
-import tempfile
 import unittest
 
 import torch
 import torch._logging.structured
 import torch.distributed as dist
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
@@ -79,7 +79,7 @@ class FxGraphRunnableTest(TestCase):
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
+        with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
             res = subprocess.run(
