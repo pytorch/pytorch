@@ -257,7 +257,7 @@ class TestDynamoTimed(TestCase):
             stack_trace_list.append(e.stack_trace)
 
         self.assertGreater(len(stack_trace_list), 0)
-        result = '\n'.join(
+        result = "\n".join(
             item
             for sublist in stack_trace_list
             if sublist
