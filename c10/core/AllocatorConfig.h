@@ -13,7 +13,17 @@
 namespace c10::CachingAllocator {
 
 // "large" allocations may be packed in 20 MiB blocks
-const size_t kLargeBuffer = 20971520;
+constexpr size_t kLargeBuffer = 20971520;
+// "small" allocations are packed in 2 MiB blocks
+constexpr size_t kSmallBuffer = 2097152;
+// all sizes are rounded to at least 512 bytes
+constexpr size_t kMinBlockSize = 512;
+// largest "small" allocation is 1 MiB
+constexpr size_t kSmallSize = 1048576;
+// allocations between 1 and 10 MiB may use kLargeBuffer
+constexpr size_t kMinLargeAlloc = 10485760;
+// round up large allocations to 2 MiB
+constexpr size_t kRoundLarge = 2097152;
 
 // A utility class for tokenizing allocator configuration strings into discrete
 // parts. For example, the config string:
@@ -371,5 +381,31 @@ struct DeviceConfigParserHookRegistry {
           },                                                  \
           parser_cls::getKeys());                             \
   }
+
+// This function takes the size and number of divisions argument and rounds
+// up the size argument for the nearest power-of-2 division.
+// For example, if we need to round-up 1200 and number of divisions is 4,
+// the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+// them, the values are 1024, 1280, 1536, and 1792. So the function will
+// return 1280 as the nearest ceiling of power-2 division.
+inline size_t roundup_power2_next_division(size_t size, size_t divisions) {
+  if (llvm::isPowerOf2_64(size)) {
+    return size;
+  }
+
+  TORCH_CHECK_VALUE(divisions >= 2, "Only 2 or more divisions are supported");
+
+  // divide the space between these 2's power into equal divisions
+  // If division is zero, return the power-of-2 ceiling.
+  size_t power2_floor = llvm::PowerOf2Floor(size);
+  // power2_divison is the division size between power2_floor and power2_floor*2
+  size_t power2_divison =
+      power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+  if (C10_UNLIKELY(power2_divison == 0)) {
+    return (power2_floor << 1);
+  }
+  size_t round_size_floor = size & (~(power2_divison - 1));
+  return (round_size_floor == size) ? size : round_size_floor + power2_divison;
+}
 
 } // namespace c10::CachingAllocator
