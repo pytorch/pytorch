@@ -12396,6 +12396,29 @@ class TestAutogradDeviceType(TestCase):
         x.resize_as_(y)
         self.assertEqual(x._version, 2)
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with an accelerator device grad
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        # Keep the model on cpu as we do want to test the mixed cpu/accelerator behavior here
+        model = RegressionModel()
+        inputs = torch.randn(4, 10, device=device)
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
 
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
