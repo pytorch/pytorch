@@ -19,6 +19,46 @@ if HAS_CUTLASS:
     from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.select_algorithm import PartialRender
 
+CUTEDSL_ADD_TEMPLATE = r"""
+{{gen_cutedsl_params()}}
+
+@cute.kernel
+def {{kernel_name}}_kernel(gA: cute.Tensor, gB: cute.Tensor, gC: cute.Tensor):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    bdim, _, _ = cute.arch.block_dim()
+
+    thread_idx = bidx * bdim + tidx
+    m, n = gA.shape
+
+    if thread_idx < m * n:
+        mi = thread_idx // n
+        ni = thread_idx % n
+
+        if mi < m and ni < n:
+            gC[mi, ni] = gA[mi, ni] + gB[mi, ni]
+
+@cute.jit
+def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
+    m, n = mA.shape
+    total_threads = m * n
+    num_blocks = (total_threads + THREADS_PER_BLOCK - 1) // THREADS_PER_BLOCK
+
+    kernel = {{kernel_name}}_kernel(mA, mB, mC)
+    kernel.launch(
+        grid=[num_blocks, 1, 1],
+        block=[THREADS_PER_BLOCK, 1, 1]
+    )
+
+{{def_kernel("input_a", "input_b", "output_c")}}
+    cute_a = from_dlpack(input_a)
+    cute_b = from_dlpack(input_b)
+    cute_c = from_dlpack(output_c)
+
+    {{kernel_name}}_jit(cute_a, cute_b, cute_c)
+    return output_c
+"""
+
 
 @unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
 class TestCuteDSLTemplate(TestCase):
@@ -244,73 +284,31 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
         """End-to-end test overriding add operation with CuteDSL template."""
         from torch._inductor.ir import TensorBox
         from torch._inductor.lowering import lowerings
-        from torch._inductor.select_algorithm import autotune_select_algorithm
 
         def cutedsl_grid(M, N, meta):
             return (1,)
 
-        # Simple CuteDSL add template
-        template_source = r"""
-@cute.kernel
-def {{kernel_name}}_kernel(gA: cute.Tensor, gB: cute.Tensor, gC: cute.Tensor):
-    tidx, _, _ = cute.arch.thread_idx()
-    bidx, _, _ = cute.arch.block_idx()
-    bdim, _, _ = cute.arch.block_dim()
-
-    thread_idx = bidx * bdim + tidx
-    m, n = gA.shape
-
-    if thread_idx < m * n:
-        mi = thread_idx // n
-        ni = thread_idx % n
-
-        if mi < m and ni < n:
-            gC[mi, ni] = gA[mi, ni] + gB[mi, ni]
-
-@cute.jit
-def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
-    m, n = mA.shape
-    total_threads = m * n
-    threads_per_block = 256
-    num_blocks = (total_threads + threads_per_block - 1) // threads_per_block
-
-    kernel = {{kernel_name}}_kernel(mA, mB, mC)
-    kernel.launch(
-        grid=[num_blocks, 1, 1],
-        block=[threads_per_block, 1, 1]
-    )
-
-{{def_kernel("input_a", "input_b", "output_c")}}
-    cute_a = from_dlpack(input_a)
-    cute_b = from_dlpack(input_b)
-    cute_c = from_dlpack(output_c)
-
-    {{kernel_name}}_jit(cute_a, cute_b, cute_c)
-    return output_c
-"""
-
         template = CuteDSLTemplate(
-            name="test_add_e2e",
-            source=template_source,
+            name="test_add_single",
+            source=CUTEDSL_ADD_TEMPLATE,
             grid=cutedsl_grid,
         )
 
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
             choices = []
             error = template.maybe_append_choice(
-                choices, input_nodes=[a, b], layout=a.get_layout()
+                choices,
+                input_nodes=[a, b],
+                layout=a.get_layout(),
+                THREADS_PER_BLOCK=256,
             )
 
             if error or not choices:
                 default_lowering = lowerings[torch.ops.aten.add.Tensor]
                 return default_lowering(a, b)
 
-            return autotune_select_algorithm(
-                "cutedsl_add",
-                choices,
-                [a, b],
-                a.get_layout(),
-            )
+            # Use the single choice directly (no autotuning)
+            return choices[0].output_node()
 
         # Save original lowering
         original = lowerings.get(torch.ops.aten.add.Tensor, None)
@@ -341,6 +339,108 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
                 lowerings[torch.ops.aten.add.Tensor] = original
             else:
                 lowerings.pop(torch.ops.aten.add.Tensor, None)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_cutedsl_add_e2e_autotune(self):
+        """E2E test with multiple CuteDSL template variants for autotuning."""
+        from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
+        from torch._inductor.select_algorithm import autotune_select_algorithm
+
+        def cutedsl_grid(M, N, meta):
+            return (1,)
+
+        template = CuteDSLTemplate(
+            name="test_add_autotune",
+            source=CUTEDSL_ADD_TEMPLATE,
+            grid=cutedsl_grid,
+        )
+
+        def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
+            choices = []
+
+            # Add multiple variants with different thread counts for autotuning
+            thread_variants = [128, 256, 512]
+            for threads in thread_variants:
+                error = template.maybe_append_choice(
+                    choices,
+                    input_nodes=[a, b],
+                    layout=a.get_layout(),
+                    THREADS_PER_BLOCK=threads,
+                )
+                if error:
+                    # Skip this variant if it fails
+                    continue
+
+            if not choices:
+                default_lowering = lowerings[torch.ops.aten.add.Tensor]
+                return default_lowering(a, b)
+
+            # Use autotuning to select the best variant
+            return autotune_select_algorithm(
+                "cutedsl_add_autotune",
+                choices,
+                [a, b],
+                a.get_layout(),
+            )
+
+        # Save original lowering
+        original = lowerings.get(torch.ops.aten.add.Tensor, None)
+
+        try:
+            # Override add lowering
+            lowerings[torch.ops.aten.add.Tensor] = cutedsl_add_lowering
+
+            # Test function
+            def test_add(x, y):
+                return x + y
+
+            device = "cuda"
+            x = torch.randn(128, 128, device=device, dtype=torch.float32)
+            y = torch.randn(128, 128, device=device, dtype=torch.float32)
+
+            # Compile and run
+            compiled_fn = torch.compile(test_add, backend="inductor")
+            result = compiled_fn(x, y)
+
+            # Verify correctness
+            expected = x + y
+            self.assertTrue(torch.allclose(result, expected, atol=1e-5))
+
+        finally:
+            # Restore original lowering
+            if original:
+                lowerings[torch.ops.aten.add.Tensor] = original
+            else:
+                lowerings.pop(torch.ops.aten.add.Tensor, None)
+
+    def test_gen_cutedsl_params(self):
+        """Test that gen_cutedsl_params correctly generates CuteDSL parameter definitions."""
+        kernel = CuteDSLTemplateKernel(
+            kernel_name="test_kernel",
+            input_nodes=[],
+            output_node=None,
+        )
+
+        # Test integer parameters
+        params = kernel.gen_cutedsl_params(
+            THREADS_PER_BLOCK=256,
+            BLOCK_SIZE=128,
+            ENABLE_FEATURE=True,
+        )
+
+        expected_lines = [
+            "THREADS_PER_BLOCK: cutlass.Constexpr = 256",
+            "BLOCK_SIZE: cutlass.Constexpr = 128",
+            "ENABLE_FEATURE: cutlass.Constexpr = True",
+        ]
+
+        for expected_line in expected_lines:
+            self.assertIn(expected_line, params)
+
+        # Test float parameters
+        params_float = kernel.gen_cutedsl_params(SCALE_FACTOR=1.5)
+        self.assertIn("SCALE_FACTOR: cutlass.Constexpr = 1.5", params_float)
 
 
 if __name__ == "__main__":
