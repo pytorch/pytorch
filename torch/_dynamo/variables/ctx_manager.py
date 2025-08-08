@@ -940,7 +940,8 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        none = variables.ConstantVariable.create(None)
+        return self.target_values if self.target_values else none
 
     def exit(self, tx: "InstructionTranslator", *args):
         return variables.ConstantVariable.create(None)
