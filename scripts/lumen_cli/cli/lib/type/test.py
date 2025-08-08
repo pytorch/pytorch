@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from cli.lib.common.file_utils import read_yaml_file
 from cli.lib.common.utils import (
     list_to_env_dict,
+    run_bash_and_capture_env,
     run_cmd,
     temp_environ,
     working_directory,
@@ -16,30 +17,28 @@ from cli.lib.common.utils import (
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TestPlan:
     """
     Configuration for test plan.
     """
-
     name: str
     id: str
     env_vars: List[str] = field(default_factory=list)
+    env_bash: str = ""
     steps: list[dict[str, Any]] = field(default_factory=list)
     test_directory: str = ""  # by default,use default test directory
-
 
 @dataclass
 class TestConfig:
     """
     Configuration for test plan.
     """
-
     name: str
     test_plans: dict[str, TestPlan]
     preset: list[Any] | None = None
     env_vars: list[str] | None = None
+    env_bash: str = ""
     work_directory: str = "."  # by default, use the current working directory which is root of the torch repo
     default_test_directory: str = "tests"  # by default, use the test directory in the torch repo, can be overridden by test plans
 
@@ -78,7 +77,7 @@ class TestRunner(ABC):
 
     def to_test_config_model(self):
         raw = self.load_raw_test_config()
-        required_top_keys = {"name", "test_plans"}
+        required_top_keys = {"test_plans"}
         missing = required_top_keys - raw.keys()
         if missing:
             raise ValueError(f"Missing required keys in TestConfig: {missing}")
@@ -129,8 +128,7 @@ class TestRunner(ABC):
         config = self.test_config
         wd = config.work_directory if config.work_directory else "."
         logger.info(f"working directory: {wd}")
-        envs = list_to_env_dict(config.env_vars if config.env_vars else [])
-        with temp_environ(envs), working_directory(wd):
+        with temp_environ(get_envs(config.env_vars, config.env_bash)), working_directory(wd):
             for id in self.test_plan_ids:
                 test_plan = self.test_config.test_plans[id]
                 self.run_test_plan(test_plan)
@@ -139,8 +137,7 @@ class TestRunner(ABC):
         """
         Run the test plan.
         """
-        envs = list_to_env_dict(test_plan.env_vars if test_plan.env_vars else [])
-        with temp_environ(envs):
+        with temp_environ(get_envs(test_plan.env_vars, test_plan.env_bash)):
             logger.info(f"Running test plan: {test_plan.name}...")
             for step in test_plan.steps:
                 self.run_test_step(step)
@@ -154,3 +151,13 @@ class TestRunner(ABC):
         logger.info(f"Running test step command: {command}...")
         with temp_environ(list_to_env_dict(step.get("env_vars", []))):
             run_cmd(command)
+
+
+def get_envs(env_vars: list[str] | None = None, env_bash: str = "") -> Dict[str, str]:
+    envs, bash_envs = {}, {}
+    if env_vars:
+        envs = list_to_env_dict(env_vars)
+    if env_bash:
+        bash_envs = run_bash_and_capture_env(env_bash)
+    merged_env = {**envs, **bash_envs}
+    return merged_env

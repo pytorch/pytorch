@@ -66,6 +66,36 @@ def run_shell(
         )
         raise
 
+def run_bash(script: str, *, env: Optional[dict] = None, cwd: Optional[str] = None, check=True, capture_output=False):
+    """
+    Run a multi-line bash script in a login shell (-l) with -c.
+
+    :param script: Bash script as a string.
+    :param env: Optional dict of environment vars to pass.
+    :param cwd: Optional working directory.
+    :param check: Raise CalledProcessError on non-zero exit.
+    :param capture_output: If True, returns CompletedProcess with stdout/stderr.
+    """
+    try:
+        cmd = ["bash", "-lc", script]
+        return subprocess.run(
+            cmd,
+            env=env or os.environ.copy(),
+            cwd=cwd,
+            check=check,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            capture_output=capture_output,
+            text=True
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(
+            f"[cmd] Command failed.\n"
+            f"Exit code: {e.returncode}\n"
+            f"STDOUT:\n{getattr(e, 'stdout', '')}\n"
+            f"STDERR:\n{getattr(e, 'stderr', '')}"
+        )
+        raise
 
 def run_cmd(
     cmd: str,
@@ -209,3 +239,12 @@ def uv_pip_install(args: str | list[str], env=None):
         args = shlex.split(args)
     cmd = [sys.executable, "-m", "uv", "pip", "install"] + args
     run_cmd(" ".join(map(shlex.quote, cmd)), env=env)
+
+def run_bash_and_capture_env(script: str, *, base_env=None):
+    base_env = base_env or os.environ.copy()
+    before = dict(base_env)
+
+    bash_cmd = f"set -a; {script}; env"
+    result = run_bash(bash_cmd, env=base_env, capture_output=True)
+    after = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    return {k: v for k, v in after.items() if before.get(k) != v}
