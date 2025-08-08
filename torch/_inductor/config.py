@@ -81,6 +81,11 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Configurable compile worker logging path for subproc_pool
+worker_log_path = (
+    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+)
+
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
@@ -90,6 +95,8 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
+
+remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -138,12 +145,8 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
-# Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches: bool = Config(
-    justknob="pytorch/remote_cache:force_disable_caches",
-    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
-    default=False,
-)
+# See torch.compiler.config.force_disable_caches
+force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
@@ -427,6 +430,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
+
+# Report the autotune choices and their benchmark results. Default is True.
+max_autotune_report_choices_stats = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
+)
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition = False
@@ -738,6 +746,12 @@ worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
     env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
     default=True,
+)
+
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
 )
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
@@ -1464,12 +1478,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1859,6 +1873,12 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
+
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
+    use_libtorch = False
 
 
 if TYPE_CHECKING:
