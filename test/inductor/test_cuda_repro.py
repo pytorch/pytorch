@@ -1826,15 +1826,15 @@ class CudaReproTests(TestCase):
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
         def fn(x):
-            return x[torch.arange(32)]
+            return x[torch.arange(32)] @ x[torch.arange(32)].T
 
         result, (graph,) = run_and_get_graph_lowering(
-            fn, torch.randn(64, device="cuda")
+            fn, torch.randn((64, 2), device="cuda")
         )
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
-        inp = torch.randn(64, device="cuda", requires_grad=True)
+        inp = torch.randn((64, 2), device="cuda", requires_grad=True)
         result, (graph,) = run_and_get_graph_lowering(fn, inp)
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})

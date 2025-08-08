@@ -940,26 +940,26 @@ if HAS_CUDA:
 
         def test_accumulate_multiple_recordings(self):
             def foo(x):
-                y = x + x + x
+                y = (x + x + x) @ x
                 torch._dynamo.graph_break()
-                if y.sum() <= 0:
-                    return y
+                if (x @ y).sum() <= 0:
+                    return x @ y + 1
                 else:
-                    return y * 10
+                    return x @ y * 10
 
             foo_opt = torch.compile(foo)
 
             # two separate compilations & recordings
-            out1 = self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
+            out1 = self.run_twc(foo_opt, torch.zeros([5, 5], device="cuda"))
 
             # out1 gets manually freed
-            out2 = self.run_twc(foo_opt, torch.zeros([6], device="cuda"))
+            out2 = self.run_twc(foo_opt, torch.zeros([6, 6], device="cuda"))
 
             self.assertEqual(all_live_block_count(), 1)
 
-            out3 = self.run_twc(foo_opt, torch.ones([5], device="cuda"))
+            out3 = self.run_twc(foo_opt, torch.ones([5, 5], device="cuda"))
 
-            self.assertEqual(out3, foo(torch.ones([5], device="cuda")))
+            self.assertEqual(out3, foo(torch.ones([5, 5], device="cuda")))
 
             self.assertEqual(all_live_block_count(), 1)
             del out1, out2
@@ -967,6 +967,7 @@ if HAS_CUDA:
 
             del out3
             gc.collect()
+
             self.assertEqual(all_live_block_count(), 0)
 
         @torch._inductor.config.patch("freezing", True)
