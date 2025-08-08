@@ -935,6 +935,67 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
         )
 
+    def _init_p2p_neighbors(self, ops: list[dist.P2POp]) -> list[dist.P2POp]:
+        """
+        Set up p2p communicators between previous and next stages
+        by sending a dummy tensor.
+        """
+
+        def to_global_rank(peer_rank: Optional[int]) -> int:
+            assert peer_rank is not None
+            return (
+                peer_rank
+                if self.group is None
+                else dist.get_global_rank(self.group, peer_rank)
+            )
+
+        next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
+        prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
+
+        recv_tensor = torch.zeros(1, device=self.device)
+        send_tensor = torch.tensor(self.stage_index, device=self.device)
+        # forward
+        if not self.is_first:
+            ops.append(
+                dist.P2POp(
+                    dist.irecv,
+                    recv_tensor,
+                    to_global_rank(prev_stage_peer_rank),
+                    self.group,
+                )
+            )
+        if not self.is_last:
+            ops.append(
+                dist.P2POp(
+                    dist.isend,
+                    send_tensor,
+                    to_global_rank(next_stage_peer_rank),
+                    self.group,
+                )
+            )
+
+        # backward
+        if not self.is_first:
+            ops.append(
+                dist.P2POp(
+                    dist.isend,
+                    send_tensor,
+                    to_global_rank(prev_stage_peer_rank),
+                    self.group,
+                )
+            )
+        if not self.is_last:
+            ops.append(
+                dist.P2POp(
+                    dist.irecv,
+                    recv_tensor,
+                    to_global_rank(next_stage_peer_rank),
+                    self.group,
+                )
+            )
+
+        return ops
+
 
 class _PipelineStage(_PipelineStageBase):
     def __init__(
