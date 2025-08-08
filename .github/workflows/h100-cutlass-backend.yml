@@ -1,0 +1,58 @@
+name: Limited CI for CUTLASS backend on H100
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/h100-cutlass-backend.yml
+  workflow_dispatch:
+  schedule:
+    - cron: 22 9 * * *  # every 24 hours about 2:22am PDT
+  push:
+    tags:
+      - ciflow/h100-cutlass-backend/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-cutlass-backend:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90-cutlass-backend
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-cutlass-backend
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '9.0'
+      test-matrix: |
+        { include: [
+          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100", owners: ["oncall:pt2"] },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-test:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90-cutlass-backend
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-cutlass-backend
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-cutlass-backend
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-cutlass-backend.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-cutlass-backend.outputs.test-matrix }}
+    secrets: inherit

@@ -35,7 +35,10 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+from torch._inductor.template_heuristics import (
+    CUDAMMTemplateConfigHeuristic,
+    GemmConfig,
+)
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -50,7 +53,12 @@ from torch.utils._triton import has_triton_tma_device
 aten = torch.ops.aten
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, run_and_get_code
+from torch._inductor.utils import (
+    fresh_cache,
+    get_k_splits,
+    run_and_get_code,
+    use_decompose_k_choice,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -60,13 +68,13 @@ from torch.testing._internal.inductor_utils import (
     get_kernel_launch,
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
 )
 
 
 torch.set_float32_matmul_precision("high")
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
@@ -752,7 +760,12 @@ class TestMaxAutotune(TestCase):
     @skipIfXpu(
         msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
-    @config.patch(max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_epilogue_fusion": False,
+        }
+    )
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
@@ -810,9 +823,9 @@ class TestMaxAutotune(TestCase):
         Check https://github.com/pytorch/pytorch/issues/125437 for more details.
         """
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -825,9 +838,9 @@ class TestMaxAutotune(TestCase):
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (50257, 2048), (1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
-        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
+        y = rand_strided((2048, 768), (768, 1), dtype=torch.bfloat16, device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -839,10 +852,10 @@ class TestMaxAutotune(TestCase):
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
-            (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
         )
         y = rand_strided(
-            (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
+            (1, 2048, 768), (0, 768, 1), dtype=torch.bfloat16, device=GPU_TYPE
         )
 
         @torch.compile(mode="max-autotune")
@@ -856,16 +869,12 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
-    @unittest.skipIf(
-        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
-        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
-    )
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
-        x2 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
-        y2 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
+        x2 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
+        y2 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -1167,7 +1176,7 @@ class TestMaxAutotune(TestCase):
         # Force only decomposeK choice
         with (
             mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
             ) as base_mm_mock,
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
@@ -1327,8 +1336,8 @@ class TestMaxAutotune(TestCase):
             if not TEST_WITH_ROCM:
                 expected = """{
                     'input_nodes':[
-                        "[[s77,s17],[s17,1],torch.float32,device(type='cuda',index=0),0]",
-                        "[[s17,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                        "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
+                        "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
@@ -1493,7 +1502,9 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(hits(), 4)
             self.assertEqual(misses(), 4)
 
+    @fresh_cache()
     @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1501,19 +1512,42 @@ class TestMaxAutotune(TestCase):
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
-        disable_decompose_k=True,
     )
-    def test_max_autotune_disable_decompose_K(self):
-        M, N, K = (32, 32, 32768)
+    @parametrize("num_decompose_k_splits", (0, 5, 20))
+    @parametrize("decompose_k_threshold", (8, 16))
+    def test_max_autotune_decompose_k_envvars(
+        self, num_decompose_k_splits, decompose_k_threshold
+    ):
+        shapes = [(32, 32, 32768), (32, 32, 256)]
+        for M, N, K in shapes:
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            a = torch.randn(M, K, dtype=torch.float16, device="cuda")
+            b = torch.randn(K, N, dtype=torch.float16, device="cuda")
 
-        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+            with config.patch(
+                {
+                    "triton.num_decompose_k_splits": num_decompose_k_splits,
+                    "triton.decompose_k_threshold": decompose_k_threshold,
+                }
+            ):
+                compiled_func = torch.compile(lambda a, b: a @ b)
+                _, code = run_and_get_code(compiled_func, a, b)
 
-        compiled_func = torch.compile(lambda a, b: a @ b)
-        out, code = run_and_get_code(compiled_func, a, b)
+                decompose_count = 0
+                for codegen in code:
+                    if "benchmark_decompose_k_mm" in codegen:
+                        decompose_count += 1
 
-        for codegen in code:
-            FileCheck().check_not("decompose_k").run(codegen)
+                if (
+                    K // M < decompose_k_threshold
+                    or K // N < decompose_k_threshold
+                    or num_decompose_k_splits == 0
+                ):
+                    self.assertEqual(decompose_count, 0)
+                else:
+                    self.assertTrue(decompose_count > 0)
+                    self.assertTrue(decompose_count <= num_decompose_k_splits)
 
     @skipIfXpu
     @unittest.skipIf(
@@ -1530,9 +1564,9 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
+            "torch._inductor.template_registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = CUDAConfigHeuristic()
+            config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -1549,6 +1583,25 @@ class TestMaxAutotune(TestCase):
             for counter in counters["inductor"]:
                 if "benchmark_gpu" in counter:
                     self.assertEqual(counters["inductor"][counter], 2)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_mm_k_1(self):
+        def mm(x, y):
+            return x @ y
+
+        for i in range(90, 100):
+            torch._dynamo.reset()
+            a = torch.randn((i, 1), device=GPU_TYPE, dtype=torch.float32)
+            b = torch.randn((1, i), device=GPU_TYPE, dtype=torch.float32)
+            compiled_f = torch.compile(mm)
+
+            out, code = run_and_get_code(compiled_f, a, b)
+            torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
 
 
 class TestMaxAutotunePrecompile(TestCase):
@@ -2102,6 +2155,9 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -2266,6 +2322,9 @@ class TestPrologueFusion(TestCase):
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
         M, K, N = sizes

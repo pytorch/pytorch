@@ -31,7 +31,12 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
 # Defines all the kernels for tests
@@ -47,7 +52,7 @@ if HAS_GPU:
     import triton
     from triton import language as tl
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         try:
             from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,
@@ -58,7 +63,7 @@ if HAS_GPU:
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
-    elif HAS_XPU:
+    elif HAS_XPU_AND_TRITON:
         from triton.language.extra.intel.libdevice import (  # @manual
             fast_dividef,
             fast_dividef as my_fast_dividef,

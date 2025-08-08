@@ -341,6 +341,7 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
@@ -1204,7 +1205,9 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                tag = get_layout_constraint_tag(target, with_default=False)
+                tag: Optional[torch._C.Tag] = get_layout_constraint_tag(
+                    target, with_default=False
+                )
                 if (
                     tag is None
                     and torch._library.utils.is_builtin(target)
@@ -1221,8 +1224,10 @@ class GraphLowering(torch.fx.Interpreter):
                     # and identify them one by one.
                     decided_constraint = require_contiguous  # type: ignore[assignment]
                 else:
-                    tag = get_layout_constraint_tag(target, with_default=True)
-                    decided_constraint = tag_to_layout_constraint(tag)
+                    default_tag: torch._C.Tag = get_layout_constraint_tag(
+                        target, with_default=True
+                    )
+                    decided_constraint = tag_to_layout_constraint(default_tag)
 
                 make_fallback(target, layout_constraint=decided_constraint)
 
@@ -1559,8 +1564,10 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
+                # this path only for built-in operators
                 and n.target
-                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
+                and isinstance(n.target, torch._ops.OpOverload)
+                and torch._library.utils.is_builtin(n.target)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
@@ -1821,7 +1828,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         shape_env = V.graph.sizevars.shape_env
 
-        # An input can an unbacked symint i.e.: when mark_unabcked is used.
+        # An input can be unbacked symint i.e.: when mark_unabcked is used.
         # in that case add it to new_unbacked_defs.
         if (
             n.op == "placeholder"
@@ -1888,6 +1895,7 @@ class GraphLowering(torch.fx.Interpreter):
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
             for s in unbacked_bindings.keys()
         )
+
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
             f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
             f"fx node is: {n.format_node()}\n"
