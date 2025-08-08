@@ -116,6 +116,7 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "linux.arm64.m7g.metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
 

@@ -5,7 +5,6 @@ import dataclasses
 import functools
 import threading
 import typing
-import warnings
 import weakref
 from abc import abstractmethod
 from contextlib import AbstractContextManager, contextmanager
@@ -81,8 +80,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
 
 
 def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return t.grad
 
 

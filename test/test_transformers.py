@@ -1619,6 +1619,34 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+        or not PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+        "Efficient or cuDNN Attention was not built for this system",
+    )
+    @parametrize("kernel", [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    def test_mask_invalid_last_dim_stride(self, device, kernel):
+        with sdpa_kernel(backends=[kernel]):
+            dtype = torch.float16
+            make_tensor = partial(torch.rand, device=device, dtype=dtype)
+            size = SdpaShape(2, 2, 8, 8)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            attn_mask = make_tensor((2, 2, 8, 8))
+            # Passing in a attn_mask with last dim stride not equal to 1 will error
+            attn_mask.as_strided_(size, [2, 2, 2, 2])
+
+            with self.assertWarnsRegex(
+                UserWarning,
+                "GPU backends require attn_mask's last dimension to have stride 1 while the CPU does not",
+            ):
+                self.assertRaises(
+                    RuntimeError,
+                    lambda: torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, attn_mask, 0.0, False
+                    ),
+                )
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("fused_kernel", [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sdpa_kernel_grouped_query_attention_cuda(self, device, fused_kernel):

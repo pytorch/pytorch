@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 8)
+SCHEMA_VERSION = (8, 9)
 TREESPEC_VERSION = 1
 
 
@@ -33,6 +33,8 @@ class ScalarType(IntEnum):
     UINT16 = 28
     FLOAT8E4M3FN = 29
     FLOAT8E5M2 = 30
+    FLOAT8E4M3FNUZ = 31
+    FLOAT8E5M2FNUZ = 32
 
 
 class Layout(IntEnum):
@@ -459,7 +461,6 @@ class Model:
     # Backend-specialized Lowered GraphModule
     # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
     delegates: Annotated[dict[str, Program], 50]
-    deviceAllocationMap: Annotated[dict[str, str], 60]
     # key is the FQN of constant in exported program (constant tensor or torchbind objs)
     # value is the archive path of serialized constants
     constantPaths: Annotated[dict[str, str], 70]
