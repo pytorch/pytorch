@@ -25,6 +25,7 @@ if torch.backends.mps.is_available():
             "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
+            "_unsafe_masked_index_put_accumulate",
             "abs",
             "add",
             "alias_copy",
@@ -75,6 +76,7 @@ if torch.backends.mps.is_available():
             "imag",
             "index_copy",
             "index_select",
+            "index_put",
             "isfinite",
             "isinf",
             "isreal",
@@ -424,14 +426,8 @@ if torch.backends.mps.is_available():
             "nn.functional.adaptive_max_pool3d": None,
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
-            "nn.functional.max_unpool1dgrad": None,
-            "nn.functional.max_unpool2dgrad": None,
-            "nn.functional.max_unpool3dgrad": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.max_unpool1d": None,
-            "nn.functional.max_unpool2d": None,
-            "nn.functional.max_unpool3d": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -823,7 +819,6 @@ if torch.backends.mps.is_available():
             "round": [torch.float16],
             # topk fails with duplicate indices
             "topk": [torch.float16],
-            "nn.functional.avg_pool3d": [torch.float32],
         }
 
         SKIPLIST_GRAD = {
