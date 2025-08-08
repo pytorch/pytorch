@@ -132,6 +132,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(shape)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(shape)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -151,6 +154,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -176,6 +182,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -206,6 +215,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         opt_fn = torch.compile(fn, backend="eager")
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -232,6 +244,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(0)
         y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
         state_1 = random.getstate()
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(inp, random.Random(12))
         random.seed(0)
         y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
         state_2 = random.getstate()

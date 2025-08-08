@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -163,6 +164,10 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     if not isinstance(fn, torch._ops.OpOverload):
         # Only OpOverloads have layout constraints.
         return None
+
+    if maybe_layout_tag := get_layout_constraint_tag(fn, with_default=False):
+        return tag_to_layout_constraint(maybe_layout_tag)
+
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
     return None
@@ -493,11 +498,11 @@ def broadcast_symbolic_shapes(a, b):
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), size_oblivious=True
+            sympy.Eq(y, 1), fallback_value=False
         ):
             output.append(x)
         elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), size_oblivious=True
+            sympy.Eq(x, 1), fallback_value=False
         ):
             output.append(y)
         else:
@@ -943,26 +948,14 @@ def broadcast_tensors(*inputs):
     outputs = []
     for x in inputs:
         sizes = x.get_size()
-        if len(sizes) != len(target) or any(
-            (
-                (
-                    V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
-                or (
-                    not V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(a, 1), size_oblivious=True
-                    )
-                    and V.graph.sizevars.shape_env.evaluate_expr(
-                        sympy.Eq(b, 1), size_oblivious=True
-                    )
-                )
+
+        def is_length_one(size: sympy.Expr):
+            return V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(size, 1), fallback_value=False
             )
-            for a, b in zip(sizes, target)
+
+        if len(sizes) != len(target) or any(
+            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -3229,7 +3222,6 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-@register_lowering(aten.full_like, type_promotion_kind=None)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
@@ -6280,7 +6272,9 @@ def div_prim(a, b):
     if is_integral:
         return truncdiv(a, b)
 
-    if (divisor := get_constant_value(b)) is not None:
+    # Disable CPU optimization to avoid precision issues.
+    # see https://github.com/pytorch/pytorch/issues/157959
+    if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
@@ -6742,7 +6736,7 @@ register_foreach_pointwise(aten._foreach_clamp_max.List, minimum)
 register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
-register_foreach_pointwise(aten._foreach_copy, copy)
+foreach_copy = register_foreach_pointwise(aten._foreach_copy, copy)
 
 
 # these are only encountered as outputs of the graph
@@ -6780,6 +6774,9 @@ register_foreach_inplace(
 )
 register_foreach_inplace(
     aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
+)
+register_foreach_inplace(
+    aten._foreach_copy_.default, aten._foreach_copy.default, foreach_copy
 )
 
 

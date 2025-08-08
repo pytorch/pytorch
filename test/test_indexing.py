@@ -15,6 +15,8 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -140,7 +142,10 @@ class TestIndexing(TestCase):
         )
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
-        tensor = torch.DoubleTensor(lst).to(device)
+        _make_tensor = (
+            torch.DoubleTensor if not device.startswith("mps") else torch.FloatTensor
+        )
+        tensor = _make_tensor(lst).to(device)
         for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
@@ -156,7 +161,7 @@ class TestIndexing(TestCase):
             else:
                 lst_indexed = lst[idx1]
                 tensor_indexed = tensor[idx1]
-            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+            self.assertEqual(_make_tensor(lst_indexed), tensor_indexed)
 
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
@@ -179,6 +184,7 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
+    @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
@@ -1189,6 +1195,7 @@ class TestIndexing(TestCase):
         out_cpu = func1(t, ind, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
+    @expectedFailureMPS  # Doubles not supported
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
@@ -1303,6 +1310,7 @@ class TestIndexing(TestCase):
         torch.float8_e5m2,
         torch.float8_e4m3fn,
     )
+    @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -2049,7 +2057,9 @@ class NumpyTests(TestCase):
         self.assertEqual(kernel, kernel2)
 
 
-instantiate_device_type_tests(TestIndexing, globals(), except_for="meta")
+instantiate_device_type_tests(
+    TestIndexing, globals(), except_for="meta", allow_mps=True
+)
 instantiate_device_type_tests(NumpyTests, globals(), except_for="meta")
 
 if __name__ == "__main__":

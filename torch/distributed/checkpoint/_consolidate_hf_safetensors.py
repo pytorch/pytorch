@@ -595,35 +595,6 @@ def _write_sub_tensor_to_file_optimized(
             )
             return
 
-    # Check for fully contiguous chunk
-    expected_chunk_size = math.prod(sub_tensor_shape) * element_size
-
-    if len(sub_tensor_bytes) == expected_chunk_size:
-        # Calculate if the chunk maps to a contiguous region in the tensor
-        tensor_strides = [1]
-        for i in range(len(tensor_shape) - 1, 0, -1):
-            tensor_strides.insert(0, tensor_strides[0] * tensor_shape[i])
-
-        # Check if chunk represents a contiguous slice
-        chunk_start_pos = sum(
-            offset * stride
-            for offset, stride in zip(sub_tensor_offsets, tensor_strides)
-        )
-
-        # For simple contiguous cases, use direct copy
-        if all(
-            offset + size <= dim
-            for offset, size, dim in zip(
-                sub_tensor_offsets, sub_tensor_shape, tensor_shape
-            )
-        ):
-            tensor_start_byte = output_start_byte + chunk_start_pos * element_size
-
-            with fs.open(output_file_path, "r+b") as out_f:
-                out_f.seek(tensor_start_byte)
-                out_f.write(sub_tensor_bytes)
-            return
-
     # Fall back to the original implementation for complex patterns
     _write_sub_tensor_to_file(
         fs,

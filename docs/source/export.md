@@ -1,3 +1,13 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+mystnb:
+  execution_timeout: 30
+  execution_show_tb: True
+  merge_streams: True
+---
+
 (torch.export)=
 
 # torch.export
@@ -9,9 +19,9 @@ representing only the Tensor computation of the function in an Ahead-of-Time
 (AOT) fashion, which can subsequently be executed with different outputs or
 serialized.
 
-```python
+```{code-cell}
 import torch
-from torch.export import export
+from torch.export import export, ExportedProgram
 
 class Mod(torch.nn.Module):
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -21,51 +31,8 @@ class Mod(torch.nn.Module):
 
 example_args = (torch.randn(10, 10), torch.randn(10, 10))
 
-exported_program: torch.export.ExportedProgram = export(
-    Mod(), args=example_args
-)
+exported_program: ExportedProgram = export(Mod(), args=example_args)
 print(exported_program)
-```
-
-```python
-ExportedProgram:
-    class GraphModule(torch.nn.Module):
-        def forward(self, x: "f32[10, 10]", y: "f32[10, 10]"):
-            # code: a = torch.sin(x)
-            sin: "f32[10, 10]" = torch.ops.aten.sin.default(x)
-
-            # code: b = torch.cos(y)
-            cos: "f32[10, 10]" = torch.ops.aten.cos.default(y)
-
-            # code: return a + b
-            add: f32[10, 10] = torch.ops.aten.add.Tensor(sin, cos)
-            return (add,)
-
-    Graph signature:
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='x'),
-                    target=None,
-                    persistent=None
-                ),
-                InputSpec(
-                    kind=<InputKind.USER_INPUT: 1>,
-                    arg=TensorArgument(name='y'),
-                    target=None,
-                    persistent=None
-                )
-            ],
-            output_specs=[
-                OutputSpec(
-                    kind=<OutputKind.USER_OUTPUT: 1>,
-                    arg=TensorArgument(name='add'),
-                    target=None
-                )
-            ]
-        )
-    Range constraints: {}
 ```
 
 `torch.export` produces a clean intermediate representation (IR) with the
@@ -142,9 +109,9 @@ The main entrypoint is through {func}`torch.export.export`, which takes a
 captures the computation graph into an {class}`torch.export.ExportedProgram`. An
 example:
 
-```python
+```{code-cell}
 import torch
-from torch.export import export
+from torch.export import export, ExportedProgram
 
 # Simple module for demonstration
 class M(torch.nn.Module):
@@ -164,64 +131,13 @@ class M(torch.nn.Module):
 example_args = (torch.randn(1, 3, 256, 256),)
 example_kwargs = {"constant": torch.ones(1, 16, 256, 256)}
 
-exported_program: torch.export.ExportedProgram = export(
+exported_program: ExportedProgram = export(
     M(), args=example_args, kwargs=example_kwargs
 )
 print(exported_program)
-```
 
-```python
-ExportedProgram:
-    class GraphModule(torch.nn.Module):
-    def forward(self, p_conv_weight: "f32[16, 3, 3, 3]", p_conv_bias: "f32[16]", x: "f32[1, 3, 256, 256]", constant: "f32[1, 16, 256, 256]"):
-            # code: a = self.conv(x)
-            conv2d: "f32[1, 16, 256, 256]" = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias, [1, 1], [1, 1])
-
-            # code: a.add_(constant)
-            add_: "f32[1, 16, 256, 256]" = torch.ops.aten.add_.Tensor(conv2d, constant)
-
-            # code: return self.maxpool(self.relu(a))
-            relu: "f32[1, 16, 256, 256]" = torch.ops.aten.relu.default(add_)
-            max_pool2d: "f32[1, 16, 85, 85]" = torch.ops.aten.max_pool2d.default(relu, [3, 3], [3, 3])
-            return (max_pool2d,)
-
-Graph signature:
-    ExportGraphSignature(
-        input_specs=[
-            InputSpec(
-                kind=<InputKind.PARAMETER: 2>,
-                arg=TensorArgument(name='p_conv_weight'),
-                target='conv.weight',
-                persistent=None
-            ),
-            InputSpec(
-                kind=<InputKind.PARAMETER: 2>,
-                arg=TensorArgument(name='p_conv_bias'),
-                target='conv.bias',
-                persistent=None
-            ),
-            InputSpec(
-                kind=<InputKind.USER_INPUT: 1>,
-                arg=TensorArgument(name='x'),
-                target=None,
-                persistent=None
-            ),
-            InputSpec(
-                kind=<InputKind.USER_INPUT: 1>,
-                arg=TensorArgument(name='constant'),
-                target=None,
-                persistent=None
-            )
-        ],
-        output_specs=[
-            OutputSpec(
-                kind=<OutputKind.USER_OUTPUT: 1>,
-                arg=TensorArgument(name='max_pool2d'),
-                target=None
-            )
-        ]
-    )
-Range constraints: {}
+# To run the exported program, we can use the `module()` method
+print(exported_program.module()(torch.randn(1, 3, 256, 256), constant=torch.ones(1, 16, 256, 256)))
 ```
 
 Inspecting the `ExportedProgram`, we can note the following:
@@ -242,17 +158,53 @@ Inspecting the `ExportedProgram`, we can note the following:
 ## Expressing Dynamism
 
 By default `torch.export` will trace the program assuming all input shapes are
-**static**, and specializing the exported program to those dimensions. However,
-some dimensions, such as a batch dimension, can be dynamic and vary from run to
-run. Such dimensions must be specified by using the
-{func}`torch.export.Dim` API to create them and by passing them into
-{func}`torch.export.export` through the `dynamic_shapes` argument.
+**static**, and specializing the exported program to those dimensions. One
+consequence of this is that at runtime, the program won’t work on inputs with
+different shapes, even if they’re valid in eager mode.
 
 An example:
 
-```python
+```{code-cell}
 import torch
-from torch.export import Dim, export
+import traceback as tb
+
+class M(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.branch1 = torch.nn.Sequential(
+            torch.nn.Linear(64, 32), torch.nn.ReLU()
+        )
+        self.branch2 = torch.nn.Sequential(
+            torch.nn.Linear(128, 64), torch.nn.ReLU()
+        )
+        self.buffer = torch.ones(32)
+
+    def forward(self, x1, x2):
+        out1 = self.branch1(x1)
+        out2 = self.branch2(x2)
+        return (out1 + self.buffer, out2)
+
+example_args = (torch.randn(32, 64), torch.randn(32, 128))
+
+ep = torch.export.export(M(), example_args)
+print(ep)
+
+example_args2 = (torch.randn(64, 64), torch.randn(64, 128))
+try:
+    ep.module()(*example_args2)  # fails
+except Exception:
+    tb.print_exc()
+```
+
+
+However, some dimensions, such as a batch dimension, can be dynamic and vary
+from run to run. Such dimensions must be specified by using the
+{func}`torch.export.Dim()` API to create them and by passing them into
+{func}`torch.export.export()` through the `dynamic_shapes` argument.
+
+```{code-cell}
+import torch
 
 class M(torch.nn.Module):
     def __init__(self):
@@ -274,42 +226,25 @@ class M(torch.nn.Module):
 example_args = (torch.randn(32, 64), torch.randn(32, 128))
 
 # Create a dynamic batch size
-batch = Dim("batch")
+batch = torch.export.Dim("batch")
 # Specify that the first dimension of each input is that batch size
-dynamic_shapes = {"x1": {0: dim}, "x2": {0: batch}}
+dynamic_shapes = {"x1": {0: batch}, "x2": {0: batch}}
 
-exported_program: torch.export.ExportedProgram = export(
+ep = torch.export.export(
     M(), args=example_args, dynamic_shapes=dynamic_shapes
 )
-print(exported_program)
-```
+print(ep)
 
-```python
-ExportedProgram:
-class GraphModule(torch.nn.Module):
-    def forward(self, p_branch1_0_weight: "f32[32, 64]", p_branch1_0_bias: "f32[32]", p_branch2_0_weight: "f32[64, 128]", p_branch2_0_bias: "f32[64]", c_buffer: "f32[32]", x1: "f32[s0, 64]", x2: "f32[s0, 128]"):
-
-         # code: out1 = self.branch1(x1)
-        linear: "f32[s0, 32]" = torch.ops.aten.linear.default(x1, p_branch1_0_weight, p_branch1_0_bias)
-        relu: "f32[s0, 32]" = torch.ops.aten.relu.default(linear)
-
-         # code: out2 = self.branch2(x2)
-        linear_1: "f32[s0, 64]" = torch.ops.aten.linear.default(x2, p_branch2_0_weight, p_branch2_0_bias)
-        relu_1: "f32[s0, 64]" = torch.ops.aten.relu.default(linear_1)
-
-         # code: return (out1 + self.buffer, out2)
-        add: "f32[s0, 32]" = torch.ops.aten.add.Tensor(relu, c_buffer)
-        return (add, relu_1)
-
-Range constraints: {s0: VR[0, int_oo]}
+example_args2 = (torch.randn(64, 64), torch.randn(64, 128))
+ep.module()(*example_args2)  # success
 ```
 
 Some additional things to note:
 
 - Through the {func}`torch.export.Dim` API and the `dynamic_shapes` argument, we specified the first
   dimension of each input to be dynamic. Looking at the inputs `x1` and
-  `x2`, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
-  the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
+  `x2`, they have a symbolic shape of `(s0, 64)` and `(s0, 128)`, instead of
+  the `(32, 64)` and `(32, 128)` shaped tensors that we passed in as example inputs.
   `s0` is a symbol representing that this dimension can be a range
   of values.
 - `exported_program.range_constraints` describes the ranges of each symbol
@@ -419,13 +354,29 @@ utility {class}`torch.export.ShapesCollection`, where instead of specifying the
 dynamism of every single input, we can just assign directly which input
 dimensions are dynamic.
 
-```python
-dim = torch.export.Dim(...)
-dynamic_shapes = torch.export.ShapesCollection()
-dynamic_shapes[tensor_x] = (dim, dim + 1, 8)
-dynamic_shapes[tensor_y] = {0: dim * 2}
+```{code-cell}
+import torch
 
-torch.export(..., args, dynamic_shapes=dynamic_shapes)
+class M(torch.nn.Module):
+    def forward(self, inp):
+        x = inp["x"] * 1
+        y = inp["others"][0] * 2
+        z = inp["others"][1] * 3
+        return x, y, z
+
+tensor_x = torch.randn(3, 4, 8)
+tensor_y = torch.randn(6)
+tensor_z = torch.randn(6)
+args = {"x": tensor_x, "others": [tensor_y, tensor_z]}
+
+dim = torch.export.Dim("dim")
+sc = torch.export.ShapesCollection()
+sc[tensor_x] = (dim, dim + 1, 8)
+sc[tensor_y] = {0: dim * 2}
+
+print(sc.dynamic_shapes(M(), (args,)))
+ep = torch.export.export(M(), (args,), dynamic_shapes=sc)
+print(ep)
 ```
 
 ### AdditionalInputs
@@ -440,16 +391,33 @@ shapes are changing.
 
 Example:
 
-```python
-args0, kwargs0 = ...  # example inputs for export
+```{code-cell}
+import dataclasses
+import torch
+import torch.utils._pytree as pytree
 
-# other representative inputs that the exported program will run on
-dynamic_shapes = torch.export.AdditionalInputs()
-dynamic_shapes.add(args1, kwargs1)
-...
-dynamic_shapes.add(argsN, kwargsN)
+@dataclasses.dataclass
+class D:
+    b: bool
+    i: int
+    f: float
+    t: torch.Tensor
 
-torch.export(..., args0, kwargs0, dynamic_shapes=dynamic_shapes)
+pytree.register_dataclass(D)
+
+class M(torch.nn.Module):
+    def forward(self, d: D):
+        return d.i + d.f + d.t
+
+input1 = (D(True, 3, 3.0, torch.ones(3)),)
+input2 = (D(True, 4, 3.0, torch.ones(4)),)
+ai = torch.export.AdditionalInputs()
+ai.add(input1)
+ai.add(input2)
+
+print(ai.dynamic_shapes(M(), input1))
+ep = torch.export.export(M(), input1, dynamic_shapes=ai)
+print(ep)
 ```
 
 ## Serialization
@@ -463,13 +431,12 @@ An example:
 
 ```python
 import torch
-import io
 
 class MyModule(torch.nn.Module):
     def forward(self, x):
         return x + 10
 
-exported_program = torch.export.export(MyModule(), torch.randn(5))
+exported_program = torch.export.export(MyModule(), (torch.randn(5),))
 
 torch.export.save(exported_program, 'exported_program.pt2')
 saved_exported_program = torch.export.load('exported_program.pt2')
@@ -479,30 +446,26 @@ saved_exported_program = torch.export.load('exported_program.pt2')
 
 ## Export IR, Decompositions
 
-The graph produced by `torch.export` returns a graph containing only ATen
-operators, which are the basic unit of computation in PyTorch. As there are over
+The graph produced by `torch.export` returns a graph containing only
+[ATen operators](https://pytorch.org/cppdocs/#aten), which are the basic unit of
+computation in PyTorch. As there are over
 3000 ATen operators, export provides a way to narrow down the operator set used
 in the graph based on certain characteristics, creating different IRs.
 
 By default, export produces the most generic IR which contains all ATen
 operators, including both functional and non-functional operators. A functional
 operator is one that does not contain any mutations or aliasing of the inputs.
-This operator set also allows you to train in eager PyTorch Autograd.
+You can find a list of all ATen operators
+[here](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/native_functions.yaml)
+and you can inspect if an operator is functional by checking
+`op._schema.is_mutable`.
 
-However, if you want to use the IR for inference, or decrease the amount of
-operators being used, you can lower the graph through the {func}`ExportedProgram.run_decompositions` API.
+This generic IR can be used to train in eager PyTorch Autograd.
 
-* By specifying an empty set to the `decomp_table` argument, we get rid of all
-    non-functional operators, reducing the operator set to ~2000 operators. This
-    is ideal for inference cases as there are no mutations or aliasing, making
-    it easy to write optimization passes.
-* By specifying None to `decomp_table` argument, we can reduce the operator set
-    to just the {ref}`Core ATen Operator Set <torch.compiler_ir>`, which is a
-    collection of only ~180 operators. This IR is optimal for backends who do
-    not want to reimplement all ATen operators.
+```{code-cell}
+import torch
 
-```python
-class ConvBatchnorm(torch.nn.Module):
+class M(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.conv = torch.nn.Conv2d(1, 3, 1, 1)
@@ -513,15 +476,105 @@ class ConvBatchnorm(torch.nn.Module):
         x = self.bn(x)
         return (x,)
 
-mod = ConvBatchnorm()
-inp = torch.randn(1, 1, 3, 3)
-
-ep_for_training = torch.export.export(mod, (inp,))
-ep_for_inference = ep_for_training.run_decompositions(decomp_table={})
+ep_for_training = torch.export.export(M(), (torch.randn(1, 1, 3, 3),))
+print(ep_for_training.graph_module.print_readable(print_output=False))
 ```
 
-A tutorial on how to use this API can be found
-[here](https://docs.pytorch.org/tutorials/intermediate/torch_export_tutorial.html#ir-decompositions).
+However, if you want to use the IR for inference, or decrease the amount of
+operators being used, you can lower the graph through the
+{func}`ExportedProgram.run_decompositions` API. This method decomposes the
+ATen operators into the ones specified in the decomposition table, and
+functionalizes the graph.
+
+By specifying an empty set, we're only performing functionalization, and does
+not do any additional decompositions. This results in an IR which contains ~2000
+operators (instead of the 3000 operators above), and is ideal for inference cases.
+
+```{code-cell}
+import torch
+
+class M(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+        self.bn = torch.nn.BatchNorm2d(3)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return (x,)
+
+ep_for_training = torch.export.export(M(), (torch.randn(1, 1, 3, 3),))
+with torch.no_grad():
+    ep_for_inference = ep_for_training.run_decompositions(decomp_table={})
+print(ep_for_inference.graph_module.print_readable(print_output=False))
+```
+
+As we can see, the previously in-place operator,
+`torch.ops.aten.add_.default` has now been replaced with
+`torch.ops.aten.add.default`, a functional operator.
+
+We can also further lower this exported program to an operator set which only
+contains the
+`Core ATen Operator Set <https://pytorch.org/docs/main/torch.compiler_ir.html#core-aten-ir>`__,
+which is a collection of only ~180 operators. This IR is optimal for backends
+who do not want to reimplement all ATen operators.
+
+```{code-cell}
+import torch
+
+class M(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+        self.bn = torch.nn.BatchNorm2d(3)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return (x,)
+
+ep_for_training = torch.export.export(M(), (torch.randn(1, 1, 3, 3),))
+with torch.no_grad():
+    core_aten_ir = ep_for_training.run_decompositions(decomp_table=None)
+print(core_aten_ir.graph_module.print_readable(print_output=False))
+```
+
+We now see that `torch.ops.aten.conv2d.default` has been decomposed
+into `torch.ops.aten.convolution.default`. This is because `convolution`
+is a more "core" operator, as operations like `conv1d` and `conv2d` can be
+implemented using the same op.
+
+We can also specify our own decomposition behaviors:
+
+```{code-cell}
+class M(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+        self.bn = torch.nn.BatchNorm2d(3)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return (x,)
+
+ep_for_training = torch.export.export(M(), (torch.randn(1, 1, 3, 3),))
+
+my_decomp_table = torch.export.default_decompositions()
+
+def my_awesome_custom_conv2d_function(x, weight, bias, stride=[1, 1], padding=[0, 0], dilation=[1, 1], groups=1):
+    return 2 * torch.ops.aten.convolution(x, weight, bias, stride, padding, dilation, False, [0, 0], groups)
+
+my_decomp_table[torch.ops.aten.conv2d.default] = my_awesome_custom_conv2d_function
+my_ep = ep_for_training.run_decompositions(my_decomp_table)
+print(my_ep.graph_module.print_readable(print_output=False))
+```
+
+Notice that instead of `torch.ops.aten.conv2d.default` being decomposed
+into `torch.ops.aten.convolution.default`, it is now decomposed into
+`torch.ops.aten.convolution.default` and `torch.ops.aten.mul.Tensor`,
+which matches our custom decomposition rule.
 
 (limitations-of-torch-export)=
 
@@ -587,6 +640,7 @@ have a FakeTensor kernel implementation yet, please file an issue.
 :caption: Additional Links for Export Users
 :maxdepth: 1
 
+export/api_reference
 export/programming_model
 export/ir_spec
 export/pt2_archive
@@ -604,72 +658,4 @@ torch.compiler_ir
 torch.compiler_dynamic_shapes
 torch.compiler_fake_tensor
 torch.compiler_transformations
-```
-
-## API Reference
-
-```{eval-rst}
-.. automodule:: torch.export
-
-.. autofunction:: torch.export.export
-
-.. autoclass:: torch.export.ExportedProgram
-   :members:
-   :exclude-members: __init__
-
-.. automodule:: torch.export.dynamic_shapes
-   :members: Dim, ShapesCollection, AdditionalInputs, refine_dynamic_shapes_from_suggested_fixes
-
-.. autofunction:: torch.export.save
-
-.. autofunction:: torch.export.load
-
-.. autofunction:: torch.export.pt2_archive._package.package_pt2
-
-.. autofunction:: torch.export.pt2_archive._package.load_pt2
-
-.. autofunction:: torch.export.draft_export
-
-.. automodule:: torch.export.unflatten
-    :members:
-
-.. autofunction:: torch.export.register_dataclass
-
-.. automodule:: torch.export.decomp_utils
-   :members:
-   :ignore-module-all:
-   :undoc-members:
-
-.. automodule:: torch.export.experimental
-   :members:
-   :ignore-module-all:
-
-.. automodule:: torch.export.passes
-   :members:
-
-.. automodule:: torch.export.pt2_archive
-   :members:
-   :ignore-module-all:
-
-.. automodule:: torch.export.pt2_archive.constants
-   :members:
-   :ignore-module-all:
-
-.. automodule:: torch.export.exported_program
-   :members:
-   :ignore-module-all:
-   :exclude-members: ExportedProgram
-
-.. automodule:: torch.export.custom_ops
-   :members:
-   :ignore-module-all:
-
-.. automodule:: torch.export.custom_obj
-   :members:
-   :ignore-module-all:
-
-.. automodule:: torch.export.graph_signature
-   :members:
-   :ignore-module-all:
-   :undoc-members:
 ```

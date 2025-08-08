@@ -19,6 +19,7 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
+    StrategyType,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -95,6 +96,36 @@ def register_op_strategy(
     return wrapper
 
 
+def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Fallback strategy all use Replication()
+    """
+    inputs_strategy = op_schema.args_strategy
+    # TODO(zpcore): handle kwarg_inputs_strategy
+    # kwarg_inputs_strategy = op_schema.kwargs_schema
+    output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
+    output_len = output_type.count("Tensor")
+    # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
+    # handling view ops until confirmed.
+    if op_schema.op.is_view:
+        raise RuntimeError(
+            "fallback strategy is unable to handle view ops until confirmed"
+        )
+    if "List[Tensor]" in output_type:
+        raise RuntimeError(
+            "fallback strategy is unable to handle ops with List[Tensor] output "
+            "because size of the list may depend on the op's input value"
+        )
+
+    mesh = inputs_strategy[0].mesh
+
+    dim_sharding: PlacementList = [Replicate()] * (output_len + len(inputs_strategy))
+    single_dim_placement = [dim_sharding]
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_dim_placement, input_index=output_len
+    )
+
+
 def as_list(
     x: Union[list[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
@@ -134,6 +165,8 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, placement in enumerate(spec.placements):
         if placement.is_shard():
             shard_dim = cast(Shard, placement).dim
+            if shard_dim >= len(shape):
+                return False
             shards_map[shard_dim] *= spec.mesh.size(i)
 
     for i, dim_size in enumerate(shape):
@@ -216,7 +249,7 @@ def map_placements_after_broadcast(
                 # the input shape shard dim before broadcasting,
                 # in this case it means implicit broadcasting happen
                 # in this dim, so we can just mark it as replicate
-                # and implict broadcast will broadcast automatically
+                # and implicit broadcast will broadcast automatically
                 # to the sharded shape
                 new_placements.append(Replicate())
 
@@ -226,6 +259,11 @@ def map_placements_after_broadcast(
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
 ) -> list[float]:
+    """Generates one row in the 'redistribute_costs' matrix in an OpSpec
+    The length of the returned list will match the number of strategies in 'src_strategy'.
+
+    Each value in the row is the cost of redistributing from a particular src_strategy to dst_spec.
+    """
     redistribute_costs: list[float] = [
         redistribute_cost(strat.output_spec, dst_spec)
         for strat in src_strategy.strategies
