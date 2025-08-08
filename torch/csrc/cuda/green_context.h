@@ -11,17 +11,17 @@ class GreenContext {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     int driver_version;
     C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
-    TORCH_CHECK(driver_version >= 12080, "cuda driver too old to use green context!");
+    TORCH_CHECK(
+        driver_version >= 12080, "cuda driver too old to use green context!");
     CUcontext pctx = nullptr;
-    C10_CUDA_DRIVER_CHECK(
-      c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&pctx));
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&pctx));
     if (C10_UNLIKELY(!pctx)) {
-      TORCH_WARN("Attempted to create a green context but"
-        " there was no primary context! Creating a primary context...");
+      TORCH_WARN(
+          "Attempted to create a green context but"
+          " there was no primary context! Creating a primary context...");
 
       cudaFree(0);
     }
-
 
     CUdevice device;
     C10_CUDA_DRIVER_CHECK(
@@ -102,8 +102,10 @@ class GreenContext {
         C10_CUDA_DRIVER_CHECK(
             c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
         if (current == context_) {
-          TORCH_CHECK(false, "attempting to overwrite current green ctx "
-            "when it is active!");
+          TORCH_CHECK(
+              false,
+              "attempting to overwrite current green ctx "
+              "when it is active!");
         }
         C10_CUDA_DRIVER_CHECK(cuGreenCtxDestroy(green_ctx_));
       }
