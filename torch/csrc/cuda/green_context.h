@@ -9,6 +9,20 @@ class GreenContext {
  public:
   GreenContext(int device_id, unsigned int num_sms) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+    int driver_version;
+    C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
+    TORCH_CHECK(driver_version >= 12080, "cuda driver too old to use green context!");
+    CUcontext pctx = nullptr;
+    C10_CUDA_DRIVER_CHECK(
+      c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&pctx));
+    if (C10_UNLIKELY(!pctx)) {
+      TORCH_WARN("Attempted to create a green context but"
+        " there was no primary context! Creating a primary context...");
+
+      cudaFree(0);
+    }
+
+
     CUdevice device;
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuDeviceGet_(&device, device_id));
@@ -84,24 +98,20 @@ class GreenContext {
     if (this != &other) {
       // Clean up current resources
       if (green_ctx_) {
-        CUresult result = cuGreenCtxDestroy(green_ctx_);
-        if (result != CUDA_SUCCESS) {
-          fprintf(
-              stderr,
-              "Failed to destroy green context during move: %d\n",
-              result);
+        CUcontext current = nullptr;
+        C10_CUDA_DRIVER_CHECK(
+            c10::cuda::DriverAPI::get()->cuCtxGetCurrent_(&current));
+        if (current == context_) {
+          TORCH_CHECK(false, "attempting to overwrite current green ctx "
+            "when it is active!");
         }
+        C10_CUDA_DRIVER_CHECK(cuGreenCtxDestroy(green_ctx_));
       }
 
       // Take ownership of other's resources
-      green_ctx_ = other.green_ctx_;
-      context_ = other.context_;
-      parent_stream_ = other.parent_stream_;
-
-      // Null out other's pointers
-      other.green_ctx_ = nullptr;
-      other.context_ = nullptr;
-      other.parent_stream_ = NULL;
+      green_ctx_ = std::exchange(other.green_ctx_, nullptr);
+      context_ = std::exchange(other.context_, nullptr);
+      parent_stream_ = std::exchange(other.parent_stream_, nullptr);
     }
     return *this;
   }
@@ -143,7 +153,7 @@ class GreenContext {
       C10_CUDA_DRIVER_CHECK(
           c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
     }
-    // currently hardcoes the new green context to use the default stream
+    // currently hardcodes the new green context to use the default stream
     // TODO(eqy): consider creating a new stream if e.g., it allows interop
     // with CUDA Graph captures etc.
     C10_CUDA_CHECK(cudaStreamWaitEvent(NULL, ev, 0));
