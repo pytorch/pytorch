@@ -2,7 +2,6 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/boxing/BoxedKernel.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/TypeList.h>
