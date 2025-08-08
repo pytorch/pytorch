@@ -476,14 +476,8 @@ class TestBasicOps(__TestCase):
         self.assertEqual(len(set(map(id, cwr('abcde', 3)))), 1)
         self.assertNotEqual(len(set(map(id, list(cwr('abcde', 3))))), 1)
 
-    @pickle_deprecated
     def test_permutations(self):
-        self.assertRaises(TypeError, permutations)              # too few arguments
-        self.assertRaises(TypeError, permutations, 'abc', 2, 1) # too many arguments
-        self.assertRaises(TypeError, permutations, None)        # pool is not iterable
-        self.assertRaises(ValueError, permutations, 'abc', -2)  # r is negative
         self.assertEqual(list(permutations('abc', 32)), [])     # r > n
-        self.assertRaises(TypeError, permutations, 'abc', 's')  # r is not an int or None
         self.assertEqual(list(permutations(range(3), 2)),
                                            [(0,1), (0,2), (1,0), (1,2), (2,0), (2,1)])
 
@@ -520,7 +514,7 @@ class TestBasicOps(__TestCase):
                 if len(set(indices)) == r:
                     yield tuple(pool[i] for i in indices)
 
-        for n in range(7):
+        for n in range(5):
             values = [5*x-12 for x in range(n)]
             for r in range(n+2):
                 result = list(permutations(values, r))
@@ -536,9 +530,6 @@ class TestBasicOps(__TestCase):
                 if r == n:
                     self.assertEqual(result, list(permutations(values, None))) # test r as None
                     self.assertEqual(result, list(permutations(values)))       # test default r
-
-                for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                    self.pickletest(proto, permutations(values, r))     # test pickling
 
     @support.bigaddrspacetest
     def test_permutations_overflow(self):

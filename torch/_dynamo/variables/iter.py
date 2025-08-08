@@ -190,6 +190,24 @@ class ItertoolsVariable(VariableTracker):
             return variables.CountIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
             )
+        elif (
+            self.value is itertools.permutations
+            and (len(args) == 1 or (len(args) == 2 and args[1].is_python_constant()))
+            and not kwargs
+        ):
+            if len(args) == 2:
+                r = args[1].as_python_constant()
+            else:
+                r = None
+            items = [
+                variables.TupleVariable(list(item))
+                for item in itertools.permutations(
+                    args[0].force_unpack_var_sequence(tx), r
+                )
+            ]
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
         else:
             return super().call_function(tx, args, kwargs)
 
