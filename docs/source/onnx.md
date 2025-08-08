@@ -38,6 +38,7 @@ torch.onnx.export(
 )
 ```
 
+
 ## torch.export-based ONNX Exporter
 
 *The torch.export-based ONNX exporter is the newest exporter for PyTorch 2.6 and newer*
@@ -56,11 +57,12 @@ translated into an ONNX graph.
 Q: I have exported my LLM model, but its input size seems to be fixed?
 
   The tracer records the shapes of the example inputs. If the model should accept
-  inputs of dynamic shapes, set ``dynamic_shapes`` when calling :func:`torch.onnx.export`.
+  inputs of dynamic shapes, set ``dynamic_shapes`` when calling {func}`torch.onnx.export`.
 
 Q: How to export models containing loops?
 
   See {ref}`torch.cond <cond>`.
+
 
 ## Contributing / Developing
 
@@ -69,7 +71,7 @@ The ONNX exporter is a community project and we welcome contributions. We follow
 also be interested in reading our [development wiki](https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter).
 
 
-### torch.onnx API
+## torch.onnx APIs
 
 ```{eval-rst}
 .. automodule:: torch.onnx
@@ -95,24 +97,6 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     :noindex:
 ```
 
-### Deprecated API
-
-```{eval-rst}
-.. deprecated:: 2.6
-    These functions are deprecated and will be removed in a future version.
-
-.. autofunction:: register_custom_op_symbolic
-.. autofunction:: unregister_custom_op_symbolic
-.. autofunction:: select_model_mode_for_export
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    JitScalarType
-```
-
 ```{eval-rst}
 .. toctree::
     :hidden:
@@ -122,8 +106,18 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_verification
 ```
 
-<!-- This module needs to be documented. Adding here in the meantime
-for tracking purposes -->
+### Deprecated APIs
+
+```{eval-rst}
+.. deprecated:: 2.6
+    These functions are deprecated and will be removed in a future version.
+
+.. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
+.. autoclass:: JitScalarType
+```
+
 ```{eval-rst}
 .. py:module:: torch.onnx.errors
 .. py:module:: torch.onnx.operators

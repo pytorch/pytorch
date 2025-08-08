@@ -4754,13 +4754,18 @@ class TestQuantizedLinear(TestCase):
                 qw, w_scales = _quantize_fp8e4m3(w, channelwise=weight_quant_per_channel)
                 if use_bias:
                     b = torch.rand(oc) * 10
+                    if bfloat16_out:
+                        b = b.to(torch.bfloat16)
                 else:
                     b = None
 
                 # compute reference result
                 x_ref = _dequantize_fp8e4m3(qx, x_scale)
                 w_ref = _dequantize_fp8e4m3(qw, w_scales)
-                y_ref = linear_op(x_ref, w_ref, b)
+                if b is not None:
+                    y_ref = linear_op(x_ref, w_ref, b.to(torch.float))
+                else:
+                    y_ref = linear_op(x_ref, w_ref)
 
                 # compute fp8 linear
                 qw_packed = qlinear_prepack(qw, x.shape)
