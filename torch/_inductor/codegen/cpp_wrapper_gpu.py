@@ -581,7 +581,7 @@ class CppWrapperGpu(CppWrapperCpu):
             if (
                 is_triton_kernel
                 and (
-                    global_scratch := self.device_codegen.cpp_scratch(
+                    scratch := self.device_codegen.cpp_scratch(
                         next(self.arg_var_id),
                         workspace=TritonScratchWorkspace(
                             size=workspace_size,
@@ -594,11 +594,9 @@ class CppWrapperGpu(CppWrapperCpu):
                 )
                 is not None
             ):
-                global_scratch_def, global_scratch_var = global_scratch
-                code.writelines(
-                    [maybe_hipify_code_wrapper(x) for x in global_scratch_def]
-                )
-                new_args.append(f"&{global_scratch_var}")
+                scratch_def, scratch_var = scratch
+                code.writelines([maybe_hipify_code_wrapper(x) for x in scratch_def])
+                new_args.append(f"&{scratch_var}")
 
         return ", ".join(new_args)
 
