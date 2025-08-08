@@ -168,3 +168,32 @@ def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> 
     if not path.exists():
         raise FileNotFoundError(f"Pin file not found: {path}")
     return path.read_text(encoding="utf-8").strip()
+
+
+def update_file_with_torch_whls(
+    target_file: str = "requirements/test.in",
+    pkgs_to_remove=["torch", "torchvision", "torchaudio", "xformers", "mamba_ssm"],
+):
+    # Read current requirements
+    target_path = Path(target_file)
+    lines = target_path.read_text().splitlines()
+
+    # Remove lines starting with the package names (==, @, >=) — case-insensitive
+    pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
+    kept_lines = [line for line in lines if not pattern.match(line)]
+
+    # Get local torch/vision/audio installs from pip freeze
+    pip_freeze = subprocess.check_output(["pip", "freeze"], text=True)
+    header_lines = [
+        line
+        for line in pip_freeze.splitlines()
+        if re.match(
+            r"^(torch|torchvision|torchaudio)\s*@\s*file://", line, re.IGNORECASE
+        )
+    ]
+
+    # Write back: header_lines + blank + kept_lines
+    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    target_path.write_text(out)
+
+    print(f"[INFO] Updated {target_file}")

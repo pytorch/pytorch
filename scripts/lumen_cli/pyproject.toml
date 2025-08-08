@@ -2,7 +2,8 @@
 name = "torch-ci"
 version = "0.1.0"
 dependencies = [
-    "pyyaml>=6.0"
+    "pyyaml>=6.0",
+    "setuptools==72.1.0"
 ]
 
 [tool.setuptools]

@@ -9,16 +9,20 @@ external_build:
   # if set, replaces the vllm dockerfile.torch_nightly with the local dockerfile.
   dockerfile_path: "./.github/docker/Dockerfile.tmp_vllm"
 test:
-  - preset: # this is a test preset, the preset steps runs before each test group
-  - name: Basic Correctness Test # name of the test
-    id: vllm_basic_correctness_test # the unique id to identify the test config, it must be unique in the ci config yml file
-    env_vars:  # global env vars
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
-    preset: # this can be bash, python etc anything you want to run to set the proper test env
-    run:
-    - test: pytest -v -s basic_correctness/test_cumem.py
-    - test: pytest -v -s basic_correctness/test_basic_correctness.py
-    - test: pytest -v -s basic_correctness/test_cpu_offload.py
-    - test: pytest -v -s basic_correctness/test_preemption.py
+  name: vllm-sm80-external-test
+  work_directory: vllm # this is the work directory, set this if it's different from the build work directory
+  default_test_directory: tests # this is related ti the work directory
+  env_vars:
+    - HF_TOKEN=${VLLM_TEST_HUGGING_FACE_TOKEN} # this is the env vars for all the test plans
+  test_plans: # this is a list of test plans
+    - name: Basic Correctness Test # name of the test
+      id: vllm_basic_correctness_test # the unique id to identify the test config, it must be unique in the ci config yml file
       env_vars:
-        - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level
+        - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      steps:
+        - step: pytest -v -s basic_correctness/test_cumem.py
+        - step: pytest -v -s basic_correctness/test_basic_correctness.py
+        - step: pytest -v -s basic_correctness/test_cpu_offload.py
+        - step: pytest -v -s basic_correctness/test_preemption.py
+          env_vars:
+            - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level

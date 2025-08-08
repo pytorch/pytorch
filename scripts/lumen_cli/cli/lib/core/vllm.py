@@ -1,9 +1,13 @@
 import logging
 import os
+import shutil
+import sys
 import textwrap
 from dataclasses import dataclass, field
 
+import pkg_resources
 from cli.lib.type.build import BuildRunner, LinuxExternalBuildBaseConfig
+from cli.lib.type.test import TestRunner
 
 
 logger = logging.getLogger(__name__)
@@ -15,8 +19,17 @@ from cli.lib.common.file_utils import (
     get_abs_path,
     is_path_exist,
     local_image_exists,
+    remove_dir,
+    update_file_with_torch_whls,
 )
-from cli.lib.common.utils import get_env, run_cmd
+from cli.lib.common.utils import (
+    get_env,
+    pip_install,
+    pip_install_first_wheel,
+    run_cmd,
+    uv_pip_install,
+    working_directory,
+)
 
 
 # default path for docker build artifacts
@@ -185,6 +198,56 @@ def _generate_docker_build_cmd(
             --progress=plain .
     """
     ).strip()
+
+
+class VllmTestRunner(TestRunner):
+    def __init__(self, config_path: str = "", test_ids: list[str] = []):
+        super().__init__(config_path, test_ids)
+        self.whl_patterns = [
+            "dist/vision/torchvision*.whl",
+            "dist/audio/torchaudio*.whl",
+            "shared/wheels/xformers/xformers*.whl",
+            "shared/wheels/vllm/vllm*.whl",
+            "shared/wheels/flashinfer-python/flashinfer*.whl",
+        ]
+
+    def prepare(self):
+        # pip_install_first_wheel("dist/torch-*.whl", extras="opt_einsum")
+        # for whl in self.whl_patterns:
+        #    pip_install_first_wheel(whl)
+        clone_vllm()
+        logger.info(f"running test plans in sequence: [vllm_test]...{self.test_config}")
+        wd = self.test_config.work_directory
+        clone_vllm()
+        logger.info(f"working directory: {wd}")
+        with working_directory(wd):
+            # remove the original vllm folder in vllm repo to avoid confusion for python module path
+            remove_dir("vllm")
+            pip_install("uv==0.8.4")
+            uv_pip_install("-e tests/vllm_test_utils")
+            uv_pip_install("hf_transfer")
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+            run_cmd(f"{sys.executable} use_existing_torch.py")
+            uv_pip_install("-r requirements/common.txt")
+            uv_pip_install("-r requirements/build.txt")
+            update_file_with_torch_whls()
+            shutil.copy("requirements/test.txt", "snapshot_constraint.txt")
+            run_cmd(
+                f"{sys.executable} -m uv pip compile requirements/test.in "
+                "-o test.txt "
+                "--index-strategy unsafe-best-match "
+                "--constraint snapshot_constraint.txt "
+                "--torch-backend cu128"
+            )
+            uv_pip_install("-r test.txt")
+            uv_pip_install(
+                '--system --no-build-isolation "git+https://github.com/state-spaces/mamba@v2.2.4"'
+            )
+
+            patterns = ("torch", "xformers", "torchvision", "torchaudio")
+            for dist in pkg_resources.working_set:
+                if any(p in dist.key for p in patterns):
+                    print(f"{dist.key}=={dist.version}")
 
 
 def clone_vllm():
