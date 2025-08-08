@@ -180,26 +180,27 @@ file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_a
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
-    set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
-      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
-        if(DEFINED ENV{PYTORCH_ROCM_ARCH})
-          list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
-          if(NUM_ARCHS GREATER 1)
-            message(WARNING "Building CK for multiple archs can increase build time considerably!
-            Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
-          endif()
-        endif()
-        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
-        message(STATUS "Generating CK kernel instances...")
-        add_subdirectory(native/transformers/hip/flash_attn/ck)
-        file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
-        list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
-        # FAv3 Generation
-        add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
-        file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
-        list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
+  if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
+    message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
+    caffe2_update_option(USE_ROCM_CK_SDPA ON)
+  endif()
+  if(USE_ROCM_CK_SDPA)
+    if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+      list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+      if(NUM_ARCHS GREATER 1)
+        message(WARNING "Building CK for multiple archs can increase build time considerably!
+        Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
       endif()
+    endif()
+    message(STATUS "USE_ROCM_CK_SDPA is set; building PyTorch with CK SDPA enabled")
+    message(STATUS "Generating CK kernel instances...")
+    add_subdirectory(native/transformers/hip/flash_attn/ck)
+    file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
+    list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+    # FAv3 Generation
+    add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
+    file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+    list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
   endif()
   file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
   file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
@@ -418,40 +419,42 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
-  # NOTE: The PyTorch build does not actually add_subdirectory
-  # third_party/composable_kernel or use it as a CMake library. What is used
-  # is header only, so this should be ok, except that the CMake build generates
-  # a ck/config.h. We just do that part here. Without this, the ck.h from the
-  # ROCM SDK may get accidentally used instead.
-  function(_pytorch_rocm_generate_ck_conf)
-    set(CK_ENABLE_INT8 "ON")
-    set(CK_ENABLE_FP16 "ON")
-    set(CK_ENABLE_FP32 "ON")
-    set(CK_ENABLE_FP64 "ON")
-    set(CK_ENABLE_BF16 "ON")
-    set(CK_ENABLE_FP8 "ON")
-    set(CK_ENABLE_BF8 "ON")
-    set(CK_USE_XDL "ON")
-    set(CK_USE_WMMA "ON")
-    configure_file(
-      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
-      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
-      )
-  endfunction()
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
-  _pytorch_rocm_generate_ck_conf()
+  if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
+    # NOTE: The PyTorch build does not actually add_subdirectory
+    # third_party/composable_kernel or use it as a CMake library. What is used
+    # is header only, so this should be ok, except that the CMake build generates
+    # a ck/config.h. We just do that part here. Without this, the ck.h from the
+    # ROCM SDK may get accidentally used instead.
+    function(_pytorch_rocm_generate_ck_conf)
+      set(CK_ENABLE_INT8 "ON")
+      set(CK_ENABLE_FP16 "ON")
+      set(CK_ENABLE_FP32 "ON")
+      set(CK_ENABLE_FP64 "ON")
+      set(CK_ENABLE_BF16 "ON")
+      set(CK_ENABLE_FP8 "ON")
+      set(CK_ENABLE_BF8 "ON")
+      set(CK_USE_XDL "ON")
+      set(CK_USE_WMMA "ON")
+      configure_file(
+        "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+        )
+    endfunction()
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
+    _pytorch_rocm_generate_ck_conf()
+  endif()
 
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
-if(USE_FLASH_ATTENTION)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
-endif()
+  if(USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
+  endif()
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
@@ -461,12 +464,17 @@ endif()
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
-  if(WIN32) # Windows doesn't support Composable Kernels
+  if(NOT USE_ROCM_CK_GEMM)
     file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
     file(GLOB native_hip_ck "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
+  if(WIN32) # Windows doesn't support Composable Kernels and Triton
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
+  endif()
+
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
     ${native_nested_hip_cpp}
