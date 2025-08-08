@@ -23,13 +23,12 @@ torch.fx.graph.Graph.node_copy(self, node: torch.fx.node.Node, arg_transform: Ca
 torch.fx.graph.Graph.output(self, result: 'Argument', type_expr: Optional[Any] = None)
 torch.fx.graph.Graph.placeholder(self, name: str, type_expr: Optional[Any] = None, default_value: Any) -> torch.fx.node.Node
 torch.fx.graph.Graph.print_tabular(self)
-torch.fx.graph.Graph.python_code(self, root_module: str, verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False) -> torch.fx.graph.PythonCode
+torch.fx.graph.Graph.python_code(self, root_module: str, verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False, expanded_def: bool = False) -> torch.fx.graph.PythonCode
 torch.fx.graph_module.GraphModule.__init__(self, root: Union[torch.nn.modules.module.Module, Dict[str, Any]], graph: torch.fx.graph.Graph, class_name: str = 'GraphModule')
 torch.fx.graph_module.GraphModule.add_submodule(self, target: str, m: torch.nn.modules.module.Module) -> bool
 torch.fx.graph_module.GraphModule.delete_all_unused_submodules(self) -> None
 torch.fx.graph_module.GraphModule.delete_submodule(self, target: str) -> bool
 torch.fx.graph_module.GraphModule.recompile(self) -> torch.fx.graph.PythonCode
-torch.fx.graph_module.reduce_deploy_graph_module(importer: Callable, body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_package_graph_module(importer: Callable, body: Dict[Any, Any], generated_module_name: str) -> torch.nn.modules.module.Module
 torch.fx.interpreter.Interpreter.__init__(self, module: torch.nn.modules.module.Module, garbage_collect_values: bool = True, graph: Optional[torch.fx.graph.Graph] = None)
@@ -53,7 +52,7 @@ torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
 torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
 torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None) -> Optional[str]
+torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None, include_tensor_metadata: bool = False) -> Optional[str]
 torch.fx.node.Node.insert_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
 torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Callable[[Node], bool] = <function <lambda>>, propagate_meta: bool = False) -> List[Node]

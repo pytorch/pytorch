@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -416,6 +416,7 @@ class AOTInductorTestsTemplate:
 
     @skipIfXpu
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -511,6 +512,7 @@ CUDA_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(),
     "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear_bias_none": fail_cuda(),
 }
 
 
@@ -554,5 +556,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_CUDA_AND_TRITON or sys.platform == "darwin":
         run_tests(needs="filelock")

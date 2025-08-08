@@ -58,6 +58,9 @@ def define_targets(rules):
         name = "bit_cast",
         hdrs = ["bit_cast.h"],
         visibility = ["//:__subpackages__"],
+        deps = [
+            "//c10/macros",
+        ],
     )
 
     rules.cc_library(
