@@ -33,6 +33,7 @@ function install_torchbench() {
   popd
 
   chown -R jenkins torchbench
+  chown -R jenkins /opt/conda
 }
 
 # Pango is needed for weasyprint which is needed for doctr
