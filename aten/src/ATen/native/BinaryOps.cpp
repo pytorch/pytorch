@@ -332,11 +332,13 @@ CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  TORCH_CHECK(!(self.scalar_type() == kBool) && !(other.scalar_type() == kBool), "maximum not implemented for bool tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  TORCH_CHECK(!(self.scalar_type() == kBool) && !(other.scalar_type() == kBool), "minimum not implemented for bool tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
