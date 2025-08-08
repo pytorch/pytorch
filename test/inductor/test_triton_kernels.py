@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_XPU_AND_TRITON,
 )
@@ -52,7 +52,7 @@ if HAS_GPU:
     import triton
     from triton import language as tl
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         try:
             from triton.language.extra.libdevice import (  # @manual
                 fast_dividef,

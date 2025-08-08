@@ -7423,6 +7423,7 @@
   dispatch:
     SparseCPU: _coalesce_sparse_cpu
     SparseCUDA: _coalesce_sparse_cuda
+    SparseMPS: _coalesce_sparse_mps
   autogen: _coalesce.out
 
 - func: is_coalesced(Tensor self) -> bool
