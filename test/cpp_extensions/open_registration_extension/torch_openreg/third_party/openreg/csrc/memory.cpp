@@ -233,6 +233,28 @@ orError_t orMemcpy(
       dst, src, count, kind);
 }
 
+orError_t orMemcpyAsync(
+    void* dst,
+    const void* src,
+    size_t count,
+    orMemcpyKind kind,
+    orStream_t stream) {
+  if (!stream) {
+    return orErrorUnknown;
+  }
+
+  auto& mm = openreg::internal::MemoryManager::getInstance();
+
+  return orLaunchKernel(
+      stream,
+      &openreg::internal::MemoryManager::memcpy,
+      &mm,
+      dst,
+      src,
+      count,
+      kind);
+}
+
 orError_t orPointerGetAttributes(
     orPointerAttributes* attributes,
     const void* ptr) {
