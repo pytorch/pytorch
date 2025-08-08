@@ -119,6 +119,8 @@ file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
 file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
 file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
 file(GLOB_RECURSE native_mps_h "native/mps/*.h")
+file(GLOB_RECURSE native_sparse_mps_mm "native/sparse/mps/*.mm")
+file(GLOB_RECURSE native_mps_sparse_metal "native/sparse/mps/*.metal")
 
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
@@ -699,29 +701,25 @@ endif()
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
-    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
 
     if(CAN_COMPILE_METAL)
-        foreach(SHADER ${native_mps_metal})
+        foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
-            string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
-            metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
-                          DEPENDS kernels_basic.metallib kernels_bfloat.metallib
+                          DEPENDS kernels_basic.metallib
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib metallib_dummy.cpp)
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
-        foreach(SHADER ${native_mps_metal})
+        foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
             string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
             metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})
