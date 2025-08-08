@@ -1,3 +1,9 @@
+# /// script
+# dependencies = [
+#   "shellcheck-py==0.7.2.1",
+# ]
+# ///
+
 from __future__ import annotations
 
 import argparse
@@ -108,7 +114,7 @@ if __name__ == "__main__":
             name="command-failed",
             original=None,
             replacement=None,
-            description="shellcheck is not installed, did you forget to run `lintrunner init`?",
+            description="shellcheck is not installed; try `uv run tools/linter/adapters/shellcheck_linter.py`",
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         sys.exit(0)

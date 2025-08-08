@@ -1,3 +1,27 @@
+# /// script
+# dependencies = [
+#   "numpy==1.26.4 ; python_version >= '3.9' and python_version <= '3.11'",
+#   "numpy==2.1.0 ; python_version >= '3.12'",
+#   "expecttest==0.3.0",
+#   "mypy==1.16.0",
+#   "sympy==1.13.3",
+#   "types-requests==2.27.25",
+#   "types-pyyaml==6.0.2",
+#   "types-tabulate==0.8.8",
+#   "types-protobuf==5.29.1.20250403",
+#   "types-setuptools==79.0.0.20250422",
+#   "types-jinja2==2.11.9",
+#   "types-colorama==0.4.6",
+#   "filelock==3.18.0",
+#   "junitparser==2.1.1",
+#   "rich==14.1.0",
+#   "pyyaml==6.0.2",
+#   "optree==0.13.0",
+#   "dataclasses-json==0.6.7",
+#   "pandas==2.2.3",
+# ]
+# ///
+
 from __future__ import annotations
 
 import argparse

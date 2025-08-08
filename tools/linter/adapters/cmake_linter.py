@@ -1,3 +1,9 @@
+# /// script
+# dependencies = [
+#   "cmakelint==1.4.1",
+# ]
+# ///
+
 from __future__ import annotations
 
 import argparse

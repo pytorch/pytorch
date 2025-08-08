@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# /// script
+# dependencies = [
+#   "ruamel.yaml==0.18.10",
+# ]
+# ///
 """
 TODO
 """

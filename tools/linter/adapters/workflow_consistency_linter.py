@@ -1,3 +1,10 @@
+# /// script
+# dependencies = [
+#   "pyyaml==6.0.2",
+#   "types-PyYAML==6.0.2",
+# ]
+# ///
+
 """Checks for consistency of jobs between different GitHub workflows.
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.
@@ -13,7 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple, TYPE_CHECKING
 
-from yaml import dump, load
+import yaml  # type: ignore[import-untyped]
 
 
 if TYPE_CHECKING:
@@ -52,7 +59,7 @@ def glob_yamls(path: Path) -> Iterable[Path]:
 
 def load_yaml(path: Path) -> Any:
     with open(path) as f:
-        return load(f, Loader)
+        return yaml.load(f, Loader)
 
 
 def is_workflow(yaml: Any) -> bool:
@@ -119,12 +126,12 @@ if __name__ == "__main__":
     # For each sync tag, check that all the jobs have the same code.
     for sync_tag, path_and_jobs in tag_to_jobs.items():
         baseline_path, baseline_dict = path_and_jobs.pop()
-        baseline_str = dump(baseline_dict)
+        baseline_str = yaml.dump(baseline_dict)
 
         printed_baseline = False
 
         for path, job_dict in path_and_jobs:
-            job_str = dump(job_dict)
+            job_str = yaml.dump(job_dict)
             if baseline_str != job_str:
                 print_lint_message(path, job_dict, sync_tag)
 

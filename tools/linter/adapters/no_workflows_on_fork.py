@@ -1,3 +1,10 @@
+# /// script
+# dependencies = [
+#   "pyyaml==6.0.2",
+#   "types-PyYAML==6.0.2",
+# ]
+# ///
+
 """
 This a linter that ensures that jobs that can be triggered by push,
 pull_request, or schedule will check if the repository owner is 'pytorch'.  This
@@ -24,7 +31,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from yaml import load
+import yaml  # type: ignore[import-untyped]
 
 
 # Safely load fast C Yaml loader/dumper if they are available
@@ -55,7 +62,7 @@ class LintMessage(NamedTuple):
 
 def load_yaml(path: Path) -> Any:
     with open(path) as f:
-        return load(f, Loader)
+        return yaml.load(f, Loader)
 
 
 def gen_lint_message(
