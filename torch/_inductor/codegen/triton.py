@@ -26,6 +26,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.utils import is_integer_scalar_expr
 from torch.utils._triton import has_triton_package
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
@@ -2300,7 +2301,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         expand_str = None
         index_str = self.index_to_str(index)
-        if isinstance(index, sympy.Integer):
+        if is_integer_scalar_expr(index):
             expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
