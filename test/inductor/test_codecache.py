@@ -59,7 +59,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
@@ -872,7 +872,7 @@ class TestFxGraphCache(TestCase):
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     def test_no_arguments_tensor_device_guards(self):
         """
         Usually, when there are example inputs, the device index of the inputs
@@ -902,7 +902,7 @@ class TestFxGraphCache(TestCase):
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch("fx_graph_remote_cache", False)
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     def test_tensor_device_guards_cpu_tensor(self):
         """
         CPU tensor arguments should still cache hit
@@ -2574,7 +2574,7 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 class TestCudaCompileCommand(TestCase):
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
             ["abc.cu", "def.cu"], "output", "so"
@@ -2619,7 +2619,7 @@ class TestAutotuneCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @unittest.skipIf(
         TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
@@ -2670,7 +2670,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2711,7 +2711,7 @@ class TestAutotuneCache(TestCase):
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2772,7 +2772,7 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
@@ -2836,7 +2836,7 @@ class TestAutotuneCache(TestCase):
 
 
 class TestRemoteAOTAutogradCache(TestCase):
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
@@ -2875,7 +2875,7 @@ class TestRemoteAOTAutogradCache(TestCase):
         for k in global_stats.fx_graph.cache.keys():
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
-    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
