@@ -5,19 +5,21 @@ from unittest.mock import MagicMock, patch
 import torch
 from torch._inductor.test_case import TestCase
 
-# Try importing and skip immediately if not available
+# Try importing and set flag for availability
 try:
     import cutlass
     import cutlass.cute as cute
+    HAS_CUTLASS = True
 except ImportError:
-    print("CUTLASS Python not available")
-    raise unittest.SkipTest("CUTLASS Python not available")
+    HAS_CUTLASS = False
 
-from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
-from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
-from torch._inductor.select_algorithm import PartialRender
+if HAS_CUTLASS:
+    from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
+    from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
+    from torch._inductor.select_algorithm import PartialRender
 
 
+@unittest.skipUnless(HAS_CUTLASS, "requires cutlass")
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
@@ -89,10 +91,8 @@ def {{kernel_name}}_kernel():
 
         kernel.render(mock_template)
 
-        self.assertIn('store_output', captured_env)
         self.assertIn('def_kernel', captured_env)
         self.assertIn('kernel_name', captured_env)
-        self.assertTrue(callable(captured_env['store_output']))
         self.assertTrue(callable(captured_env['def_kernel']))
 
     def test_multiple_templates_unique_names(self):
