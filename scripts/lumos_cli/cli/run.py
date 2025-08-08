@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     # Define top-level parser
-    parser = argparse.ArgumentParser(description="Torch CLI")
+    parser = argparse.ArgumentParser(description="Lumos CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
     # Add top-level args
     parser.add_argument(
