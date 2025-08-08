@@ -27,7 +27,6 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
-    replicate_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -563,13 +562,6 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = input_strategy.mesh
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([OpSpec(replicate_spec)])
-
-
-@register_op_strategy(
-    [aten.sort.stable, aten.sort.default], schema_info=RuntimeSchemaInfo(1)
-)
-def sort_strategy(op_schema: OpSchema):
-    return cast(TupleStrategy, replicate_op_strategy(op_schema))
 
 
 @register_op_strategy(
