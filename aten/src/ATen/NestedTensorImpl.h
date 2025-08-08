@@ -32,7 +32,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor nested_strides,
       at::Tensor storage_offsets);
   // assume contiguous, `nested_strides` and `offsets`
-  // can be infered from `nested_sizes`
+  // can be inferred from `nested_sizes`
   explicit NestedTensorImpl(
       const at::Tensor& buffer,
       const at::Tensor& nested_sizes);

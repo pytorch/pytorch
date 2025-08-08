@@ -955,7 +955,10 @@ static at::Tensor fp8_qlinear_onednn_ref(
   std::vector<int64_t> w_scales_new_shape(weight.dim(), 1);
   w_scales_new_shape[0] = -1;
   auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
-  auto y_f32 = at::linear(dqx, dqw, bias);
+  auto y_f32 = at::linear(dqx, dqw);
+  if (bias.has_value()) {
+      y_f32 += bias.value().to(at::kFloat);
+  }
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
       at::relu_(y_f32);
@@ -987,7 +990,6 @@ static at::Tensor fp8_qlinear_onednn_ref(
     } else if (unary_post_op == "hardswish") {
       at::hardswish_(y_f32);
     } else if (unary_post_op == "swish") {
-      // return ideep::attr_t::fuse_swish();
       y_f32 = y_f32 * at::sigmoid(y_f32);
     } else {
       TORCH_CHECK(
@@ -1119,8 +1121,9 @@ static at::Tensor linear_int8_with_onednn_weight(
   if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
 #endif
     // Fall back to ref impl on old platforms because not supported
+    // Transpose weight to align with behavior in oneDNN
     return fp8_qlinear_onednn_ref(
-        input, input_scale, onednn_weight, weight_scales, bias,
+        input, input_scale, onednn_weight.t(), weight_scales, bias,
         output_scale, output_dtype, other, other_scale,
         binary_post_op, binary_alpha, unary_post_op,
         unary_post_op_args, unary_post_op_algorithm);
