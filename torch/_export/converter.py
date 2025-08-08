@@ -134,7 +134,7 @@ def execute_subgraph_from_prim_loop(
 ):
     """
     subgraph: GraphModule from sub-block.
-    iter_idx: The index of interation.
+    iter_idx: The index of interaction.
     len_loop_local_arguments: The number of loop local arguments in args.
     """
 
@@ -810,7 +810,7 @@ class TS2FXGraphConverter:
 
         fx_node = self.fx_graph.call_function(target, args, kwargs)
 
-        # TODO: covnert sourceRange() into stack_trace
+        # TODO: convert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
         if node.outputsSize() == 1:
@@ -883,7 +883,7 @@ class TS2FXGraphConverter:
             torch.ops.aten._local_scalar_dense.default, (to_copy_node,)
         )
 
-        # TODO: covnert sourceRange() into stack_trace
+        # TODO: convert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
         output_name = node.output().debugName()
@@ -942,7 +942,7 @@ class TS2FXGraphConverter:
                         kwargs,
                     )
 
-                    # TODO: covnert sourceRange() into stack_trace
+                    # TODO: convert sourceRange() into stack_trace
                     # fx_node.meta["stack_trace"] = node.sourceRange()
 
                     output_name = node.output().debugName()
@@ -1006,7 +1006,7 @@ class TS2FXGraphConverter:
             ):
                 target = torch.ops.aten.add.t
             else:
-                raise RuntimeError(f"unable to determind the target for {node}")
+                raise RuntimeError(f"unable to determined the target for {node}")
         else:
             target = get_op_overload(node)
 
@@ -1565,7 +1565,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         #
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
-        # which is not accessable in TS2FXGraphConverter. It is similar to where
+        # which is not accessible in TS2FXGraphConverter. It is similar to where
         # we collect self.name_to_param and self.name_to_buffer.
         name_to_attribute_fqn: dict[str, str] = {}
 
