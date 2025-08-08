@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, TYPE_CHECKING, TypedDict, Union
+from typing import Callable, Optional, TYPE_CHECKING, TypedDict, Union
 
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -305,7 +305,7 @@ def compute_memory_timeline(
 ) -> tuple[
     list[BufferInfo],
     dict[BaseSchedulerNode, int],
-    dict[FreeableInputBuffer, BaseSchedulerNode],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
 ]:
     """
     Compute buffer allocation and deallocation sizes and map their
@@ -320,23 +320,32 @@ def compute_memory_timeline(
 
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []
-    f_input_buf_to_snode_last_use = {}
+    buf_to_snode_last_use: dict[
+        Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode
+    ] = {}
+
+    def _get_end_step_and_snode(
+        buf: Union[FreeableInputBuffer, SchedulerBuffer],
+    ) -> tuple[int, Optional[BaseSchedulerNode]]:
+        max_step: int = -1
+        max_step_snode: Optional[BaseSchedulerNode] = None
+        succ_nodes = buf.mpi_buffer.succ_nodes
+        if succ_nodes:
+            for succ_node in succ_nodes:
+                step = node_to_step[succ_node]
+                if step > max_step:
+                    max_step = step
+                    max_step_snode = succ_node
+            assert max_step_snode is not None
+        return max_step, max_step_snode
+
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
         end_step = len(nodes) - 1
         if buf_name not in graph_outputs:
-            max_step = -1
-            max_step_snode = None
-            succ_nodes = input_buf.mpi_buffer.succ_nodes
-            if succ_nodes:
-                for succ_node in succ_nodes:
-                    step = node_to_step[succ_node]
-                    if step > max_step:
-                        max_step = step
-                        max_step_snode = succ_node
-                end_step = max_step
-                assert max_step_snode is not None
-                f_input_buf_to_snode_last_use[input_buf] = max_step_snode
+            end_step, end_step_snode = _get_end_step_and_snode(input_buf)
+            assert end_step_snode is not None
+            buf_to_snode_last_use[input_buf] = end_step_snode
 
         buf_info_list.append(
             BufferInfo(
@@ -354,17 +363,16 @@ def compute_memory_timeline(
             # note: it is possible for a non-graph-output sched_buf to have no succ_nodes and
             # to be only used by its defining op (e.g., due to fusion when all consumers of
             # the buffer are fused with its defining op). In such cases, end_step is step.
-            end_step = (
-                len(nodes) - 1
-                if sched_buf.get_name() in graph_outputs
-                else max(
-                    [
-                        node_to_step[succ_node]
-                        for succ_node in sched_buf.mpi_buffer.succ_nodes
-                    ],
-                    default=step,
-                )
-            )
+            buf_name = sched_buf.get_name()
+            end_step = len(nodes) - 1
+            if buf_name not in graph_outputs:
+                end_step, end_step_snode = _get_end_step_and_snode(sched_buf)
+                if end_step == -1:
+                    end_step = step
+                else:
+                    assert end_step_snode is not None
+                    buf_to_snode_last_use[sched_buf] = end_step_snode
+
             buf_info_list.append(
                 BufferInfo(
                     sched_buf,
@@ -375,7 +383,7 @@ def compute_memory_timeline(
                 )
             )
 
-    return buf_info_list, node_to_step, f_input_buf_to_snode_last_use
+    return buf_info_list, node_to_step, buf_to_snode_last_use
 
 
 def estimate_peak_memory(
@@ -430,7 +438,7 @@ def estimate_peak_memory_allocfree(
     int,
     list[tuple[int, int]],
     dict[BaseSchedulerNode, SNodeMemory],
-    dict[FreeableInputBuffer, BaseSchedulerNode],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
 ]:
     """
     Alternative version of estimate_peak_memory, that respects the fact,
@@ -445,7 +453,7 @@ def estimate_peak_memory_allocfree(
     In future usages of estimate_peak_memory will migrate to this version.
     """
 
-    buf_info_list, _, f_input_buf_to_snode_last_use = compute_memory_timeline(
+    buf_info_list, _, buf_to_snode_last_use = compute_memory_timeline(
         nodes, name_to_freeable_input_buf, graph_outputs
     )
 
@@ -478,7 +486,7 @@ def estimate_peak_memory_allocfree(
         max_memory,
         snodes_curr_memory,
         snodes_allocfree,
-        f_input_buf_to_snode_last_use,
+        buf_to_snode_last_use,
     )
 
 

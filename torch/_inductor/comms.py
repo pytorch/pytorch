@@ -30,6 +30,7 @@ from .memory import (
     estimate_peak_memory_allocfree,
     FreeableInputBuffer,
     get_freeable_input_buf,
+    SNodeMemory,
 )
 from .utils import (
     contains_collective,
@@ -220,7 +221,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = get_freeable_input_buf(
         snodes, graph_inputs
     )
-    peak_memory, snodes_curr_memory, snodes_allocfree, f_input_buf_to_snode_last_use = (
+    peak_memory, snodes_curr_memory, snodes_allocfree, buf_to_snode_last_use = (
         estimate_peak_memory_allocfree(
             snodes, name_to_freeable_input_buf, graph_outputs
         )
@@ -302,7 +303,11 @@ def _reorder_communication_preserving_peak_memory_internal(
 
     num_processed_collectives: int = 0
     curr = _head
+    debug_assert_current_memory_recalculation = False
+    iterative_recompute_error = False
     while _next[curr] is not None:
+        if iterative_recompute_error:
+            break
         if contains_collective(curr):
             if debug_num_collectives_to_reorder and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
@@ -377,17 +382,19 @@ def _reorder_communication_preserving_peak_memory_internal(
                         reorder_info.limiting_factor = msg
                         break
 
-                candidate_allocfree = snodes_allocfree[candidate]
-                candidate_delta_mem = (
+                candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
+                candidate_delta_mem: int = (
                     candidate_allocfree.size_alloc - candidate_allocfree.size_free
                 )
-                gns = _group_nodes(group_head, group_tail)
-                gn_f_input_last_use = defaultdict(list)
+                gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
+                gn_to_bufs_last_use: dict[
+                    BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+                ] = defaultdict(list)
                 for (
-                    f_input_buf,
+                    buf_buf,
                     snode_last_use,
-                ) in f_input_buf_to_snode_last_use.items():
-                    succ_nodes = f_input_buf.mpi_buffer.succ_nodes
+                ) in buf_to_snode_last_use.items():
+                    succ_nodes = buf_buf.mpi_buffer.succ_nodes
                     if candidate not in succ_nodes:
                         continue
 
@@ -398,16 +405,20 @@ def _reorder_communication_preserving_peak_memory_internal(
                     # The last use of freeable input deallocates it.
                     # If we swap to [[group] candidate]:
                     # candidate.size_free += inp_size
-                    gn_f_input_last_use[snode_last_use].append(f_input_buf)
+                    gn_to_bufs_last_use[snode_last_use].append(buf_buf)
 
                 # Caching calculations of memory for group nodes and candidate,
                 # to apply without recalculation after swap.
-                _post_alloc_update = {}
-                if gn_f_input_last_use:
-                    potential_peak_after_reorder = 0
+                _post_alloc_update: dict[BaseSchedulerNode, int] = {}
+                if debug_assert_current_memory_recalculation:
+                    import copy
+
+                    candidate_cm_pre_swap = copy.copy(_curr_memory[candidate])
+                if gn_to_bufs_last_use:
+                    potential_peak_after_reorder: int = 0
                     # If candidate will be after group, the starting memory level of group nodes
                     # changes to the -(candidate.size_alloc - candidate.size_free)
-                    mem_after_reorder_delta = -candidate_delta_mem
+                    mem_after_reorder_delta: int = -candidate_delta_mem
                     for gn in gns:
                         _post_alloc_update[gn] = gn_post_alloc_mem = (
                             _curr_memory[gn][0] + mem_after_reorder_delta
@@ -415,10 +426,10 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if gn_post_alloc_mem > potential_peak_after_reorder:
                             potential_peak_after_reorder = gn_post_alloc_mem
 
-                        f_input_bufs = gn_f_input_last_use.get(gn, None)
-                        if f_input_bufs is not None:
-                            for f_input in f_input_bufs:
-                                mem_after_reorder_delta += f_input.mpi_buffer.size_free
+                        buf_bufs = gn_to_bufs_last_use.get(gn, None)
+                        if buf_bufs is not None:
+                            for buf in buf_bufs:
+                                mem_after_reorder_delta += buf.mpi_buffer.size_free
 
                     _post_alloc_update[candidate] = candidate_mem_post_alloc = (
                         _curr_memory[group_tail][1]
@@ -429,20 +440,22 @@ def _reorder_communication_preserving_peak_memory_internal(
                         potential_peak_after_reorder = candidate_mem_post_alloc
 
                     if potential_peak_after_reorder > peak_memory:
-                        reorder_info.limiting_factor = "peak memory"
+                        reorder_info.limiting_factor = "peak memory new:{potential_peak_after_reorder} vs base:{peak_memory}"
                         break
                 else:
                     # Path when we do not need to account for
                     # freeable input buffers changing deallocation time.
-                    potential_peak_after_reorder = max(
+                    potential_peak: int = max(
                         group_peak_memory - candidate_delta_mem,
                         _curr_memory[group_tail][1]
                         - candidate_delta_mem
                         + candidate_allocfree.size_alloc,
                     )
 
-                    if potential_peak_after_reorder > peak_memory:
-                        reorder_info.limiting_factor = "peak memory"
+                    if potential_peak > peak_memory:
+                        reorder_info.limiting_factor = (
+                            "peak memory new:{potential_peak} vs base:{peak_memory}"
+                        )
                         break
 
                 reorder_info.moves += 1
@@ -476,37 +489,37 @@ def _reorder_communication_preserving_peak_memory_internal(
                     curr, _group_nodes(_next[curr], None)
                 )
                 # Recompute curr_memory
-                if gn_f_input_last_use:
+                if gn_to_bufs_last_use:
                     # Candidate becomes last use of freeable input buffers
-                    for gn, f_input_bufs in gn_f_input_last_use.items():
-                        for f_input_buf in f_input_bufs:
-                            f_input_buf_to_snode_last_use[f_input_buf] = candidate
+                    for gn, buf_bufs in gn_to_bufs_last_use.items():
+                        for buf_buf in buf_bufs:
+                            buf_to_snode_last_use[buf_buf] = candidate
 
-                    size_free_to_move_to_candidate_sum = 0
+                    size_free_to_move_to_candidate_sum: int = 0
                     for n in gns:
-                        gn_post_alloc_mem = _post_alloc_update[n]
-                        size_free_to_move_to_candidate = sum(
-                            f_input.mpi_buffer.size_free
-                            for f_input in gn_f_input_last_use[n]
+                        _gn_post_alloc_mem: int = _post_alloc_update[n]
+                        size_free_to_move_to_candidate: int = sum(
+                            buf.mpi_buffer.size_free for buf in gn_to_bufs_last_use[n]
                         )
                         size_free_to_move_to_candidate_sum += (
                             size_free_to_move_to_candidate
                         )
                         # group node does not deallocate this after swap
                         snodes_allocfree[n].size_free -= size_free_to_move_to_candidate
-                        gn_post_free_mem = (
-                            gn_post_alloc_mem - snodes_allocfree[n].size_free
+                        gn_post_free_mem: int = (
+                            _gn_post_alloc_mem - snodes_allocfree[n].size_free
                         )
-                        _curr_memory[n] = (gn_post_alloc_mem, gn_post_free_mem)
-                    candidate_post_alloc_mem = _post_alloc_update[candidate]
+                        _curr_memory[n] = (_gn_post_alloc_mem, gn_post_free_mem)
+                    _candidate_post_alloc_mem = _post_alloc_update[candidate]
                     snodes_allocfree[
                         candidate
                     ].size_free += size_free_to_move_to_candidate_sum
                     candidate_post_free_mem = (
-                        candidate_post_alloc_mem - snodes_allocfree[candidate].size_free
+                        _candidate_post_alloc_mem
+                        - snodes_allocfree[candidate].size_free
                     )
                     _curr_memory[candidate] = (
-                        candidate_post_alloc_mem,
+                        _candidate_post_alloc_mem,
                         candidate_post_free_mem,
                     )
                 else:
@@ -516,17 +529,103 @@ def _reorder_communication_preserving_peak_memory_internal(
                             cm[0] - candidate_delta_mem,
                             cm[1] - candidate_delta_mem,
                         )
-                    candidate_post_alloc_mem = (
+                    _candidate_post_alloc_mem = (
                         _curr_memory[group_tail][1] + candidate_allocfree.size_alloc
                     )
-                    candidate_post_free_mem = (
-                        candidate_post_alloc_mem - candidate_allocfree.size_free
+                    _candidate_post_free_mem = (
+                        _candidate_post_alloc_mem - candidate_allocfree.size_free
                     )
                     _curr_memory[candidate] = (
-                        candidate_post_alloc_mem,
-                        candidate_post_free_mem,
+                        _candidate_post_alloc_mem,
+                        _candidate_post_free_mem,
                     )
 
+                if debug_assert_current_memory_recalculation:
+                    # Compare iteratively recomputed memory data
+                    # with full run of estimate_peak_memory
+                    _snodes = _group_nodes(_head, None)
+                    _peak_memory, _snodes_curr_memory, _snodes_allocfree, _ = (
+                        estimate_peak_memory_allocfree(
+                            _snodes, name_to_freeable_input_buf, graph_outputs
+                        )
+                    )
+                    __curr_memory = dict(zip(_snodes, _snodes_curr_memory))
+
+                    iter_cm = _curr_memory[candidate]
+                    new_cm = __curr_memory[candidate]
+                    log = ""
+                    if iter_cm != new_cm:
+                        log += (
+                            f"\nCANDIDATE:{candidate.get_name()}"
+                            f"\nGROUP:{_group_names(group_head, group_tail)}"
+                            f"\nPEAK_MEMORY_BEFORE:{peak_memory}"
+                            f"\nPEAK_MEMORY_AFTER_SWAP:{_peak_memory}"
+                            f"\nCANDIDATE:{candidate.debug_str()}"
+                            f"\nITER_CURR_MEMORY = {iter_cm}"
+                            f"\nNEW__CURR_MEMORY = {new_cm}"
+                            f"\nITER_PRE_SWAP = {candidate_cm_pre_swap}"  # typing: ignore[possibly-undefined]
+                            f"\nITER_ALLOCFREE:{candidate_allocfree}"
+                            f"\nNEW_ALLOCFREE:{_snodes_allocfree[candidate]}"
+                        )
+                        iterative_recompute_error = True
+                    for i, gn in enumerate(_group_nodes(group_head, group_tail)):
+                        iter_gnm = _curr_memory[gn]
+                        new_gnm = __curr_memory[gn]
+                        if iter_gnm != new_gnm:
+                            log += (
+                                f"GROUP_NODE[{i}]:{gn.debug_str()}"
+                                f"GROUP_NODE[{i}] ITER_GNM[{gn.get_name()}] = {iter_gnm}"
+                                f"GROUP_NODE[{i}] ESTM_GNM[{gn.get_name()}] = {new_gnm}"
+                                + f"\n\n buffer_names:{n.get_buffer_names()}"
+                            )
+                            iterative_recompute_error = True
+
+                    if _peak_memory > peak_memory:
+                        iterative_recompute_error = True
+                        peak_log = ""
+                        for i, (pre, post) in enumerate(_snodes_curr_memory):
+                            if _peak_memory == pre:
+                                n = _snodes[i]
+                                peak_log = f"\nNEW_PEAK {_peak_memory} SNODE[{i}]:{n.get_name()} {n.debug_str()}"
+                                break
+                        log += peak_log
+
+                    if iterative_recompute_error:
+                        log += "\n\n".join(
+                            [
+                                (
+                                    f"GROUP[{i}] SNODE:\n{n.debug_str()}"
+                                    f"\nITER_cur_mem:{_curr_memory[n]}"
+                                    f"\nESTM_cur_mem:{__curr_memory[n]}"
+                                    f"\nITER_allocfree:{_snodes_allocfree[n]}"
+                                    f"\nESTM_allocfree:{_snodes_allocfree[n]}"
+                                )
+                                for i, n in enumerate(gns)
+                            ]
+                        )
+                        log += "\n\n".join(
+                            [
+                                (
+                                    f"SNODE[{i}]\n{n.debug_str()}"
+                                    f"\nbuffer_names:{n.get_buffer_names()}"
+                                    f"\nITER_cur_mem:{_curr_memory[n]}"
+                                    f"\nESTM_cur_mem:{__curr_memory[n]}"
+                                    f"\nITER_allocfree:{snodes_allocfree[n]}"
+                                    f"\nESTM_allocfree:{_snodes_allocfree[n]}"
+                                )
+                                for i, n in enumerate(_snodes)
+                            ]
+                        )
+                        trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "reorder_communication_preserving_peak_memory_ITERATIVE_RECOMPUTE_ERROR",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: log,
+                        )
+                if iterative_recompute_error:
+                    break
                 candidate = _prev[group_head]
         curr = _next[curr]  # type: ignore[assignment]
 
