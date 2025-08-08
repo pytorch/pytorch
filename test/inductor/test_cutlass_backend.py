@@ -58,12 +58,12 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
 )
 
 
 torch.set_float32_matmul_precision("high")
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
@@ -158,7 +158,7 @@ def select_no_algorithm(*args, **kwargs):
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
-        if not HAS_CUDA:
+        if not HAS_CUDA_AND_TRITON:
             self.skipTest("CUDA is not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
@@ -2313,5 +2313,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu():
+    if HAS_CUDA_AND_TRITON and HAS_CPU and is_big_gpu():
         run_tests()
