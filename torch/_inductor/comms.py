@@ -401,19 +401,19 @@ def _reorder_communication_preserving_peak_memory_internal(
                     if not any(gn == snode_last_use for gn in gns):
                         continue
 
-                    # candidate and one of group nodes are successors of the same freeable input.
-                    # The last use of freeable input deallocates it.
-                    # If we swap to [[group] candidate]:
-                    # candidate.size_free += inp_size
+                    # candidate and one of group nodes are successors of the same buffer
+                    # The last use deallocates it.
+                    # If we swap [candidate [group]] to [[group] candidate],
+                    # candidate becomes the last use
+                    # and deallocated this buffer instead of group node.
+                    # we need to update size_free accordingly to group_node and candidate,
+                    # and recalculate post_alloc, post_free for them.
                     gn_to_bufs_last_use[snode_last_use].append(buf_buf)
 
                 # Caching calculations of memory for group nodes and candidate,
                 # to apply without recalculation after swap.
                 _post_alloc_update: dict[BaseSchedulerNode, int] = {}
-                if debug_assert_current_memory_recalculation:
-                    import copy
 
-                    candidate_cm_pre_swap = copy.copy(_curr_memory[candidate])
                 if gn_to_bufs_last_use:
                     potential_peak_after_reorder: int = 0
                     # If candidate will be after group, the starting memory level of group nodes
@@ -429,6 +429,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                         buf_bufs = gn_to_bufs_last_use.get(gn, None)
                         if buf_bufs is not None:
                             for buf in buf_bufs:
+                                # Candidate will deallocate those buffers
                                 mem_after_reorder_delta += buf.mpi_buffer.size_free
 
                     _post_alloc_update[candidate] = candidate_mem_post_alloc = (
@@ -443,8 +444,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                         reorder_info.limiting_factor = "peak memory new:{potential_peak_after_reorder} vs base:{peak_memory}"
                         break
                 else:
-                    # Path when we do not need to account for
-                    # freeable input buffers changing deallocation time.
+                    # Path when we do not need to account for buffers last use changes.
                     potential_peak: int = max(
                         group_peak_memory - candidate_delta_mem,
                         _curr_memory[group_tail][1]
@@ -563,7 +563,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                             f"\nCANDIDATE:{candidate.debug_str()}"
                             f"\nITER_CURR_MEMORY = {iter_cm}"
                             f"\nNEW__CURR_MEMORY = {new_cm}"
-                            f"\nITER_PRE_SWAP = {candidate_cm_pre_swap}"  # typing: ignore[possibly-undefined]
                             f"\nITER_ALLOCFREE:{candidate_allocfree}"
                             f"\nNEW_ALLOCFREE:{_snodes_allocfree[candidate]}"
                         )
