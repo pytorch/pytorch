@@ -6,7 +6,6 @@ import torch
 from torch._inductor.test_case import TestCase
 
 
-# Try importing and set flag for availability
 try:
     import cutlass  # noqa: F401
     import cutlass.cute as cute  # noqa: F401
