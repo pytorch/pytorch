@@ -635,9 +635,7 @@ kernel void applyPivots(
 
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
-#endif
 
 // Integral MM
 INSTANTIATE_NAIVE_MM(short);
