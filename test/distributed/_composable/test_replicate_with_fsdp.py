@@ -256,7 +256,7 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_train_parity_2d_mlp(self):
         """
-        Verifies that when a device mesh is passed in, the model has the same behavior as the original model when training
+        Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
         """
         self._init_pg()
         global_mesh = self.init_replicate_tp_mesh()
