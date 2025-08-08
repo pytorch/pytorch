@@ -236,7 +236,10 @@ def reduction_combine(
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
-        return f"welford_combine({var}, {next_value})"
+        if helper_val:
+            return f"welford_combine({var}, {next_value}, &{helper_val})"
+        else:
+            return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -2167,7 +2170,7 @@ class CppKernel(Kernel):
         for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
-    def need_use_acc_helper(self, reduction_type, dtype, use_scalar):
+    def need_use_acc_helper(self, reduction_type, dtype, reduction_size):
         # Check if we need accumulate helper for the reduction operation.
         # using accumulate helper generates the necessary code to improve precision for
         # sum and welford
@@ -2176,7 +2179,8 @@ class CppKernel(Kernel):
         # keep the original behavior for welford_reduce
         # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
-            return not use_scalar
+            # return reduction_size > 128
+            return False
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
@@ -2237,12 +2241,13 @@ class CppKernel(Kernel):
                 if hasattr(self, "_get_vec_type")
                 else DTYPE_TO_CPP[dtype]
             )
+        s_type = DTYPE_TO_CPP[dtype]
         helper_init_line = (
-            f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
-            f"("
-            f"{num_range_thread_expr}"
-            f");"
+            f"{helper_type}<{h_type}, {s_type}, {chunk_size}> {helper_val}"
+            if reduction_type == "welford_reduce"
+            else f"{helper_type}<{h_type}, {chunk_size}> {helper_val}"
         )
+        helper_init_line += f"({num_range_thread_expr});"
         if reduction_type == "sum":
             return helper_init_line
         if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
@@ -2303,14 +2308,20 @@ class CppKernel(Kernel):
             )
         )
 
-        if self.need_use_acc_helper(reduction_type, dtype, True):
-            # use cascade_helper for vec kernel
-            reduction_size = functools.reduce(
-                operator.mul, self.ranges[self.reduction_depth :]
-            )
-            helper_val = self.cascade_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
-            )
+        assert self.reduction_depth is not None
+        reduction_size = functools.reduce(
+            operator.mul, self.ranges[self.reduction_depth :]
+        )
+        if self.need_use_acc_helper(reduction_type, dtype, reduction_size):
+            # use welford_helper/cascade_helper for vec kernel
+            if reduction_type == "welford_reduce":
+                helper_val = self.welford_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
+            else:
+                helper_val = self.cascade_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
             # rename the helper variable to distinguish it from vectorized version
             scalar_helper_val = f"scalar_{helper_val}"
             self._use_acc_helper(
@@ -2325,13 +2336,16 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
             )
         else:
-            assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
+            if reduction_type == "welford_reduce":
+                self.non_parallel_reduction_suffix.writeline(
+                    f"{acc} = welford_combine({acc}, Welford<{DTYPE_TO_CPP[dtype]}>(), false, false, true);"
+                )
 
         self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
         result = reduction_project(reduction_type, acc)
@@ -3028,8 +3042,12 @@ class CppVecKernel(CppKernel):
             )
         )
 
-        use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
-        if use_acc_helper:
+        assert self.reduction_depth is not None
+        reduction_size = functools.reduce(
+            operator.mul, self.ranges[self.reduction_depth :]
+        )
+        use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, reduction_size)
+        if use_acc_helper or reduction_type == "welford_reduce":
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3041,11 +3059,8 @@ class CppVecKernel(CppKernel):
                 )
             )
 
-            # use welford_helper/cascade_helper for vec kernel
-            assert self.reduction_depth is not None
-            reduction_size = functools.reduce(
-                operator.mul, self.ranges[self.reduction_depth :]
-            )
+        if use_acc_helper:
+            # use welford_helper/cascade_helper for vec kerne
             if reduction_type == "welford_reduce":
                 helper_val = self.welford_helper_cse.generate(
                     self.compute, f"reduction {reduction_key}", write=False
@@ -3110,7 +3125,6 @@ class CppVecKernel(CppKernel):
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
                 )
         else:
-            assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
                 index = index * self.ranges[i] + self.itervars[i]
@@ -3158,43 +3172,48 @@ class CppVecKernel(CppKernel):
                     1,
                     2,
                 ], "Welford reduction does not support VectorizedN (N>2)"
-                next_value = f"welford_vec_reduce_all({acc_vec})"
-                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec})"
+                use_helper = "true" if use_acc_helper else "false"
+                next_value = f"welford_vec_reduce_all({acc_vec}, {use_helper})"
+                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec}, {use_helper})"
                 self.reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
+                    f"{acc} = welford_combine({acc}, {next_value}, false, {use_helper});"
                 )
-            elif argmax_or_argmin:
-                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
-            elif is_bool:
-                if reduction_type in (
-                    "any",
-                    "sum",
-                    "max",
-                ):
-                    next_value = f"!{acc_vec}.all_zero()"
-                else:
-                    assert reduction_type == "min"
-                    next_value = f"{acc_vec}.all_masked()"
+                self.reduction_suffix.writeline(
+                    f"{acc} = welford_combine({acc}, {masked_next_value}, false, {use_helper}, true);"
+                )
             else:
-                reduce_all_body = (
-                    "{ return "
-                    + self.reduction_combine_vec(reduction_type, "x", "y")
-                    + "; }"
-                )
-                is_bool = dtype == torch.bool
-                # we are using at::vec::VecMask<float, N> for bool
-                vec_dtype = torch.float if is_bool else dtype
-                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
-                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
-                result_vec = f"{acc_vec}"
-                if use_acc_helper:
-                    assert reduction_type == "sum"
-                    result_vec = f"{acc_vec} + {masked_acc_vec}"
-                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
+                if argmax_or_argmin:
+                    next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+                elif is_bool:
+                    if reduction_type in (
+                        "any",
+                        "sum",
+                        "max",
+                    ):
+                        next_value = f"!{acc_vec}.all_zero()"
+                    else:
+                        assert reduction_type == "min"
+                        next_value = f"{acc_vec}.all_masked()"
+                else:
+                    reduce_all_body = (
+                        "{ return "
+                        + self.reduction_combine_vec(reduction_type, "x", "y")
+                        + "; }"
+                    )
+                    is_bool = dtype == torch.bool
+                    # we are using at::vec::VecMask<float, N> for bool
+                    vec_dtype = torch.float if is_bool else dtype
+                    vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
+                    vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
+                    result_vec = f"{acc_vec}"
+                    if use_acc_helper:
+                        assert reduction_type == "sum"
+                        result_vec = f"{acc_vec} + {masked_acc_vec}"
+                    next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
 
-            self.reduction_suffix.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
-            )
+                self.reduction_suffix.writeline(
+                    f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
+                )
             tmpvar = acc
         else:
             tmpvar = acc_vec
