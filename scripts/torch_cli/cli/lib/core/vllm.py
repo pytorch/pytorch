@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 
 import pkg_resources
 from cli.lib.type.build import BuildRunner, LinuxExternalBuildBaseConfig
-
-from scripts.torch_cli.cli.lib.type.test import TestRunner
+from cli.lib.type.test import TestRunner
 
 
 logger = logging.getLogger(__name__)

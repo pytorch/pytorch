@@ -5,8 +5,7 @@ import logging
 
 from cli.build_cli.register_build import register_build_commands
 from cli.lib.common.logger import setup_logging
-
-from scripts.torch_cli.cli.test_cli.register_test import register_test_commands
+from cli.test_cli.register_test import register_test_commands
 
 
 logger = logging.getLogger(__name__)

@@ -5,8 +5,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
-from scripts.torch_cli.cli.lib.common.file_utils import read_yaml_file
-from scripts.torch_cli.cli.lib.common.utils import (
+from cli.lib.common.file_utils import read_yaml_file
+from cli.lib.common.utils import (
     list_to_env_dict,
     run_cmd,
     temp_environ,
