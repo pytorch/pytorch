@@ -387,6 +387,7 @@ isolate_fails_code_str = None
         fn_name = (
             kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
         )
+        fn_name = fn_name.split(".")[-1]
 
         model_str += src_code
         model_str += "\n"
