@@ -412,6 +412,23 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
+  const auto driver_api = c10::cuda::DriverAPI::get();
+
+  if (handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
+    // Initialize NVML
+    if (driver_api->nvmlInit_v2_() == NVML_SUCCESS) {
+      // Get the driver version
+      int version = -1;
+      const auto res = driver_api->nvmlSystemGetCudaDriverVersion_v2_(&version);
+      if (res == NVML_SUCCESS) {
+        // Check if driver is sufficiently new
+        if (version < 12040) {
+          handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
+        }
+      }
+    }
+  }
+
   if (handle_type_ == Expandable_Segments_Handle_Type::POSIX_FD) {
     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   } else {
@@ -419,7 +436,6 @@ void* CUDASymmetricMemoryAllocator::alloc(
   }
 
   size_t granularity;
-  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
