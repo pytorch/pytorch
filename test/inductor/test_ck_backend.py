@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import logging
 import os
 import unittest
