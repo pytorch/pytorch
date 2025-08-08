@@ -373,6 +373,8 @@ struct TORCH_API TupleElements {
       case 0:
         new (&elementsVector_) std::vector<IValue>(elements.begin(), elements.end());
         break;
+      default:
+        break;
     }
   }
 

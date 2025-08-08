@@ -11,6 +11,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
+#include <c10/util/Switch.h>
 #include <c10/util/intrusive_ptr.h>
 #include <type_traits>
 #include <unordered_map>
@@ -994,14 +995,17 @@ struct TORCH_API IValue final {
 
   // for debugging
   std::string tagKind() const {
+    C10_EXHAUSTIVE_SWITCH_BEGIN
     switch (tag) {
 #define DEFINE_CASE(x) \
   case Tag::x:         \
     return #x;
       TORCH_FORALL_TAGS(DEFINE_CASE)
 #undef DEFINE_CASE
-    }
+  default:
     return "InvalidTag(" + std::to_string(static_cast<int>(tag)) + ")";
+    }
+    C10_EXHAUSTIVE_SWITCH_END
   }
 
   // generic v.to<at::Tensor>() implementations
@@ -1232,6 +1236,7 @@ struct TORCH_API IValue final {
   // as needed and isIntrusivePtr will pick them up.
   // NOLINTBEGIN(bugprone-branch-clone)
   static constexpr bool isIntrusivePtrConstexpr(Tag tag) {
+    C10_EXHAUSTIVE_SWITCH_BEGIN
     switch (tag) {
       case Tag::None:
         return false;
@@ -1287,8 +1292,10 @@ struct TORCH_API IValue final {
         return true;
       case Tag::Enum:
         return true;
+      default:
+        return false;
     }
-    return false;
+    C10_EXHAUSTIVE_SWITCH_END
   }
   // NOLINTEND(bugprone-branch-clone)
 

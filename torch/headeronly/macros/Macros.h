@@ -525,11 +525,14 @@ __host__ __device__
 #define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
   _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_DIAGNOSTIC_ERROR(flag) \
+  _C10_PRAGMA_(clang diagnostic error flag)
 #define C10_CLANG_HAS_WARNING(flag) __has_warning(flag)
 #else
 #define C10_CLANG_DIAGNOSTIC_PUSH()
 #define C10_CLANG_DIAGNOSTIC_POP()
 #define C10_CLANG_DIAGNOSTIC_IGNORE(flag)
+#define C10_CLANG_DIAGNOSTIC_ERROR(flag)
 #define C10_CLANG_HAS_WARNING(flag) 0
 #endif
 

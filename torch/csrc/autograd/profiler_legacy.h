@@ -96,6 +96,8 @@ struct TORCH_API LegacyEvent {
         return "pop";
       case EventKind::MemoryAlloc:
         return "memory_alloc";
+      default:
+        break;
     }
     throw std::runtime_error("unknown event kind");
   }

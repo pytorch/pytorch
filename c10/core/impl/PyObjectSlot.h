@@ -4,6 +4,8 @@
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Switch.h>
 #include <optional>
 
 #include <atomic>
