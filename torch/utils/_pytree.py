@@ -1281,7 +1281,7 @@ def _is_pytreespec_instance(obj: Any) -> TypeIs[Union[TreeSpec, "cxx.TreeSpec"]]
 
 
 def _ensure_python_treespec_instance(
-    treespec: Union[TreeSpec, "cxx.TreeSpec"]
+    treespec: Union[TreeSpec, "cxx.TreeSpec"],
 ) -> TreeSpec:
     if isinstance(treespec, TreeSpec):
         return treespec
