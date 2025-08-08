@@ -519,6 +519,9 @@ coverage_ignore_functions = [
     "make_graphed_callables",
     # torch.mtia.memory
     "reset_peak_memory_stats",
+    # torch.compiler
+    "load_cache_artifacts",
+    "save_cache_artifacts",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -1815,17 +1818,6 @@ coverage_ignore_functions = [
     "tensorboard_trace_handler",
     # torch.return_types
     "pytree_register_structseq",
-    # torch.serialization
-    "check_module_version_greater_or_equal",
-    "default_restore_location",
-    "load",
-    "location_tag",
-    "mkdtemp",
-    "normalize_storage_type",
-    "save",
-    "storage_to_tensor_type",
-    "validate_cuda_device",
-    "validate_hpu_device",
     # torch.signal.windows.windows
     "bartlett",
     "blackman",
