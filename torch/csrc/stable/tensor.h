@@ -111,14 +111,14 @@ class Tensor {
 
   bool is_cpu() const {
     int32_t device_type;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cpu();
   }
 
   int32_t dtype() const {
     int32_t ty;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_dtype(ath_.get(), &ty));
     return ty;
   }
