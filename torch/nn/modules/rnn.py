@@ -254,7 +254,7 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         try:
-            unique_storage_refs = {
+            _ = {
                 StorageWeakRef(p.untyped_storage())
                 for p in self._flat_weights  # type: ignore[union-attr]
                 if p is not None

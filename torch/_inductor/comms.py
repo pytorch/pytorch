@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.utils.weak import StorageWeakRef
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
+from torch.utils.weak import StorageWeakRef
 
 from . import config, ir
 from .dependencies import WeakDep

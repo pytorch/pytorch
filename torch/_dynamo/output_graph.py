@@ -66,9 +66,9 @@ from torch.fx.experimental.symbolic_shapes import (
     Specialization,
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
-from torch.utils.weak import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import StorageWeakRef
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
