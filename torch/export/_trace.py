@@ -1826,6 +1826,17 @@ def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
     return next(iter(node for node in gm.graph.nodes if node.name == name))
 
 
+def _format_bogus_const_name(name: str):
+    splitted_names = name.split(".")
+    if len(splitted_names) == 1:
+        return name
+
+    if not splitted_names[-1].startswith("lifted_tensor"):
+        return name
+
+    return ".".join(splitted_names[:-1])
+
+
 def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -2035,6 +2046,16 @@ def _export_for_training(
         allow_complex_guards_as_runtime_asserts=False,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
+
+    for const, val in export_artifact.aten.constants.items():
+        if isinstance(val, torch._subclasses.fake_tensor.FakeTensor):
+            raise RuntimeError(
+                f"We found a fake tensor in the exported program constant's list. "
+                f"This typically means our tracing system encountered an op that "
+                f"we can't trace through. For the potential source, you can refer to "
+                f"following model attribute: {_format_bogus_const_name(const)}. "
+                f"Please file an issue on github. "
+            )
 
     export_graph_signature = export_artifact.aten.sig
 
