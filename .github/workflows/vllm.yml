@@ -56,6 +56,7 @@ jobs:
       ci-config: ".github/ci_configs/vllm.yaml"
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
+      cuda-arch-list: '8.9'
       runner: linux.24xlarge.memory
     secrets: inherit
 
