@@ -144,6 +144,7 @@
 #include <ATen/ops/xlogy.h>
 #include <ATen/ops/xlogy_native.h>
 #include <ATen/ops/xor_native.h>
+#include <ATen/ops/mm_native.h>
 #endif
 
 namespace at::meta {
@@ -1009,21 +1010,41 @@ static Device correct_out_device(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+inline std::pair<Device, Tensor> get_zero_tensor_meta(
+    const Tensor& self, const Tensor& other,
+    const std::function<Tensor(c10::DispatchKeySet, const Tensor&, const Tensor&)>& op) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto meta_out = op(meta_dks, self.to(device_), other.to(device_));
+  return {out_device, meta_out};
+}
+
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  auto [out_device, meta_out] = get_zero_tensor_meta(
+    self, other,
+    [](c10::DispatchKeySet meta_dks, const Tensor& self, const Tensor& other) {
+      return at::_ops::mul_Tensor::redispatch(meta_dks, self, other);
+    });
+  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+}
+
+Tensor mm_zerotensor(const Tensor& self, const Tensor& other) {
+  auto [out_device, meta_out] = get_zero_tensor_meta(
+    self, other,
+    [](c10::DispatchKeySet meta_dks, const Tensor& self, const Tensor& other) {
+      return at::_ops::mm::redispatch(meta_dks, self, other);
+    });
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
-  auto out_device = correct_out_device(self, other);
-  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
-  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto [out_device, meta_out] = get_zero_tensor_meta(
+    self, other,
+    [](c10::DispatchKeySet meta_dks, const Tensor& self, const Tensor& other) {
+      return at::_ops::div_Tensor::redispatch(meta_dks, self, other);
+    });
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
@@ -1047,30 +1068,29 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
-static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  auto out_device = correct_out_device(self, other);
-  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
-  auto device_ = Device(DeviceType::Meta);
-  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::add_Tensor::redispatch(
-      meta_dks, self.to(device_), other.to(device_), alpha);
+static inline Tensor get_out_like(const Tensor& tensor, const Device& out_device, const Tensor& meta_out) {
+    auto sizes = meta_out.sizes();
+    return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+}
 
-  auto get_out_like = [&] (const Tensor& tensor)
-  {
-      auto sizes = meta_out.sizes();
-      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
-  };
+static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  auto [out_device, meta_out] = get_zero_tensor_meta(
+    self, other,
+    [alpha](c10::DispatchKeySet meta_dks, const Tensor& self, const Tensor& other) {
+      return at::_ops::add_Tensor::redispatch(meta_dks, self, other, alpha);
+    });
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
       return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
     }
-    auto res = get_out_like(other);
+    auto res = get_out_like(other, out_device, meta_out);
     return alpha.equal(1) ? std::move(res) : res.mul(alpha);
   } else {
-    return get_out_like(self);
+    return get_out_like(self, out_device, meta_out);
   }
 }
+
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   return maybe_add_maybe_sub(self, other, alpha);
 }
