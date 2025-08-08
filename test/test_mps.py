@@ -12696,6 +12696,65 @@ class TestSparseMPS(TestCaseMPS):
         sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
         self.assertEqual(sparse, sparse_cpu)
 
+    def test_coalesce(self):
+        indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
+        values = torch.tensor([1., 2., 3., 4.], dtype=torch.float32, device="mps")
+        size = (2, 3)
+        indices_cpu = indices.cpu()
+        values_cpu = values.cpu()
+        sparse_mps = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices_cpu, values_cpu, size, device="cpu")
+        coalesced_mps = sparse_mps.coalesce()
+        coalesced_cpu = sparse_cpu.coalesce()
+
+        self.assertTrue(coalesced_mps.is_coalesced())
+        self.assertTrue(coalesced_cpu.is_coalesced())
+        self.assertEqual(coalesced_mps._nnz(), 2)
+        self.assertEqual(coalesced_mps.cpu(), coalesced_cpu)
+
+    def test_already_coalesced_tensor(self):
+        already_coalesced = self._get_basic_sparse_coo()
+        result = already_coalesced.coalesce()
+        self.assertTrue(result.is_coalesced())
+        self.assertEqual(result._indices().cpu(), already_coalesced._indices().cpu())
+        self.assertEqual(result._values().cpu(), already_coalesced._values().cpu())
+
+    def test_coalesce_empty_sparse_tensor(self):
+        empty_indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
+        empty_values = torch.tensor([], dtype=torch.float32, device="mps")
+        empty_sparse = torch.sparse_coo_tensor(empty_indices, empty_values, (3, 3), device="mps")
+        empty_coalesced = empty_sparse.coalesce()
+        self.assertTrue(empty_coalesced.is_coalesced())
+        self.assertEqual(empty_coalesced._nnz(), 0)
+
+    def test_coalesce_large_tensor(self):
+        size = (1000000, 1000000)
+        num_elements = 1000
+
+        # 800 unique random positions
+        unique_indices = torch.randint(0, size[0], (2, 800), dtype=torch.int64)
+        # 200 duplicates by repeating some of the first 200 indices
+        duplicate_indices = unique_indices[:, :200]
+        indices = torch.cat([unique_indices, duplicate_indices], dim=1)
+        # shuffle indices to mix duplicates with unique entries
+        perm = torch.randperm(indices.size(1))
+        indices = indices[:, perm]
+
+        values = torch.randn(num_elements, dtype=torch.float32)
+        indices_mps = indices.to("mps")
+        values_mps = values.to("mps")
+        sparse_mps = torch.sparse_coo_tensor(indices_mps, values_mps, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
+
+        self.assertFalse(sparse_mps.is_coalesced())
+        coalesced_mps = sparse_mps.coalesce()
+        coalesced_cpu = sparse_cpu.coalesce()
+        self.assertTrue(coalesced_mps.is_coalesced())
+        self.assertTrue(coalesced_cpu.is_coalesced())
+        self.assertEqual(coalesced_mps._nnz(), coalesced_cpu._nnz())
+        self.assertEqual(coalesced_mps._indices().cpu(), coalesced_cpu._indices())
+        self.assertEqual(coalesced_mps._values().cpu(), coalesced_cpu._values())
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
