@@ -349,7 +349,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
                 p_dropout,
                 drop_seed_offset);
         float t = fmha_fwd(traits, args, stream_config);
-        TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+        TORCH_CHECK(t >= 0, "invalid argument for fmha_varlen_fwd");
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
