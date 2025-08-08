@@ -27,7 +27,7 @@ jobs:
       opt_out_experiments: lf
 
   torch-build-sm89:
-    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
+    name: sm89-vllm-test
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -45,7 +45,7 @@ jobs:
     secrets: inherit
 
   vllm-build-sm89:
-    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
+    name: sm89-vllm-test
     uses: ./.github/workflows/_linux-external-build-main.yml
     needs: [
       get-label-type,
@@ -62,11 +62,11 @@ jobs:
     secrets: inherit
 
   vllm-test-sm89:
-    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
+    name: sm89-vllm-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [
       torch-build-sm89,
-      torch-build-sm89
+      vllm-build-sm89
     ]
     with:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
