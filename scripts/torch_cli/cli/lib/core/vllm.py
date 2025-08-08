@@ -45,7 +45,6 @@ class VllmBuildRunner(BuildRunner):
         super().__init__(config_path)
         self.cfg = VllmBuildConfig()
         self.work_directory = "vllm"
-        self.result_path = _DEFAULT_RESULT_PATH
 
     def prepare(self):
         """
@@ -75,7 +74,7 @@ class VllmBuildRunner(BuildRunner):
         torch_arg = _get_torch_wheel_path_arg(self.cfg.torch_whl_dir)
         base_arg, final_base_img, pull_flag = _get_base_image_args(self.cfg.base_image)
         cmd = _generate_docker_build_cmd(
-            self.cfg, self.result_path, torch_arg, base_arg, final_base_img, pull_flag
+            self.cfg, torch_arg, base_arg, final_base_img, pull_flag
         )
         logger.info(f"Running docker build: \n{cmd}")
         run_cmd(cmd, cwd="vllm", env=os.environ.copy())
@@ -159,7 +158,6 @@ def _get_base_image_args(base_image: str) -> tuple[str, str, str]:
 
 def _generate_docker_build_cmd(
     cfg: VllmBuildConfig,
-    result_path: str,
     torch_arg: str,
     base_image_arg: str,
     final_base_image_arg: str,
@@ -168,7 +166,7 @@ def _generate_docker_build_cmd(
     return textwrap.dedent(
         f"""
         docker buildx build \
-            --output type=local,dest={result_path} \
+            --output type=local,dest={cfg.artifact_dir} \
             -f docker/Dockerfile.nightly_torch \
             {pull_flag} \
             {torch_arg} \
