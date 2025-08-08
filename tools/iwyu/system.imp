@@ -1,8 +1,0 @@
-# Toolchain-specific mappings. These ones seem to be missing from iwyu defaults
-[
-    { include: [ "<bits/struct_stat.h>", private, "<sys/stat.h>", public ] },
-    { include: [ "<bits/pthreadtypes.h>", private, "<pthread.h>", public ] },
-    { include: [ "<bits/refwrap.h>", private, "<reference_wrapper>", public ] },
-    { symbol: [ "size_t", private, "<cstddef>", public ] },
-    { symbol: [ "ptrdiff_t", private, "<cstddef>", public ] },
-]

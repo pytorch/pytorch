@@ -1,3 +1,0 @@
-torch/csrc/autograd/generated/
-torch/csrc/jit/generated/
-build/aten/src/ATen

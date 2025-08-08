@@ -1,7 +1,0 @@
-pyyaml==6.0.2
-numpy==1.26.4
-requests==2.32.4
-setuptools==78.1.1
-sympy==1.12
-typing-extensions==4.11.0
-networkx==2.8.8

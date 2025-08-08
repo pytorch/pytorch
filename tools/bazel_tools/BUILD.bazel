@@ -1,5 +1,0 @@
-sh_binary(
-    name = "shellwrap",
-    srcs = ["shellwrap.sh"],
-    visibility = ["//visibility:public"],
-)
