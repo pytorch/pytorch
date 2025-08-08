@@ -477,7 +477,7 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
         cp /$LIBTORCH_HOUSE_DIR/libtorch*.zip "$PYTORCH_FINAL_PACKAGE_DIR"
     else
         if [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
-            cp /$WHEELHOUSE_DIR/*.log "$PYTORCH_FINAL_PACKAGE_DIR"
+            cp /tmp/${WHEELHOUSE_DIR}/*.log "$PYTORCH_FINAL_PACKAGE_DIR"
         fi
         cp /$WHEELHOUSE_DIR/torch*.whl "$PYTORCH_FINAL_PACKAGE_DIR"
     fi
