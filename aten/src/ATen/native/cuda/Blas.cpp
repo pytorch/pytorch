@@ -1634,6 +1634,9 @@ bool use_fast_accum) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+  }
   TORCH_CHECK(
     mat_a.size(-1) % 16 == 0,
     "Expected trailing dimension of mat_a to be divisible by 16 ",
@@ -1716,6 +1719,9 @@ std::optional<c10::ScalarType> out_dtype) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+  }
 
   // check that the strides are valid, the fn will throw an error if not
   check_valid_strides_and_return_transposed(mat_a);
