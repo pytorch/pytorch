@@ -2,25 +2,24 @@
 import hashlib
 import logging
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
 
-from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import Buffer, ComputedBuffer, CuteDSLTemplateBuffer
+from ...ir import CuteDSLTemplateBuffer
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
     SchedulerNode,
 )
+from ...select_algorithm import PartialRender
 from ...utils import get_fused_kernel_name, get_kernel_metadata
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
-from ...select_algorithm import PartialRender
 
 
 log = logging.getLogger(__name__)
@@ -85,7 +84,9 @@ class CuteDSLScheduling(BaseScheduling):
             else:
                 kernel_name = f"cutedsl_{fused_name}_{kernel_hash}"
             wrapper.src_to_kernel[src_code_str] = kernel_name
-            src_code_str = src_code_str.replace(str(Placeholder.KERNEL_NAME), kernel_name)
+            src_code_str = src_code_str.replace(
+                str(Placeholder.KERNEL_NAME), kernel_name
+            )
 
             _, _, kernel_path = get_path(code_hash(src_code_str), "py")
 

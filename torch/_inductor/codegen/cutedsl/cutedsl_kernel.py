@@ -2,19 +2,15 @@
 import contextlib
 import dataclasses
 import logging
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional
 
 import torch
-from torch._inductor import config
-from torch._inductor.codegen.common import CSE, IndentedBuffer, KernelArgs, KernelTemplate, Kernel
-from torch._inductor.ir import Buffer, CuteDSLTemplateBuffer, IRNode, Layout, TensorBox, ExternKernel
+from torch._inductor.codegen.common import IndentedBuffer, Kernel
+from torch._inductor.ir import Buffer
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
-if TYPE_CHECKING:
-    from .cutedsl_template import CuteDSLBenchmarkRequest, CuteDSLTemplate
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
 MAIN_SUFFIX = "main"
@@ -26,7 +22,9 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 class CuteDSLKernelWrapper:
     """Wrapper to provide .run() interface for CuteDSL kernels"""
 
-    def __init__(self, kernel_fn: Callable, kernel_path: Optional[str] = None):
+    def __init__(
+        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
+    ):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
@@ -45,9 +43,11 @@ class CuteDSLKernelWrapper:
         """
         return self.kernel_fn(*args, **kwargs)
 
+
 @dataclasses.dataclass
 class CuteDSLSubgraphInfo:
     """Minimal subgraph info for CuteDSL kernels."""
+
     body: IndentedBuffer
     template_mask: Optional[str] = None
     template_out: Optional[str] = None
@@ -84,7 +84,7 @@ class CuteDSLTemplateKernel(Kernel):
         self.body: IndentedBuffer = IndentedBuffer()
         self.template_mask: Optional[str] = None
         self.template_out: Optional[str] = None
-        self.template_indices: Optional[list] = None
+        self.template_indices: Optional[list[Any]] = None
         self.render_hooks: dict[str, Any] = {}
 
         # TODO Additional attributes needed by template system
@@ -94,10 +94,8 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Create named input nodes mapping
         for i, input_node in enumerate(input_nodes):
-            node_name = getattr(input_node, 'name', f'input_{i}')
+            node_name = getattr(input_node, "name", f"input_{i}")
             self.named_input_nodes[node_name] = input_node
-
-        # self.cse = SimpleCuteDSLCSE()
 
     def gen_imports(self) -> str:
         """Generate common imports for CuteDSL templates."""
@@ -116,7 +114,7 @@ class CuteDSLTemplateKernel(Kernel):
         """Render the kernel using the template, returning PartialRender object with hooks."""
         # Available {{}} hooks for jinja rendering
         template_env = {
-            'def_kernel': self.def_kernel,
+            "def_kernel": self.def_kernel,
         }
 
         # Render the template with the environment and provided kwargs
@@ -125,13 +123,13 @@ class CuteDSLTemplateKernel(Kernel):
             input_nodes=self.input_nodes,
             output_node=self.output_node,
             **template_env,
-            **kwargs
+            **kwargs,
         )
-        
+
         # Always prepend the common imports
         imports = self.gen_imports()
         full_code = imports + rendered_code
-        
+
         return PartialRender(full_code, self.render_hooks)
 
     def __enter__(self):
@@ -140,13 +138,13 @@ class CuteDSLTemplateKernel(Kernel):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """TODO: Context manager exit - doesn't set anything yet"""
-        pass
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         """Set the active subgraph body for template processing."""
         assert all(
-            hasattr(self, field.name) for field in dataclasses.fields(CuteDSLSubgraphInfo)
+            hasattr(self, field.name)
+            for field in dataclasses.fields(CuteDSLSubgraphInfo)
         )
         old_state = {
             key.name: getattr(self, key.name)
@@ -182,7 +180,9 @@ class CuteDSLTemplateKernel(Kernel):
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
         """Create a new subgraph body for template processing."""
-        assert body_name not in self.subgraph_bodies, f"Subgraph body '{body_name}' already exists"
+        assert body_name not in self.subgraph_bodies, (
+            f"Subgraph body '{body_name}' already exists"
+        )
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
             template_mask=None,
@@ -193,10 +193,7 @@ class CuteDSLTemplateKernel(Kernel):
 
     def def_kernel(self, *argnames):
         """Define kernel function signature for CuteDSL templates."""
-        # TODO is this needed
-        # self.kernel_argnames = argnames
-
-        # Populate args during template generation (following Triton pattern)
+        # Populate all the kernel args
         for i, input_node in enumerate(self.input_nodes):
             self.args.input(input_node.get_name())
 
@@ -206,7 +203,9 @@ class CuteDSLTemplateKernel(Kernel):
         def hook():
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
-            code.writeline(f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(argnames)}):")
+            code.writeline(
+                f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(argnames)}):"
+            )
             return code.getvalue()
 
         assert "<DEF_KERNEL>" not in self.render_hooks
@@ -218,9 +217,4 @@ class CuteDSLTemplateKernel(Kernel):
         wrapper = V.graph.wrapper_code
         _, call_args, _, arg_types = self.args.python_argdefs()
         # TODO triton should really be swapped w/ `python`
-        wrapper.generate_kernel_call(
-            name,
-            call_args,
-            triton=True,
-            arg_types=arg_types
-        )
+        wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
