@@ -1,0 +1,5 @@
+# A template for a CI config file. This file is used as an example for how to define a CI config file.
+build:
+  build_target: fake_build_target
+  fake_env: ${ENV_VAR1}
+  fake_env2: ${ENV_VAR2}
