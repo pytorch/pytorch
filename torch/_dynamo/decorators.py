@@ -755,6 +755,15 @@ def mark_static_address(t: Any, guard: bool = True) -> None:
     is not needed for this input. The data_ptr will be guarded if guard=True. Note:
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
+    if torch._dynamo.config.caching_precompile:
+        # [Note] Static Addresses and Precompile
+        # When using precompile, `mark_static_address` is dangerous to use, because
+        # dynamo saves the addresses directly on the parameters of the graph. These addresses
+        # are process dependent, so are not serializable, and serializing
+        # their tensors would be extremely expensive. Instead, by treating mark_static_address
+        # as a no-op, dynamo will automatically inline them as inputs to the graph instead.
+        # See https://github.com/pytorch/pytorch/issues/159228
+        return
     if not isinstance(t, torch.Tensor):
         raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
