@@ -590,10 +590,6 @@ def init_device_reg() -> None:
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
-    register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
-
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
 
