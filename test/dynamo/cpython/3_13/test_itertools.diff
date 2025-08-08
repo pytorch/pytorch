@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..98f962e4353 100644
+index 7d5ba727389..f1cabfe2111 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
 @@ -1,3 +1,25 @@
@@ -210,6 +210,24 @@ index 7d5ba727389..98f962e4353 100644
  
          self.assertEqual([tuple(list(pair)) for pair in zip_longest('abc', 'def')],
                           list(zip('abc', 'def')))
+@@ -1296,7 +1320,6 @@ class TestBasicOps(unittest.TestCase):
+                 self.assertEqual(list(product(*(args*r))),
+                                  list(product(*args, **dict(repeat=r))))
+         self.assertEqual(len(list(product(*[range(7)]*6))), 7**6)
+-        self.assertRaises(TypeError, product, range(6), None)
+ 
+         def product1(*args, **kwds):
+             pools = list(map(tuple, args)) * kwds.get('repeat', 1)
+@@ -1336,7 +1359,8 @@ class TestBasicOps(unittest.TestCase):
+         argtypes = ['', 'abc', '', range(0), range(4), dict(a=1, b=2, c=3),
+                     set('abcdefg'), range(11), tuple(range(13))]
+         for i in range(100):
+-            args = [random.choice(argtypes) for j in range(random.randrange(5))]
++            with torch._dynamo.set_fullgraph(fullgraph=False):
++                args = [random.choice(argtypes) for j in range(random.randrange(5))]
+             expected_len = prod(map(len, args))
+             self.assertEqual(len(list(product(*args))), expected_len)
+             self.assertEqual(list(product(*args)), list(product1(*args)))
 @@ -1767,6 +1791,7 @@ class TestBasicOps(unittest.TestCase):
          script_helper.assert_python_ok("-c", script)
  

@@ -59,14 +59,24 @@ class ItertoolsVariable(VariableTracker):
     ) -> "VariableTracker":
         # See also: module `torch._dynamo.polyfills.itertools`
 
-        if (
-            self.value is itertools.product
-            and not kwargs
-            and all(arg.has_unpack_var_sequence(tx) for arg in args)
-        ):
-            seqs = [arg.unpack_var_sequence(tx) for arg in args]
+        if self.value is itertools.product:
+            if any(kw != "repeat" for kw in kwargs.keys()):
+                unimplemented_v2(
+                    gb_type="Unsupported kwargs for itertools.product",
+                    context=f"call_function {self} {args} {kwargs}",
+                    explanation=f"Expected kwargs: 'repeat', but got "
+                    f"{','.join(set(kwargs.keys()) - {'repeat'})}",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+
+            if "repeat" in kwargs.keys():
+                r = kwargs["repeat"].as_python_constant()
+            else:
+                r = 1
+            seqs = [arg.force_unpack_var_sequence(tx) for arg in args]
             items = [
-                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+                variables.TupleVariable(list(item))
+                for item in itertools.product(*seqs, repeat=r)
             ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
