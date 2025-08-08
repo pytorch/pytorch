@@ -20,6 +20,8 @@ from collections.abc import Iterator
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
 
+from torch.utils._traceback import CapturedTraceback
+
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ class MetricsContext:
         self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
+        self._edits: list[tuple[CapturedTraceback, set[str]]] = []
 
     def __enter__(self) -> "MetricsContext":
         """
@@ -112,6 +115,13 @@ class MetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
+    def _render_edits(self, pred: set[str]) -> str:
+        return "\n\n" + "\n\n".join(
+            "Previous Traceback:\n" + "".join(e.format())
+            for e, k in self._edits
+            if k & pred
+        )
+
     def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
         """
         Set a metric to a given value. Raises if the metric has been assigned previously
@@ -121,8 +131,11 @@ class MetricsContext:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
         if metric in self._metrics and not overwrite:
             raise RuntimeError(
-                f"Metric '{metric}' has already been set in the current context"
+                self._render_edits({metric})
+                + f"\n\nRuntimeError: Metric '{metric}' has already been set in the current context "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), {metric}))
         self._metrics[metric] = value
 
     def set_key_value(self, metric: str, key: str, value: Any) -> None:
@@ -150,8 +163,11 @@ class MetricsContext:
         existing = self._metrics.keys() & values.keys()
         if existing and not overwrite:
             raise RuntimeError(
-                f"Metric(s) {existing} have already been set in the current context"
+                self._render_edits(set(values.keys()))
+                + f"\n\nRuntimeError: Metric(s) {existing} have already been set in the current context.  "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), set(values.keys())))
         self._metrics.update(values)
 
     def update_outer(self, values: dict[str, Any]) -> None:
