@@ -581,7 +581,10 @@ class AsyncCompile:
             CuteDSL currently requires source files to do its compilation, there we
             use the PyCodeCache to write the source code to a file and load it.
         """
-        from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLKernelWrapper, MAIN_SUFFIX
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            CuteDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
 
@@ -593,7 +596,9 @@ class AsyncCompile:
             main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
             if not hasattr(mod, main_func_name):
                 available = [name for name in dir(mod) if callable(getattr(mod, name))]
-                raise RuntimeError(f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}")
+                raise RuntimeError(
+                    f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+                )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
 
