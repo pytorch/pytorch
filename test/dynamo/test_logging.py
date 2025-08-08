@@ -26,7 +26,10 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -34,10 +37,11 @@ from torch.testing._internal.logging_utils import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 requires_gpu = unittest.skipUnless(
-    HAS_CUDA or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
+    HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
 )
+
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

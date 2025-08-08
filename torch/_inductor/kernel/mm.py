@@ -15,6 +15,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
@@ -836,7 +837,19 @@ def tuned_mm(mat1, mat2, *, layout=None):
             lazy_register_extern_choice(k).bind(kernel_inputs.nodes(), layout)
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    best_config_future = None
+    # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
+    # The future will be awaited at scheduling time in select_algorithm.py
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config(mat1, mat2)
+
+    return autotune_select_algorithm(
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
