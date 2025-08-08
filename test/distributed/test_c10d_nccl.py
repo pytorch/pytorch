@@ -692,7 +692,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self._helper_test_extra_cuda_context_by_nvml()
         except ModuleNotFoundError:
             self._helper_test_extra_cuda_context_by_memory()
-        self.assertTrue(False)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
