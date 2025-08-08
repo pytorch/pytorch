@@ -361,7 +361,7 @@ sycl::event scaled_matmul(
                                      op_attr);
   } catch (dnnl::error& e) {
     if (e.status == dnnl_unimplemented)
-      throw std::runtime_error("Onednn cannot create primitive.");
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Onednn cannot create primitive.");
     // on any other error just re-throw
     throw;
   }
