@@ -22260,7 +22260,8 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                 dtypes=(
                     torch.float32, torch.float64, torch.float16, torch.complex64,
-                    torch.complex128, torch.bfloat16, torch.int8, torch.uint8
+                    torch.complex128, torch.bfloat16, torch.int8, torch.uint8,
+                    torch.int16, torch.int32, torch.int64
                 ),
                 device_type="cuda"
             ),
