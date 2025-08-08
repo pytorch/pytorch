@@ -29,7 +29,15 @@ class Tensor {
   std::shared_ptr<AtenTensorOpaque> ath_;
 
  public:
-  Tensor() = delete;
+  // Construct a stable::Tensor with an uninitialized AtenTensorHandle (ATH)
+  // Steals ownership from the ATH
+  Tensor() {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
+    ath_ = std::shared_ptr<AtenTensorOpaque>(ret, [](AtenTensorHandle ath) {
+      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+    });
+  }
 
   // Construct a stable::Tensor from an AtenTensorHandle (ATH)
   // Steals ownership from the ATH
@@ -113,6 +121,12 @@ class Tensor {
     int64_t size;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
     return size;
+  }
+
+  bool defined() const {
+    bool defined;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
+    return defined;
   }
 
   // =============================================================================
