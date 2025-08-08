@@ -466,11 +466,9 @@ def forward(self, x_1, output_1):
                 self.assertIn("return (buf0, s92, )", code)
         else:
             self.assertIn(
-                (
-                    "output_handles[0] = "
-                    if inductor_config.cpp_wrapper
-                    else "return (buf0, )"
-                ),
+                "output_handles[0] = "
+                if inductor_config.cpp_wrapper
+                else "return (buf0, )",
                 code,
             )
 
@@ -3523,7 +3521,10 @@ if HAS_GPU:
         fn = make_mutation_test(
             # Add default arguments to avoid Python lambda capture pitfall
             # This forces the capture at lambda creation
-            lambda kernel=kernel, inputs=inputs, tma_descriptor_metadata=tma_descriptor_metadata, outputs=outputs: (
+            lambda kernel=kernel,
+            inputs=inputs,
+            tma_descriptor_metadata=tma_descriptor_metadata,
+            outputs=outputs: (
                 kernel,
                 inputs,
                 tma_descriptor_metadata,
