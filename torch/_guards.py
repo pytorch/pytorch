@@ -159,6 +159,17 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
+        import torch._dynamo.config as config
+
+        if config._unsafe_skip_fsdp_module_guards:
+            return (
+                self
+                in (
+                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+                )
+                or self.is_fsdp_module()
+            )
         return self in (
             GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
@@ -256,7 +267,7 @@ class Guard:
     guard_types: Optional[list[str]] = None
     code_list: Optional[list[str]] = None
     obj_weakref: Optional[object] = None
-    guarded_class_weakref: Optional[type] = None
+    guarded_class_weakref: Optional[weakref.ReferenceType[Any]] = None
 
     stack: Optional[CapturedTraceback] = None
     user_stack: Optional[traceback.StackSummary] = None
@@ -369,7 +380,7 @@ class Guard:
     def set_export_info(
         self,
         guard_type: str,
-        guarded_class: Optional[type],
+        guarded_class: Optional[weakref.ReferenceType[Any]],
         code_list: list[str],
         obj_weakref: object,
     ) -> None:
@@ -622,8 +633,8 @@ class GuardsSet:
         if collect_debug_stack:
             if guard.stack is None:
                 guard.stack = CapturedTraceback.extract(skip=1 + skip)
-            if guard.user_stack is None:
-                guard.user_stack = TracingContext.extract_stack()
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: set[Guard]) -> None:

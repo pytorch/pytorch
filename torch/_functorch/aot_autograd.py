@@ -637,10 +637,15 @@ def create_aot_state(
 
     if fw_metadata.num_intermediate_bases > 0:
         assert not req_subclass_dispatch, f"""\
-torch.compile is currently being used with tensor subclass inputs:
-{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
-that alias one another, which is currently unsupported in the subclass use case. If you run into this,
-please file a github issue"""
+torch.compile is currently being used with tensor subclass inputs.
+We are attempting to a compile a graph with two graph outputs
+that alias one another, specifically output indices:
+
+    {[i for i, x in enumerate(fw_metadata.output_info) if x.output_type == OutputType.alias_of_intermediate]}
+
+ANY output aliasing (even for regular tensors) is currently unsupported if
+there are any subclass outputs. If you run into this, please file a github
+issue"""
 
     if aot_config.is_export:
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
@@ -893,6 +898,8 @@ def prepare_aot_module_simplified(
     boxed_forward_device_index: BoxedDeviceIndex,
     ignore_shape_env: bool,
     flatten: bool,
+    *,
+    force_non_lazy_backward_lowering: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -982,6 +989,7 @@ def prepare_aot_module_simplified(
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
+        force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1128,6 +1136,15 @@ def aot_module_simplified(
     return forward
 
 
+def boxed_nop_preserve_node_meta(fx_g, example_inputs):
+    def run(args):
+        with torch.fx.traceback.preserve_node_meta():
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
 def aot_export_joint_with_descriptors(
     stack: contextlib.ExitStack,
     mod: nn.Module,
@@ -1137,6 +1154,8 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1198,8 +1217,6 @@ def aot_export_joint_with_descriptors(
     of the inputs to determine if inputs are parameters and their FQNs.
     """
 
-    from torch._dynamo.backends.debugging import boxed_nop
-
     (
         functional_call,
         _params_buffers_flat,
@@ -1216,8 +1233,8 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        boxed_nop,
-        boxed_nop,
+        fw_compiler,
+        bw_compiler,
         default_partition,
         decompositions,
         keep_inference_input_mutations,
@@ -1225,6 +1242,12 @@ def aot_export_joint_with_descriptors(
         None,
         ignore_shape_env,
         flatten=True,
+        # Without this, we will attempt to "compile" the backward lazily
+        # at runtime, but this is pointless because it's just boxed_nop,
+        # it's trivial.  But this will get Inductor confused about scoping
+        # Metric(s) {'is_forward'} have already been set in the current
+        # context.
+        force_non_lazy_backward_lowering=True,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1271,6 +1294,7 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
+    @torch._dynamo.nonstrict_trace  # allow recursive compilation
     def unflattened_compiled_fn(*args, **kwargs):
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, jd.in_spec)))[0]
         # TODO: do I need to filter? I hope not!
