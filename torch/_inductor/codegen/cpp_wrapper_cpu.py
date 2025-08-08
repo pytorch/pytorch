@@ -22,13 +22,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
-from ..utils import (
-    _align,
-    aoti_model_name_from_config,
-    DeferredLineBase,
-    LineContext,
-    normalize_name,
-)
+from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -64,11 +58,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
-        self.model_class_name_suffix = ""
-        if config.aot_inductor.compile_standalone:
-            self.model_class_name_suffix = aoti_model_name_from_config()
+        self.model_class_name_suffix = (
+            config.aot_inductor.model_name_for_generated_files
+            if config.aot_inductor.compile_standalone
+            else ""
+        )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
+
         super().__init__()
+
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
@@ -518,6 +516,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
+            self.codegen_additional_funcs()
+
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
@@ -673,6 +673,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         code.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
         )
+
+    def codegen_additional_funcs(self):
+        pass
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1275,12 +1278,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if (
-            extern_kernel.python_kernel_name
-            == "torch.ops._c10d_functional.wait_tensor.default"
+        if extern_kernel.python_kernel_name in (
+            "torch.ops._c10d_functional.all_reduce_.default",
+            "torch.ops._c10d_functional.wait_tensor.default",
         ):
-            # wait_tensor returns its input, and the returned tensor is not used anywhere,
-            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
+            # all_reduce_ is an inplace op and its returned tensor is not used anywhere.
+            # wait_tensor returns its input without any modification and the returned tensor is not used anywhere.
+            # In both cases, we can immediately delete the returned AtenTensorHandle to reduce its lifetime.
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
             )

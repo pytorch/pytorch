@@ -104,6 +104,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -1332,9 +1333,16 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
-            # This is a userdefined class, so install an ID_MATCH even if its a
-            # global variable.
-            self.install_guards(GuardBuilder.ID_MATCH)
+
+            if not is_from_closure_source(self.source):
+                # For closure source, the variable comes from LOAD_SUPER_ATTR,
+                # which calls self.__class__. This is internal Cpython
+                # implementation, and it is rare for the user to modify
+                # self.__class__ manually.
+                # For other cases, this is a userdefined class, so install an
+                # ID_MATCH even if its a global variable.
+                self.install_guards(GuardBuilder.ID_MATCH)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
