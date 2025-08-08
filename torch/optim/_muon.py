@@ -272,5 +272,5 @@ def muon(
         msign_fn=msign_fn,
         msign_fn_config=msign_fn_config,
         adjust_lr_fn=adjust_lr_fn,
-        has_complex=has_complex
+        has_complex=has_complex,
     )
