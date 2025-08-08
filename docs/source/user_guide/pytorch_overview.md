@@ -47,17 +47,6 @@ PyTorch extends far beyond basic arithmetic operations to provide a complete eco
 * {func}`torch.export`: Enables exporting models for deployment in various environments.
 * Distributed training: Facilitates training across multiple GPUs and nodes, making it suitable for large-scale machine learning tasks
 
-# Performance Optimization
-PyTorch provides several tools for optimizing model performance:
-
-## {func}`torch.compile`
-This feature allows you to compile PyTorch models to improve execution speed and efficiency. By applying compilation decorators to functions or models, PyTorch can optimize the computational graph and generate more efficient code, often resulting in significant performance improvements without requiring code changes.
-
-## {func}`torch.export`
-This functionality enables exporting trained models for deployment in various environments, making it easier to transition from research to production. Exported models can be optimized for inference and deployed across different platforms while maintaining compatibility and performance.
-
-
-
 ```{seealso}
 * {ref}`torch.compiler_overview`
 * {ref}`torch.export`
