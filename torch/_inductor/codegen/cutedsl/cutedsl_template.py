@@ -63,6 +63,8 @@ class CuteDSLTemplate(KernelTemplate):
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = self._template_from_string(source)
+        assert name not in self.all_templates, "duplicate template name"
+        CuteDSLTemplate.all_templates[name] = self
 
     @functools.lru_cache(None)
     def _template_from_string(self, source: str) -> Any:
