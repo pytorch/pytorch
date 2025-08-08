@@ -605,7 +605,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         pynvml provides python bindings for NVIDIA NVML functionalities.
         Here we are interested in: nvmlDeviceGetComputeRunningProcesses
         """
+        print("try to import pynvml")
         import pynvml
+        print("pynvml imported successfully")
 
         pynvml.nvmlInit()
 
@@ -637,6 +639,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         A helper for `test_extra_cuda_context`, if pynvml is NOT available.
         If extra context is created, it would manifest into device 0's memory usage.
         """
+        print("call _helper_test_extra_cuda_context_by_memory")
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         # Rank 0 takes a snapshot before collective -- this snapshot should have
