@@ -6,6 +6,7 @@ import heapq
 import logging
 from typing import Callable, TYPE_CHECKING, TypedDict, Union
 
+import torch
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
@@ -302,7 +303,11 @@ def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> tuple[list[BufferInfo], dict[BaseSchedulerNode, int]]:
+) -> tuple[
+    list[BufferInfo],
+    dict[BaseSchedulerNode, int],
+    dict[FreeableInputBuffer, BaseSchedulerNode],
+]:
     """
     Compute buffer allocation and deallocation sizes and map their
     lifetime to the node schedule
@@ -316,15 +321,22 @@ def compute_memory_timeline(
 
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []
+    f_input_buf_to_snode_last_use = {}
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
-        end_step = (
-            len(nodes) - 1
-            if buf_name in graph_outputs
-            else max(
-                node_to_step[succ_node] for succ_node in input_buf.mpi_buffer.succ_nodes
-            )
-        )
+        end_step = len(nodes) - 1
+        if buf_name not in graph_outputs:
+            max_step = -1
+            max_step_snode = None
+            succ_nodes = input_buf.mpi_buffer.succ_nodes
+            for succ_node in succ_nodes:
+                step = node_to_step[succ_node]
+                if step > max_step:
+                    max_step = step
+                    max_step_snode = succ_node
+            end_step = max_step
+            f_input_buf_to_snode_last_use[input_buf] = max_step_snode
+
         buf_info_list.append(
             BufferInfo(
                 input_buf,
@@ -362,7 +374,7 @@ def compute_memory_timeline(
                 )
             )
 
-    return buf_info_list, node_to_step
+    return buf_info_list, node_to_step, f_input_buf_to_snode_last_use
 
 
 def estimate_peak_memory(
@@ -379,7 +391,7 @@ def estimate_peak_memory(
         List[int]: memory usage at each node (or each step).
     """
 
-    buf_info_list, _ = compute_memory_timeline(
+    buf_info_list, _, _ = compute_memory_timeline(
         nodes, name_to_freeable_input_buf, graph_outputs
     )
 
@@ -402,26 +414,32 @@ def estimate_peak_memory(
 
     return (max_memory, snodes_curr_memory)
 
+
 @dataclasses.dataclass
 class SNodeMemory:
     size_alloc: int
     size_free: int
 
-def estimate_peak_memory_debug(
+
+def estimate_peak_memory_allocfree(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
 ) -> tuple[int, list[int]]:
     """
-    Given a list of nodes in their execution order, estimate the peak memory, by
-    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
+    Alternative version of estimate_peak_memory, that respects the fact,
+    that every SchedulerNode has multiple phases:
+    1. alloc ( outputs )
+    2. run_kernel
+    3. dealloc last_use buffers
+    estimate_peak_memory collapses memory into one value: size_alloc - size_free
+    While peak memory happens aftter alloc.
 
-    Returns:
-        int: peak memory
-        List[int]: memory usage at each node (or each step).
+    Duplicating the code to not migrate all callsites at once,
+    In furture usages of estimate_peak_memory will migrate to this version.
     """
 
-    buf_info_list, _ = compute_memory_timeline(
+    buf_info_list, _, f_input_buf_to_snode_last_use = compute_memory_timeline(
         nodes, name_to_freeable_input_buf, graph_outputs
     )
 
@@ -437,7 +455,6 @@ def estimate_peak_memory_debug(
     for i, node in enumerate(nodes):
         snodes_allocfree[node] = step_idx_allocfree[i]
 
-    torch.distributed.breakpoint()
     # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0
@@ -451,8 +468,27 @@ def estimate_peak_memory_debug(
         cur_memory -= free
         post_free = cur_memory
         snodes_curr_memory.append((post_alloc, post_free))
+    if max_memory == 0:
+        print(f"XXX ZERO_PEAK!!! len(nodes):{len(nodes)}")
+        for i, buf_info in enumerate(buf_info_list):
+            print(f"XXX BUF_INFO[{i}]:{buf_info}")
+        for i, af in enumerate(step_idx_allocfree):
+            print(f"XXX AF[{i}]:{af}")
+        for i, m in enumerate(snodes_curr_memory):
+            print(f"SNODE_CURR_MEMORY[{i}]:{m}")
+        for i, af in enumerate(snodes_allocfree.values()):
+            print(f"SNODE_ALLOCFREE[{i}]:{af}")
+        import sys
 
-    return (max_memory, snodes_curr_memory, snodes_allocfree)
+        sys.exit(1)
+
+    return (
+        max_memory,
+        snodes_curr_memory,
+        snodes_allocfree,
+        f_input_buf_to_snode_last_use,
+    )
+
 
 def topological_sort_lpmf(
     nodes: list[BaseSchedulerNode],
@@ -788,3 +824,30 @@ def reorder_for_peak_memory(
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
     return best_result.order
+
+
+_mems = []
+
+
+def _reset():
+    _mems.clear()
+
+
+def _get_mems():
+    return _mems
+
+
+def foo():
+    _mems.append(torch.cuda.memory_allocated())
+
+
+lib = torch.library.Library("_test", "FRAGMENT")
+lib.define("foo() -> ()")
+lib.impl("foo", foo, "BackendSelect")
+from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+
+_register_effectful_op(
+    torch.ops._test.foo.default,
+    _EffectType.ORDERED,
+)

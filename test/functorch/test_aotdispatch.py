@@ -6893,9 +6893,12 @@ metadata incorrectly.
         args = [
             None,
             None,
-            torch.empty_strided([192, 1], (1, 1), dtype=torch.int64, device="cuda").zero_(),
+            torch.empty_strided(
+                [192, 1], (1, 1), dtype=torch.int64, device="cuda"
+            ).zero_(),
             torch.empty_strided([192], (1,), dtype=torch.int64, device="cuda").zero_(),
         ]
+
         def fn(inp, args):
             return torch.ops.aten._unsafe_index(inp, args)
 
@@ -6907,8 +6910,9 @@ metadata incorrectly.
             print(f"out.shape:{out.shape} out.stride:{out.stride()}")
 
         out_compile = torch.compile(fn)(inp, args)
-        print(f"out_compile.shape{out_compile.shape} out_compile.stride:{out_compile.stride()}")
-
+        print(
+            f"out_compile.shape{out_compile.shape} out_compile.stride:{out_compile.stride()}"
+        )
 
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
