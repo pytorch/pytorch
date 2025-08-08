@@ -1773,8 +1773,12 @@ class BuiltinVariable(VariableTracker):
                             obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
                         )
 
+            if isinstance(obj, ListVariable):
+                items = obj.items
+            else:
+                items = list(obj.unpack_var_sequence(tx))
             return cls(
-                list(obj.unpack_var_sequence(tx)),
+                items,
                 mutation_type=ValueMutationNew(),
             )
 

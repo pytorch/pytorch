@@ -1245,6 +1245,7 @@ class ListIteratorVariable(IteratorVariable):
         # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
+        self.is_exhausted = False
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
@@ -1252,7 +1253,8 @@ class ListIteratorVariable(IteratorVariable):
     def next_variable(self, tx):
         assert self.is_mutable()
         old_index = self.index
-        if old_index >= len(self.items):
+        if old_index >= len(self.items) or self.is_exhausted:
+            self.is_exhausted = True
             raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
@@ -1274,22 +1276,26 @@ class ListIteratorVariable(IteratorVariable):
         return True
 
     def unpack_var_sequence(self, tx):
+        if self.is_exhausted:
+            return []
         r = list(self.items[self.index :])
         self.index = len(self.items)
+        self.is_exhausted = True
         return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        remaining_items = self.items[self.index :]
-        codegen.foreach(remaining_items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
-                create_instruction("GET_ITER"),
-            ]
-        )
+        if not self.is_exhausted:
+            remaining_items = self.items[self.index :]
+            codegen.foreach(remaining_items)
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                    create_instruction("GET_ITER"),
+                ]
+            )
 
 
 class TupleIteratorVariable(ListIteratorVariable):

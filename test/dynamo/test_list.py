@@ -389,6 +389,21 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__delitem__, 1.1)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
 
+    @make_dynamo_test
+    def test_iter_mutate1(self):
+        l = [1]
+        it = iter(l)
+        next(it)
+        l.append(2)
+        self.assertEqual(next(it), 2)
+
+    @make_dynamo_test
+    def test_iter_mutate2(self):
+        l = [1]
+        it = iter(l)
+        l.clear()
+        self.assertRaises(StopIteration, next, it)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
