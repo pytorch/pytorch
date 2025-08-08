@@ -231,12 +231,13 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(d, {1: t, 2: t})
 
     def test_reconstruct_generator_with_object_mutation(self):
-        class Counter:
-            def __init__(self):
-                self.x = 0
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Counter:
+                def __init__(self):
+                    self.x = 0
 
-            def incr(self):
-                self.x += 1
+                def incr(self):
+                    self.x += 1
 
         def whoo(t, c):
             c.incr()
@@ -265,12 +266,13 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_reconstruct_generator_with_object_mutation_before(self):
-        class Counter:
-            def __init__(self):
-                self.x = 0
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Counter:
+                def __init__(self):
+                    self.x = 0
 
-            def incr(self):
-                self.x += 1
+                def incr(self):
+                    self.x += 1
 
         def whoo(t, c):
             c.incr()
@@ -1538,9 +1540,10 @@ class TestGeneratorThrow(GeneratorTestsBase):
         self._compile_check(fn)
 
     def test_return_value_in_except_and_finally(self):
-        class Foo:
-            def __init__(self, x):
-                self.x = x
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Foo:
+                def __init__(self, x):
+                    self.x = x
 
         def whoo():
             try:
