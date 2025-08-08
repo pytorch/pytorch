@@ -6578,6 +6578,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "call_function":
                 self.assertNotEqual(node.target, torch.ops.aten.to.dtype_layout)
 
+        # test mutation for decomposed program
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 4)
+        self.assertEqual(id(y), id(x))
+
     @requires_gpu
     def test_export_lstm_gpu_fake_tensor(self):
 
