@@ -8,8 +8,8 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
-    consolidate_safetensors_files,
     _calculate_max_contiguous_elements,
+    consolidate_safetensors_files,
 )
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.device_mesh import init_device_mesh
