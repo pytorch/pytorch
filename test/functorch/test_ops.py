@@ -399,6 +399,25 @@ skip_noncontig = {
     "as_strided_copy",
 }
 
+ordered_op_names = {
+    "sort",
+    "topk",
+    "lt",
+    "argmin",
+    "le",
+    "ge",
+    "amax",
+    "maximum",
+    "minimum",
+    "clamp",
+    "amin",
+    "gt",
+    "ceil",
+    "argmax",
+    "floor",
+}
+ordered_op_db = tuple(filter(lambda op: op.name in ordered_op_names, op_db))
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -2967,6 +2986,21 @@ class TestOperators(TestCase):
             expected_fn(torch.ones_like(expected_o)),
             actual_fn(torch.ones_like(actual_o)),
         )
+
+    @ops(ordered_op_db, dtypes=[torch.complex32, torch.complex64, torch.complex128])
+    def test_ordered_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
 
 
 only_for = ("cpu", "cuda")
