@@ -171,13 +171,15 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
 elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
     setup_ccache
 
+    # NOTE: We log directly to PYTORCH_FINAL_PACKAGE_DIR to ensure logs upload
+    # as part of the artifacts
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
         USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
         python3 tools/packaging/build_wheel.py \
           --find-python manylinux \
-          --log-destination "/tmp/${WHEELHOUSE_DIR}" \
+          --log-destination "${PYTORCH_FINAL_PACKAGE_DIR}" \
           -d "/tmp/${WHEELHOUSE_DIR}"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
