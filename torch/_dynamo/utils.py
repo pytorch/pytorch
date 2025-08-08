@@ -4705,7 +4705,7 @@ class CompileTimeInstructionCounter:
 
 
 class CompileCounterInt(int):
-    def __add__(self, other):
+    def __add__(self, other: Any) -> CompileCounterInt:
         return CompileCounterInt(super().__add__(other))
 
 
