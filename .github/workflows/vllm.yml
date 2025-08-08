@@ -65,12 +65,12 @@ jobs:
     name: cuda12.8-py3.12-gcc11-sm89-vllm-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-89,
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-sm89
+      torch-build-sm89,
+      torch-build-sm89
     ]
     with:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
-      docker-image: ${{ needstorch-build-sm89.outputs.docker-image }}
+      docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
       test-matrix: ${{ needs.torch-build-sm89.outputs.test-matrix }}
-      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm89-additional-build
+      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm89-vllm-additional-build
     secrets: inherit
