@@ -24,7 +24,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -1330,7 +1330,7 @@ class TestCompileTorchbind(TestCase):
             return tq
 
         with self.assertRaisesRegex(
-            RuntimeError, "call method __setattr__ on script object is not safe"
+            RuntimeError, "Weird method call on TorchScript object"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
@@ -1343,7 +1343,7 @@ class TestCompileTorchbind(TestCase):
             return tq._not_defined_attr
 
         with self.assertRaisesRegex(
-            RuntimeError, "doesn't define method _not_defined_attr"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
@@ -1434,7 +1434,7 @@ def forward(self, token, obj, x):
 
         x = torch.randn(2, 3)
         with self.assertRaisesRegex(
-            RuntimeError, "FakeScriptObject doesn't define method"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
 
@@ -1552,7 +1552,7 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_gpu
+    @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
@@ -1570,7 +1570,7 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_gpu
+    @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     def test_export_obj_torchbind_op_with_autocast(self, device):
         class Mod(torch.nn.Module):

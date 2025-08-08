@@ -14,7 +14,6 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/header_only_apis.txt @janeyx99
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
@@ -196,3 +195,8 @@ torch/backends/cudnn/ @eqy @syed-ahmed
 /torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/utils/pytree/ @XuehaiPan
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
+
+# Relating to libtorch ABI
+/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
+/torch/headeronly/ @janeyx99
+/torch/header_only_apis.txt @janeyx99

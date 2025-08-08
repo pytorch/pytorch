@@ -80,7 +80,7 @@ def div_floor_integer(a, b):
 def remainder_integer(a, b):
     # NOTE: a % b matches C division, not floor division
     remainder = a % b
-    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
+    return tl.where((remainder != 0) & ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
 @triton.jit
@@ -131,9 +131,9 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan and not b_isnan
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
-        equal |= a_isnan and b_isnan
+        equal |= a_isnan & b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -147,9 +147,9 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan and not b_isnan
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
-        equal |= a_isnan and b_isnan
+        equal |= a_isnan & b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
