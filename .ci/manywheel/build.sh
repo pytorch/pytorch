@@ -9,13 +9,13 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         # Legacy behavior for CircleCI
         bash "${SCRIPTPATH}/build_cuda.sh"
         ;;
-    cuda)
+    cuda | cuda-aarch64)
         bash "${SCRIPTPATH}/build_cuda.sh"
         ;;
     rocm)
         bash "${SCRIPTPATH}/build_rocm.sh"
         ;;
-    cpu | cpu-cxx11-abi | cpu-s390x)
+    cpu | cpu-aarch64 | cpu-cxx11-abi | cpu-s390x)
         bash "${SCRIPTPATH}/build_cpu.sh"
         ;;
     xpu)
