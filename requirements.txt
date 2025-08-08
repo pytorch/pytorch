@@ -20,4 +20,4 @@ requests==2.32.4
 setuptools==75.8.2
 sympy==1.13.3
 types-dataclasses==0.6.6
-typing-extensions==4.10.0
+typing-extensions==4.14.1
