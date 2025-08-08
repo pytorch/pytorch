@@ -90,7 +90,7 @@ class TestLocalMap(DTensorTestBase):
         )  # row-wisely sharded W tensor
 
         # Test 1: use the function returned from calling local_map
-        # get the function wrapped with DTensor/Tensor convertion
+        # get the function wrapped with DTensor/Tensor conversion
         # mm_allreduce_forward is a function that applies to Tensors with manual collective
         # local_mm_allreduce_forward is the function that does the same but applies to
         # DTensors' `_local_tensor`.

@@ -37,6 +37,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.distributed.numa.binding import maybe_wrap_with_numa_bindings, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -811,7 +812,12 @@ class SubprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
+        numa_options: Optional[NumaOptions] = None,
     ):
+        entrypoint, args = maybe_wrap_with_numa_bindings(
+            entrypoint=entrypoint, local_rank_to_args=args, numa_options=numa_options
+        )
+
         super().__init__(
             name,
             entrypoint,
