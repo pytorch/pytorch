@@ -355,17 +355,28 @@ Tensor my_zero_(Tensor t) {
   return zero_(t);
 }
 
+Tensor my_amax(Tensor t) {
+  return amax(t, 0, false);
+}
+
 void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   auto res = my_zero_(to<Tensor>(stack[0]));
   stack[0] = from(res);
 }
 
+void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
+  m.def("my_amax(Tensor a) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
+  m.impl("my_amax", &boxed_my_amax);
 }
 
 bool test_default_constructor(bool defined) {
