@@ -251,20 +251,24 @@ make_wheel_record() {
 }
 
 replace_needed_sofiles() {
-    find $1 -name '*.so*' | while read sofile; do
-        origname=$2
-        patchedname=$3
-        if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+  (
+      # use +x here to limit command output spam
+      set +x
+      find $1 -name '*.so*' | while read sofile; do
+          origname=$2
+          patchedname=$3
+          if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
             set +e
             origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
             ERRCODE=$?
             set -e
             if [ "$ERRCODE" -eq "0" ]; then
-                echo "patching $sofile entry $origname to $patchedname"
-                $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
+              echo "patching $sofile entry $origname to $patchedname"
+              $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
             fi
-        fi
-    done
+          fi
+      done
+  )
 }
 
 echo 'Built this wheel:'
@@ -352,19 +356,27 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         done
     fi
 
-    # set RPATH of _C.so and similar to $ORIGIN, $ORIGIN/lib
-    find $PREFIX -maxdepth 1 -type f -name "*.so*" | while read sofile; do
-        echo "Setting rpath of $sofile to ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'}"
-        $PATCHELF_BIN --set-rpath ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile
-    done
+    (
+        # use +x here to limit command output spam
+        set +x
+        # set RPATH of _C.so and similar to $ORIGIN, $ORIGIN/lib
+        find $PREFIX -maxdepth 1 -type f -name "*.so*" | while read sofile; do
+            echo "Setting rpath of $sofile to ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'}"
+            $PATCHELF_BIN --set-rpath ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'} ${FORCE_RPATH:-} $sofile
+            $PATCHELF_BIN --print-rpath $sofile
+        done
+    )
 
-    # set RPATH of lib/ files to $ORIGIN
-    find $PREFIX/lib -maxdepth 1 -type f -name "*.so*" | while read sofile; do
-        echo "Setting rpath of $sofile to ${LIB_SO_RPATH:-'$ORIGIN'}"
-        $PATCHELF_BIN --set-rpath ${LIB_SO_RPATH:-'$ORIGIN'} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile
-    done
+    (
+        # use +x here to limit command output spam
+        set +x
+        # set RPATH of lib/ files to $ORIGIN
+        find $PREFIX/lib -maxdepth 1 -type f -name "*.so*" | while read sofile; do
+            echo "Setting rpath of $sofile to ${LIB_SO_RPATH:-'$ORIGIN'}"
+            $PATCHELF_BIN --set-rpath ${LIB_SO_RPATH:-'$ORIGIN'} ${FORCE_RPATH:-} $sofile
+            $PATCHELF_BIN --print-rpath $sofile
+        done
+    )
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
@@ -378,9 +390,12 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         echo "Generating new record file $record_file"
         : > "$record_file"
         # generate records for folders in wheel
-        find * -type f | while read fname; do
-            make_wheel_record "$fname" >>"$record_file"
-        done
+        (
+            set +x
+            find * -type f | while read fname; do
+              make_wheel_record "$fname" >>"$record_file"
+            done
+        )
     fi
 
     if [[ $BUILD_DEBUG_INFO == "1" ]]; then
