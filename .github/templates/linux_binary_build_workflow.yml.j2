@@ -50,6 +50,7 @@ env:
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
+  USE_SEQUENTIAL: !{{ "1" if use_sequential else "0" }}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -90,6 +91,9 @@ jobs:
       {%- endif %}
       {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
       timeout-minutes: 420
+      {%- endif %}
+      {%- if use_sequential %}
+      USE_SEQUENTIAL: 1
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

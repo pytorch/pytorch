@@ -274,12 +274,17 @@ def generate_wheels_matrix(
     arches: Optional[list[str]] = None,
     python_versions: Optional[list[str]] = None,
     use_split_build: bool = False,
+    use_sequential: bool = False,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
         # NOTE: We only build manywheel packages for x86_64 and aarch64 and s390x linux
         package_type = "manywheel"
 
+    # If we're using sequential builds, we don't care about the python versions since they
+    # will be inferred from the pyproject.toml file using tools/packaging/build_wheel.py
+    if use_sequential:
+        python_versions = [FULL_PYTHON_VERSIONS[0]]
     if python_versions is None:
         python_versions = FULL_PYTHON_VERSIONS
 
@@ -327,6 +332,10 @@ def generate_wheels_matrix(
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
+            python_build_name = (
+                f"py{python_version}" if not use_sequential else "sequential"
+            )
+
             if (
                 arch_version in ["12.9", "12.8", "12.6"]
                 and os == "linux"
@@ -355,7 +364,7 @@ def generate_wheels_matrix(
                             else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                         ),
                         "build_name": (
-                            f"{package_type}-py{python_version}-{gpu_arch_type}"
+                            f"{package_type}-{python_build_name}-{gpu_arch_type}"
                             f"{'-' if 'aarch64' in gpu_arch_type else ''}{gpu_arch_version.replace('-aarch64', '')}".replace(
                                 ".", "_"
                             )
@@ -381,7 +390,7 @@ def generate_wheels_matrix(
                             ].split(":")[1],
                             "package_type": package_type,
                             "pytorch_extra_install_requirements": "",
-                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
+                            "build_name": f"{package_type}-{python_build_name}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
                                 ".", "_"
                             ),
                         }
@@ -403,7 +412,7 @@ def generate_wheels_matrix(
                             arch_version
                         ].split(":")[1],
                         "package_type": package_type,
-                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        "build_name": f"{package_type}-{python_build_name}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
