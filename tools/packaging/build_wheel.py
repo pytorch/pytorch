@@ -140,13 +140,62 @@ class Builder:
     # The python interpreter that we should be using
     interpreter: str
 
-    def __init__(self, interpreter: str) -> None:
+    def __init__(self, interpreter: str, log_destination: str) -> None:
         self.interpreter = interpreter
+        self.log_destination = log_destination
 
     def setup_py(self, cmd_args: list[str]) -> bool:
-        return (
-            run_cmd([self.interpreter, str(SETUP_PY_PATH), *cmd_args]).returncode == 0
-        )
+        interpreter_version_str = interpreter_version(self.interpreter)
+        captured_output = []
+
+        # Use Popen for real-time streaming
+        with subprocess.Popen(
+            [self.interpreter, str(SETUP_PY_PATH), *cmd_args],
+            env={**os.environ},  # Ensure we use the same environment as the parent process
+            stdout=subprocess.PIPE if self.log_destination else subprocess.STDOUT,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=0,  # Unbuffered for real-time output
+        ) as process:
+            if process.stdout is None:
+                raise ValueError("Failed to start process")
+            if self.log_destination:
+                logger.info("Logging to %s", self.log_destination)
+            counter = 0
+            # Stream output line by line
+            for line in process.stdout:
+                if not self.log_destination:
+                    print(
+                        line, end=""
+                    )  # Print to console in real time if we're not logging to a file
+                    sys.stdout.flush()  # Force flush to ensure immediate output
+                else:
+                    # print a dot for every 10 lines to indicate progress
+                    if counter % 10 == 0:
+                        print(".", end="")
+                        sys.stdout.flush()  # Force flush for dots too
+                    counter += 1
+                captured_output.append(line)  # Capture for logging
+            else:
+                print()  # Empty print to ensure new logs will be written on a new line
+                sys.stdout.flush()
+
+            # Wait for process to complete
+            process.wait()
+
+            if process.returncode != 0:
+                logger.error("Build failed with return code %d", process.returncode)
+                logger.error("Last 100 lines of output:")
+                for line in captured_output[-100:]:
+                    logger.error(line.strip())
+
+            # Write captured output to log file
+            with open(
+                f"{self.log_destination}/builder_{interpreter_version_str}.log", "a"
+            ) as f:
+                f.writelines(captured_output)
+
+            return process.returncode == 0
 
     def bdist_wheel(self, destination: str) -> bool:
         logger.info("Running bdist_wheel -d %s", destination)
@@ -159,7 +208,15 @@ class Builder:
     def install_requirements(self) -> None:
         logger.info("Installing requirements")
         run_cmd(
-            [self.interpreter, "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)]
+            [
+                self.interpreter,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "-r",
+                str(REQUIREMENTS_PATH),
+            ]
         )
 
 
@@ -191,6 +248,12 @@ def parse_args() -> argparse.Namespace:
         default="dist/",
         type=str,
         help="Destination to put the compiled binaries",
+    )
+    parser.add_argument(
+        "--log-destination",
+        default="",
+        type=str,
+        help="Destination to put the build logs",
     )
     return parser.parse_args()
 
@@ -224,9 +287,12 @@ def main() -> None:
             "dest is 'dist/' while multiple python versions specified, output will be overwritten"
         )
 
+    if args.log_destination:
+        os.makedirs(args.log_destination, exist_ok=True)
+
     for interpreter in pythons:
         with venv(interpreter) as venv_interpreter:
-            builder = Builder(venv_interpreter)
+            builder = Builder(venv_interpreter, args.log_destination)
             # clean actually requires setuptools so we need to ensure we
             # install requirements before
             builder.install_requirements()
