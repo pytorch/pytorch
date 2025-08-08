@@ -424,6 +424,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
+    def get_source(self):
+        source = self.source
+
+        if source and isinstance(self, variables.UserMethodVariable):
+            source = self.source_fn
+        return source
+
     def bind_args(self, parent, args, kwargs) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
@@ -436,7 +443,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if not isinstance(fn, FunctionType):
             raise TypeError("Only supports regular Python functions.")
         root_tx = parent.output.root_tx
-        result = bind_args_cached(fn, root_tx, self.source, args, kwargs)
+
+        source = self.get_source()
+        result = bind_args_cached(fn, root_tx, source, args, kwargs)
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
@@ -449,8 +458,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if cell in side_effects:
                 cell_var = side_effects[cell]
 
-            elif self.source:
-                closure_cell = GetItemSource(ClosureSource(self.source), idx)
+            elif source:
+                closure_cell = GetItemSource(ClosureSource(source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -480,7 +489,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
-        return fn_var_getattr(tx, self.fn, self.source, name)
+        source = self.get_source()
+        return fn_var_getattr(tx, self.fn, source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
