@@ -5091,6 +5091,7 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
     Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
     Similar to other template buffers but specialized for CuteDSL operations.
     """
+
     def __init__(
         self,
         layout: Layout,

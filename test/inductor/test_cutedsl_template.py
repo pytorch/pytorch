@@ -1,14 +1,16 @@
 # Owner(s): ["module: inductor"]
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import torch
 from torch._inductor.test_case import TestCase
 
+
 # Try importing and set flag for availability
 try:
-    import cutlass
-    import cutlass.cute as cute
+    import cutlass  # noqa: F401
+    import cutlass.cute as cute  # noqa: F401
+
     HAS_CUTLASS = True
 except ImportError:
     HAS_CUTLASS = False
@@ -38,7 +40,7 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIn("from cutlass.cute.runtime import from_dlpack", imports)
         self.assertIsInstance(imports, str)
 
-        lines = imports.strip().split('\n')
+        lines = imports.strip().split("\n")
         self.assertEqual(len(lines), 4)
 
     def test_render_includes_imports(self):
@@ -66,8 +68,10 @@ def {{kernel_name}}_kernel():
         # The imports might have leading whitespace, so strip it
         rendered_code_stripped = rendered_code.lstrip()
 
-        self.assertTrue(rendered_code_stripped.startswith("import torch"),
-                       f"Code should start with 'import torch', got: {rendered_code_stripped[:50]}")
+        self.assertTrue(
+            rendered_code_stripped.startswith("import torch"),
+            f"Code should start with 'import torch', got: {rendered_code_stripped[:50]}",
+        )
         self.assertIn("import cutlass", rendered_code)
         self.assertIn("import cutlass.cute as cute", rendered_code)
         self.assertIn("from cutlass.cute.runtime import from_dlpack", rendered_code)
@@ -91,9 +95,9 @@ def {{kernel_name}}_kernel():
 
         kernel.render(mock_template)
 
-        self.assertIn('def_kernel', captured_env)
-        self.assertIn('kernel_name', captured_env)
-        self.assertTrue(callable(captured_env['def_kernel']))
+        self.assertIn("def_kernel", captured_env)
+        self.assertIn("kernel_name", captured_env)
+        self.assertTrue(callable(captured_env["def_kernel"]))
 
     def test_multiple_templates_unique_names(self):
         # Clean registry first
@@ -101,13 +105,13 @@ def {{kernel_name}}_kernel():
         if test_name in CuteDSLTemplate.all_templates:
             del CuteDSLTemplate.all_templates[test_name]
 
-        template1 = CuteDSLTemplate(
+        _ = CuteDSLTemplate(
             name=test_name,
             source="template1",
         )
 
         with self.assertRaises(AssertionError):
-            template2 = CuteDSLTemplate(
+            _ = CuteDSLTemplate(
                 name=test_name,
                 source="template2",
             )
@@ -121,18 +125,18 @@ def {{kernel_name}}_kernel():
 
         imports = kernel.gen_imports()
 
-        lines = imports.strip().split('\n')
+        lines = imports.strip().split("\n")
         for line in lines:
             if line:
-                self.assertFalse(line.startswith(' '),
-                               f"Line should not be indented: '{line}'")
-
+                self.assertFalse(
+                    line.startswith(" "), f"Line should not be indented: '{line}'"
+                )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cutedsl_code_generation(self):
         """Test that CuteDSL kernels appear in generated code."""
-        from torch._inductor.lowering import lowerings
         from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
         from torch._inductor.select_algorithm import autotune_select_algorithm
         from torch._inductor.utils import run_and_get_code
 
@@ -187,9 +191,7 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
             choices = []
             error = template.maybe_append_choice(
-                choices,
-                input_nodes=[a, b],
-                layout=a.get_layout()
+                choices, input_nodes=[a, b], layout=a.get_layout()
             )
 
             if error or not choices:
@@ -220,7 +222,9 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
             result, (code,) = run_and_get_code(compiled_fn, x, y)
 
             # Verify CuteDSL code is present
-            self.assertIn("cute", code.lower(), "CuteDSL code should be in generated code")
+            self.assertIn(
+                "cute", code.lower(), "CuteDSL code should be in generated code"
+            )
             # Could also check for specific markers
             # self.assertIn("@cute.kernel", code)
             # self.assertIn("cute.Tensor", code)
@@ -239,8 +243,8 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cutedsl_add_e2e(self):
         """End-to-end test overriding add operation with CuteDSL template."""
-        from torch._inductor.lowering import lowerings
         from torch._inductor.ir import TensorBox
+        from torch._inductor.lowering import lowerings
         from torch._inductor.select_algorithm import autotune_select_algorithm
 
         def cutedsl_grid(M, N, meta):
@@ -295,9 +299,7 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
             choices = []
             error = template.maybe_append_choice(
-                choices,
-                input_nodes=[a, b],
-                layout=a.get_layout()
+                choices, input_nodes=[a, b], layout=a.get_layout()
             )
 
             if error or not choices:
@@ -344,4 +346,5 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
+
     run_tests()
