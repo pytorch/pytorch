@@ -116,7 +116,40 @@ if has_triton():
     # RMA Operations (mem-based APIs - sizes in bytes)
     @core.extern
     def putmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
-        """Put data to remote PE. size_bytes specifies the size in bytes."""
+        """
+        Put data to remote PE using block-scoped operation.
+
+        This function copies a contiguous block of data from the local PE's memory
+        to a symmetric data object on the remote PE. The operation is performed at
+        thread block scope, meaning all threads in the block cooperate to perform
+        the transfer efficiently.
+
+        Args:
+            dst (int64): Symmetric address of the destination data object on the remote PE.
+                        Must be a pointer to symmetric memory allocated via NVSHMEM.
+            src (int64): Local address of the source data object containing data to be copied.
+                        Can be any valid local memory address.
+            size_bytes (int64): Number of bytes to transfer. Must be positive.
+            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation that returns after data has been copied out
+              of the source array on the local PE.
+            - The operation does not guarantee delivery to the destination PE.
+              Use nvshmem_fence() for ordering or nvshmem_quiet() for completion.
+            - All threads in the block should call this function with the same parameters.
+            - The source memory remains valid for use immediately after the call returns.
+
+        Example:
+            ```python
+            # Transfer 1024 bytes from local buffer to PE 1
+            nvshmem.putmem_block(remote_ptr, local_ptr, 1024, 1)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -135,7 +168,39 @@ if has_triton():
 
     @core.extern
     def getmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
-        """Get data from remote PE. size_bytes specifies the size in bytes."""
+        """
+        Get data from remote PE using block-scoped operation.
+
+        This function copies a contiguous block of data from a symmetric data object
+        on the remote PE to the local PE's memory. The operation is performed at
+        thread block scope, meaning all threads in the block cooperate to perform
+        the transfer efficiently.
+
+        Args:
+            dst (int64): Local address of the destination data object to be updated.
+                        Can be any valid local memory address.
+            src (int64): Symmetric address of the source data object on the remote PE.
+                        Must be a pointer to symmetric memory allocated via NVSHMEM.
+            size_bytes (int64): Number of bytes to transfer. Must be positive.
+            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation that returns after data has been delivered
+              to the destination array on the local PE.
+            - All threads in the block should call this function with the same parameters.
+            - The destination data is guaranteed to be available for use after the call returns.
+            - Provides method for copying contiguous symmetric data from different PE.
+
+        Example:
+            ```
+            # Get 1024 bytes from PE 0 into local buffer
+            nvshmem.getmem_block(local_ptr, remote_ptr, 1024, 0)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -163,7 +228,46 @@ if has_triton():
         pe,
         _semantic=None,
     ):  # type: ignore[no-untyped-def]
-        """Put data to remote PE with signal. size_bytes specifies the size in bytes."""
+        """
+        Put data to remote PE with atomic signal operation using block-scoped operation.
+
+        This function copies data from the local PE to the remote PE and then
+        atomically updates a signal variable on the remote PE to indicate completion.
+        This enables efficient point-to-point synchronization between PEs.
+
+        Args:
+            dst (int64): Symmetric address of the destination data object on the remote PE.
+            src (int64): Local address of the source data object containing data to be copied.
+            size_bytes (int64): Number of bytes to transfer. Must be positive.
+            sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
+                             Must be 8-byte aligned symmetric memory.
+            signal (int64): Value to be used in the signal operation.
+            sig_op (int64): Signal operation type. Common values:
+                           - NVSHMEM_SIGNAL_SET (0): Atomic set operation
+                           - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
+            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation that returns after data has been copied out
+              of the source array and the signal has been updated on the remote PE.
+            - The signal update is performed atomically with respect to other signal
+              operations and synchronization routines.
+            - The signal variable must be of type uint64_t in symmetric memory.
+            - Use with nvshmem_signal_wait_until() for synchronization.
+
+        Example:
+            ```
+            # Transfer data and set completion flag to 1
+            NVSHMEM_SIGNAL_SET = 0
+            nvshmem.putmem_signal_block(
+                dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
+            )
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -186,7 +290,43 @@ if has_triton():
     # Wait and Signal Operations
     @core.extern
     def wait_until(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
-        """Wait until a condition is met on a symmetric variable."""
+        """
+        Wait until a condition is met on a symmetric variable.
+
+        This function blocks the calling thread until the value at the specified
+        symmetric memory location satisfies the given comparison condition. This
+        provides a mechanism for point-to-point synchronization between PEs.
+
+        Args:
+            ivar (int64): Symmetric address of the variable to monitor. Must be a
+                         pointer to symmetric memory (typically int64/uint64).
+            cmp (int64): Comparison operator. Common values:
+                        - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
+                        - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
+                        - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
+                        - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
+                        - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
+                        - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+            cmp_val (int64): Value to compare against.
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation that will wait indefinitely until the
+              condition is satisfied.
+            - The variable must be in symmetric memory and accessible from other PEs.
+            - Updates to the variable from remote PEs will eventually become visible.
+            - Can be used with put operations from other PEs for synchronization.
+
+        Example:
+            ```
+            # Wait until flag becomes 1 (set by another PE)
+            NVSHMEM_CMP_EQ = 0
+            nvshmem.wait_until(flag_ptr, NVSHMEM_CMP_EQ, 1)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -204,7 +344,44 @@ if has_triton():
 
     @core.extern
     def signal_wait_until(sig_addr, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
-        """Wait until a signal variable meets a condition."""
+        """
+        Wait until a signal variable meets a specified condition.
+
+        This function blocks the calling thread until the value at the specified
+        signal variable satisfies the given comparison condition. Signal variables
+        are special uint64_t symmetric objects used for efficient synchronization
+        with signal operations.
+
+        Args:
+            sig_addr (int64): Symmetric address of the signal variable (uint64_t).
+                             Must be 8-byte aligned symmetric memory.
+            cmp (int64): Comparison operator. Common values:
+                        - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
+                        - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
+                        - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
+                        - NVSHMEM_CMP_GE (3): Wait until signal >= cmp_val
+                        - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
+                        - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
+            cmp_val (int64): Value to compare against.
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation designed specifically for signal variables.
+            - Signal variables are updated atomically by putmem_signal operations.
+            - More efficient than wait_until for signal-based synchronization patterns.
+            - Ensures the signal update is fully complete before returning.
+            - Commonly used with putmem_signal_block for producer-consumer patterns.
+
+        Example:
+            ```
+            # Wait for signal to be set to completion value
+            NVSHMEM_CMP_EQ = 0
+            nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -222,7 +399,40 @@ if has_triton():
 
     @core.extern
     def signal_op(sig_addr, signal, sig_op, pe, _semantic=None):  # type: ignore[no-untyped-def]
-        """Perform a signal operation on a remote PE."""
+        """
+        Perform an atomic signal operation on a remote PE.
+
+        This function atomically updates a signal variable on the specified remote PE
+        using the given operation and value. This enables efficient point-to-point
+        synchronization and notification between PEs.
+
+        Args:
+            sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
+                             Must be 8-byte aligned symmetric memory.
+            signal (int64): Value to be used in the signal operation.
+            sig_op (int64): Signal operation type. Common values:
+                           - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
+                           - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
+            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a one-sided operation - the remote PE does not need to participate.
+            - The signal operation is performed atomically on the remote PE.
+            - Can be used with signal_wait_until() on the remote PE for synchronization.
+            - Provides low-overhead notification mechanism between PEs.
+            - The signal variable must be of type uint64_t in symmetric memory.
+
+        Example:
+            ```python
+            # Atomically set remote signal to 1 to notify completion
+            NVSHMEM_SIGNAL_SET = 0
+            nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -242,7 +452,41 @@ if has_triton():
     # Memory Ordering Operations
     @core.extern
     def fence(_semantic=None):  # type: ignore[no-untyped-def]
-        """Ensure ordering of put operations."""
+        """
+        Ensure ordering of put operations to each remote PE.
+
+        This function provides a memory fence that ensures point-to-point ordering
+        of remote memory operations. Put operations issued before the fence are
+        guaranteed to be ordered before put operations issued after the fence,
+        when targeting the same remote PE.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This provides weaker ordering guarantees than quiet().
+            - Operations to each PE are ordered, but operations to different PEs
+              may still be reordered relative to each other.
+            - Does not guarantee completion of operations, only ordering.
+            - Non-blocking operations are not ordered by fence - use quiet() instead.
+            - Essential for ensuring correct ordering in communication patterns.
+
+        Memory Ordering Guarantees:
+            - Put operations before fence() → ordered before → Put operations after fence()
+            - Ordering is maintained per-destination-PE basis
+            - Remote PEs can observe the enforced ordering
+
+        Example:
+            ```
+            # Ensure first put completes before second put to same PE
+            nvshmem.putmem_block(dst1, src1, size, target_pe)
+            nvshmem.fence()  # Enforce ordering
+            nvshmem.putmem_block(dst2, src2, size, target_pe)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -256,7 +500,41 @@ if has_triton():
 
     @core.extern
     def quiet(_semantic=None):  # type: ignore[no-untyped-def]
-        """Wait for completion of all outstanding put operations."""
+        """
+        Wait for completion of all outstanding put operations.
+
+        This function blocks until all outstanding remote memory operations issued
+        by the calling PE have completed. It provides stronger guarantees than
+        fence() by ensuring both ordering and completion of all operations.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a blocking operation that waits for completion.
+            - Ensures all previous put operations have been delivered to their destinations.
+            - Provides global ordering - operations to ALL PEs are ordered.
+            - Required to complete non-blocking operations.
+            - More expensive than fence() but provides stronger guarantees.
+
+        Memory Ordering Guarantees:
+            - All put operations before quiet() are completed before any operations after quiet()
+            - Operations are visible to all PEs as having occurred before subsequent operations
+            - Both blocking and non-blocking operations are completed
+
+        Example:
+            ```
+            # Ensure all data transfers complete before setting completion flag
+            nvshmem.putmem_block(data_ptr, src_ptr, data_size, target_pe)
+            nvshmem.quiet()  # Wait for data transfer completion
+            nvshmem.putmem_block(
+                flag_ptr, flag_src_ptr, 8, target_pe
+            )  # Signal completion
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -271,7 +549,38 @@ if has_triton():
     # PE Information Operations
     @core.extern
     def my_pe(_semantic=None):  # type: ignore[no-untyped-def]
-        """Get the PE number of the calling PE."""
+        """
+        Get the PE number of the calling PE.
+
+        This function returns the unique identifier (PE number) of the current
+        processing element within the NVSHMEM job. PE numbers range from 0 to
+        nvshmem_n_pes() - 1.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: PE number of the calling PE (0 ≤ pe < nvshmem_n_pes()).
+
+        Notes:
+            - This is a pure function that returns the same value throughout execution.
+            - PE numbering starts from 0 and is contiguous.
+            - Each PE has a unique identifier within the NVSHMEM job.
+            - Can be called from both host and device code.
+            - Essential for implementing PE-specific logic and communication patterns.
+
+        Example:
+            ```
+            # Get current PE number for conditional logic
+            pe = nvshmem.my_pe()
+            if pe == 0:
+                # Root PE logic
+                pass
+            else:
+                # Non-root PE logic
+                pass
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -283,7 +592,38 @@ if has_triton():
 
     @core.extern
     def n_pes(_semantic=None):  # type: ignore[no-untyped-def]
-        """Get the total number of PEs."""
+        """
+        Get the total number of PEs in the NVSHMEM job.
+
+        This function returns the total count of processing elements (PEs)
+        participating in the current NVSHMEM job. This value remains constant
+        throughout the execution of the program.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Total number of PEs in the job (always ≥ 1).
+
+        Notes:
+            - This is a pure function that returns the same value throughout execution.
+            - The value is determined at NVSHMEM initialization and never changes.
+            - Valid PE numbers range from 0 to n_pes() - 1.
+            - Can be called from both host and device code.
+            - Essential for implementing collective operations and communication patterns.
+
+        Example:
+            ```
+            # Broadcast from root to all other PEs
+            total_pes = nvshmem.n_pes()
+            my_rank = nvshmem.my_pe()
+
+            if my_rank == 0:
+                # Send to all other PEs
+                for peer in range(1, total_pes):
+                    nvshmem.putmem_block(dst_ptr, src_ptr, size, peer)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -296,7 +636,41 @@ if has_triton():
     # Synchronization Operations
     @core.extern
     def barrier_all(_semantic=None):  # type: ignore[no-untyped-def]
-        """Synchronize all PEs."""
+        """
+        Synchronize all PEs with completion guarantee.
+
+        This function creates a barrier across all PEs in the NVSHMEM job. It ensures
+        that all local and remote memory updates issued before the barrier by any PE
+        are completed before any PE exits the barrier. This provides both
+        synchronization and memory consistency.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a collective operation - all PEs must participate.
+            - Stronger guarantee than sync_all() - ensures completion of remote operations.
+            - Blocks until all PEs reach the barrier AND all memory operations complete.
+            - Must be called from kernels launched with cooperative launch.
+            - Provides full memory consistency across all PEs.
+            - More expensive than sync_all() due to completion guarantees.
+
+        Memory Consistency Guarantees:
+            - All memory updates before barrier_all() are visible to all PEs
+            - All remote memory operations are completed before any PE continues
+            - Provides a global synchronization point with memory ordering
+
+        Example:
+            ```
+            # Ensure all PEs complete their work before proceeding
+            # All PEs execute this - it's a collective operation
+            nvshmem.barrier_all()
+            # At this point, all previous operations are complete on all PEs
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -308,7 +682,41 @@ if has_triton():
 
     @core.extern
     def sync_all(_semantic=None):  # type: ignore[no-untyped-def]
-        """Synchronize all PEs (lightweight version, does not ensure completion of remote memory updates)."""
+        """
+        Synchronize all PEs with local completion guarantee.
+
+        This function creates a lightweight synchronization barrier across all PEs.
+        It ensures that all local store operations issued before the sync are
+        visible to other PEs, but does not guarantee completion of remote memory
+        operations initiated by the calling PE.
+
+        Args:
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a collective operation - all PEs must participate.
+            - Lighter weight than barrier_all() - only ensures local store visibility.
+            - Does not guarantee completion of remote memory updates initiated locally.
+            - Must be called from kernels launched with cooperative launch.
+            - Suitable when only synchronization (not completion) is needed.
+            - More efficient than barrier_all() for synchronization-only patterns.
+
+        Memory Consistency Guarantees:
+            - Local store operations are visible to other PEs
+            - Does NOT ensure completion of outgoing remote operations
+            - Provides synchronization point without full completion overhead
+
+        Example:
+            ```
+            # Lightweight synchronization between PEs
+            # All PEs execute this - it's a collective operation
+            nvshmem.sync_all()
+            # Local stores are visible, but remote ops may still be in flight
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -321,7 +729,45 @@ if has_triton():
     # Collective Operations (mem-based APIs - sizes in bytes)
     @core.extern
     def alltoallmem_block(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
-        """Perform alltoall operation on symmetric memory. size_bytes specifies the number of bytes to exchange per PE."""
+        """
+        Perform alltoall collective operation on symmetric memory.
+
+        This function implements an all-to-all collective communication pattern where
+        each PE sends a portion of its data to every other PE, and receives data from
+        every other PE. The operation exchanges size_bytes of data between each pair of PEs.
+
+        Args:
+            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
+                         (all PEs in the job).
+            dest (int64): Symmetric address of the destination buffer. Must be large enough
+                         to hold size_bytes * n_pes total bytes.
+            source (int64): Symmetric address of the source buffer containing data to send.
+                           Must contain size_bytes * n_pes total bytes.
+            size_bytes (int64): Number of bytes to exchange with each PE. Must be positive.
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Data Layout:
+            - Source buffer layout: [data_for_pe0, data_for_pe1, ..., data_for_pe(n-1)]
+            - Destination buffer layout: [data_from_pe0, data_from_pe1, ..., data_from_pe(n-1)]
+            - Each segment is size_bytes in length
+
+        Notes:
+            - This is a collective operation - all PEs in the team must participate.
+            - Must be called from kernels launched with cooperative launch.
+            - The source and destination buffers must not overlap.
+            - All PEs must call with the same size_bytes value.
+            - Provides efficient many-to-many data exchange pattern.
+
+        Example:
+            ```
+            # Each PE sends 1024 bytes to every other PE
+            team_world = 0
+            nvshmem.alltoallmem_block(team_world, dest_ptr, src_ptr, 1024)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
@@ -340,7 +786,44 @@ if has_triton():
 
     @core.extern
     def broadcastmem_block(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
-        """Broadcast data from a root PE to all other PEs in a team. size_bytes specifies the size in bytes."""
+        """
+        Broadcast data from a root PE to all other PEs in a team.
+
+        This function implements a collective broadcast operation where the root PE
+        sends its data to all other PEs in the team. All PEs (including the root)
+        receive a copy of the data from the root PE in their destination buffer.
+
+        Args:
+            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
+                         (all PEs in the job).
+            dest (int64): Symmetric address of the destination buffer on all PEs.
+                         Must be large enough to hold size_bytes.
+            source (int64): Symmetric address of the source buffer on the root PE.
+                           Only the root PE's source buffer is used.
+            size_bytes (int64): Number of bytes to broadcast. Must be positive.
+            pe_root (int64): PE number of the root PE that provides the source data.
+            _semantic: Optional semantic information for Triton compilation.
+
+        Returns:
+            int32: Status code (0 for success).
+
+        Notes:
+            - This is a collective operation - all PEs in the team must participate.
+            - Must be called from kernels launched with cooperative launch.
+            - Only the root PE's source buffer is read; other PEs' source buffers are ignored.
+            - All PEs (including root) receive the data in their destination buffer.
+            - All PEs must call with the same team, size_bytes, and pe_root values.
+            - The source and destination buffers must not overlap on any PE.
+            - Efficient one-to-many communication pattern.
+
+        Example:
+            ```
+            # PE 0 broadcasts 1024 bytes to all PEs in the team
+            team_world = 0
+            root_pe = 0
+            nvshmem.broadcastmem_block(team_world, dest_ptr, src_ptr, 1024, root_pe)
+            ```
+        """
         return core.extern_elementwise(
             "",
             "",
