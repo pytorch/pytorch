@@ -2629,7 +2629,6 @@ if HAS_CUDA:
                     for length in range(10, 30, 10):
                         iter(batch_size, length)
 
-            print(captured_output)
             FileCheck().check(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -2662,8 +2661,6 @@ if HAS_CUDA:
                 for batch_size in range(10, 200, 10):
                     iter(batch_size, mod)
 
-            print(captured_output)
-
             FileCheck().check_count(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -2673,6 +2670,21 @@ if HAS_CUDA:
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning.",
+                1,
+                exactly=True,
+            ).run("\n".join(captured_output))
+
+        def test_skip_if_single_kernel(self):
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                f(torch.randn(1, device="cuda"))
+
+            FileCheck().check_count(
+                "only one kernel in generated code",
                 1,
                 exactly=True,
             ).run("\n".join(captured_output))
