@@ -66,6 +66,26 @@ class TestAutogradLab(TestCase):
             v = torch.randn(*v_shape, dtype=torch.float64, requires_grad=True)
 
             self.assertRaises(ValueError, Attention.apply, q, k, v)
+        
+    def test_attention_native(self):
+        q = torch.randn(3, 5, dtype=torch.float64, requires_grad=True)
+        k = torch.randn(3, 5, dtype=torch.float64, requires_grad=True)
+        v = torch.randn(3, 7, dtype=torch.float64, requires_grad=True)
 
+        gradcheck(torch.ops.aten.attention, (q, k, v))
+        gradgradcheck(torch.ops.aten.attention, (q, k, v))
+
+    def test_attention_native_mismatched_dims(self):
+        test_cases = [
+            ((3, 5), (4, 5), (3, 7)),  # q and k have different first dimensions
+            ((3, 5), (3, 4), (3, 7)),  # q and k have different second dimensions
+            ((3, 5), (3, 5), (4, 7)),  # q and v have different first dimensions
+        ]
+        for q_shape, k_shape, v_shape in test_cases:
+            q = torch.randn(*q_shape, dtype=torch.float64, requires_grad=True)
+            k = torch.randn(*k_shape, dtype=torch.float64, requires_grad=True)
+            v = torch.randn(*v_shape, dtype=torch.float64, requires_grad=True)
+
+            self.assertRaises(RuntimeError, torch.ops.aten.attention, q, k, v)
 if __name__ == "__main__":
     run_tests()
