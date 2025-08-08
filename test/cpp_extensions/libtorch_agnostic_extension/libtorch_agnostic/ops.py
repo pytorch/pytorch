@@ -164,3 +164,15 @@ def fill_infinity(t) -> Tensor:
     Returns: The modified tensor (same as input)
     """
     return torch.ops.libtorch_agnostic.fill_infinity.default(t)
+
+
+def test_default_constructor(defined) -> bool:
+    """
+    Tests the default constructor for torch::stable::Tensor.
+
+    Args:
+        defined: bool - if True, tests defined tensor; if False, tests undefined tensor
+
+    Returns: bool - result of calling .defined() on the tensor
+    """
+    return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
