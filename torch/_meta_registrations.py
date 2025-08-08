@@ -2471,6 +2471,54 @@ def meta_conv(
     return out
 
 
+if torch._C.has_zendnn:  # type: ignore[attr-defined]
+
+    @register_meta(aten.zendnn_linear.default)
+    def meta_zendnn_linear(
+        input,
+        weight,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op="",
+        zentorch_op_name="zendnn_linear",
+    ):
+        if input.shape[-1] != weight.shape[-1]:
+            weight_first_dim = weight.shape[-1]
+            len_inp_shape = input.ndim
+            new_last_dim = 1
+            idx = -1
+            while (new_last_dim != weight_first_dim) and (idx >= -len_inp_shape):
+                new_last_dim *= input.shape[idx]
+                idx -= 1
+            output_shape = input.shape[: len_inp_shape + idx + 1] + (new_last_dim,)
+            return input.new_empty(output_shape)
+        else:
+            out_dim = list(input.size())
+            out_dim[-1] = weight.size(0)
+            return input.new_empty(out_dim)
+
+    @register_meta(aten.zendnn_weight_prepack_for_linear.default)
+    def meta_zendnn_weight_prepack_for_linear(
+        weight,
+        treat_tensor_as_transposed=True,
+        zentorch_op_name="zendnn_weight_prepack_for_linear",
+    ):
+        return weight.new_empty(weight.shape)
+
+    @register_meta(aten.zendnn_linear_unary_binary.default)
+    def meta_zendnn_linear_unary_binary(
+        input,
+        weight,
+        binary_input,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="",
+        post_op_2="",
+        zentorch_op_name="zendnn_linear_unary_binary",
+    ):
+        return binary_input.new_empty(binary_input.shape)
+
+
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
