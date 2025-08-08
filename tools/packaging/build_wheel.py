@@ -152,7 +152,7 @@ class Builder:
         with subprocess.Popen(
             [self.interpreter, str(SETUP_PY_PATH), *cmd_args],
             env={**os.environ},  # Ensure we use the same environment as the parent process
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if self.log_destination else subprocess.STDOUT,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
             bufsize=0,  # Unbuffered for real-time output
@@ -287,8 +287,8 @@ def main() -> None:
             "dest is 'dist/' while multiple python versions specified, output will be overwritten"
         )
 
-    if args.log_destination and not os.path.exists(args.log_destination):
-        os.makedirs(args.log_destination)
+    if args.log_destination:
+        os.makedirs(args.log_destination, exist_ok=True)
 
     for interpreter in pythons:
         with venv(interpreter) as venv_interpreter:
