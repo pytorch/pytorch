@@ -142,7 +142,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
-                         -1,                                // min_seqlen_q
+                         0,                                // min_seqlen_q
                          p_dropout,
                          has_dropout_randval,
                          drop_seed_offset};
@@ -362,9 +362,12 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                                  attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
                                  has_lse,           // has_lse
                                  true);             // use_ext_asm
-
-
-
+/*
+        if( t < 0 ) {
+            std::cout << "RUNNING FALLBACK" << std::endl;
+            t = fmha_fwd(traits, args, stream_config);
+        }
+*/
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
     }
     else {
