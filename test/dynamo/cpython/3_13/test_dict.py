@@ -1341,8 +1341,9 @@ class DictTest(__TestCase):
                 def __init__(self, msg):
                     self.msg = msg
         f = Foo('123')
-        class _str(str):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class _str(str):
+                pass
         self.assertEqual(f.msg, getattr(f, _str('msg')))
         self.assertEqual(f.msg, f.__dict__[_str('msg')])
 
