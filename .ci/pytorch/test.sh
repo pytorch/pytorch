@@ -1639,6 +1639,10 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
   test_xla
+elif [[ "$TEST_CONFIG" == *vllm* ]]; then
+    (cd scripts/torch_cli && python -m pip install -e .)
+    export TORCH_CUDA_ARCH_LIST="8.0"
+    python -m cli.run --config ".github/ci_configs/vllm.yaml" test external vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then

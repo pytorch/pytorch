@@ -59,3 +59,17 @@ jobs:
       cuda-arch-list: '8.9'
       runner: linux.24xlarge.memory
     secrets: inherit
+
+  vllm-test-sm89:
+    name: sm89-vllm-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [
+      torch-build-sm89,
+      vllm-build-sm89
+    ]
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
+      docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
+      test-matrix: ${{ needs.torch-build-sm89.outputs.test-matrix }}
+      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm89-vllm-additional-build
+    secrets: inherit

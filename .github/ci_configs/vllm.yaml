@@ -26,3 +26,11 @@ test:
         - step: pytest -v -s basic_correctness/test_preemption.py
           env_vars:
             - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level
+    - name: Basic Models Test # 24min
+      id: vllm_basic_models_test
+      steps:
+        - step: pytest -v -s models/test_transformers.py
+        - step: pytest -v -s models/test_registry.py
+        - step: pytest -v -s models/test_utils.py
+        - step: pytest -v -s models/test_vision.py
+        - step: pytest -v -s models/test_initialization.py

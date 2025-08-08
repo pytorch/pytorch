@@ -164,7 +164,8 @@ def clone_external_repo(target: str, repo: str, cwd: str):
 
 
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
-    path = Path(prefix) / f"{name}.txt"
+    abs_path = get_abs_path(prefix)
+    path = Path(abs_path) / f"{name}.txt"
     if not path.exists():
         raise FileNotFoundError(f"Pin file not found: {path}")
     return path.read_text(encoding="utf-8").strip()
