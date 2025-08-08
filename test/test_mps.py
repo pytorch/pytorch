@@ -29,6 +29,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
+from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
@@ -9445,6 +9446,78 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+
+
+
+class TestSDPAMetaDispatchMode(TorchDispatchMode):
+    """
+    TorchDispatchMode which intercepts the
+    _scaled_dot_product_attention_math_for_mps aten operator to check that the
+    meta kernel is correct.
+    """
+
+    def __init__(self, test):
+        self.test = test
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args, kwargs=None):
+        kwargs = kwargs or {}
+        res = func(*args, **kwargs)
+        if func != torch.ops.aten._scaled_dot_product_attention_math_for_mps.default:
+            return res
+
+        meta_args, meta_kwargs = pytree.tree_map_only(torch.Tensor, lambda t: t.to(device="meta"), (args, kwargs))
+        meta_res = func(*meta_args, **meta_kwargs)
+
+        def format_res(res):
+            return [
+                (t.shape, t.stride(), t.dtype) if isinstance(t, torch.Tensor) else t
+                for t in pytree.tree_flatten(res)[0]
+            ]
+
+        # Format the output so that we only look at the tensor metadata
+        self.test.assertEqual(format_res(res), format_res(meta_res))
+        return res
+
+
+def create_sdpa_meta_test():
+    """
+    Creates a new class which takes every test in TestSDPA and adds the
+    TestSDPAMetaDispatchMode context in order to test the
+    scaled_dot_product_attention_for_mps meta kernel. This allows us to test all
+    the branches for the sdpa op. If there are changes to the sdpa kernel
+    without changing the meta kernel, a torch.compile guard will catch the issue
+    but not necessarily export.
+    """
+    orig_test_cls = TestSDPA
+
+    new_test_cls = type(f"{orig_test_cls.__name__}Meta", orig_test_cls.__bases__, {})
+    new_test_cls.__qualname__ = new_test_cls.__name__
+
+    for name in dir(orig_test_cls):
+        if name.startswith("test_"):
+            fn = getattr(orig_test_cls, name)
+            if not callable(fn):
+                setattr(new_test_cls, name, getattr(orig_test_cls, name))
+                continue
+
+            new_name = f"{name}_meta"
+
+            def new_fn(self, *args, **kwargs):
+                with TestSDPAMetaDispatchMode(self):
+                    fn(self, *args, **kwargs)
+
+            new_fn.__name__ = new_name
+
+            setattr(new_test_cls, new_name, new_fn)
+
+        elif not hasattr(new_test_cls, name):
+            setattr(new_test_cls, name, getattr(orig_test_cls, name))
+
+    return new_test_cls
+
+TestSDPAMeta = create_sdpa_meta_test()
+instantiate_parametrized_tests(TestSDPAMeta)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):

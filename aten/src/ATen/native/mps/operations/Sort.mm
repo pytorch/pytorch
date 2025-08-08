@@ -26,9 +26,6 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
  const Tensor& indices) {
   using namespace mps;
 
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
-  MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
-
   if (self.numel() == 0) {
     return;
   }
@@ -55,8 +52,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
-      MPSGraphTensor* castInputTensor =
-          castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self, /*includesInt64=*/macOS13_3_plus);
+      MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self);
       MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:castInputTensor
                                                          axis:(NSInteger)dim
                                                    descending:(BOOL)descending
