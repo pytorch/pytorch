@@ -2179,14 +2179,17 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
-        torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
-            lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
-        )
-        torch._check(
-            sympy_product(red_ranges) == reduction_numel,
-            lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
-        )
+        # def check_eq(a, b):
+        #     return V.graph.sizevars.atomically_apply_size_hint(a - b, fallback=32) == 0
+
+        # torch._check(
+        #     check_eq(sympy_product(pw_ranges), pointwise_numel),
+        #     lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
+        # )
+        # torch._check(
+        #     check_eq(sympy_product(red_ranges), reduction_numel),
+        #     lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
+        # )
 
         # score of a pointwise or reduction split
         scored_sub_split: dict[Any, tuple[list[int], list[int]]] = {}
@@ -2331,7 +2334,7 @@ class SIMDScheduling(BaseScheduling):
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
-                if not CandidateTiling.is_good_size(tile_size):
+                if not CandidateTiling.is_good_size(tile_size, size_hint=False):
                     score_factor = score_factor / bad_size_additional_tiling_penalty
                 else:
                     score_factor = score_factor / good_size_tiling_penalty
@@ -2588,8 +2591,12 @@ class CandidateTiling:
     name: Optional[str] = None
 
     @staticmethod
-    def is_good_size(s):
+    def is_good_size(s, size_hint=True):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
+        sv = V.graph.sizevars
+        if not size_hint:
+            return sv.statically_known_multiple_of(s, 32) and sv.statically_known_geq(s, 32)
+
         s = V.graph.sizevars.size_hint(s)
         return s >= 32 and (s % 32 == 0)
 

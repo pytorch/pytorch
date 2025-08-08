@@ -237,6 +237,9 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_integer and equal_valued(divisor, -1):
             return sympy.Mul(base, -1)
+        if base is divisor:
+            return sympy.S.One
+
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
@@ -324,11 +327,15 @@ class ModularIndexing(sympy.Function):
             if divisor != 1:
                 gcd = sympy.gcd(base, divisor)
                 if gcd != 1:
-                    return ModularIndexing(
-                        sympy.simplify(base / gcd),
-                        sympy.simplify(divisor / gcd),
-                        modulus,
-                    )
+                    try:
+                        return ModularIndexing(
+                            sympy.simplify(base / gcd),
+                            sympy.simplify(divisor / gcd),
+                            modulus,
+                        )
+                    except Exception:
+                        breakpoint()
+                        raise
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 

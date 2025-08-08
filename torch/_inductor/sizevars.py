@@ -380,12 +380,8 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
-        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
-            denominator
-        ):
-            return False
+        if denominator is numerator:
+            return True
 
         if len(free_symbols(numerator)) > 20:
             return False

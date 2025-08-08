@@ -221,13 +221,17 @@ def get_pw_red_splits(
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
-    if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+    n_pointwise_numel = V.graph.sizevars.simplify(sympy_product(n._body.sizes[0]))
+    if n.is_reduction() or n_pointwise_numel == pointwise_numel:
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    assert sympy_product(n._body.sizes[0]) == pointwise_numel * red_numel  # type: ignore[operator]
+    assert V.graph.sizevars.atomically_apply_size_hint(
+        n_pointwise_numel - (pointwise_numel * red_numel), fallback=config.unbacked_symint_fallback
+    ) == 0
+
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -319,6 +323,7 @@ class NodeSplitGetter:
 
         if len(self.all_node_sizes) == 1:
             return next(iter(self.all_node_sizes))
+        # TODO - return default pointwise, reduction
 
         max_pw_split = max(self.pw_split_options.keys())
         for pw_split_len in range(max_pw_split, 0, -1):
@@ -477,13 +482,6 @@ def extract_normalized_read_writes(
 
     pointwise_numel: sympy.Expr = node.group[1][0]
     red_numel: sympy.Expr = node.group[1][1]
-
-    # TODO - a few dynamic shapes issues to resolve
-    if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
-        for var in (pointwise_numel, red_numel)
-    ):
-        return None
 
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
@@ -663,13 +661,8 @@ def analyze_memory_coalescing(
         ((True, item) for item in reads.items()),
         ((False, item) for item in writes.items()),
     ):
-        # skip memory deps with indirect vars - todo: better handling
-        indirect_expr = bool(
-            memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
-        )
-
-        if indirect_expr:
-            continue
+        # TODO skip memory deps with indirect vars
+        # handled in extract_normalized_read_writes currently
 
         size = get_score(memory_expr, var_ranges)
         if size == 0:
@@ -699,8 +692,8 @@ def analyze_memory_coalescing(
     tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
 
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
-        expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
-        for v in uncoalesced_expr.free_symbols:
+        expr_subs = dict.fromkeys(var_ranges.keys(), 0)
+        for v in uncoalesced_expr.free_symbols & var_ranges.keys():
             # skip non iter/reduce var variables
             if v not in var_ranges:
                 continue
@@ -710,7 +703,13 @@ def analyze_memory_coalescing(
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
+
+            # TODO: skip dynamic shapes for now,
+            if len(single_var_expr.free_symbols) != 1:
+                continue
+
             tiling_factor = solve_for_tiling(single_var_expr)
+
             if (
                 tiling_factor is None
                 or not tiling_factor.is_constant()

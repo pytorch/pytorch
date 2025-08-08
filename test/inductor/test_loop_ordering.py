@@ -896,7 +896,9 @@ class MemoryCoalescingTest(MockSchedulerTest):
             arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
-            out, code = run_and_get_code(torch.compile(forward), (permute))
+            out, code = run_and_get_code(
+                torch.compile(forward, dynamic=True), (permute)
+            )
 
             self.assertEqual(out, forward(permute))
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
@@ -937,12 +939,13 @@ class TestTiling(TestCase):
 
     @parametrize("a", layouts)
     @parametrize("b", layouts)
-    def test_pointwise(self, a, b):
+    @parametrize("dynamic", (False, True))
+    def test_pointwise(self, a, b, dynamic):
         def foo(x, y):
             return x + y
 
         x, y = self.T(a), self.T(b)
-        res, code = run_and_get_code(torch.compile(foo), x, y)
+        res, code = run_and_get_code(torch.compile(foo, dynamic=dynamic), x, y)
 
         if a != b:
             FileCheck().check("ynumel").run(code[0])
@@ -968,13 +971,14 @@ class TestTiling(TestCase):
         ).run(code[0])
         self.assertEqual(out, f(*inps), atol=0.001, rtol=0.04)
 
-    def test_3d_pointwise(self):
+    @parametrize("dynamic", (False, True))
+    def test_3d_pointwise(self, dynamic):
         inps = (self.T("cont"), self.T("T"), self.T("NHWC"))
 
         def f(x, y, z):
             return x + y + z
 
-        f_c = torch.compile(f)
+        f_c = torch.compile(f, dynamic=dynamic)
         out, code = run_and_get_code(f_c, *inps)
 
         FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
