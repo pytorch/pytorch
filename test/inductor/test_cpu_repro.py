@@ -3117,6 +3117,30 @@ class CPUReproTests(TestCase):
         lengths = torch.zeros(11, dtype=torch.long)
         get_traj_idx(lengths, num_slices=4)
 
+    def test_store_reduction(self):
+        # fix https://github.com/pytorch/pytorch/issues/157683
+        def fn(x, y):
+            r1 = x.amax(dim=0)
+            r2 = y.amax(dim=0)
+            return r1, r2
+
+        device = "cpu"
+        for int_dypte, float_dtype in zip(
+            [torch.int64, torch.int32, torch.int16, torch.int8],
+            [torch.float64, torch.float32, torch.float16, torch.bfloat16],
+        ):
+            x = torch.randint(
+                low=0, high=100, size=(16, 24, 59), dtype=int_dypte, device=device
+            )
+            y = torch.randn(16, 24, 59, dtype=float_dtype, device=device)
+            self.common(
+                fn,
+                (
+                    x,
+                    y,
+                ),
+            )
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_sign_cpu_only(self):
