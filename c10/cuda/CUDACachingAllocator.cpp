@@ -4118,7 +4118,18 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+// Register this HIP allocator as the CUDA allocator to allow it to work
+// with both c10::GetAllocator(kCUDA) and c10::getDeviceAllocator(kCUDA)
+// APIs. We don't perform this masquerading inside
+// HIPAllocatorMasqueradingAsCUDA because it needs to happen during static
+// initialization, and doing so there may introduce static initialization
+// order (SIOF) issues.
+#define HIP_MASQUERADING_AS_CUDA \
+  "cud"                          \
+  "a"
+    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
     allocator.store(r);
+#undef HIP_MASQUERADING_AS_CUDA
   }
 };
 
