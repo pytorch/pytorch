@@ -142,10 +142,10 @@ struct AtomicType<half2> {
   }
 };
 
-// There are no atomic 64-bit add in Metal yet, but templates below implements a consistent
-// add I.e. if multiple threads are modify the same 64-bit value, results stored
-// at the address will eventually be equal to its original value plus sum of all
-// operands
+// There are no atomic 64-bit add in Metal yet, but templates below implements a
+// consistent add I.e. if multiple threads are modify the same 64-bit value,
+// results stored at the address will eventually be equal to its original value
+// plus sum of all operands
 template <>
 struct AtomicType<long> {
   using type = ::metal::atomic<uint>;
@@ -154,20 +154,22 @@ struct AtomicType<long> {
     const uint low = static_cast<uint>(value_bits);
     uint high = static_cast<uint>(value_bits >> 32);
     auto ptr = data + (offset << 1);
-    auto old_low = atomic_fetch_add_explicit(ptr, low, memory_order_relaxed);
+    auto old_low =
+        atomic_fetch_add_explicit(ptr, low, ::metal::memory_order_relaxed);
     high += (old_low + low < old_low) ? 1 : 0;
-    atomic_fetch_add_explicit(ptr + 1, high, memory_order_relaxed);
+    atomic_fetch_add_explicit(ptr + 1, high, ::metal::memory_order_relaxed);
   }
 };
 
-// ComplexFloat atomic op, which again is not really atomic, but eventually consistent
+// ComplexFloat atomic op, which again is not really atomic, but eventually
+// consistent
 template <>
 struct AtomicType<float2> {
   using type = ::metal::atomic<float>;
   static inline void atomic_add(device type* data, long offset, float2 value) {
     auto ptr = data + (offset << 1);
-    atomic_fetch_add_explicit(ptr + 0, value.x, memory_order_relaxed);
-    atomic_fetch_add_explicit(ptr + 1, value.y, memory_order_relaxed);
+    atomic_fetch_add_explicit(ptr + 0, value.x, ::metal::memory_order_relaxed);
+    atomic_fetch_add_explicit(ptr + 1, value.y, ::metal::memory_order_relaxed);
   }
 };
 
