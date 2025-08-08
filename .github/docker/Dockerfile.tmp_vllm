@@ -1,0 +1,414 @@
+# TODO(elainwy): remove this file after the torch nightly dockerfile is in sync in vllm repo
+# The vLLM Dockerfile is used to construct vLLM image against torch nightly and torch main that can be directly used for testing
+
+ARG CUDA_VERSION=12.8.1
+ARG PYTHON_VERSION=3.12
+
+# BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
+# by default, it uses the torch-nightly-base stage from this docker image
+ARG BUILD_BASE_IMAGE=torch-nightly-base
+
+# FINAL_BASE_IMAGE: used to set up vllm-instaled environment and build flashinfer,
+# by default, it uses devel-ubuntu22.04 official image.
+ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
+
+
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+# A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
+From nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
+ARG CUDA_VERSION=12.8.1
+ARG PYTHON_VERSION=3.12
+ARG TARGETPLATFORM
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
+    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
+
+# Install Python and other dependencies if it does not existed
+RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
+      echo "Installing Python ${PYTHON_VERSION}..." && \
+      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
+      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
+      apt-get update -y && \
+      apt-get install -y ccache software-properties-common git curl sudo && \
+      for i in 1 2 3; do \
+        add-apt-repository -y ppa:deadsnakes/ppa && break || \
+        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+      done && \
+      apt-get update -y && \
+      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
+      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
+      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
+      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
+   else \
+      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
+   fi \
+   && python3 --version && python3 -m pip --version
+
+# Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
+# as it was causing spam when compiling the CUTLASS kernels
+# Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
+RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
+    if [ "$current_gcc_version" -lt 10 ]; then \
+      echo "GCC version is $current_gcc_version, installing gcc-10..."; \
+      apt-get update && \
+      apt-get install -y gcc-10 g++-10 && \
+      update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 && \
+      update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
+    else \
+      echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
+    fi && \
+    gcc --version && g++ --version
+
+# install uv for faster pip installs
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python3 -m pip install uv==0.8.4
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+
+
+#################### BASE BUILD IMAGE ####################
+# A base image for building vLLM with torch nightly or torch wheels
+# prepare basic build environment
+FROM ${BUILD_BASE_IMAGE} AS base
+USER root
+
+# Workaround for https://github.com/openai/triton/issues/2507 and
+# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+# this won't be needed for future versions of this docker image
+# or future versions of triton.
+RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+# Install uv for faster pip installs if not existed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if ! python3 -m uv --version >/dev/null 2>&1; then \
+        python3 -m pip install uv==0.8.4; \
+    fi
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+WORKDIR /workspace
+
+# install build and runtime dependencies
+COPY requirements/common.txt requirements/common.txt
+COPY use_existing_torch.py use_existing_torch.py
+COPY pyproject.toml pyproject.toml
+
+# install build and runtime dependencies without stable torch version
+RUN python3 use_existing_torch.py
+
+# default mount file as placeholder, this just avoid the mount error
+# change to a different vllm folder if this does not exist anymore
+ARG TORCH_WHEELS_PATH="./requirements"
+ARG PINNED_TORCH_VERSION
+
+# Install torch, torchaudio and torchvision based on the input
+# if TORCH_WHEELS_PATH is default "./requirements", it will pull thethe nightly versions using pip
+# otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
+    --mount=type=cache,target=/root/.cache/uv \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
+        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        uv pip install --system "${torch_whl}[opt-einsum]"; \
+        uv pip install --system "${vision_whl}"; \
+        uv pip install --system "${audio_whl}"; \
+    elif [ -n "$PINNED_TORCH_VERSION" ]; then \
+        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+        uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    else \
+        echo "[INFO] Installing torch nightly with latest one"; \
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    fi
+
+# Install numba 0.61.2 for cuda environment
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system numba==0.61.2
+
+# Install common dependencies from vllm common.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+uv pip install --system -r requirements/common.txt
+
+
+# Must put before installing xformers, so it can install the correct version of xfomrers.
+ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+ARG max_jobs=16
+ENV MAX_JOBS=${max_jobs}
+
+# Build xformers with cuda and torch nightly/wheel
+# following official xformers guidance: https://github.com/facebookresearch/xformers#build
+ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
+ENV CCACHE_DIR=/root/.cache/ccache
+RUN --mount=type=cache,target=/root/.cache/ccache \
+    --mount=type=cache,target=/root/.cache/uv \
+    echo 'git clone xformers...' \
+    && git clone https://github.com/facebookresearch/xformers.git --recursive \
+    && cd xformers \
+    && git checkout ${XFORMERS_COMMIT} \
+    && git submodule update --init --recursive \
+    && echo 'finish git clone xformers...' \
+    && rm -rf build \
+    && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
+    && cd .. \
+    && rm -rf xformers
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system xformers-dist/*.whl --verbose
+
+# Build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
+# track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
+RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
+RUN cat  torch_build_versions.txt
+
+RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
+
+#################### BASE BUILD IMAGE ####################
+
+
+#################### WHEEL BUILD IMAGE ####################
+# Image used to build vllm wheel
+FROM base AS build
+ARG TARGETPLATFORM
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+COPY . .
+
+RUN python3 use_existing_torch.py
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements/build.txt
+
+ARG GIT_REPO_CHECK=0
+RUN --mount=type=bind,source=.git,target=.git \
+    if [ "$GIT_REPO_CHECK" != "0" ]; then bash tools/check_repo.sh ; fi
+
+# Max jobs used by Ninja to build extensions
+ARG max_jobs=16
+ENV MAX_JOBS=${max_jobs}
+ARG nvcc_threads=2
+ENV NVCC_THREADS=$nvcc_threads
+ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+
+ARG USE_SCCACHE
+ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
+ARG SCCACHE_REGION_NAME=us-west-2
+ARG SCCACHE_S3_NO_CREDENTIALS=0
+
+# if USE_SCCACHE is set, use sccache to speed up compilation
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=.git,target=.git \
+    if [ "$USE_SCCACHE" = "1" ]; then \
+        echo "Installing sccache..." \
+        && curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
+        && tar -xzf sccache.tar.gz \
+        && sudo mv sccache-v0.8.1-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
+        && rm -rf sccache.tar.gz sccache-v0.8.1-x86_64-unknown-linux-musl \
+        && export SCCACHE_BUCKET=${SCCACHE_BUCKET_NAME} \
+        && export SCCACHE_REGION=${SCCACHE_REGION_NAME} \
+        && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
+        && export SCCACHE_IDLE_TIMEOUT=0 \
+        && export CMAKE_BUILD_TYPE=Release \
+        && sccache --show-stats \
+        && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
+        && sccache --show-stats; \
+    fi
+
+ENV CCACHE_DIR=/root/.cache/ccache
+RUN --mount=type=cache,target=/root/.cache/ccache \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=.git,target=.git  \
+    if [ "$USE_SCCACHE" != "1" ]; then \
+        # Clean any existing CMake artifacts
+        rm -rf .deps && \
+        mkdir -p .deps && \
+        python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
+    fi
+
+RUN echo "[DEBUG] Listing  current directory:" && \
+    ls -al && \
+    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    cat torch_build_versions.txt
+
+#################### WHEEL BUILD IMAGE ####################
+
+
+################### VLLM INSTALLED IMAGE ####################
+# Setup clean environment for vLLM for test and api server using ubuntu22.04 with AOT flashinfer
+FROM ${FINAL_BASE_IMAGE} AS vllm-base
+USER root
+# prepare for environment starts
+WORKDIR /workspace
+
+RUN PYTHON_VERSION_STR=$(echo ${PYTHON_VERSION} | sed 's/\.//g') && \
+    echo "export PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> /etc/environment
+
+# Install Python and other dependencies if it does not existed
+RUN if ! command -v python3 >/dev/null || ! python3 --version | grep -q "${PYTHON_VERSION}"; then \
+      echo "Installing Python ${PYTHON_VERSION}..." && \
+      echo 'tzdata tzdata/Areas select America' | debconf-set-selections && \
+      echo 'tzdata tzdata/Zones/America select Los_Angeles' | debconf-set-selections && \
+      apt-get update -y && \
+      apt-get install -y ccache software-properties-common git curl sudo && \
+      for i in 1 2 3; do \
+        add-apt-repository -y ppa:deadsnakes/ppa && break || \
+        { echo "Attempt $i failed, retrying in 5s..."; sleep 5; }; \
+      done && \
+      apt-get update -y && \
+      apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv && \
+      update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 && \
+      update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} && \
+      ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config && \
+      curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}; \
+   else \
+      echo "Python ${PYTHON_VERSION} already present, skipping setup."; \
+   fi \
+   && python3 --version && python3 -m pip --version
+
+
+# Get the torch versions, and whls used in previous stagtes for consistency
+COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
+COPY --from=base /workspace/xformers-dist /wheels/xformers
+COPY --from=build /workspace/vllm-dist /wheels/vllm
+RUN echo "[DEBUG] Listing current directory before torch install step:" && \
+    ls -al && \
+    echo "[DEBUG] Showing torch_build_versions.txt content:" && \
+    cat torch_build_versions.txt
+
+# Workaround for https://github.com/openai/triton/issues/2507 and
+# https://github.com/pytorch/pytorch/issues/107960 -- hopefully
+# this won't be needed for future versions of this docker image
+# or future versions of triton.
+RUN ldconfig /usr/local/cuda-$(echo $CUDA_VERSION | cut -d. -f1,2)/compat/
+
+
+# Install uv for faster pip installs if not existed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if ! python3 -m uv --version > /dev/null 2>&1; then \
+        python3 -m pip install uv==0.8.4; \
+    fi
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+# Default mount file as placeholder, this just avoid the mount error
+ARG TORCH_WHEELS_PATH="./requirements"
+# Install torch, torchaudio and torchvision
+# if TORCH_WHEELS_PATH is default "./requirements", it will pull the nightly versions using pip using torch_build_versions.txt
+# otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
+RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
+    --mount=type=cache,target=/root/.cache/uv \
+    if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
+        vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
+        audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
+        echo "Found: '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
+        uv pip install --system "${torch_whl}[opt-einsum]"; \
+        uv pip install --system "${vision_whl}"; \
+        uv pip install --system "${audio_whl}"; \
+    else \
+        echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --index-url https://download.pytorch.org/whl/nightly/cu128; \
+    fi
+
+# Install the vllm wheel from previous stage
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system /wheels/vllm/*.whl --verbose
+
+# Install xformers wheel from previous stage
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system /wheels/xformers/*.whl --verbose
+
+
+# Build flashinfer from source.
+ARG torch_cuda_arch_list='8.0;8.9;9.0a'
+# install package for build flashinfer
+# see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
+
+RUN pip install build==1.3.0
+RUN pip freeze | grep -E 'setuptools|packaging|build'
+
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+# Build flashinfer for torch nightly from source around 10 mins
+ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
+# Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
+ARG FLASHINFER_GIT_REF="v0.2.9rc2"
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 --recursive --shallow-submodules \
+        --branch ${FLASHINFER_GIT_REF} \
+        ${FLASHINFER_GIT_REPO} flashinfer \
+    && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
+    && cd flashinfer \
+    && python3 -m flashinfer.aot \
+    && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
+    && cd .. \
+    && rm -rf flashinfer
+
+# install flashinfer python
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system wheels/flashinfer/*.whl --verbose
+
+# Logging to confirm the torch versions
+RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+################### VLLM INSTALLED IMAGE ####################
+
+
+#################### UNITTEST IMAGE #############################
+FROM vllm-base as test
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+
+COPY tests/ tests/
+COPY examples examples
+COPY benchmarks benchmarks
+COPY ./vllm/collect_env.py .
+COPY requirements/common.txt requirements/common.txt
+COPY use_existing_torch.py use_existing_torch.py
+COPY pyproject.toml pyproject.toml
+# Install build and runtime dependencies without stable torch version
+COPY requirements/nightly_torch_test.txt requirements/nightly_torch_test.txt
+
+RUN python3 use_existing_torch.py
+
+# install packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements/common.txt
+# enable fast downloads from hf (for testing)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system hf_transfer
+ENV HF_HUB_ENABLE_HF_TRANSFER 1
+
+# install development dependencies (for testing)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -e tests/vllm_test_utils
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements/nightly_torch_test.txt
+
+# Workaround for #17068
+# pinned commit for v2.2.4
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-build-isolation "git+https://github.com/state-spaces/mamba@95d8aba8a8c75aedcaa6143713b11e745e7cd0d9#egg=mamba-ssm"
+
+# Logging to confirm the torch versions
+RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
+
+# Logging to confirm all the packages are installed
+RUN pip freeze
+
+#################### UNITTEST IMAGE #############################
+
+#################### EXPORT STAGE ####################
+FROM scratch as export-wheels
+
+# Just copy the wheels we prepared in previous stages
+COPY --from=base /workspace/xformers-dist /wheels/xformers
+COPY --from=build /workspace/vllm-dist /wheels/vllm
+COPY --from=vllm-base /workspace/wheels/flashinfer /wheels/flashinfer-python

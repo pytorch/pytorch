@@ -1,22 +1,78 @@
 import logging
 import os
 import re
+import shutil
+import subprocess
+from pathlib import Path
 
 import yaml
+from cli.lib.common.utils import run_cmd
 
 
 logger = logging.getLogger(__name__)
 
 
+def force_create_dir(path: str):
+    """
+    Ensures that the given directory path is freshly created.
+
+    If the directory already exists, it will be removed along with all its contents.
+    Then a new, empty directory will be created at the same path.
+    """
+    remove_dir(path)
+    ensure_dir_exists(path)
+
+
+def ensure_dir_exists(path: str):
+    """
+    Ensure the directory exists. Create it if it doesn't exist.
+    """
+    if not os.path.exists(path):
+        logger.info(f"[INFO] Creating directory: {path}")
+        os.makedirs(path, exist_ok=True)
+    else:
+        logger.info(f"Directory already exists: {path}")
+
+
+def remove_dir(path: str):
+    """
+    Remove a directory if it exists.
+    """
+    if os.path.exists(path):
+        logger.info(f"Removing directory: {path}")
+        shutil.rmtree(path)
+    else:
+        logger.info(f"Directory not found (skipped): {path}")
+
+
 def get_abs_path(path: str):
+    """
+    Get the absolute path of the given path.
+    """
+    if not path:
+        return ""
     return os.path.abspath(path)
 
 
 def get_existing_abs_path(path: str) -> str:
-    path = os.path.abspath(path)
-    if not os.path.exists(path):
+    """
+    Get and validate the absolute path of the given path.
+    Raises an exception if the path does not exist.
+    """
+
+    path = get_abs_path(path)
+    if is_path_exist(path):
         raise FileNotFoundError(f"Path does not exist: {path}")
     return path
+
+
+def is_path_exist(path: str) -> bool:
+    """
+    Check if a path exists.
+    """
+    if not path:
+        return False
+    return os.path.exists(path)
 
 
 def read_yaml_file(file_path: str) -> dict:
@@ -26,15 +82,16 @@ def read_yaml_file(file_path: str) -> dict:
     Supports replacing environment variables in the form of $VAR or ${VAR}.
     Logs any missing variables and removes unresolved placeholders.
 
-    Args:
-        - file_path [str]: Path to the YAML file.
+    Args
+    - file_path[str]: Local Path to the YAML file
+
     Returns:
-        - dict: Parsed YAML content as a dictionary.
+    - dict[optionally]: Parsed YAML content as a dictionary.
 
     Raises:
-        - FileNotFoundError: If the file does not exist.
-        - ValueError: If the YAML content is invalid or not a dictionary.
-        - RuntimeError: For other unexpected errors during parsing.
+    - FileNotFoundError: If the file does not exist.
+    - ValueError: If the YAML content is invalid or not a dictionary.
+    - RuntimeError: For other unexpected errors during parsing.
     """
     p = get_abs_path(file_path)
 
@@ -79,3 +136,35 @@ def read_yaml_file(file_path: str) -> dict:
         raise RuntimeError(
             f"Unexpected error while reading YAML file '{file_path}': {e}"
         ) from e
+
+
+def local_image_exists(image_name: str):
+    """
+    Check if a local Docker image exists.
+    image name format: <image_name>:<tag>
+    """
+    try:
+        run_cmd(f"docker image inspect {image_name}", log_cmd=False)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def clone_external_repo(target: str, repo: str, cwd: str):
+    logger.info(f"cloning {target}....")
+    commit = get_post_build_pinned_commit(target)
+
+    # delete the directory if it exists
+    remove_dir(cwd)
+
+    # Clone the repo & checkout commit
+    run_cmd(f"git clone {repo}")
+    run_cmd(f"git checkout {commit}", cwd=cwd)
+    run_cmd("git submodule update --init --recursive", cwd=cwd)
+
+
+def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:
+    path = Path(prefix) / f"{name}.txt"
+    if not path.exists():
+        raise FileNotFoundError(f"Pin file not found: {path}")
+    return path.read_text(encoding="utf-8").strip()

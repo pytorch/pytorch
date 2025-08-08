@@ -1,6 +1,6 @@
 import logging
 
-from cli.lib.core.vllm import build_vllm
+from cli.lib.core.vllm import VllmBuildRunner
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def register_build_external_commands(subparsers):
 # Mappings to build external targets
 # add new build external targets here
 EXTERNAL_BUILD_TARGET_DISPATCH = {
-    "vllm": lambda args: build_vllm(config_path=args.config),
+    "vllm": lambda args: VllmBuildRunner(config_path=args.config),
 }
 
 
@@ -40,4 +40,4 @@ def run_build_external(args):
     print(args.config)
     if target not in EXTERNAL_BUILD_TARGET_DISPATCH:
         raise ValueError(f"Unknown build target: {target}")
-    EXTERNAL_BUILD_TARGET_DISPATCH[target](args)
+    EXTERNAL_BUILD_TARGET_DISPATCH[target](args).run()

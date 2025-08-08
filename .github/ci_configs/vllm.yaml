@@ -1,0 +1,24 @@
+external_build:
+  name: vllm-sm80-external-build
+  build_target: vllm
+  torch_whl_dir: dist
+  work_directory: vllm
+  # if set, overrides the base image used in vllm build
+  base_image: ${DOCKER_IMAGE} # replace with the env_var DOCKER_IMAGE
+  # if set, replaces the vllm dockerfile.torch_nightly with the local dockerfile.
+  dockerfile_path: "./.github/docker/Dockerfile.tmp_vllm"
+
+test:
+  - preset: # this is a test preset, the preset steps runs before each test group
+  - name: Basic Correctness Test # name of the test
+    id: vllm_basic_correctness_test # the unique id to identify the test config, it must be unique in the ci config yml file
+    env_vars:  # global env vars
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    preset: # this can be bash, python etc anything you want to run to set the proper test env
+    run:
+    - test: pytest -v -s basic_correctness/test_cumem.py
+    - test: pytest -v -s basic_correctness/test_basic_correctness.py
+    - test: pytest -v -s basic_correctness/test_cpu_offload.py
+    - test: pytest -v -s basic_correctness/test_preemption.py
+      env_vars:
+        - VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 # test-level
