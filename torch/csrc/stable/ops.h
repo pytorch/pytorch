@@ -9,9 +9,9 @@
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
-
 using torch::stable::Tensor;
+
+namespace torch::stable {
 
 // We expect this to be the stable version of the empty_like op that takes in
 // no kwargs (device, dtype, layout, memory_format). We will add kwargs
@@ -25,7 +25,7 @@ inline Tensor empty_like(const Tensor& self) {
       from(std::nullopt),
       from(std::nullopt),
       from(std::nullopt)};
-  AOTI_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::empty_like", "", stack.data()));
   return to<Tensor>(stack[0]);
 }
@@ -36,7 +36,7 @@ inline Tensor empty_like(const Tensor& self) {
 // actually a Scalar. This is because Scalar.h is currently not
 // header-only.
 inline Tensor fill_(const Tensor& self, double value) {
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self.get(), value));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_fill__Scalar(self.get(), value));
   return self;
 }
 
@@ -46,7 +46,7 @@ inline Tensor fill_(const Tensor& self, double value) {
 inline Tensor narrow(Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AtenTensorHandle ret0 = nullptr;
 
-  AOTI_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_aten_narrow(self.get(), dim, start, length, &ret0));
   return Tensor(ret0);
 }
@@ -63,7 +63,7 @@ inline Tensor pad(
     double value = 0.0) {
   AtenTensorHandle ret0 = nullptr;
 
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_pad(
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_pad(
       self.get(), pad.data(), pad.size(), mode.c_str(), &value, &ret0));
   return Tensor(ret0);
 }
@@ -73,7 +73,7 @@ inline Tensor pad(
 inline Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
   const auto num_args = 3;
   std::array<StableIValue, num_args> stack{from(self), from(dim0), from(dim1)};
-  AOTI_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::transpose", "int", stack.data()));
   return to<Tensor>(stack[0]);
 }
@@ -84,7 +84,9 @@ inline Tensor transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
 inline Tensor zero_(Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{from(self)};
-  AOTI_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
   return to<Tensor>(stack[0]);
 }
+
+} // namespace torch::stable
