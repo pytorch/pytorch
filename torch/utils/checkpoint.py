@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import itertools
 import platform
 import uuid
 import warnings
@@ -328,6 +329,10 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+
+uid = itertools.count(1)
+
+
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
@@ -479,6 +484,13 @@ def checkpoint(
             "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
         )
 
+    is_compiling = torch.compiler.is_compiling()
+    if is_compiling:
+        # Overwrite each node's "recompute" tag to add in PREFER_RECOMPUTE
+        # SAC will change those values if applicable
+        fx_traceback.current_meta["ac_graph_id"] = next(uid)
+        fx_traceback.current_meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
+
     if use_reentrant:
         if context_fn is not noop_context_fn or debug is not False:
             raise ValueError(
@@ -493,6 +505,10 @@ def checkpoint(
         # Runs pre-forward logic
         next(gen)
         ret = function(*args, **kwargs)
+        if is_compiling:
+            # Remove previous state
+            del fx_traceback.current_meta["ac_graph_id"]
+            del fx_traceback.current_meta["recompute"]
         # Runs post-forward logic
         try:
             next(gen)
@@ -1173,6 +1189,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             super().__init__(pack_hook, unpack_hook)
 
 
+# TODO: replace this is torch.compiler.is_compiling()
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # Checking that a functional mode is active should always do what we want
@@ -1300,7 +1317,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
 
-        is_compiling = _is_compiling(func, args, kwargs)
+        is_compiling = torch.compiler.is_compiling()
 
         if is_compiling:
             # Overwrite each node's "recompute" tag to add in the user annotation.
@@ -1337,7 +1354,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
 
-        is_compiling = _is_compiling(func, args, kwargs)
+        is_compiling = torch.compiler.is_compiling()
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             storage = self.storage.get(func)
