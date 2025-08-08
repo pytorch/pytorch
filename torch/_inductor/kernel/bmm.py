@@ -4,6 +4,7 @@ import logging
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 
 from .. import ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
@@ -240,7 +241,17 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    best_config_future = None
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config("bmm", [mat1, mat2])
+
+    return autotune_select_algorithm(
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
 
 
 @L.register_lowering(aten.baddbmm)
