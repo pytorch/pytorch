@@ -5,11 +5,11 @@ on:
     branches:
       - main
     paths:
-      - scripts/lumos_cli/**
+      - scripts/lumen_cli/**
       - .github/workflows/tools-unit-tests.yml
   pull_request:
     paths:
-      - scripts/lumos_cli/**
+      - scripts/lumen_cli/**
       - .github/workflows/tools-unit-tests.yml
 
 concurrency:
@@ -38,5 +38,5 @@ jobs:
           source /tmp/venv/bin/activate
           python -m pip install --upgrade pip
           pip install pytest==7.3.2
-          pip install -e scripts/lumos_cli
-          pytest -v -s scripts/lumos_cli/tests
+          pip install -e scripts/lumen_cli
+          pytest -v -s scripts/lumen_cli/tests
