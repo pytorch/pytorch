@@ -62,6 +62,7 @@ from ..source import (
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    SkipGuardSource,
 )
 from ..utils import (
     check_constant_args,
@@ -303,6 +304,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
