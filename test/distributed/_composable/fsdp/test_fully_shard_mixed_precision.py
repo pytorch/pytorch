@@ -28,7 +28,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TEST_HPU
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TEST_HPU, TEST_XPU, xfailIf
 
 
 device_type = torch.device(get_devtype())
@@ -89,6 +89,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    @xfailIf(TEST_XPU) #https://github.com/pytorch/pytorch/issues/156782
     def test_compute_dtype(self):
         use_shard_placement_fn_vals = (
             self._get_use_shard_placement_fn_vals_for_bf16_reduce()
@@ -169,6 +170,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    @xfailIf(TEST_XPU) #https://github.com/pytorch/pytorch/issues/156782
     def test_reduce_dtype(self):
         self.run_subtests(
             {
@@ -291,6 +293,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU) #https://github.com/pytorch/pytorch/issues/156782
     def test_grad_acc_with_reduce_dtype(self):
         """
         Tests that gradient accumulation without reduce-scatter when using
@@ -610,7 +613,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
         model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
+        inp = Input(torch.randn(2, 10).to(device_type))
 
         fully_shard(model, mp_policy=mp_policy)
         loss = model(inp).sum()
