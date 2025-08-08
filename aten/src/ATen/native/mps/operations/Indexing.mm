@@ -353,14 +353,7 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
 }
 
 Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    Tensor out_fallback = nonzero_fallback(self);
-    at::native::resize_output(out_, out_fallback.sizes());
-    out_.copy_(out_fallback);
-    return out_;
-  } else if (self.is_complex()) {
+  if (self.is_complex()) {
     TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes. ",
                     "Falling back on CPU. This may have performance implications.");
     Tensor out_fallback = nonzero_fallback(self);
@@ -445,11 +438,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 }
 
 Tensor nonzero_mps(const Tensor& self) {
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
-    TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 14.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-    return nonzero_fallback(self);
-  } else if (self.is_complex()) {
+  if (self.is_complex()) {
     TORCH_WARN_ONCE("MPS: nonzero op is not supported for complex datatypes ",
                     "Falling back on CPU. This may have performance implications.");
     return nonzero_fallback(self);
