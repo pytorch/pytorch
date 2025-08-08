@@ -91,6 +91,8 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif isinstance(x, variables.FrozenDataClassVariable):
+        return all(is_hashable(e) for e in x.fields.values())
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
         and not was_instancecheck_override(x.value)
@@ -118,6 +120,7 @@ def is_hashable(x):
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
                 variables.WeakRefVariable,
+                variables.TorchHigherOrderOperatorVariable,
             ),
         )
 
@@ -169,6 +172,14 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.FrozenDataClassVariable):
+                Hashable = ConstDictVariable._HashableTracker
+                fields_values = {
+                    k: Hashable(v).underlying_value for k, v in self.vt.fields.items()
+                }
+                return variables.FrozenDataClassVariable.HashWrapper(
+                    self.vt.python_type(), fields_values
+                )
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):
@@ -1183,6 +1194,11 @@ class DictViewVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
+
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
 
     def call_method(
         self,
