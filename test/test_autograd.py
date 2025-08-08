@@ -12409,6 +12409,7 @@ class TestAutogradDeviceType(TestCase):
             def forward(self, x):
                 return x * self.a + self.b
 
+        # Keep the model on cpu as we do want to test the mixed cpu/accelerator behavior here
         model = RegressionModel()
         inputs = torch.randn(4, 10, device=device)
         out = model(inputs)
