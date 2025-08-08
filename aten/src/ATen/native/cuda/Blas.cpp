@@ -1373,7 +1373,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
   }
-  else if (scaling_choice == ScalingType::BlockWise1x32) {
+  else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
     #if ROCM_VERSION >= 70000
     TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
                 "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
