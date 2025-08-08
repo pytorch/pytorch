@@ -947,7 +947,7 @@ auto FunctionParameter::check(
   // that internally
   if (check_has_torch_function(obj, /*ignore_mode*/ true) &&
       !THPVariable_Check(obj)) {
-    // tensor subclasses and unrelated objects with __torch_function__
+    // unrelated objects with __torch_function__
     append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
     return true;
   }
