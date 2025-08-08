@@ -96,6 +96,12 @@ using CaptureId_t = unsigned long long;
 // second is set if the instance is created by Graph mode graph_pool_handle.
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
+struct MempoolIdHash {
+  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
+    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
+  }
+};
+
 struct C10_API DeviceAllocator : public c10::Allocator {
   DeviceAllocator();
   ~DeviceAllocator() override;
@@ -643,6 +649,96 @@ ExpandableSegmentT* make_expandable_segment(
   TORCH_INTERNAL_ASSERT(ptr, "Failed to allocate memory for ExpandableSegment");
   ptr->init(device, std::move(stream), segment_size, std::move(peers));
   return ptr;
+}
+
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
+template <
+    typename StreamT,
+    typename EventT,
+    typename BlockT = DeviceBlock<StreamT>,
+    typename ExpandableSegmentT = ExpandableSegment<StreamT>>
+struct CachingDeviceAllocatorImpl {
+  using BlockPoolT = BlockPool<BlockT>;
+  using PrivatePoolT = PrivatePool<BlockT>;
+
+  virtual ~CachingDeviceAllocatorImpl() = default;
+
+  CachingDeviceAllocatorImpl(c10::DeviceIndex device_index)
+      : device_index_(device_index),
+        large_blocks(/*small=*/false),
+        small_blocks(/*small=*/true) {
+    stats.max_split_size =
+        static_cast<int64_t>(AcceleratorAllocatorConfig::max_split_size());
+    context_recorder_.store(nullptr);
+  }
+
+  BlockT* malloc(DeviceIndex device, size_t orig_size, c10::Stream stream) {}
+
+ private:
+  /* Internal methods for managing device blocks*/
+
+  BlcokPoolT& get_pool(size_t size, StreamT stream) {
+    // captures_underway is a conservative guess that the current stream may be
+    // capturing. It's only non-empty if some thread has begun and not yet ended
+    // a capture, so it's usually 0, and we can short-circuit
+    // cudaStreamCaptureStatus (which does a TLS lookup).
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      for (auto& entry : captures_underway) {
+        if (entry.second(stream)) {
+          auto it1 = graph_pools.find(entry.first);
+          TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
+          if (size <= kSmallSize) {
+            return it1->second->small_blocks;
+          } else {
+            return it1->second->large_blocks;
+          }
+        }
+      }
+    }
+    if (size <= kSmallSize) {
+      return small_blocks;
+    } else {
+      return large_blocks;
+    }
+  }
+
+  c10::DeviceIndex device_index_;
+
+  // lock around all operations
+  mutable std::recursive_mutex mutex;
+
+  // device statistics
+  DeviceStats stats;
+
+  // unallocated cached blocks larger than 1 MB
+  BlockPoolT large_blocks;
+
+  // unallocated cached blocks 1 MB or smaller
+  BlockPoolT small_blocks;
+
+  std::atomic<CreateContextFn> context_recorder_;
+  RecordContext record_context_ = RecordContext::NEVER;
+
+  // captures_underway tracks if we are diverting some allocations to a specific
+  // pool. Most of the time it's empty, in which case malloc can avoid calling
+  // query streams' capture state API such as `cudaStreamGetCaptureInfo` in the
+  // hot path.
+  std::vector<std::pair<MempoolId_t, std::function<bool(StreamT)>>>
+      captures_underway;
+
+  // Members specific to Graph mode capture.
+
+  // Private pools for CUDA graphs
+  ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePoolT>, MempoolIdHash>
+      graph_pools;
 }
 
 } // namespace c10::CachingDeviceAllocator

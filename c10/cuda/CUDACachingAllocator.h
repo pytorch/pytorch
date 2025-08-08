@@ -51,9 +51,9 @@ namespace c10::cuda::CUDACachingAllocator {
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::CachingAllocator::kLargeBuffer;
+using c10::CachingDeviceAllocator::CreateContextFn;
 using c10::CachingDeviceAllocator::DeviceStats;
-
-typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+using c10::CachingDeviceAllocator::RecordContext;
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
@@ -180,13 +180,6 @@ struct SnapshotInfo {
 struct CheckpointDelta {
   std::vector<void*> ptrs_freed;
   std::vector<at::DataPtr> dataptrs_allocd;
-};
-
-enum struct RecordContext {
-  NEVER = 0,
-  STATE = 1, // only keep stacks for active allocations
-  ALLOC = 2, // additionally keep stacks for allocations in the trace history
-  ALL = 3, // additionally record stacks for when something is freed
 };
 
 using OutOfMemoryObserver = std::function<void(
