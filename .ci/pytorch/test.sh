@@ -1675,8 +1675,6 @@ elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
-  pip install transformers==4.54.0
-  pip_uninstall torchao
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
@@ -1694,21 +1692,12 @@ elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
-  install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    # installing torchbench can install torchao and we don't want need torchao
-    # for inductor torchbench tests. It creates another unnecessary dependency
-    # on the transformers model.
-    pip_uninstall torchao
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
-    # installing torchbench can install torchao and we don't want need torchao
-    # for inductor torchbench tests. It creates another unnecessary dependency
-    # on the transformers model.
-    pip_uninstall torchao
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
     TORCHBENCHPATH=/torchbench test_torchbench_gcp_smoketest
