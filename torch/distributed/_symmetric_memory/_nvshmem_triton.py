@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sysconfig
-from typing import Optional
+from typing import Any, Optional
 
 from torch.utils._triton import has_triton
 
@@ -111,106 +111,111 @@ def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
 
 
 if has_triton():
+    import triton
+    import triton.language as tl
     from triton.language import core
 
-    # RMA Operations (mem-based APIs - sizes in bytes)
-    @core.extern
-    def putmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def put(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
-        Put data to remote PE using block-scoped operation.
+        Put tensor data from local PE to a remote PE.
 
-        This function copies a contiguous block of data from the local PE's memory
-        to a symmetric data object on the remote PE. The operation is performed at
-        thread block scope, meaning all threads in the block cooperate to perform
-        the transfer efficiently.
+        This high-level function provides a tensor-aware interface for NVSHMEM put
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            dst (int64): Symmetric address of the destination data object on the remote PE.
-                        Must be a pointer to symmetric memory allocated via NVSHMEM.
-            src (int64): Local address of the source data object containing data to be copied.
-                        Can be any valid local memory address.
-            size_bytes (int64): Number of bytes to transfer. Must be positive.
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            dest: Destination tensor on the remote PE. Type must match source.
+            source: Source tensor on the local PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a blocking operation that returns after data has been copied out
               of the source array on the local PE.
             - The operation does not guarantee delivery to the destination PE.
               Use nvshmem_fence() for ordering or nvshmem_quiet() for completion.
-            - All threads in the block should call this function with the same parameters.
-            - The source memory remains valid for use immediately after the call returns.
 
         Example:
-            ```python
-            # Transfer 1024 bytes from local buffer to PE 1
-            nvshmem.putmem_block(remote_ptr, local_ptr, 1024, 1)
+            ```
+            # Transfer 100 elements to PE 1
+            nvshmem.put(dest_tensor, src_tensor, 100, 1)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return putmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+        )
+
+    @core.extern
+    def putmem_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM put"""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, pe],
+            [dest, source, size_bytes, pe],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int64"),  # pe number
                 ): ("nvshmemx_putmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
-    @core.extern
-    def getmem_block(dst, src, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def get(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
-        Get data from remote PE using block-scoped operation.
+        Get tensor data from a remote PE to local PE.
 
-        This function copies a contiguous block of data from a symmetric data object
-        on the remote PE to the local PE's memory. The operation is performed at
-        thread block scope, meaning all threads in the block cooperate to perform
-        the transfer efficiently.
+        This high-level function provides a tensor-aware interface for NVSHMEM get
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            dst (int64): Local address of the destination data object to be updated.
-                        Can be any valid local memory address.
-            src (int64): Symmetric address of the source data object on the remote PE.
-                        Must be a pointer to symmetric memory allocated via NVSHMEM.
-            size_bytes (int64): Number of bytes to transfer. Must be positive.
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            dest: Destination tensor on the local PE. Type must match source.
+            source: Source tensor on the remote PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a blocking operation that returns after data has been delivered
               to the destination array on the local PE.
-            - All threads in the block should call this function with the same parameters.
             - The destination data is guaranteed to be available for use after the call returns.
-            - Provides method for copying contiguous symmetric data from different PE.
 
         Example:
             ```
-            # Get 1024 bytes from PE 0 into local buffer
-            nvshmem.getmem_block(local_ptr, remote_ptr, 1024, 0)
+            # Get 100 elements from PE 0
+            nvshmem.get(dest_tensor, src_tensor, 100, 0)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return getmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+        )
+
+    @core.extern
+    def getmem_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM get"""
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, pe],
+            [dest, source, size_bytes, pe],
             {
                 (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int64"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -288,45 +293,47 @@ if has_triton():
         )
 
     # Wait and Signal Operations
-    @core.extern
-    def wait_until(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
-        """
-        Wait until a condition is met on a symmetric variable.
 
-        This function blocks the calling thread until the value at the specified
-        symmetric memory location satisfies the given comparison condition. This
-        provides a mechanism for point-to-point synchronization between PEs.
+    @triton.jit  # type: ignore[misc]
+    def wait_until(ivar, cmp_op, cmp_val):  # type: ignore[no-untyped-def]
+        """
+        Wait until a tensor variable meets a specified condition.
+
+        This high-level function provides a tensor-aware interface for NVSHMEM wait_until
+        operations. It automatically handles tensor address extraction, making
+        the API more ergonomic and type-safe.
 
         Args:
-            ivar (int64): Symmetric address of the variable to monitor. Must be a
-                         pointer to symmetric memory (typically int64/uint64).
-            cmp (int64): Comparison operator. Common values:
-                        - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
-                        - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
-                        - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                        - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
-                        - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                        - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
-            cmp_val (int64): Value to compare against.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            ivar_tensor: Tensor to monitor (typically int64/uint64) in symmetric memory.
+            cmp: Comparison operator. Common values:
+                 - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
+                 - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
+                 - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
+                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
+                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+            cmp_val: Value to compare against.
 
         Notes:
             - This is a blocking operation that will wait indefinitely until the
               condition is satisfied.
-            - The variable must be in symmetric memory and accessible from other PEs.
-            - Updates to the variable from remote PEs will eventually become visible.
-            - Can be used with put operations from other PEs for synchronization.
+            - The tensor must be in symmetric memory and accessible from other PEs.
 
         Example:
             ```
-            # Wait until flag becomes 1 (set by another PE)
+            # Wait until flag tensor becomes 1 (set by another PE)
             NVSHMEM_CMP_EQ = 0
-            nvshmem.wait_until(flag_ptr, NVSHMEM_CMP_EQ, 1)
+            nvshmem.wait_until_tensor(flag_tensor, NVSHMEM_CMP_EQ, 1)
             ```
         """
+        tl.static_assert(
+            ivar.type.element_ty.itemsize == 8,
+            "wait_until expects a 64-bit type for the synchronization variable",
+        )
+        return wait_until_extern_wrapper(ivar.to(tl.int64), cmp_op, cmp_val)
+
+    @core.extern
+    def wait_until_extern_wrapper(ivar, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
@@ -482,9 +489,9 @@ if has_triton():
         Example:
             ```
             # Ensure first put completes before second put to same PE
-            nvshmem.putmem_block(dst1, src1, size, target_pe)
+            nvshmem.put(dst, src, nelems, target_pe)
             nvshmem.fence()  # Enforce ordering
-            nvshmem.putmem_block(dst2, src2, size, target_pe)
+            nvshmem.put(dst2, src2, nelems, target_pe)
             ```
         """
         return core.extern_elementwise(
@@ -727,47 +734,44 @@ if has_triton():
         )
 
     # Collective Operations (mem-based APIs - sizes in bytes)
-    @core.extern
-    def alltoallmem_block(team, dest, source, size_bytes, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def alltoall(team, dest, source, nelems_per_pe):  # type: ignore[no-untyped-def]
         """
-        Perform alltoall collective operation on symmetric memory.
+        All-to-all tensor exchange between PEs in a team.
 
-        This function implements an all-to-all collective communication pattern where
-        each PE sends a portion of its data to every other PE, and receives data from
-        every other PE. The operation exchanges size_bytes of data between each pair of PEs.
+        This high-level function provides a tensor-aware interface for NVSHMEM alltoall
+        operations. Each PE sends nelems_per_pe elements to every other PE and receives
+        the same amount from every other PE.
 
         Args:
-            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
-                         (all PEs in the job).
-            dest (int64): Symmetric address of the destination buffer. Must be large enough
-                         to hold size_bytes * n_pes total bytes.
-            source (int64): Symmetric address of the source buffer containing data to send.
-                           Must contain size_bytes * n_pes total bytes.
-            size_bytes (int64): Number of bytes to exchange with each PE. Must be positive.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
-
-        Data Layout:
-            - Source buffer layout: [data_for_pe0, data_for_pe1, ..., data_for_pe(n-1)]
-            - Destination buffer layout: [data_from_pe0, data_from_pe1, ..., data_from_pe(n-1)]
-            - Each segment is size_bytes in length
+            team: Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD.
+            dest: Destination tensor. Must be large enough for nelems_per_pe * n_pes elements.
+            source: Source tensor containing data for all PEs. Must contain nelems_per_pe * n_pes elements.
+            nelems_per_pe: Number of elements to exchange with each PE.
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a collective operation - all PEs in the team must participate.
-            - Must be called from kernels launched with cooperative launch.
-            - The source and destination buffers must not overlap.
-            - All PEs must call with the same size_bytes value.
-            - Provides efficient many-to-many data exchange pattern.
+            - Data layout: source=[data_for_pe0, data_for_pe1, ...], dest=[data_from_pe0, data_from_pe1, ...]
 
         Example:
             ```
-            # Each PE sends 1024 bytes to every other PE
-            team_world = 0
-            nvshmem.alltoallmem_block(team_world, dest_ptr, src_ptr, 1024)
+            # Each PE exchanges 10 elements with every other PE
+            nvshmem.alltoall(0, dest_tensor, src_tensor, 10)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        size_bytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
+        return alltoallmem_block_extern_wrapper(
+            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe
+        )
+
+    @core.extern  # type: ignore[misc]
+    def alltoallmem_block_extern_wrapper(
+        team: Any, dest: Any, source: Any, size_bytes: Any, _semantic: Any = None
+    ) -> None:
+        """Low-level extern wrapper for NVSHMEM alltoall"""
         return core.extern_elementwise(
             "",
             "",
@@ -784,46 +788,50 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    @core.extern
-    def broadcastmem_block(team, dest, source, size_bytes, pe_root, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def broadcast(team, dest, source, nelems, pe_root):  # type: ignore[no-untyped-def]
         """
-        Broadcast data from a root PE to all other PEs in a team.
+        Broadcast tensor data from a root PE to all other PEs in a team.
 
-        This function implements a collective broadcast operation where the root PE
-        sends its data to all other PEs in the team. All PEs (including the root)
-        receive a copy of the data from the root PE in their destination buffer.
+        This high-level function provides a tensor-aware interface for NVSHMEM broadcast
+        operations. It automatically handles type checking and size calculations, making
+        the API more ergonomic and type-safe.
 
         Args:
-            team (int64): Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD
-                         (all PEs in the job).
-            dest (int64): Symmetric address of the destination buffer on all PEs.
-                         Must be large enough to hold size_bytes.
-            source (int64): Symmetric address of the source buffer on the root PE.
-                           Only the root PE's source buffer is used.
-            size_bytes (int64): Number of bytes to broadcast. Must be positive.
-            pe_root (int64): PE number of the root PE that provides the source data.
-            _semantic: Optional semantic information for Triton compilation.
-
-        Returns:
-            int32: Status code (0 for success).
+            team: Team handle for the collective operation. Use 0 for NVSHMEM_TEAM_WORLD.
+            dest: Destination tensor with type information. All PEs receive data here.
+            source: Source tensor on the root PE. Type must match dest.
+            nelems: Number of elements to broadcast.
+            pe_root: PE number of the root PE that provides the source data.
 
         Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
             - This is a collective operation - all PEs in the team must participate.
             - Must be called from kernels launched with cooperative launch.
-            - Only the root PE's source buffer is read; other PEs' source buffers are ignored.
-            - All PEs (including root) receive the data in their destination buffer.
-            - All PEs must call with the same team, size_bytes, and pe_root values.
-            - The source and destination buffers must not overlap on any PE.
-            - Efficient one-to-many communication pattern.
 
         Example:
             ```
-            # PE 0 broadcasts 1024 bytes to all PEs in the team
-            team_world = 0
-            root_pe = 0
-            nvshmem.broadcastmem_block(team_world, dest_ptr, src_ptr, 1024, root_pe)
+            # Broadcast 100 elements from PE 0 to all PEs
+            nvshmem.broadcast(0, dest_tensor, src_tensor, 100, 0)
             ```
         """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return broadcastmem_block_extern_wrapper(
+            team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root
+        )
+
+    @core.extern  # type: ignore[misc]
+    def broadcastmem_block_extern_wrapper(
+        team: Any,
+        dest: Any,
+        source: Any,
+        size_bytes: Any,
+        pe_root: Any,
+        _semantic: Any = None,
+    ) -> None:
+        """Low-level extern wrapper for NVSHMEM broadcast"""
         return core.extern_elementwise(
             "",
             "",
@@ -842,10 +850,56 @@ if has_triton():
         )
 
     # Reduction Operation
-    @core.extern  # type: ignore[misc]
-    def reduce(team, dest, source, nreduce, operation: str, dtype_id, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def reduce(team, dest, source, nreduce, operation: tl.constexpr):  # type: ignore[no-untyped-def]
         """
-        Performs a collective reduction operation on symmetric data across a team of PEs.
+        Performs a collective reduction on tensors across a team of PEs.
+
+        This high-level function provides a tensor-aware interface for NVSHMEM
+        reduction operations. It automatically infers the data type from the
+        input tensors and calls the appropriate underlying NVSHMEM function.
+
+        Args:
+            team: The team handle for the collective (0 for NVSHMEM_TEAM_WORLD).
+            dest: Destination tensor for the reduction results.
+            source: Source tensor containing data to be reduced. Must be the same type as dest.
+            nreduce: The number of elements in the source tensor to reduce.
+            operation: The reduction operation to perform ("sum", "max", "min", "prod").
+
+        Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - This is a collective operation that must be called by all PEs in the team.
+            - Requires a cooperative grid launch.
+
+        Example:
+            ```
+            # Perform a sum reduction on two tensors
+            nvshmem.reduce(0, dest_tensor, src_tensor, 100, "sum")
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        dtype = dest.type.element_ty
+        return reduce_extern_wrapper(
+            team,
+            dest.to(tl.int64),
+            source.to(tl.int64),
+            nreduce,
+            operation,
+            dtype,
+        )
+
+    @core.extern  # type: ignore[misc]
+    def reduce_extern_wrapper(
+        team: Any,
+        dest: Any,
+        source: Any,
+        nreduce: Any,
+        operation: str,
+        dtype: Any,
+        _semantic: Any = None,
+    ) -> None:
+        """
+        Low-level extern wrapper for NVSHMEM reduction operations.
 
         This function provides a generic interface to NVSHMEM reduction operations,
         automatically selecting the appropriate NVSHMEM function based on the data type
@@ -856,7 +910,7 @@ if has_triton():
             source (pointer): Source pointer containing data to be reduced.
             nreduce (int64): Number of elements to reduce.
             operation (str): Reduction operation ("sum", "max", "min", "prod").
-            dtype_id: Data type specification - accepts torch.dtype, tl.dtype, str, or constexpr.
+            dtype: Data type specification - accepts torch.dtype, tl.dtype, str, or constexpr.
             _semantic: Optional semantic information for Triton compilation.
 
         Raises:
@@ -866,7 +920,7 @@ if has_triton():
         Example:
             nvshmem.reduce(0, dest_ptr, src_ptr, 100, "sum", torch.float32)
         """
-        # Mapping from PyTorch/Triton dtype names to NVSHMEM typenames
+        # Mapping from Triton dtype names to NVSHMEM typenames
         DTYPE_TO_NVSHMEM_MAP = {
             "int8": "int8",
             "int16": "int16",
@@ -876,35 +930,22 @@ if has_triton():
             "uint16": "uint16",
             "uint32": "uint32",
             "uint64": "uint64",
-            "float16": "half",
-            "bfloat16": "bfloat16",
-            "float32": "float",
-            "float64": "double",
+            "fp16": "half",
+            "bf16": "bfloat16",
+            "fp32": "float",
+            "fp64": "double",
         }
+
+        # Triton dtype names are standardized as fp16, bf16, fp32, etc.
+        dtype_name = str(dtype).replace("tl.", "")
+
+        if dtype_name not in DTYPE_TO_NVSHMEM_MAP:
+            raise TypeError(
+                f"Unsupported reduction dtype: {dtype_name}. Supported dtypes: {list(DTYPE_TO_NVSHMEM_MAP.keys())}"
+            )
 
         # Extract operation name from constexpr if needed
         op_name = operation.value if hasattr(operation, "value") else operation
-
-        # Normalize dtype_id to a canonical string name
-        # Handle different input formats: tl.dtype, torch.dtype, str, constexpr[dtype]
-        if hasattr(dtype_id, "name"):
-            # Triton language dtype (e.g., tl.float32)
-            dtype_name = dtype_id.name
-        elif isinstance(dtype_id, str):
-            # Already a plain string name
-            dtype_name = dtype_id
-        elif hasattr(dtype_id, "value"):
-            # Constexpr wrapper around a dtype
-            inner_value = dtype_id.value
-            if hasattr(inner_value, "name"):
-                # Triton dtype inside constexpr
-                dtype_name = inner_value.name
-            else:
-                # PyTorch dtype inside constexpr
-                dtype_name = str(inner_value).replace("torch.", "")
-        else:
-            # PyTorch dtype (e.g., torch.float32)
-            dtype_name = str(dtype_id).replace("torch.", "")
 
         # Validate operation is supported
         supported_ops = {"sum", "max", "min", "prod"}
