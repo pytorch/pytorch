@@ -2647,9 +2647,37 @@
         "Try to construct `torch.nn.Parameter()` outside the compiled region.",
         "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ],
-      "Additional_Info": [
-        "Try to construct nn.Parameter() outside the compiled region.  If this is not possible, turn `graph_break_on_nn_param_ctor` off"
+      ]
+    }
+  ],
+  "GB0265": [
+    {
+      "Gb_type": "FakeScriptObject missing method implementation",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "TorchScript object {self.value} doesn't define the method {name}.",
+      "Hints": [
+        "Ensure the method {name} is implemented in {self.value}.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0266": [
+    {
+      "Gb_type": "Weird method call on TorchScript object",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "This particular method call ({name}) is not supported (e.g. calling `__setattr__`). Most method calls to TorchScript objects should be supported.",
+      "Hints": [
+        "Avoid calling this method."
+      ]
+    }
+  ],
+  "GB0267": [
+    {
+      "Gb_type": "Attempted to access non-callable attribute of TorchScript object",
+      "Context": "value={self.value}, method={name}",
+      "Explanation": "Attribute accesses of TorchScript objects to non-callable attributes are not supported.",
+      "Hints": [
+        "Use method calls instead of attribute access."
       ]
     }
   ]
