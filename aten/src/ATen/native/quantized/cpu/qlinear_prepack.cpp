@@ -305,11 +305,12 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
 #if defined(__powerpc__)
   if (is_fp8){
 #else
-    if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+  if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
 #endif
     // oneDNN's fp8 requires AMX support
     // If AMX is not available, fall back to reference implementation
-    return weight;
+    // Transpose weight to align with behavior in oneDNN
+    return weight.t();
   }
   std::vector<int64_t> w_dims = weight.sizes().vec();
   auto w_data_type = is_fp8

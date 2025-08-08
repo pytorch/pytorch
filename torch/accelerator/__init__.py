@@ -119,6 +119,18 @@ current_device_idx = deprecated(
     category=FutureWarning,
 )(current_device_index)
 
+current_device_idx.__doc__ = r"""
+    (Deprecated) Return the index of a currently selected device for the current :ref:`accelerator<accelerators>`.
+
+    Returns:
+        int: the index of a currently selected device.
+
+    .. warning::
+
+        :func:`torch.accelerator.current_device_idx` is deprecated in favor of :func:`torch.accelerator.current_device_index`
+        and will be removed in a future PyTorch release.
+    """
+
 
 def set_device_index(device: _device_t, /) -> None:
     r"""Set the current device index to a given device.
@@ -137,6 +149,19 @@ set_device_idx = deprecated(
     "Use `set_device_index` instead.",
     category=FutureWarning,
 )(set_device_index)
+
+set_device_idx.__doc__ = r"""
+    (Deprecated) Set the current device index to a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type.
+
+    .. warning::
+
+        :func:`torch.accelerator.set_device_idx` is deprecated in favor of :func:`torch.accelerator.set_device_index`
+        and will be removed in a future PyTorch release.
+    """
 
 
 def current_stream(device: _device_t = None, /) -> torch.Stream:

@@ -886,7 +886,7 @@ def _record_memory_history(
     store the last accumulated `max_entries` entries, meaning new entries overwrite
     older entries.
 
-    C++ implementation for reference to ring buffer implemenation:
+    C++ implementation for reference to ring buffer implementation:
 
     .. code-block:: cpp
 
@@ -914,7 +914,7 @@ def _record_memory_history(
     Args:
         enabled (Literal[None, "state", "all"], optional):
             `None`, disable recording memory history.
-            `"state"`, keep information for currenly allocated memory.
+            `"state"`, keep information for currently allocated memory.
             `"all"`, additionally keep a history of all alloc/free calls.
             Defaults to "all".
         context (Literal[None, "state", "alloc", "all"], optional):
@@ -1075,8 +1075,8 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
         f.write(_memory(snapshot))
 
 
-def _set_allocator_settings(env: str):
-    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+# Keep for BC only
+_set_allocator_settings = torch._C._accelerator_setAllocatorSettings
 
 
 def get_allocator_backend() -> str:

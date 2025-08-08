@@ -6,7 +6,6 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
@@ -71,7 +70,6 @@ def parallelize_module(  # type: ignore[return]
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-    _validate_tp_mesh_dim(device_mesh)
 
     if parallelize_plan is None:
         warnings.warn(

@@ -1254,7 +1254,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
    *   A[0] = 3;
    *   A[x] = (A[x]) + 1;
    * }
-   * int A_2 = A[x];              // A_2 initialier
+   * int A_2 = A[x];              // A_2 initializer
    * B[x] = A_2;                  //
    * B[x + 1] = A_2;              //
    * A_2 = C[x];                  //
@@ -3064,7 +3064,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
 }
 
 // In this case the conditional access must be hoisted by two loops, there are
-// two accesses here one is unhidden and the other isnt. A[0] can be
+// two accesses here one is unhidden and the other isn't. A[0] can be
 // registerized but B[0] cannot.
 TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   BufHandle a("A", {10}, kInt);
@@ -3422,8 +3422,8 @@ TEST(Registerizer, RegisterizerMultiDim) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-// Wont registerize if only some dims match, but will still registerize distinct
-// elements.
+// Won't registerize if only some dims match, but will still registerize
+// distinct elements.
 TEST(Registerizer, RegisterizerMultiDimPartial) {
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);

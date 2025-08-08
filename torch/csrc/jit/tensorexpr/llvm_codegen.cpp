@@ -83,7 +83,7 @@ using namespace torch::jit::tensorexpr;
 C10_DEFINE_bool(
     torch_jit_llvm_use_fast_intrinsics,
     false,
-    "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
+    "Use fast (but slightly less accurate) implementations of tanh and sigmoid")
 
 namespace torch::jit::tensorexpr {
 
@@ -246,7 +246,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::string kernel_func_name_;
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE)
 #undef LLVM_TYPE_DECLARE
 
 #if LLVM_VERSION_MAJOR >= 15
@@ -1101,7 +1101,7 @@ std::enable_if_t<std::is_floating_point_v<T>, llvm::Value*> getFromType(
   void LLVMCodeGenImpl::visit(const Name##ImmPtr& v) { \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
-AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
+AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE)
 #undef IMM_VISIT_DECLARE
 
 void LLVMCodeGenImpl::visit(const HalfImmPtr& v) {
