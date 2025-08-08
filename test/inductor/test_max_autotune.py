@@ -68,13 +68,13 @@ from torch.testing._internal.inductor_utils import (
     get_kernel_launch,
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
 )
 
 
 torch.set_float32_matmul_precision("high")
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 

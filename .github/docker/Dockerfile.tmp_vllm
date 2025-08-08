@@ -167,15 +167,6 @@ RUN cat  torch_build_versions.txt
 
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
-# Cuda arch list used by torch
-# can be useful for `test`
-# explicitly set the list to avoid issues with torch 2.2
-# see https://github.com/pytorch/pytorch/pull/123243
-
-# Override the arch list for flash-attn to reduce the binary size
-ARG vllm_fa_cmake_gpu_arches='80-real;90-real'
-ENV VLLM_FA_CMAKE_GPU_ARCHES=${vllm_fa_cmake_gpu_arches}
-
 #################### BASE BUILD IMAGE ####################
 
 
