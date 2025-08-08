@@ -817,14 +817,23 @@ class DefaultDictVariable(ConstDictVariable):
             if args[0] in self:
                 return self.getitem_const(tx, args[0])
             else:
-                if self.default_factory is None:
-                    raise KeyError(f"{args[0]}")
-                else:
+                self.call_method(tx, "__missing__", args, kwargs)
+        elif name == "__missing__":
+            if self.default_factory is None:
+                raise_observed_exception(KeyError, tx)
+            else:
+                try:
                     default_var = self.default_factory.call_function(tx, [], {})
                     super().call_method(
                         tx, "__setitem__", (args[0], default_var), kwargs
                     )
                     return default_var
+                except Exception as exc:
+                    raise_observed_exception(
+                        type(exc),
+                        tx,
+                        args=list(map(ConstantVariable.create, exc.args)),
+                    )
         else:
             return super().call_method(tx, name, args, kwargs)
 
