@@ -22,6 +22,7 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
@@ -315,28 +316,28 @@ triton_grouped_mm_source = r"""
 {%- else %}
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                offs_k = k_start_offset + tl.arange(0, BLOCK_K)
-                a_ptrs = (
-                    a_ptr
-{%- if not A_IS_2D %}
-                    + g * A_STRIDE_G
-{%- endif %}
-                    + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
-                    + offs_k[None, :] * A_STRIDE_K
-                )
-                b_ptrs = (
-                    b_ptr
-{%- if not B_IS_2D %}
-                    + g * B_STRIDE_G
-{%- endif %}
-                    + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
-                    + offs_k[None, :] * B_STRIDE_K
-                )
                 for k_offset in range(0, k_size, BLOCK_K):
+                    group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                    offs_k = group_offs_k + k_start_offset
+                    a_ptrs = (
+                        a_ptr
+{%- if not A_IS_2D %}
+                        + g * A_STRIDE_G
+{%- endif %}
+                        + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
+                        + offs_k[None, :] * A_STRIDE_K
+                    )
+                    b_ptrs = (
+                        b_ptr
+{%- if not B_IS_2D %}
+                        + g * B_STRIDE_G
+{%- endif %}
+                        + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
+                        + offs_k[None, :] * B_STRIDE_K
+                    )
                     a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
                     b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
                     if k_offset + BLOCK_K > k_size:
-                        group_offs_k = k_offset + tl.arange(0, BLOCK_K)
                         a = tl.where(group_offs_k < k_size, a, 0)
                         b = tl.where(group_offs_k < k_size, b, 0)
 {%- if USE_FAST_ACCUM %}
@@ -386,7 +387,7 @@ triton_grouped_mm_source = r"""
 {%- else %}
                 idx_n = offs_bn[None, :]
 {%- endif %}
-                mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
+                mask = (offs_am[:, None] < m_size) & (offs_bn[None, :] < n_size)
 {%- if M_IS_VARYING or N_IS_VARYING %}
                 {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
 {%- else %}
@@ -434,23 +435,30 @@ def grouped_mm_args(
 
         if out_dtype is None:
             out_dtype = mat1.get_dtype()
+        alignment = 16 // out_dtype.itemsize
 
-        dims = []
         if m1dim == 2:
             if m2dim == 2:
                 assert offs is not None
-                dims = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
+                out_size = [offs.get_size()[0], mat1_size[0], mat2_size[1]]
             else:
-                dims = [mat1_size[0], mat2_size[-1]]
+                out_size = [mat1_size[0], mat2_size[-1]]
         else:
             if m2dim == 2:
-                dims = [mat1_size[1], mat2_size[1]]
+                out_size = [mat1_size[1], mat2_size[1]]
             else:
-                dims = [mat1_size[0], mat1_size[1], mat2_size[-1]]
+                out_size = [mat1_size[0], mat1_size[1], mat2_size[-1]]
+        size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
+        if len(out_size) == 2:
+            out_stride = [size_padded, 1]
+        else:
+            out_stride = [out_size[1] * size_padded, size_padded, 1]
+
         layout = FixedLayout(
             mat1.get_device(),
             out_dtype,
-            dims,
+            out_size,
+            out_stride,
         )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
@@ -604,7 +612,11 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
-    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
+    ):
         scaled = scale_a is not None
         if len(m1_size) == 2:
             if len(m2_size) == 2:
