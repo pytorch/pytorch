@@ -554,6 +554,13 @@ or equal to the number of stages ({self._num_stages})."
         )
 
     def _initialize_stage(self, args, kwargs):
+        # Prepare the communication needed for the pipeline schedule execution
+        # This is needed because during execution we always perform a series of batch P2P ops
+        # The first call of the batched P2P needs to involve the entire pipeline group
+        ops = []
+        self._stage._init_p2p_neighbors(ops)
+        _wait_batch_p2p(_batch_p2p(ops))
+
         self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
         if self._has_backward:
             self._stage._prepare_backward_infra(self._n_microbatches)
@@ -1428,6 +1435,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
             )
 
     def _initialize_stages(self, args: tuple[Any, ...], kwargs):
+        # Prepare the communication needed for the pipeline schedule execution
+        # This is needed because during execution we always perform a series of batch P2P ops
+        # The first call of the batched P2P needs to involve the entire pipeline group
+        ops = []
+        for stage in self._stages:
+            stage._init_p2p_neighbors(ops)
+        _wait_batch_p2p(_batch_p2p(ops))
+
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
         # or real value (if this stage and next stage are on the same device)
         next_stage_args: tuple[Any, ...] = tuple()
