@@ -477,17 +477,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
-            return DefaultDictVariable(
+        elif self.value is collections.defaultdict:
+            default_factory = args[0] if len(args) else None
+            df = DefaultDictVariable(
                 {},
                 collections.defaultdict,
-                args[0],
+                default_factory,
                 mutation_type=ValueMutationNew(),
             )
+            if len(args) == 2:
+                # slowpath
+                d = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.construct_dict),
+                    [self, *args[1:]],
+                    kwargs,
+                )
+                df.items = d.items
+            return df
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
                 unimplemented_v2(
