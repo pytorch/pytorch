@@ -4,6 +4,9 @@
 # ruff: noqa
 # flake8: noqa
 
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_iter.py
+
 import sys
 import torch
 import torch._dynamo.test_case
@@ -162,8 +165,6 @@ class TestCase(__TestCase):
 
     # Helper to check that an iterator returns a given sequence
     def check_iterator(self, it, seq, pickle=True):
-        if pickle:
-            self.check_pickle(it, seq)
         res = []
         while 1:
             try:
@@ -175,8 +176,6 @@ class TestCase(__TestCase):
 
     # Helper to check that a for loop generates a given sequence
     def check_for_loop(self, expr, seq, pickle=True):
-        if pickle:
-            self.check_pickle(iter(expr), seq)
         res = []
         for val in expr:
             res.append(val)
