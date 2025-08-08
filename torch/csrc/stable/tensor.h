@@ -116,13 +116,6 @@ class Tensor {
     return device_type == aoti_torch_device_type_cpu();
   }
 
-  int32_t dtype() const {
-    int32_t ty;
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_dtype(ath_.get(), &ty));
-    return ty;
-  }
-
   int64_t size(int64_t dim) const {
     int64_t size;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
