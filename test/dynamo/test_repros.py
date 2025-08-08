@@ -7160,7 +7160,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.\n\n"
             "  Developer debug context: \n\n"
             " For more details about this graph break, please visit: "
-            "https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0264.html"
+            "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0264.html"
         )
         self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
 
