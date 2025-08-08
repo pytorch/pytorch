@@ -50,7 +50,8 @@ TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn);
+    std::function<FreeFuncType> free_fn,
+    bool symmetric = false);
 TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
@@ -70,7 +71,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(
       std::function<MallocFuncType> alloc_fn,
-      std::function<FreeFuncType> free_fn);
+      std::function<FreeFuncType> free_fn,
+      bool symmetric = false);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
   CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
@@ -139,6 +141,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       c10::cuda::MempoolId_t mempool_id) override;
   void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
+  bool isSymmetric() override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
   c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
       void*) override;
@@ -173,6 +176,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void copy_data(void* dest, const void* src, std::size_t count) const final;
 
  protected:
+  bool symmetric_;
   std::function<MallocFuncType> alloc_fn_;
   std::function<FreeFuncType> free_fn_;
   std::function<void(int)> init_fn_;

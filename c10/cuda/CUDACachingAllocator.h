@@ -256,6 +256,15 @@ class CUDAAllocator : public DeviceAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  // returns true if the allocator supports symmetric memory allocations
+  virtual bool isSymmetric() {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support isSymmetric. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex /*device*/,
@@ -485,6 +494,10 @@ inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setUseOnOOM(device, mempool_id);
 }
 
+inline bool isSymmetric() {
+  return get()->isSymmetric();
+}
+
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }
@@ -538,8 +551,7 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false,
-      bool symmetric = false);
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -547,7 +559,6 @@ struct C10_CUDA_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
-  bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
@@ -559,7 +570,6 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
-  bool symmetric_;
   c10::DeviceIndex device_;
 };
 
