@@ -358,60 +358,101 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    # Reduction Operations
-    @core.extern
-    def sum_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
-        """Sum reduction for int64. nreduce is number of elements in the dest and source arrays."""
-        return core.extern_elementwise(
-            "",
-            "",
-            [team, dest, source, nreduce],
-            {
-                (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                ): ("nvshmem_int64_sum_reduce", core.dtype("int32"))
-            },
-            is_pure=False,
-            _semantic=_semantic,
+    # Reduction Operation
+    @core.extern  # type: ignore[misc]
+    def reduce(team, dest, source, nreduce, operation: str, dtype_id, _semantic=None):  # type: ignore[no-untyped-def]
+        """
+        Performs a collective reduction operation on symmetric data across a team of PEs.
+
+        This function provides a generic interface to NVSHMEM reduction operations,
+        automatically selecting the appropriate NVSHMEM function based on the data type
+        and operation specified.
+        Args:
+            team (int64): The team handle (0 for NVSHMEM_TEAM_WORLD).
+            dest (pointer): Destination pointer where reduction results are stored.
+            source (pointer): Source pointer containing data to be reduced.
+            nreduce (int64): Number of elements to reduce.
+            operation (str): Reduction operation ("sum", "max", "min", "prod").
+            dtype_id: Data type specification - accepts torch.dtype, tl.dtype, str, or constexpr.
+            _semantic: Optional semantic information for Triton compilation.
+
+        Raises:
+            ValueError: If the operation is not supported.
+            TypeError: If the data type is not supported.
+
+        Example:
+            nvshmem.reduce(0, dest_ptr, src_ptr, 100, "sum", torch.float32)
+        """
+        # Mapping from PyTorch/Triton dtype names to NVSHMEM typenames
+        DTYPE_TO_NVSHMEM_MAP = {
+            "int8": "int8",
+            "int16": "int16",
+            "int32": "int32",
+            "int64": "int64",
+            "uint8": "uint8",
+            "uint16": "uint16",
+            "uint32": "uint32",
+            "uint64": "uint64",
+            "float16": "half",
+            "bfloat16": "bfloat16",
+            "float32": "float",
+            "float64": "double",
+        }
+
+        # Extract operation name from constexpr if needed
+        op_name = operation.value if hasattr(operation, "value") else operation
+
+        # Normalize dtype_id to a canonical string name
+        # Handle different input formats: tl.dtype, torch.dtype, str, constexpr[dtype]
+        if hasattr(dtype_id, "name"):
+            # Triton language dtype (e.g., tl.float32)
+            dtype_name = dtype_id.name
+        elif isinstance(dtype_id, str):
+            # Already a plain string name
+            dtype_name = dtype_id
+        elif hasattr(dtype_id, "value"):
+            # Constexpr wrapper around a dtype
+            inner_value = dtype_id.value
+            if hasattr(inner_value, "name"):
+                # Triton dtype inside constexpr
+                dtype_name = inner_value.name
+            else:
+                # PyTorch dtype inside constexpr
+                dtype_name = str(inner_value).replace("torch.", "")
+        else:
+            # PyTorch dtype (e.g., torch.float32)
+            dtype_name = str(dtype_id).replace("torch.", "")
+
+        # Validate operation is supported
+        supported_ops = {"sum", "max", "min", "prod"}
+        if op_name not in supported_ops:
+            raise ValueError(
+                f"Unsupported reduction operation: '{op_name}'. Supported ops are {supported_ops}"
+            )
+
+        # Map to NVSHMEM typename and validate dtype is supported
+        nvshmem_typename = DTYPE_TO_NVSHMEM_MAP.get(dtype_name)
+        if nvshmem_typename is None:
+            raise TypeError(
+                f"Unsupported reduction dtype: {dtype_name}. Supported dtypes are {list(DTYPE_TO_NVSHMEM_MAP.keys())}"
+            )
+
+        # Generate NVSHMEM function name
+        nvshmem_func = f"nvshmem_{nvshmem_typename}_{op_name}_reduce"
+
+        # Define function signature - all parameters are int64 in Triton (they are just ptrs)
+        signature = (
+            core.dtype("int64"),  # team handle
+            core.dtype("int64"),  # destination pointer
+            core.dtype("int64"),  # source pointer
+            core.dtype("int64"),  # number of elements
         )
 
-    @core.extern
-    def max_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
-        """Max reduction for int64. nreduce is number of elements in the dest and source arrays."""
         return core.extern_elementwise(
             "",
             "",
             [team, dest, source, nreduce],
-            {
-                (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                ): ("nvshmem_int64_max_reduce", core.dtype("int32"))
-            },
-            is_pure=False,
-            _semantic=_semantic,
-        )
-
-    @core.extern
-    def min_reduce(team, dest, source, nreduce, _semantic=None):  # type: ignore[no-untyped-def]
-        """Min reduction for int64. nreduce is number of elements in the dest and source arrays."""
-        return core.extern_elementwise(
-            "",
-            "",
-            [team, dest, source, nreduce],
-            {
-                (
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                ): ("nvshmem_int64_min_reduce", core.dtype("int32"))
-            },
+            {signature: (nvshmem_func, core.dtype("int32"))},
             is_pure=False,
             _semantic=_semantic,
         )
