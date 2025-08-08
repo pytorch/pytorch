@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 def register_build_commands(subparsers):
     """
-    register build commands, this is a subcommand of torch_cli
+    register build commands, this is a subcommand of lumos_cli
     """
     build_parser = subparsers.add_parser("build", help="Build related commands")
     build_subparsers = build_parser.add_subparsers(dest="build_command")
