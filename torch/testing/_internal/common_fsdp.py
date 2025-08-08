@@ -57,7 +57,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_cycles_per_ms,
-    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
@@ -1181,7 +1180,7 @@ class FSDPTest(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, seed, **kwargs):  # type: ignore[override]
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1227,7 +1226,6 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier(device_ids=device_ids)
 
         torch._dynamo.reset()
-        set_rng_seed(seed)
         self.run_test(test_name, pipe)
         torch._dynamo.reset()
 
@@ -1287,10 +1285,10 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert (
-                    loss.dtype == torch.float32
-                ), "loss data type should be float32, as the original \
+                assert loss.dtype == torch.float32, (
+                    "loss data type should be float32, as the original \
                     parameter data type is float32."
+                )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
@@ -1356,9 +1354,9 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert (
-            fsdp_init_mode != FSDPInitMode.NO_FSDP
-        ), "Expects an FSDP init mode that wraps with FSDP"
+        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
+            "Expects an FSDP init mode that wraps with FSDP"
+        )
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
