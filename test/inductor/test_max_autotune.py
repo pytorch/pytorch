@@ -35,7 +35,10 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+from torch._inductor.template_heuristics import (
+    CUDAMMTemplateConfigHeuristic,
+    GemmConfig,
+)
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1173,7 +1176,7 @@ class TestMaxAutotune(TestCase):
         # Force only decomposeK choice
         with (
             mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
             ) as base_mm_mock,
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
@@ -1561,9 +1564,9 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
 
         with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
+            "torch._inductor.template_registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = CUDAConfigHeuristic()
+            config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -2152,6 +2155,9 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -2316,6 +2322,9 @@ class TestPrologueFusion(TestCase):
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
         M, K, N = sizes
