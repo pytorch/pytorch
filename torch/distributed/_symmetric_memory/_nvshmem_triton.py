@@ -116,7 +116,7 @@ if has_triton():
     from triton.language import core
 
     @triton.jit  # type: ignore[misc]
-    def put(dest: Any, source: Any, nelems: Any, pe: Any) -> None:
+    def put(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
         Put tensor data from local PE to a remote PE.
 
@@ -170,7 +170,7 @@ if has_triton():
         )
 
     @triton.jit  # type: ignore[misc]
-    def get(dest: Any, source: Any, nelems: Any, pe: Any) -> None:
+    def get(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
         """
         Get tensor data from a remote PE to local PE.
 
@@ -295,7 +295,7 @@ if has_triton():
     # Wait and Signal Operations
 
     @triton.jit  # type: ignore[misc]
-    def wait_until(ivar: Any, cmp_op: Any, cmp_val: Any) -> None:
+    def wait_until(ivar, cmp_op, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a tensor variable meets a specified condition.
 
@@ -735,7 +735,7 @@ if has_triton():
 
     # Collective Operations (mem-based APIs - sizes in bytes)
     @triton.jit  # type: ignore[misc]
-    def alltoall(team: Any, dest: Any, source: Any, nelems_per_pe: Any) -> None:
+    def alltoall(team, dest, source, nelems_per_pe):  # type: ignore[no-untyped-def]
         """
         All-to-all tensor exchange between PEs in a team.
 
@@ -789,7 +789,7 @@ if has_triton():
         )
 
     @triton.jit  # type: ignore[misc]
-    def broadcast(team: Any, dest: Any, source: Any, nelems: Any, pe_root: Any) -> None:
+    def broadcast(team, dest, source, nelems, pe_root):  # type: ignore[no-untyped-def]
         """
         Broadcast tensor data from a root PE to all other PEs in a team.
 
@@ -851,9 +851,7 @@ if has_triton():
 
     # Reduction Operation
     @triton.jit  # type: ignore[misc]
-    def reduce(
-        team: Any, dest: Any, source: Any, nreduce: Any, operation: tl.constexpr
-    ) -> None:
+    def reduce(team, dest, source, nreduce, operation: tl.constexpr):  # type: ignore[no-untyped-def]
         """
         Performs a collective reduction on tensors across a team of PEs.
 
@@ -880,14 +878,14 @@ if has_triton():
             ```
         """
         tl.static_assert(dest.type == source.type)
-        dtype_id = dest.type.element_ty
+        dtype = dest.type.element_ty
         return reduce_extern_wrapper(
             team,
             dest.to(tl.int64),
             source.to(tl.int64),
             nreduce,
             operation,
-            dtype_id,
+            dtype,
         )
 
     @core.extern  # type: ignore[misc]
@@ -897,7 +895,7 @@ if has_triton():
         source: Any,
         nreduce: Any,
         operation: str,
-        dtype_id: Any,
+        dtype: Any,
         _semantic: Any = None,
     ) -> None:
         """
@@ -912,7 +910,7 @@ if has_triton():
             source (pointer): Source pointer containing data to be reduced.
             nreduce (int64): Number of elements to reduce.
             operation (str): Reduction operation ("sum", "max", "min", "prod").
-            dtype_id: Data type specification - accepts torch.dtype, tl.dtype, str, or constexpr.
+            dtype: Data type specification - accepts torch.dtype, tl.dtype, str, or constexpr.
             _semantic: Optional semantic information for Triton compilation.
 
         Raises:
@@ -922,7 +920,7 @@ if has_triton():
         Example:
             nvshmem.reduce(0, dest_ptr, src_ptr, 100, "sum", torch.float32)
         """
-        # Mapping from PyTorch/Triton dtype names to NVSHMEM typenames
+        # Mapping from Triton dtype names to NVSHMEM typenames
         DTYPE_TO_NVSHMEM_MAP = {
             "int8": "int8",
             "int16": "int16",
@@ -939,8 +937,7 @@ if has_triton():
         }
 
         # Triton dtype names are standardized as fp16, bf16, fp32, etc.
-        dtype_name = str(dtype_id)
-        dtype_name = dtype_name.replace("tl.", "").replace("torch.", "")
+        dtype_name = str(dtype).replace("tl.", "")
 
         if dtype_name not in DTYPE_TO_NVSHMEM_MAP:
             raise TypeError(
