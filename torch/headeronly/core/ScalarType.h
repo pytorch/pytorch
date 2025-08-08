@@ -83,11 +83,11 @@ struct dummy_int1_7_t {};
   _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
 
 enum class ScalarType : int8_t {
+  Undefined = -1,
 #define DEFINE_ST_ENUM_VAL_(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ST_ENUM_VAL_)
 #undef DEFINE_ENUM_ST_ENUM_VAL_
-      Undefined,
-  NumOptions
+      NumOptions
 };
 
 constexpr uint16_t NumScalarTypes =
