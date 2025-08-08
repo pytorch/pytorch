@@ -6,7 +6,6 @@ import heapq
 import logging
 from typing import Callable, TYPE_CHECKING, TypedDict, Union
 
-import torch
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
@@ -329,13 +328,15 @@ def compute_memory_timeline(
             max_step = -1
             max_step_snode = None
             succ_nodes = input_buf.mpi_buffer.succ_nodes
-            for succ_node in succ_nodes:
-                step = node_to_step[succ_node]
-                if step > max_step:
-                    max_step = step
-                    max_step_snode = succ_node
-            end_step = max_step
-            f_input_buf_to_snode_last_use[input_buf] = max_step_snode
+            if succ_nodes:
+                for succ_node in succ_nodes:
+                    step = node_to_step[succ_node]
+                    if step > max_step:
+                        max_step = step
+                        max_step_snode = succ_node
+                end_step = max_step
+                assert max_step_snode is not None
+                f_input_buf_to_snode_last_use[input_buf] = max_step_snode
 
         buf_info_list.append(
             BufferInfo(
@@ -425,7 +426,12 @@ def estimate_peak_memory_allocfree(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> tuple[int, list[int]]:
+) -> tuple[
+    int,
+    list[tuple[int, int]],
+    dict[BaseSchedulerNode, SNodeMemory],
+    dict[FreeableInputBuffer, BaseSchedulerNode],
+]:
     """
     Alternative version of estimate_peak_memory, that respects the fact,
     that every SchedulerNode has multiple phases:
@@ -433,10 +439,10 @@ def estimate_peak_memory_allocfree(
     2. run_kernel
     3. dealloc last_use buffers
     estimate_peak_memory collapses memory into one value: size_alloc - size_free
-    While peak memory happens aftter alloc.
+    While peak memory happens after alloc.
 
     Duplicating the code to not migrate all callsites at once,
-    In furture usages of estimate_peak_memory will migrate to this version.
+    In future usages of estimate_peak_memory will migrate to this version.
     """
 
     buf_info_list, _, f_input_buf_to_snode_last_use = compute_memory_timeline(
@@ -455,7 +461,6 @@ def estimate_peak_memory_allocfree(
     for i, node in enumerate(nodes):
         snodes_allocfree[node] = step_idx_allocfree[i]
 
-    # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0
     snodes_curr_memory = []
@@ -468,19 +473,6 @@ def estimate_peak_memory_allocfree(
         cur_memory -= free
         post_free = cur_memory
         snodes_curr_memory.append((post_alloc, post_free))
-    if max_memory == 0:
-        print(f"XXX ZERO_PEAK!!! len(nodes):{len(nodes)}")
-        for i, buf_info in enumerate(buf_info_list):
-            print(f"XXX BUF_INFO[{i}]:{buf_info}")
-        for i, af in enumerate(step_idx_allocfree):
-            print(f"XXX AF[{i}]:{af}")
-        for i, m in enumerate(snodes_curr_memory):
-            print(f"SNODE_CURR_MEMORY[{i}]:{m}")
-        for i, af in enumerate(snodes_allocfree.values()):
-            print(f"SNODE_ALLOCFREE[{i}]:{af}")
-        import sys
-
-        sys.exit(1)
 
     return (
         max_memory,
@@ -824,30 +816,3 @@ def reorder_for_peak_memory(
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
     return best_result.order
-
-
-_mems = []
-
-
-def _reset():
-    _mems.clear()
-
-
-def _get_mems():
-    return _mems
-
-
-def foo():
-    _mems.append(torch.cuda.memory_allocated())
-
-
-lib = torch.library.Library("_test", "FRAGMENT")
-lib.define("foo() -> ()")
-lib.impl("foo", foo, "BackendSelect")
-from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
-
-
-_register_effectful_op(
-    torch.ops._test.foo.default,
-    _EffectType.ORDERED,
-)
