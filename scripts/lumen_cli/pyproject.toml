@@ -1,0 +1,19 @@
+[project]
+name = "torch-ci"
+version = "0.1.0"
+dependencies = [
+    "pyyaml>=6.0"
+]
+
+[tool.setuptools]
+packages = ["cli", "cli.build_cli", "cli.lib"]
+
+[tool.setuptools.package-dir]
+cli = "cli"
+
+[tool.ruff.lint]
+# Enable preview mode for linting
+preview = true
+
+# Now you can select your preview rules, like RUF048
+extend-select = ["RUF048"]
