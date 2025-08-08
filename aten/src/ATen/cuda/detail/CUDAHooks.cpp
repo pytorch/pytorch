@@ -331,6 +331,16 @@ long CUDAHooks::versionCuDNN() const {
 #endif
 }
 
+long CUDAHooks::versionMIOpen() const {
+#if AT_ROCM_ENABLED()
+  return MIOPEN_VERSION_MAJOR * 10000 +
+         MIOPEN_VERSION_MINOR * 100 +
+         MIOPEN_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
+#endif
+}
+
 long CUDAHooks::versionCUDART() const {
 #ifdef CUDART_VERSION
   return CUDART_VERSION;

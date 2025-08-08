@@ -372,12 +372,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
-            store2 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -767,7 +763,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
+            url = f"file:///{file.name.replace(os.path.sep, '/')}?world_size=2"
             gen0 = dist.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -841,9 +837,9 @@ class RendezvousTCPTest(TestCase):
         # not respected, it will take much longer to timeout.
         start = time.time()
         with self.assertRaisesRegex(
-            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistent key"
         ):
-            store0.get("nonexistant key")
+            store0.get("nonexistent key")
 
         end = time.time()
         time_diff = end - start
@@ -1070,7 +1066,7 @@ class TimeoutTest(TestCase):
             wait_for_workers=False,
         )
 
-        ths = []
+        threads = []
         for i in range(2):
             t = threading.Thread(
                 target=run,
@@ -1080,16 +1076,16 @@ class TimeoutTest(TestCase):
                 ),
             )
             t.start()
-            ths.append(t)
+            threads.append(t)
 
         def handler(a, b):
             pass
 
         signal.signal(signal.SIGUSR1, handler)
         time.sleep(1)
-        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+        signal.pthread_kill(threads[1].ident, signal.SIGUSR1)
 
-        for t in ths:
+        for t in threads:
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
@@ -1178,8 +1174,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

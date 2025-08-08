@@ -165,6 +165,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         role="test_trainer",
         local_world_size=8,
         local_addr=None,
+        event_log_handler="null",
     ):
         run_id = str(uuid.uuid4().int)
         port = get_free_port()
@@ -191,6 +192,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
             max_restarts=max_restarts,
             monitor_interval=monitor_interval,
             local_addr=local_addr,
+            event_log_handler=event_log_handler,
         )
         return spec
 
@@ -348,7 +350,8 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertGreater(worker_group.master_port, 0)
 
     @patch.object(TestAgent, "_construct_event")
-    def test_initialize_workers(self, mock_construct_event):
+    @patch("torch.distributed.elastic.agent.server.api.record")
+    def test_initialize_workers(self, mock_record, mock_construct_event):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
         worker_group = agent.get_worker_group()
@@ -361,6 +364,30 @@ class SimpleElasticAgentTest(unittest.TestCase):
 
         mock_construct_event.assert_called()
         self.assertEqual(mock_construct_event.call_count, 10)
+        mock_record.assert_called()
+        second_arg = mock_record.call_args_list[0][0][1]
+        self.assertEqual(second_arg, "null")
+
+    @patch.object(TestAgent, "_construct_event")
+    @patch("torch.distributed.elastic.agent.server.api.record")
+    def test_initialize_workers_with_new_spec(self, mock_record, mock_construct_event):
+        spec = self._get_worker_spec(
+            max_restarts=1, event_log_handler="framework_logger"
+        )
+        agent = TestAgent(spec)
+        worker_group = agent.get_worker_group()
+        agent._initialize_workers(worker_group)
+
+        self.assertEqual(WorkerState.HEALTHY, worker_group.state)
+        for i in range(spec.local_world_size):
+            worker = worker_group.workers[i]
+            self.assertEqual(worker.id, worker.global_rank)
+
+        mock_construct_event.assert_called()
+        self.assertEqual(mock_construct_event.call_count, 10)
+        mock_record.assert_called()
+        second_arg = mock_record.call_args_list[0][0][1]
+        self.assertEqual(second_arg, "framework_logger")
 
     def test_restart_workers(self):
         spec = self._get_worker_spec()

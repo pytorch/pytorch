@@ -10,7 +10,7 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size, is_wait
+from .utils import get_dtype_size
 from .virtualized import V
 
 
@@ -78,19 +78,8 @@ def get_freeable_input_buf(
         A dictionary containing all freeble input buffers, keyed by their names.
     """
 
-    # this function is copied from torch/_inductor/scheduler.py
-    # TODO: would be nice to remove the try/except block for both places
     def _dep_size_hint(dep: Dep) -> int:
-        res = 0
-        try:
-            if not dep.has_unbacked_symbols():
-                res = dep.numbytes_hint()
-        except KeyError:
-            # In at least one test (test/inductor/test_torchbind.py) we
-            # create a StarDep that doesn't exist in the graph and calling
-            # `has_unbacked_symbols()` throws an error.
-            pass
-        return res
+        return V.graph.get_dep_size_hint(dep)
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
@@ -135,6 +124,28 @@ def compute_size_for_scheduler_buffer(
         buf1: at creation, 0 bytes allocated, when deleted, 10 bytes freed
         buf2: at creation, 0 bytes allocated, when deleted, 20 bytes freed
 
+    When an operation mutates a buffer in-place, the scheduler creates a new buffer name
+    to track the "before" and "after" states, even though they share the same memory.
+
+    The mutated buffer represents a rename with zero allocation and deallocation cost.
+    During dependency tracking, we transfer dependencies from the mutated name back to
+    the original buffer, ensuring the original memory is only freed when all aliases
+    are done.
+
+    This handles cases where a buffer has multiple non-overlapping aliases - rather than
+    trying to assign free costs to individual aliases, we forward all alias dependencies
+    to the original buffer.
+
+    Consider:
+        buf0 = op0()
+        buf1 = mutation_op_(buf0)
+        del buf0
+        ...
+        op(buf1)
+        del buf1
+
+    The only memory events are the creation prior to op0, and the deletion following buf1.
+
     Returns:
         A dictionary mapping a scheduler buffer to a tuple of (size_alloc, size_free).
     """
@@ -146,24 +157,12 @@ def compute_size_for_scheduler_buffer(
     def _compute_and_update_buf_size(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
-        if isinstance(sched_buf.node.layout, NoneLayout):
-            _size = 0
-            # for a wait tensor op, its schedulerBuffer NoneLayout layout. However,
-            # the schedulerBuffer is treated as a mutation of the collective output
-            # so it needs to inherit the size of the collectives
-            if (
-                sched_buf.defining_op
-                and is_wait(sched_buf.defining_op.node)
-                and sched_buf.get_mutations()
-            ):
-                mutated_buf_name = sched_buf.get_mutations()[0]
-                _size = (
-                    sched_buf_to_size[mutated_buf_name][1]
-                    if mutated_buf_name in sched_buf_to_size
-                    else 0
-                )
-            sched_buf_to_size[sched_buf.get_name()] = (_size, _size)
-            return _size
+        if sched_buf.get_name() in V.graph.scheduler.mutation_real_name:
+            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
+        elif isinstance(sched_buf.node.layout, NoneLayout):
+            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0
             for user in sched_buf.users:
@@ -216,6 +215,14 @@ def assign_memory_planning_info_for_scheduler_buffers(
         for dep in node.unmet_dependencies:
             dep_name_to_succ_nodes[dep.name].add(node)
 
+    # iterate in reverse, so dependencies are picked up transitively.
+    for mutating_buf_name, real_buf_name in reversed(
+        V.graph.scheduler.mutation_real_name.items()
+    ):
+        dep_name_to_succ_nodes[real_buf_name] |= dep_name_to_succ_nodes[
+            mutating_buf_name
+        ]
+
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
     for buf_name in name_to_buf.keys():
@@ -235,57 +242,71 @@ def assign_memory_planning_info_for_scheduler_nodes(
     """
     Assign to each scheduler node its predecessor and successor nodes.
     """
-    from .scheduler import SchedulerBuffer
 
-    for index, node in enumerate(nodes):
-        size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
-        pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
-        for dep in node.read_writes.reads:
-            if dep.name in name_to_buf and dep in node.unmet_dependencies:
-                pred_buffers.add(name_to_buf[dep.name])
-            elif dep.name in name_to_freeable_input_buf:
-                pred_buffers.add(name_to_freeable_input_buf[dep.name])
-        pred_nodes = OrderedSet(
-            name_to_fused_node[pred_buffer.defining_op_name()]
-            for pred_buffer in pred_buffers
-            if (isinstance(pred_buffer, SchedulerBuffer))
-        )
+    node_to_pred_nodes: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
+    node_to_succ_nodes: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = {}
+    node_to_pred_buffers: dict[
+        BaseSchedulerNode, OrderedSet[SchedulerBuffer | FreeableInputBuffer]
+    ] = collections.defaultdict(OrderedSet)
+
+    # collect all predecessors using existing successor mappings
+    for node in nodes:
         succ_nodes = OrderedSet(
             succ_node
             for buffer in node.get_outputs()
             for succ_node in buffer.mpi_buffer.succ_nodes
         )
+        node_to_succ_nodes[node] = succ_nodes
+
+        # For each successor, add current node as its predecessor
+        for succ_node in succ_nodes:
+            node_to_pred_nodes[succ_node].add(node)
+
+        # For each output buffer, add it as predecessor to its successor nodes
+        # TODO - is pred buffers needed ?
+        for buffer in node.get_outputs():
+            for succ_node in buffer.mpi_buffer.succ_nodes:
+                node_to_pred_buffers[succ_node].add(buffer)
+
+    for freeable_buffer in name_to_freeable_input_buf.values():
+        for succ_node in freeable_buffer.mpi_buffer.succ_nodes:
+            node_to_pred_buffers[succ_node].add(freeable_buffer)
+
+    # Second pass: assign memory planning info using completed predecessor mappings
+    for index, node in enumerate(nodes):
+        size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
+        succ_nodes = node_to_succ_nodes[node]
+
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
             size=size_alloc,
-            pred_buffers=pred_buffers,
-            pred_nodes=pred_nodes,
+            pred_buffers=node_to_pred_buffers[node],
+            pred_nodes=node_to_pred_nodes[node],
             succ_nodes=succ_nodes,
         )
 
 
-def estimate_peak_memory(
+# map each scheduler buffer to its size, start step, and end step
+@dataclasses.dataclass
+class BufferInfo:
+    buffer: Union[SchedulerBuffer, FreeableInputBuffer]
+    size_alloc: int
+    size_free: int
+    start_step: int
+    end_step: int
+
+
+def compute_memory_timeline(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> tuple[int, list[int]]:
+) -> tuple[list[BufferInfo], dict[BaseSchedulerNode, int]]:
     """
-    Given a list of nodes in their execution order, estimate the peak memory, by
-    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
-
-    Returns:
-        int: peak memory
-        List[int]: memory usage at each node (or each step).
+    Compute buffer allocation and deallocation sizes and map their
+    lifetime to the node schedule
     """
-
-    # map each scheduler buffer to its size, start step, and end step
-    @dataclasses.dataclass
-    class BufferInfo:
-        buffer: Union[SchedulerBuffer, FreeableInputBuffer]
-        size_alloc: int
-        size_free: int
-        start_step: int
-        end_step: int
 
     # get the execution step of each node, this will be used to determine
     # the end_step of buffers
@@ -340,6 +361,27 @@ def estimate_peak_memory(
                     end_step,
                 )
             )
+
+    return buf_info_list, node_to_step
+
+
+def estimate_peak_memory(
+    nodes: list[BaseSchedulerNode],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+    graph_outputs: OrderedSet[str],
+) -> tuple[int, list[int]]:
+    """
+    Given a list of nodes in their execution order, estimate the peak memory, by
+    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
+
+    Returns:
+        int: peak memory
+        List[int]: memory usage at each node (or each step).
+    """
+
+    buf_info_list, _ = compute_memory_timeline(
+        nodes, name_to_freeable_input_buf, graph_outputs
+    )
 
     # incremental memory changes at each step
     memory = [0 for _ in range(len(nodes) + 1)]

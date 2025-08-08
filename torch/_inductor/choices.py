@@ -9,6 +9,7 @@ import torch
 
 from . import config
 from .codecache import write_text
+from .kernel_inputs import KernelInputs  # noqa: TC001
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -16,9 +17,11 @@ from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .template_registry import get_template_heuristic
 from .virtualized import V
 
 
@@ -65,60 +68,10 @@ class InductorChoices:
             return XPUConfigHeuristic()
         elif device_type == "cpu":
             return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
         else:
             return BaseConfigHeuristic()
-
-    # GEMM configs
-    def get_base_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
-            return mm_heuristics.get_mm_configs()
-        else:
-            return mm_heuristics.get_exhaustive_mm_configs()
-
-    def get_extra_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_extra_mm_configs()
-
-    def get_int8_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_int8_mm_configs()
-
-    def get_mixed_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_mixed_mm_configs()
-
-    def get_persistent_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_persistent_mm_configs()
-
-    def get_scaled_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_scaled_mm_configs()
-
-    def get_scaled_persistent_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_scaled_persistent_mm_configs()
-
-    def get_mm_plus_mm_configs(
-        self, device_type: Optional[str] = "cuda"
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        mm_heuristics = self.get_config_heuristics(device_type)
-        return mm_heuristics.get_mm_plus_mm_configs()
 
     # Conv configs
     def get_conv_configs(
@@ -126,6 +79,57 @@ class InductorChoices:
     ) -> partial[Generator[TritonConfig, None, None]]:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
+
+    # Flex attention configs
+    # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
+    def get_flex_attention_fwd_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, dtype)
+
+    def get_flex_attention_bwd_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+
+    def get_flex_decode_configs(
+        self, head_dim: int, dtype: torch.dtype, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        flex_heuristics = self.get_config_heuristics(device_type)
+        return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def get_mm_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        template_name: str,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Get generator of template parameters for MM templates using template-specific heuristics.
+
+        Args:
+            kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
+            layout: Output layout
+            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
+            op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
+
+        Yields:
+            Template parameter dictionaries ready for maybe_append_choice
+        """
+        input_tensors = kernel_inputs.nodes()
+        if len(input_tensors) < 2:
+            raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
+
+        # Extract device_type from kernel_inputs
+        device_type = kernel_inputs.device_type
+        assert device_type is not None, "get_mm_configs requires a valid device type"
+        # Get the appropriate template-specific heuristic
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
+
+        yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
     def triton_kernel_kwargs(
         self,
@@ -176,7 +180,9 @@ class InductorChoices:
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
             try:
-                threshold *= 32 // min(V.graph.sizevars.size_hint(features.numel), 32)
+                threshold *= 32 // min(
+                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
+                )
             except ValueError:
                 pass  # unbacked symint
 
@@ -342,6 +348,17 @@ class InductorChoices:
 
         if scheduler.can_fusion_increase_peak_memory(node1, node2):
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
+            return False
+
+        if (
+            config.realize_acc_reads_size_threshold is not None
+            and scheduler.fusion_accumulate_large_reads(
+                node1,
+                node2,
+                config.realize_acc_reads_size_threshold,
+            )
+        ):
+            WhyNoFuse(node1, node2)("Fusion accumulate large amount of reads")
             return False
 
         return True

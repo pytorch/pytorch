@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 # TODO: Remove after https://github.com/huggingface/safetensors/pull/318
-@functools.lru_cache(None)
+@functools.cache
 def has_safetensors_and_transformers():
     try:
         # safetensors is not an exporter requirement, but needed for some huggingface models

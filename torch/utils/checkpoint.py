@@ -858,14 +858,15 @@ class _CheckpointFrame:
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
-            # We know that everytime we save something do original forward
+            # We know that every time we save something do original forward
             # we append to weak_holder, and every time we save a tensor
             # during recompute we increment recompute_counter.
             raise CheckpointError(
                 "torch.utils.checkpoint: A different number of tensors was saved "
                 "during the original forward and recomputation.\n"
                 f"Number of tensors saved during forward: {len(self.weak_holders)}\n"
-                f"Number of tensors saved during recomputation: {self.recomp_counter[gid]}"
+                f"Number of tensors saved during recomputation: {self.recomp_counter[gid]}.\n"
+                f"{_debug_tip_msg}"
             )
 
         # 3. During recompute, the same tensors were saved, but they
@@ -902,8 +903,17 @@ class _CheckpointFrame:
             raise CheckpointError(
                 "torch.utils.checkpoint: Recomputed values for the following tensors "
                 "have different metadata than during the forward pass.\n"
-                f"{mismatched_tensors}"
+                f"{mismatched_tensors}.\n"
+                f"{_debug_tip_msg}"
             )
+
+
+_debug_tip_msg = """
+Tip: To see a more detailed error message, either pass `debug=True` to
+`torch.utils.checkpoint.checkpoint(...)` or wrap the code block
+with `with torch.utils.checkpoint.set_checkpoint_debug_enabled(True):` to
+enable checkpoint‑debug mode globally.
+"""
 
 
 _checkpoint_error_template = """ \
@@ -1068,7 +1078,8 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     return x
                 raise CheckpointError(
                     "torch.utils.checkpoint: trying to save more tensors during "
-                    "recomputation than during the original forward pass."
+                    "recomputation than during the original forward pass.\n"
+                    f"{_debug_tip_msg}"
                 )
 
             holder = target_frame.weak_holders[recomp_idx]()
@@ -1259,7 +1270,7 @@ class CheckpointPolicy(enum.Enum):
 
 
 def _policy_from_bool(b):
-    # For backward compatability
+    # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
 
 

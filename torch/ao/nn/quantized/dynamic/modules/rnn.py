@@ -520,6 +520,7 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -804,6 +805,7 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -1035,8 +1037,10 @@ class RNNCellBase(torch.nn.Module):
             torch.nn.LSTMCell,
             torch.nn.GRUCell,
             torch.nn.RNNCell,
-        }, "nn.quantized.dynamic.RNNCellBase.from_float \
+        }, (
+            "nn.quantized.dynamic.RNNCellBase.from_float \
                                  only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
+        )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
@@ -1209,6 +1213,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ["input_size", "hidden_size", "bias", "nonlinearity"]
 
     def __init__(

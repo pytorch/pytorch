@@ -139,8 +139,9 @@ class TestFullyShardOverlap(FSDPTest):
                     dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
-            with patch_all_gather(delayed_all_gather), patch_reduce_scatter(
-                delayed_reduce_scatter
+            with (
+                patch_all_gather(delayed_all_gather),
+                patch_reduce_scatter(delayed_reduce_scatter),
             ):
                 loss = model(inp).sum()
                 loss.backward()

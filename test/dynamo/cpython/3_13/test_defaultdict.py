@@ -4,6 +4,9 @@
 # ruff: noqa
 # flake8: noqa
 
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_defaultdict.py
+
 import sys
 import torch
 import torch._dynamo.test_case
@@ -181,11 +184,12 @@ class TestDefaultDict(__TestCase):
 
     def test_recursive_repr(self):
         # Issue2045: stack overflow when default_factory is a bound method
-        class sub(defaultdict):
-            def __init__(self):
-                self.default_factory = self._factory
-            def _factory(self):
-                return []
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class sub(defaultdict):
+                def __init__(self):
+                    self.default_factory = self._factory
+                def _factory(self):
+                    return []
         d = sub()
         self.assertRegex(repr(d),
             r"sub\(<bound method .*sub\._factory "

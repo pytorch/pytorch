@@ -134,14 +134,14 @@ def _validate(configs):
 def config_list(**configs):
     """Generate configs based on the list of input shapes.
     This function will take input shapes specified in a list from user. Besides
-    that, all other parameters will be cross producted first and each of the
+    that, all other parameters will be cross produced first and each of the
     generated list will be merged with the input shapes list.
 
     Reserved Args:
         attr_names(reserved): a list of names for input shapes.
         attrs(reserved): a list of values for each input shape.
         corss_product: a dictionary of attributes which will be
-                       cross producted with the input shapes.
+                       cross produced with the input shapes.
         tags(reserved): a tag used to filter inputs.
 
     Here is an example:

@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_defaultdict.py b/test/dynamo/cpython/3_13/test_defaultdict.py
-index bdbe9b81e8f..3da7ab4a607 100644
+index bdbe9b81e8f..d55f1dc54c6 100644
 --- a/test/dynamo/cpython/3_13/test_defaultdict.py
 +++ b/test/dynamo/cpython/3_13/test_defaultdict.py
-@@ -1,3 +1,57 @@
+@@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_defaultdict.py
 +
 +import sys
 +import torch
@@ -60,7 +63,7 @@ index bdbe9b81e8f..3da7ab4a607 100644
  """Unit tests for collections.defaultdict."""
  
  import copy
-@@ -9,7 +63,7 @@ from collections import defaultdict
+@@ -9,7 +66,7 @@ from collections import defaultdict
  def foobar():
      return list
  
@@ -69,7 +72,25 @@ index bdbe9b81e8f..3da7ab4a607 100644
  
      def test_basic(self):
          d1 = defaultdict()
-@@ -187,4 +241,4 @@ class TestDefaultDict(unittest.TestCase):
+@@ -127,11 +184,12 @@ class TestDefaultDict(unittest.TestCase):
+ 
+     def test_recursive_repr(self):
+         # Issue2045: stack overflow when default_factory is a bound method
+-        class sub(defaultdict):
+-            def __init__(self):
+-                self.default_factory = self._factory
+-            def _factory(self):
+-                return []
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class sub(defaultdict):
++                def __init__(self):
++                    self.default_factory = self._factory
++                def _factory(self):
++                    return []
+         d = sub()
+         self.assertRegex(repr(d),
+             r"sub\(<bound method .*sub\._factory "
+@@ -187,4 +245,4 @@ class TestDefaultDict(unittest.TestCase):
              i |= None
  
  if __name__ == "__main__":

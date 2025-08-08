@@ -64,6 +64,10 @@ class C10_API SizesAndStrides {
                   storageBytes(size_)));
   }
 
+  bool operator!=(const SizesAndStrides& other) const {
+    return !(*this == other);
+  }
+
   SizesAndStrides& operator=(const SizesAndStrides& rhs) {
     if (this == &rhs) {
       return *this;
