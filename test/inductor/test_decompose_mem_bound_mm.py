@@ -48,6 +48,16 @@ class MyModule3(torch.nn.Module):
         return output
 
 
+class TestDecomposeAddMM(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self, z: torch.Tensor, x: torch.Tensor, y: torch.Tensor
+    ) -> torch.Tensor:
+        return torch.ops.aten.addmm.default(z, x, y)
+
+
 @requires_gpu
 @unittest.skipIf(
     TEST_XPU,
@@ -423,6 +433,31 @@ class TestDecomposeMemMM(TestCase):
         self.assertFalse(check_device(input1, input2, device="cpu"))
 
         self.assertFalse(check_device(input1, input2, device="mtia"))
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "decompose_mm_pass": {"skip_dynamic_shape_dim_check": True},
+        }
+    )
+    def test_dynamic_shape_decompose_addmm(self):
+        m, k, n = 19494144, 8, 8
+        input = torch.randn(m, k, device=GPU_TYPE).requires_grad_(False)
+        weight = torch.randn(k, n, device=GPU_TYPE).requires_grad_(False)
+        bias = torch.randn(n, device=GPU_TYPE).requires_grad_(False)
+
+        counters.clear()
+
+        module = TestDecomposeAddMM().to(GPU_TYPE)
+        traced = torch.compile(module, dynamic=True)
+        input = [bias, input, weight]
+
+        self.compare_pred(module, traced, input)
+
+        self.assertEqual(
+            counters["inductor"]["decompose_addmm"],
+            1,
+        )
+        counters.clear()
 
 
 if __name__ == "__main__":

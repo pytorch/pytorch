@@ -278,14 +278,29 @@ void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outpu
   stack[0] = from(res);
 }
 
+Tensor fill_infinity(Tensor t) {
+  auto value = std::numeric_limits<float>::infinity();
+  return fill_(t, value);
+}
+
+void boxed_fill_infinity(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  auto res = fill_infinity(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
+  m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
   m.impl("my_empty_like", &boxed_empty_like);
+  m.impl("fill_infinity", &boxed_fill_infinity);
 }
 
 

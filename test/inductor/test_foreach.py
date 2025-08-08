@@ -645,6 +645,7 @@ class ForeachTests(TestCase):
     @bin_ops
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", False)
     def test_dynamic_shapes_fallback(self, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
