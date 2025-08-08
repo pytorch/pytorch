@@ -521,9 +521,9 @@ def process_automatic_dynamic(
 
 def get_cache_key() -> Optional[str]:
     # TODO: info versions of these logs that log only once
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         warn_once(
-            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
         )
         return None
 
@@ -566,7 +566,7 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
 
     if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
