@@ -26,49 +26,51 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80:
-    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
+  torch-build-sm89:
+    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       build-additional-packages: "vision audio torchao"
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
-      cuda-arch-list: '8.0'
+      cuda-arch-list: '8.9'
       test-matrix: |
         { include: [
-          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu"  },
+          { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_entrypoints_test_llm", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-sm80:
-    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
+  vllm-build-sm89:
+    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
     uses: ./.github/workflows/_linux-external-build-main.yml
     needs: [
       get-label-type,
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80
+      torch-build-sm89
     ]
     with:
       build-additional-packages: "vision audio"
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       build-target: vllm
       ci-config: ".github/ci_configs/vllm.yaml"
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.docker-image }}
+      docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
       runner: linux.24xlarge.memory
     secrets: inherit
 
-  linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-test:
-    name: cuda12.8-py3.12-gcc11-sm80-vllm-test
+  vllm-test-sm89:
+    name: cuda12.8-py3.12-gcc11-sm89-vllm-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80,
-      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-sm80
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-89,
+      linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-external-build-sm89
     ]
     with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
-      docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_12-gcc11-vllm-build-80.outputs.test-matrix }}
-      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm80-additional-build
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
+      docker-image: ${{ needstorch-build-sm89.outputs.docker-image }}
+      test-matrix: ${{ needs.torch-build-sm89.outputs.test-matrix }}
+      additional-artifact-name: linux-jammy-cuda12.8-py3.12-gcc11-sm89-additional-build
     secrets: inherit
