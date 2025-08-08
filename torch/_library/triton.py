@@ -70,7 +70,6 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
         collector = Visitor()
         collector.visit(tree)
         closure_vars = inspect.getclosurevars(fn)
-        breakpoint()
         resolved = []
         # First, resolve triton kernel names
         for name in collector.triton_kernels:
