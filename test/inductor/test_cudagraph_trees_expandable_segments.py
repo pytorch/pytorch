@@ -32,7 +32,12 @@ from tools.stats.import_test_stats import get_disabled_tests  # @manual
 sys.path.remove(str(REPO_ROOT))
 
 if __name__ == "__main__":
-    if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS and HAS_CUDA_AND_TRITON:
+    if (
+        torch.cuda.is_available()
+        and not IS_JETSON
+        and not IS_WINDOWS
+        and HAS_CUDA_AND_TRITON
+    ):
         get_disabled_tests(".")
 
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")

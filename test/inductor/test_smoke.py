@@ -6,7 +6,11 @@ import torch
 import torch._logging
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 
 
 class MLP(torch.nn.Module):
