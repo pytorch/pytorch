@@ -28,7 +28,7 @@ from torch.utils.checkpoint import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

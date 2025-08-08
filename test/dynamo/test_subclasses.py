@@ -145,7 +145,7 @@ def get_view_test_cases():
 VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 

@@ -13,7 +13,7 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 
 
 _SOURCE_CODE = r"""

@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import instantiate_parametrized_tests
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 
 
 def normalize_graph(gm):

@@ -59,7 +59,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 aten = torch.ops.aten
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )

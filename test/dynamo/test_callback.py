@@ -61,7 +61,7 @@ class CallbackTests(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "ROCm outputs a different number of autotuning logs"
     )
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires triton")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_triggers(self) -> None:
         torch._dynamo.reset()

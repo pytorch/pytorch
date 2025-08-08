@@ -2994,7 +2994,7 @@ main()
                 b = MyFunc.apply(a)
                 b.sum().backward()
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -3034,7 +3034,7 @@ main()
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
             32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
@@ -3056,7 +3056,7 @@ main()
             2 if inductor_config.cpp_wrapper else 0,
         )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -3087,7 +3087,7 @@ main()
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     @scoped_load_inline
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -3715,7 +3715,7 @@ class CompiledAutograd0(torch.nn.Module):
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_flex_attention(self):
         def _squared(score, b, h, m, n):
             """Joint graph needed for correctness"""
@@ -3883,7 +3883,7 @@ class CompiledAutograd0(torch.nn.Module):
                 compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
 
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda")
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires cuda and triton")
     def test_cpu_offloading(self):
         def fn():
             def pack(x):
