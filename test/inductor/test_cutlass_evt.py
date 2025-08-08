@@ -15,7 +15,7 @@ from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwi
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
 
 
 if try_import_cutlass():
@@ -382,7 +382,7 @@ return tmp_1, D""",
                 epilogue_functor,
                 _create_mock_buffer_name_map(EXAMPLE_TENSORS),
                 lambda x: int(x),
-            ),
+            )[0],
             """\
 { /* thread */
         { /* F */
@@ -392,12 +392,12 @@ return tmp_1, D""",
               {}, /* C */
               {}, /* compute_0 */
             },
-            {/* ptr_aux */ (float*) aux, /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
+            {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
             {}, /* compute_1 */
           },
-          {/* ptr_aux */ (float*) F, /* dAux */ {2048, _1{}, _0{}}}, /* F */
+          {/* ptr_aux */ (float*) (ptr_1 + ptr_1_offset), /* dAux */ {2048, _1{}, _0{}}}, /* F */
         },
-        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {/* ptr_col */ (float*) (ptr_2 + ptr_2_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
         {}, /* compute_2 */
         {}, /* compute_3 */
         {}, /* compute_4 */
@@ -439,14 +439,14 @@ def fn(accum, bias):
                 epilogue_functor,
                 _create_mock_buffer_name_map(example_tensors),
                 lambda x: int(x),
-            ),
+            )[0],
             """\
 { /* thread */
         { /* E */
           {}, /* accum */
-          {/* ptr_aux */ (float*) E, /* dAux */ {2048, _1{}, _0{}}}, /* E */
+          {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* dAux */ {2048, _1{}, _0{}}}, /* E */
         },
-        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {/* ptr_col */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
         {}, /* compute_0 */
       }
 """,
@@ -455,7 +455,7 @@ def fn(accum, bias):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
-        _, _, code = trace(
+        _, _, code, _ = trace(
             BIAS_CODE,
             EXAMPLE_TENSORS,
             DataType.f32,
@@ -571,5 +571,5 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

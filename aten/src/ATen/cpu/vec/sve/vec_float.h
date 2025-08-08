@@ -38,7 +38,9 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(float);
   }
-  Vectorized() {}
+  Vectorized() {
+    values = svdup_n_f32(0);
+  }
   Vectorized(svfloat32_t v) : values(v) {}
   Vectorized(float val) {
     values = svdup_n_f32(val);
@@ -312,6 +314,9 @@ class Vectorized<float> {
         Vectorized<float>(Sleef_expm1fx_u10sve(values)), map(std::expm1));
   }
   Vectorized<float> exp_u20() const {
+    return exp();
+  }
+  Vectorized<float> fexp_u20() const {
     return exp();
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {USE_SLEEF(
@@ -751,6 +756,30 @@ Vectorized<float> inline fmadd(
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return svmad_f32_x(ptrue, a, b, c);
+}
+
+template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return svmsb_f32_x(ptrue, a, b, c);
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return svnmsb_f32_x(ptrue, a, b, c);
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return svnmad_f32_x(ptrue, a, b, c);
 }
 
 #endif // defined(CPU_CAPABILITY_SVE)

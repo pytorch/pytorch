@@ -56,7 +56,14 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ClosureSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    SkipGuardSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -152,24 +159,45 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw:
             if name in spec.posonly_names:
-                raise TypeError(f"{name} is positional-only")
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(f"{name} is positional-only")],
+                )
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
-            if fn_source:
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
-            raise TypeError(f"Missing required positional argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required positional argument: {name}"
+                    )
+                ],
+            )
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise TypeError(
-            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(
+                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+                )
+            ],
         )
 
     # 3) Keyword-only
@@ -182,13 +210,27 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise TypeError(f"Missing required keyword-only argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required keyword-only argument: {name}"
+                    )
+                ],
+            )
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+            ],
+        )
 
     return ba
 
@@ -262,6 +304,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
@@ -401,9 +450,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 cell_var = side_effects[cell]
 
             elif self.source:
-                closure_cell = GetItemSource(
-                    AttrSource(self.source, "__closure__"), idx
-                )
+                closure_cell = GetItemSource(ClosureSource(self.source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -666,6 +713,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def has_unpack_var_sequence(self, tx):
         return False
 
@@ -885,12 +937,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
-        elif name == "__contains__":
-            # The generator needs to be lazily consumed here to avoid unintended
-            # side effects
-            return variables.UserFunctionVariable(
-                polyfills.generator___contains__
-            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 
