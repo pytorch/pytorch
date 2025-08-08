@@ -225,26 +225,8 @@ def _reorder_communication_preserving_peak_memory_internal(
             snodes, name_to_freeable_input_buf, graph_outputs
         )
     )
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "reorder_estimate_memory",
-            "encoding": "string",
-        },
-        payload_fn=lambda: f"PEAK_MEMORY:{peak_memory}\n"
-        + "\n\n".join(
-            [
-                f"snode[{i}]"
-                + n.debug_str()
-                + f"\n --- alloc_free:{snodes_allocfree[n]}"
-                + f"\n --- curr_memory:{snodes_curr_memory[i]}"
-                for i, n in enumerate(snodes)
-            ]
-        ),
-    )
-
     # snodes_allocfree: dict {snode -> (size_alloc, size_free)}
-    # snodes_curr_memory: list [(mem_post_output_alloc, mem_post_free)]
+    # snodes_curr_memory: list [(mem_post_alloc, mem_post_free)]
     runtimes: dict[BaseSchedulerNode, float] = {
         snode: estimate_op_runtime(snode) for snode in snodes
     }
@@ -516,7 +498,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                             gn_post_alloc_mem - snodes_allocfree[n].size_free
                         )
                         _curr_memory[n] = (gn_post_alloc_mem, gn_post_free_mem)
-                    candidate_post_alloc_mem = _post_alloc_update[n]
+                    candidate_post_alloc_mem = _post_alloc_update[candidate]
                     snodes_allocfree[
                         candidate
                     ].size_free += size_free_to_move_to_candidate_sum

@@ -1640,8 +1640,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         comm from moving due to data dependency.
         """
 
-        torch._inductor.config.debug_test_memory_node = True
-
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
