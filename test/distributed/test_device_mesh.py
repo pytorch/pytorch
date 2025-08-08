@@ -745,9 +745,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_get_item_1d(self):
-        mesh = init_device_mesh(
-            self.device_type, (8,), mesh_dim_names=("dp",)
-        )
+        mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
         # Make sure slicing out 1D mesh from a 1D mesh works.
         dp_mesh = mesh["dp"]
         self.assertEqual(dp_mesh, mesh)
@@ -793,9 +791,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(
-            self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
-        )
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
 
         ref_pg_count = _world.group_count
 
