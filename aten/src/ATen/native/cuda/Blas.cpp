@@ -1205,7 +1205,6 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 
 } // namespace
 
-
 // Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, scale_result is not applied.
@@ -1362,25 +1361,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     else {
       TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
     }
-    // Until more than bf16 is supported
+    // Until more than bf16 is supported.
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output");
-  }
-  else if (scaling_choice == ScalingType::BlockWise) {
-#if ROCM_VERSION >= 70000
-    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-               "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
-
-    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
-               mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
-               "Matrix dimensions must be multiples of 32 for block-wise scaling");
-
-    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
-                out.scalar_type() == ScalarType::Half,
-                "Block-wise scaling only supports BFloat16 or Half output types");
-#else
-    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
-#endif
+         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
   }
 #endif
 

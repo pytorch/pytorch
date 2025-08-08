@@ -1,7 +1,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 
-#if defined(USE_TENSORPIPE)
+#if defined(USE_TENSORPIPE) && !defined(USE_ROCM)
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -50,8 +50,6 @@ C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_gdr, makeCudaGdrChannel)
 
 #endif
 
-#if TENSORPIPE_HAS_CUDA_XTH_CHANNEL
-
 std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
   auto context = tensorpipe::channel::cuda_xth::create();
   return std::make_unique<ChannelRegistration>(
@@ -60,8 +58,6 @@ std::unique_ptr<ChannelRegistration> makeCudaXthChannel() {
 
 // The cuda_xth channel supports same-process GPU-to-GPU comm
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cuda_xth, makeCudaXthChannel)
-
-#endif
 
 std::unique_ptr<ChannelRegistration> makeCudaBasicChannel() {
   auto context = tensorpipe::channel::cuda_basic::create(

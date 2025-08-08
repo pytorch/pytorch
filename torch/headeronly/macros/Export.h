@@ -100,10 +100,10 @@
 #define TORCH_API C10_IMPORT
 #endif
 
-// You may be wondering why we have TORCH_CUDA_CPP_API and TORCH_CUDA_CU_API
+// You may be wondering why we have TORCH_CUDA_CPP_API and TORCH_CUDA_API
 // belonging to the same library instead of just one TORCH_CUDA_API. Well, it
 // can indeed just be one TORCH_CUDA_API (and used to be)! TORCH_CUDA_CPP_API
-// and TORCH_CUDA_CU_API are artifacts of when we needed a split build to
+// and TORCH_CUDA_API are artifacts of when we needed a split build to
 // avoid relocation marker linking errors. The context is as follows:
 //
 // Once upon a time, there _was_ only TORCH_CUDA_API. All was happy until we
@@ -128,14 +128,6 @@
 #else
 #define TORCH_CUDA_CPP_API C10_IMPORT
 #define TORCH_CUDA_CU_API C10_IMPORT
-#endif
-
-#if defined(TORCH_HIP_BUILD_MAIN_LIB)
-#define TORCH_HIP_CPP_API C10_EXPORT
-#define TORCH_HIP_API C10_EXPORT
-#else
-#define TORCH_HIP_CPP_API C10_IMPORT
-#define TORCH_HIP_API C10_IMPORT
 #endif
 
 #if defined(TORCH_XPU_BUILD_MAIN_LIB)

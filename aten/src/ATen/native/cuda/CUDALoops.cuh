@@ -531,44 +531,6 @@ __global__ void elementwise_kernel(int N, func_t f) {
   }
 }
 
-#ifdef USE_ROCM
-template <int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, 4)
-__global__ void elementwise_kernel_manual_unroll(int N, func_t f) {
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
-  if ((idx + nt*(vt-1)) < N) {
-    f(idx, true);
-  } else {
-#pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if (idx < N) {
-        f(idx, false);
-        idx += nt;
-      }
-    }
-  }
-}
-
-template <int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, 4)
-__global__ void elementwise_kernel_strided(int N, func_t f) {
-  int tid = threadIdx.x;
-  int idx = nt * vt * blockIdx.x + tid;
-  int step = nt * vt * gridDim.x;
-  while (idx < N) {
-#pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if ((idx + nt * i) < N) {
-        f(idx + nt * i);
-      }
-    }
-    idx += step;
-  }
-}
-#endif
-
 template <int nt, int vt, typename func_t>
 static void launch_legacy_kernel(int64_t N, const func_t& f) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());

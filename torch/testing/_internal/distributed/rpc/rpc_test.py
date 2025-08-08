@@ -37,7 +37,6 @@ from torch.testing._internal.common_distributed import (
     captured_output,
     skip_if_lt_x_gpu,
     tp_transports,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,

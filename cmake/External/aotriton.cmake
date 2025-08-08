@@ -81,7 +81,7 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_MANYLINUX_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_MANYLINUX)
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
-                                  "${__AOTRITON_VER_WITH_COMMIT}-${__AOTRITON_MANYLINUX}"
+                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"  # @lint-ignore
