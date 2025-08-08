@@ -1783,8 +1783,9 @@ class TestSingleOperation(unittest.TestCase):
         self.assertEqual(s.check(), z3.sat)
 
         add_result = z3.Const(3, tensor_type)
-        broadcast_res1, broadcast_res2 = z3.Const(4, tensor_type), z3.Const(
-            5, tensor_type
+        broadcast_res1, broadcast_res2 = (
+            z3.Const(4, tensor_type),
+            z3.Const(5, tensor_type),
         )
 
         # print(s.model())

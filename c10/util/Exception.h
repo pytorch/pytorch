@@ -267,6 +267,13 @@ class C10_API NotImplementedError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
+// an unsupported device.  These turn into BufferError when they cross to
+// Python.
+class C10_API BufferError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -365,26 +372,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
 #define C10_EXPAND_MSVC_WORKAROUND(x) x
 
-// On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases
-// where the unlikely expression may be a constant, use this macro to ensure
-// return statement analysis keeps working (at the cost of not getting the
-// likely/unlikely annotation on nvcc).
-// https://github.com/pytorch/pytorch/issues/21418
-//
-// Currently, this is only used in the error reporting macros below.  If you
-// want to use it more generally, move me to Macros.h
-//
-// TODO: Brian Vaughan observed that we might be able to get this to work on
-// nvcc by writing some sort of C++ overload that distinguishes constexpr inputs
-// from non-constexpr.  Since there isn't any evidence that losing C10_UNLIKELY
-// in nvcc is causing us perf problems, this is not yet implemented, but this
-// might be an interesting piece of C++ code for an intrepid bootcamper to
-// write.
-#if defined(__CUDACC__)
-#define C10_UNLIKELY_OR_CONST(e) e
-#else
-#define C10_UNLIKELY_OR_CONST(e) C10_UNLIKELY(e)
-#endif
+#include <torch/headeronly/util/Exception.h>
 
 // ----------------------------------------------------------------------------
 // Error reporting macros
@@ -654,6 +642,10 @@ namespace c10::detail {
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
+// Like TORCH_CHECK, but raises BufferError instead of Errors.
+#define TORCH_CHECK_BUFFER(cond, ...) \
+  TORCH_CHECK_WITH_MSG(BufferError, cond, "TYPE", __VA_ARGS__)
+
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
   TORCH_CHECK_WITH_MSG(                                   \
       ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
@@ -718,28 +710,28 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
-instead.")
+[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+instead.")]]
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
+[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
+https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERTM() {}
 

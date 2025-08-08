@@ -28,13 +28,13 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON, requires_cuda
 
 
 # set so that metrics appear
 torch._logging.set_logs(inductor_metrics=True)
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -646,7 +646,7 @@ class SchedulerFusionTests(TestCase):
 
     @patch.object(config, "pattern_matcher", False)
     def test_fusion_choice4_cpu(self):
-        # Fuse nodes with same number of elements and compatible orginal var ranges
+        # Fuse nodes with same number of elements and compatible original var ranges
         # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
         def f(x, w):
             o1 = x * w
@@ -1292,5 +1292,5 @@ class WouldBeNiceIfItWorked:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

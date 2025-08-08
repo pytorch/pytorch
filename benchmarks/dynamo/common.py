@@ -9,20 +9,23 @@ import copy
 import csv
 import dataclasses
 import functools
+import gc
 import importlib
 import itertools
 import json
 import logging
 import os
+import platform
 import random
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -39,6 +42,7 @@ import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
+from torch._C._nativert import PyModelRunner
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
@@ -51,9 +55,10 @@ from torch._logging.scribe import open_source_signpost
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
-    from torch._inductor.utils import fresh_inductor_cache
+    from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -67,7 +72,7 @@ try:
     import torch_xla
     import torch_xla.core.xla_model as xm
 
-    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    # This is to workaround the backward issue https://github.com/pytorch/xla/issues/4174
     torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
@@ -75,7 +80,10 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Sequence
+
+_D = TypeVar("_D", bound=dict[str, Any])
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -270,7 +278,7 @@ DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
 # Maps a benchmark model name to a list of status codes. For any listed entry, we'll
-# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preserve them (i.e., for upload) if
 # the result status matches one listed.
 CI_PRESERVE_COMPILE_DEBUG = {
     # For example:
@@ -560,7 +568,7 @@ def nothing(f):
     return f
 
 
-@functools.lru_cache(None)
+@functools.cache
 def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 
@@ -766,7 +774,17 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+@overload
+def _normalize_bench_inputs(example_inputs: _D) -> tuple[tuple[()], _D]: ...
+
+
+@overload
+def _normalize_bench_inputs(
+    example_inputs: Sequence[_T],
+) -> tuple[tuple[_T, ...], dict[str, Any]]: ...
+
+
+def _normalize_bench_inputs(example_inputs):
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1074,7 +1092,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     times = args.iterations_per_run
 
-    # Use higher tolerance for XLA since XLA cause numerical unstability when
+    # Use higher tolerance for XLA since XLA cause numerical instability when
     # graph size changes
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
@@ -1084,6 +1102,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.inductor_compile_mode
             )
+        elif args.export_nativert:
+            frozen_model_iter_fn = export_nativert(model, example_inputs)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1430,6 +1450,38 @@ class AOTInductorModelCache:
         return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
 
 
+class NativeRTCache:
+    cache: dict[weakref.ref, Any] = {}
+
+    @classmethod
+    def load(cls, model, example_inputs):
+        from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
+
+        key = weakref.ref(model)
+        if key not in cls.cache:
+            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+            example_outputs = model(*example_args, **example_kwargs)
+            _register_dataclass_output_as_pytree(example_outputs)
+
+            combined_args = _combine_args(model, example_args, example_kwargs)
+            dynamic_shapes = _tree_map_with_path(
+                _produce_dynamic_shapes_for_export, combined_args
+            )
+
+            ep = torch.export.export(
+                model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+            )
+            ep = ep.run_decompositions({})
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                torch.export.pt2_archive._package.package_pt2(
+                    f, exported_programs={"forward": ep}
+                )
+                filename = f.name
+            cls.cache[key] = PyModelRunner(filename, "forward")
+
+        return cls.cache[key]
+
+
 def export(model, example_inputs):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
@@ -1454,6 +1506,16 @@ def export(model, example_inputs):
         return ep.module()(*example_args, **example_kwargs)
 
     return opt_export
+
+
+def export_nativert(model, example_inputs):
+    optimized = NativeRTCache.load(model, example_inputs)
+
+    def opt_nativert(_, example_inputs, collect_outputs=False):
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        return optimized.run(*example_args, **example_kwargs)
+
+    return opt_nativert
 
 
 def export_aot_inductor(model, example_inputs, mode):
@@ -1671,7 +1733,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -1680,7 +1742,7 @@ class BenchmarkRunner:
 
         devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            # AMP training can lead to small loss values which can undeflow
+            # AMP training can lead to small loss values which can underflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
             # structure, that scales the loss values to prevent underflow. Loss
@@ -1718,7 +1780,7 @@ class BenchmarkRunner:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
-                # After autotuning and fake tensor caching lands, we can enable, becuase the compile time impact will be lower.
+                # After autotuning and fake tensor caching lands, we can enable, because the compile time impact will be lower.
                 # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
                 # Autotuning: https://github.com/pytorch/pytorch/issues/117447
                 self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
@@ -1747,6 +1809,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cpu(self):
+        return set()
+
+    @property
+    def skip_models_for_cpu_aarch64(self):
         return set()
 
     @property
@@ -2208,7 +2274,11 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                if self.args.export or self.args.export_aot_inductor:
+                if (
+                    self.args.export
+                    or self.args.export_aot_inductor
+                    or self.args.export_nativert
+                ):
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
@@ -2368,6 +2438,7 @@ class BenchmarkRunner:
         )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2406,6 +2477,8 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_parallelize(model)
 
+        if not hasattr(model, name):
+            model.name = name
         self.init_optimizer(name, current_device, model.parameters())
 
         # The self.autocast context is needed for the model we export with aot_compile,
@@ -2509,8 +2582,6 @@ class BenchmarkRunner:
             result_summary = latency_experiment_summary(
                 self.suite_name, self.args, model, timings, **experiment_kwargs
             )
-            if not hasattr(model, name):
-                model.name = name
             results.append(result_summary)
             return " ".join(map(str, results))
 
@@ -2529,6 +2600,7 @@ class BenchmarkRunner:
                 return experiment(*self.maybe_cast(model, example_inputs))
 
         def warmup(fn, model, example_inputs, mode, niters=5):
+            gc.collect()
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2567,6 +2639,9 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_parallelize(model)
 
+        if not hasattr(model, name):
+            model.name = name
+
         self.init_optimizer(name, current_device, model.parameters())
 
         # The self.autocast context is needed for the model we export with aot_compile,
@@ -2599,7 +2674,7 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if self.args.export_aot_inductor:
+            if self.args.export_aot_inductor or self.args.export_nativert:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -2680,8 +2755,6 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            if not hasattr(model, name):
-                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -2823,7 +2896,7 @@ class BenchmarkRunner:
                 )
 
                 # NB: Don't upload them to the benchmark database as they are debugging
-                # infomation. There are also around a million records a day which is
+                # information. There are also around a million records a day which is
                 # wasteful to store
                 write_outputs(
                     filename,
@@ -2881,7 +2954,7 @@ def parse_args(args=None):
     iterations_per_run_help = """
         Run this may iterations for each time measurement. This is mainly used for
         XLA training. We want to run multiple iterations per measurement so the
-        tracing and computation for different iteartions can overlap with each
+        tracing and computation for different iterations can overlap with each
         other. This makes sure we have an accurate xla baseline.
     """
     parser.add_argument(
@@ -3040,7 +3113,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--generate-aot-autograd-stats",
         action="store_true",
-        help="Generates AOT Autograd stats like how mnay graphs are sent to AOT",
+        help="Generates AOT Autograd stats like how many graphs are sent to AOT",
     )
     parser.add_argument(
         "--inductor-settings",
@@ -3250,6 +3323,12 @@ def parse_args(args=None):
             instead of deleting it and creating a new one.",
     )
 
+    parser.add_argument(
+        "--caching-precompile",
+        action="store_true",
+        help="Enables caching precompile, serializing artifacts to DynamoCache between runs",
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -3261,7 +3340,7 @@ def parse_args(args=None):
         "--warm-start-latency",
         "--warm_start_latency",
         action="store_true",
-        help="Run model(s) twice and preseve caches in between to enable a 'warm start' on the 2nd run",
+        help="Run model(s) twice and preserve caches in between to enable a 'warm start' on the 2nd run",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3349,6 +3428,11 @@ def parse_args(args=None):
         help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
+        "--export-nativert",
+        action="store_true",
+        help="Measure pass rate with Export+NativeRT",
+    )
+    group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
@@ -3400,6 +3484,29 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
+def process_caching_precompile():
+    """
+    After every process_entry, save precompile artifacts to DynamoCache
+    """
+    assert torch._dynamo.config.caching_precompile, (
+        "Caching precompile should be enabled with --caching-precompile"
+    )
+    from torch._dynamo.precompile_context import PrecompileContext
+
+    # Serialize all callables, clear PrecompileContext
+    # TODO: put this under torch.compiler API once ready
+    serialized = PrecompileContext.serialize()
+    PrecompileContext.clear()
+    if serialized is not None:
+        artifacts, info = serialized
+        print(
+            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
+        )
+        results = PrecompileContext.deserialize(artifacts)
+        assert results is not None
+        PrecompileContext.populate_caches(results)
+
+
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
@@ -3408,7 +3515,10 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
-        return run(runner, args, original_dir)
+        result = run(runner, args, original_dir)
+        if args.caching_precompile:
+            process_caching_precompile()
+        return result
 
 
 def maybe_fresh_cache(args):
@@ -3416,7 +3526,7 @@ def maybe_fresh_cache(args):
     if not cache_dir_assigned and (
         args.cold_start_latency or args.warm_start_latency or args.ci
     ):
-        return fresh_inductor_cache()
+        return fresh_cache()
     else:
         return contextlib.nullcontext()
 
@@ -3444,6 +3554,10 @@ def main(runner, original_dir=None, args=None):
             )
 
     with maybe_fresh_cache(args):
+        if args.caching_precompile:
+            os.environ["TORCH_CACHING_PRECOMPILE"] = "1"
+            torch._dynamo.config.caching_precompile = True
+
         args.init_distributed = args.only and args.multiprocess
         if args.init_distributed:
             # NB: Do NOT query device count before CUDA initialization; we're
@@ -3610,7 +3724,7 @@ def run(runner, args, original_dir=None):
 
         torch.backends.mkldnn.deterministic = True
 
-        # Remove randomeness when torch manual seed is called
+        # Remove randomness when torch manual seed is called
         patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
@@ -3701,7 +3815,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
+        arch = platform.machine()
         runner.skip_models.update(runner.skip_models_for_cpu)
+        if arch == "aarch64":
+            runner.skip_models.update(runner.skip_models_for_cpu_aarch64)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
@@ -3756,6 +3873,10 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export
         experiment = speedup_experiment
         output_filename = "export.csv"
+    elif args.export_nativert:
+        optimize_ctx = export_nativert
+        experiment = speedup_experiment
+        output_filename = "export_nativert.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]

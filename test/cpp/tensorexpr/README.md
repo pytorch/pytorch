@@ -40,8 +40,8 @@ We glob all the test files together in `CMakeLists.txt` so that you don't
 have to edit it every time you add a test. Unfortunately, this means that in
 order to get the build to pick up your new test file, you need to re-run
 cmake:
-```
-python setup.py build --cmake
+```bash
+CMAKE_FRESH=1 python setup.py build
 ```
 
 ## How do I run the tests?

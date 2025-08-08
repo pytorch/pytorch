@@ -131,7 +131,7 @@ def check_for_mutation(
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
         mutation_indices: Sequence[int] = [
@@ -222,7 +222,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
-    # doesnt work for non-trees because the warmup run would apply mutation twice
+    # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs

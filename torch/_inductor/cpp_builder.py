@@ -127,7 +127,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
@@ -144,6 +144,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
@@ -183,7 +184,6 @@ def convert_cubin_to_obj(
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
-    os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
@@ -201,13 +201,13 @@ def convert_cubin_to_obj(
     return obj_file
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -222,7 +222,7 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
@@ -230,7 +230,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
     return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
@@ -248,7 +248,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     def _check_minimal_version(compiler_version: TorchVersion) -> None:
         """
@@ -292,32 +292,32 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_intel_compiler() -> bool:
     return _is_intel_compiler(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
@@ -332,7 +332,7 @@ def get_compiler_version_info(compiler: str) -> str:
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
-    # Mutiple lines to one line string.
+    # Multiple lines to one line string.
     version_string = version_string.replace("\r", "_")
     version_string = version_string.replace("\n", "_")
     return version_string
@@ -411,7 +411,7 @@ def normalize_path_separator(orig_path: str) -> str:
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
-    Acturally, to build a cxx shared library. We just need to select a compiler
+    Actually, to build a cxx shared library. We just need to select a compiler
     and maintains the suitable args.
     """
 
@@ -573,6 +573,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
                 else "Wno-ignored-optimization-argument"
             )
             cflags.append(ignored_optimization_argument)
+        if _is_gcc(cpp_compiler):
+            # Issue all the warnings demanded by strict ISO C and ISO C++.
+            # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
+            cflags.append("pedantic")
     return cflags
 
 
@@ -597,40 +601,73 @@ def _get_ffast_math_flags() -> list[str]:
     return flags
 
 
+def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+    """
+    When we turn on generate debug symbol.
+    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+    On Linux, it should create some debug sections in binary file.
+    """
+    cflags: list[str] = []
+    ldflags: list[str] = []
+
+    if _IS_WINDOWS:
+        cflags = ["ZI", "_DEBUG"]
+        ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
+    else:
+        cflags.append("g")
+
+    return cflags, ldflags
+
+
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
-) -> list[str]:
-    if _IS_WINDOWS:
-        return ["O1" if min_optimize else "O2"]
+) -> tuple[list[str], list[str]]:
+    cflags: list[str] = []
+    ldflags: list[str] = []
+
+    b_debug_build = (
+        config.aot_inductor.debug_compile
+        or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+    )
+    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
+
+    if b_debug_build:
+        cflags, ldflags = _get_inductor_debug_symbol_cflags()
+        if _IS_WINDOWS:
+            cflags += ["Od", "Ob0", "Oy-"]
+        else:
+            cflags.append("O0")
     else:
-        wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
-        cflags = (
-            ["O0", "g"]
-            if config.aot_inductor.debug_compile
-            else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
-        )
-        cflags += _get_ffast_math_flags()
-        cflags.append("fno-finite-math-only")
-        if not config.cpp.enable_unsafe_math_opt_flag:
-            cflags.append("fno-unsafe-math-optimizations")
-        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+        if _IS_WINDOWS:
+            cflags = ["O1" if min_optimize else "O2"]
+        else:
+            cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
 
-        if sys.platform != "darwin":
-            # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if _is_gcc(cpp_compiler):
-                cflags.append("fno-tree-loop-vectorize")
-            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-            # `-march=native` is unrecognized option on M1
-            if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
-                else:
-                    cflags.append("march=native")
+    cflags += _get_ffast_math_flags()
+    cflags.append("fno-finite-math-only")
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        cflags.append("fno-unsafe-math-optimizations")
+    cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
-        return cflags
+    if sys.platform != "darwin":
+        # on macos, unknown argument: '-fno-tree-loop-vectorize'
+        if _is_gcc(cpp_compiler):
+            cflags.append("fno-tree-loop-vectorize")
+        # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+        # `-march=native` is unrecognized option on M1
+        if not config.is_fbcode():
+            if platform.machine() == "ppc64le":
+                cflags.append("mcpu=native")
+            else:
+                cflags.append("march=native")
+
+    if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        cflags.append("flto=thin")
+
+    return cflags, ldflags
 
 
-def _get_shared_cflag(do_link: bool) -> list[str]:
+def _get_shared_cflags(do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
@@ -660,13 +697,19 @@ def get_cpp_options(
     libraries: list[str] = []
     passthrough_args: list[str] = []
 
+    opt_cflags, opt_ldflags = _get_optimization_cflags(cpp_compiler, min_optimize)
+
     cflags = (
-        _get_shared_cflag(do_link)
-        + _get_optimization_cflags(cpp_compiler, min_optimize)
+        opt_cflags
+        + _get_shared_cflags(do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        ldflags.append("fuse-ld=lld")
+        ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
 
@@ -674,7 +717,7 @@ def get_cpp_options(
         definitions,
         include_dirs,
         cflags,
-        ldflags,
+        ldflags + opt_ldflags,
         libraries_dirs,
         libraries,
         passthrough_args,
@@ -735,13 +778,6 @@ class CppOptions(BuildOptionsBase):
         _append_list(self._libraries, libraries)
         _append_list(self._passthrough_args, passthrough_args)
         self._finalize_options()
-
-
-def _get_glibcxx_abi_build_flags() -> list[str]:
-    if not _IS_WINDOWS:
-        return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    else:
-        return []
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
@@ -886,7 +922,7 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
     return python_include_dirs, python_lib_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_conda_llvm_openmp_installed() -> bool:
     try:
         command = "conda list llvm-openmp --json"
@@ -896,7 +932,7 @@ def is_conda_llvm_openmp_installed() -> bool:
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
@@ -917,7 +953,7 @@ def homebrew_libomp() -> tuple[bool, str]:
         return False, ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
         output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
@@ -931,7 +967,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
@@ -949,7 +985,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    Intel Compiler implemented more math libraries than clang, for performance proposal.
     We need preload them like openmp library.
     """
     preload_list = [
@@ -1069,6 +1105,19 @@ def _get_openmp_args(
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthrough_args
 
 
+def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
+    """
+    For fbcode cpu case, we should link stdc++ instead assuming the binary where dlopen is executed is built with dynamic stdc++.
+    """
+    lib_dir_paths: list[str] = []
+    libs: list[str] = []
+    if config.is_fbcode():
+        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        libs.append("stdc++")
+
+    return lib_dir_paths, libs
+
+
 def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
     macros = []
     if use_mmap_weights:
@@ -1084,6 +1133,15 @@ def get_cpp_torch_options(
     use_relative_path: bool,
     use_mmap_weights: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of torch related build options.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
+    4. Torch MACROs.
+    5. MISC
+    6. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1120,7 +1178,6 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    cxx_abi_passthrough_args = _get_glibcxx_abi_build_flags()
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1143,10 +1200,7 @@ def get_cpp_torch_options(
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
+        sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
 
     return (
@@ -1268,6 +1322,13 @@ def get_cpp_torch_device_options(
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """
+    This function is used to get the build args of device related build options.
+    1. Device include_directories, libraries, libraries_directories.
+    2. Device MACROs.
+    3. MISC
+    4. Return the build args
+    """
     definitions: list[str] = []
     include_dirs: list[str] = []
     cflags: list[str] = []
@@ -1287,6 +1348,8 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
+    if not config.is_fbcode():
+        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1314,6 +1377,9 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
+    if device_type == "mps":
+        definitions.append(" USE_MPS")
+
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
@@ -1322,6 +1388,14 @@ def get_cpp_torch_device_options(
                 if not compile_only:
                     # Only add link args, when compile_only is false.
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+
+        if device_type == "cpu":
+            (
+                stdcxx_lib_dir_paths,
+                stdcxx_libs,
+            ) = _get_libstdcxx_args()
+            libraries_dirs += stdcxx_lib_dir_paths
+            libraries += stdcxx_libs
 
     if config.aot_inductor.custom_op_libs:
         libraries += config.aot_inductor.custom_op_libs
@@ -1425,7 +1499,7 @@ def get_name_and_dir_from_output_file_path(
         dir = /tmp/tmpof1n5g7t/5c/
 
     put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
-    CppBuilder --> get_target_file_path will format output path accoding OS:
+    CppBuilder --> get_target_file_path will format output path according OS:
     Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
@@ -1442,13 +1516,13 @@ class CppBuilder:
     Args:
         name:
             1. Build target name, the final target file will append extension type automatically.
-            2. Due to the CppBuilder is supports mutliple OS, it will maintains ext for OS difference.
+            2. Due to the CppBuilder is supports multiple OS, it will maintains ext for OS difference.
         sources:
             Source code file list to be built.
         BuildOption:
             Build options to the builder.
         output_dir:
-            1. The output_dir the taget file will output to.
+            1. The output_dir the target file will output to.
             2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
@@ -1462,7 +1536,7 @@ class CppBuilder:
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
@@ -1502,8 +1576,11 @@ class CppBuilder:
         self._aot_mode: bool = False
 
         self._name = name
+        self._target_name = (
+            config.aot_inductor.model_name_for_generated_files or "aoti_model"
+        )
 
-        # Code start here, initial self internal veriables firstly.
+        # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_relative_path = BuildOption.get_use_relative_path()
@@ -1700,8 +1777,8 @@ class CppBuilder:
 
     def build(self) -> None:
         """
-        It is must need a temperary directory to store object files in Windows.
-        After build completed, delete the temperary directory to save disk space.
+        It is must need a temporary directory to store object files in Windows.
+        After build completed, delete the temporary directory to save disk space.
         """
         if self._use_relative_path:
             # remote build uses relative path
@@ -1727,35 +1804,76 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
+        target_library_type = (
+            "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+        )
+
         contents = textwrap.dedent(
             f"""
-            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
+            cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+            project({self._target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
-            add_library(aoti_model SHARED)
-
-            # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+            # Set a library target
+            add_library({self._target_name} {target_library_type})
 
             """
         )
+
+        if (
+            not config.aot_inductor.compile_standalone
+            or config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, the generated cpp project should
+            # not use Torch. But for unit testing purpose, we need to use Torch here.
+            contents += textwrap.dedent(
+                """
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
+
+                """
+            )
+            # flags and macros here are mostly CPU specific. Not emitting them for GPU models
+            # will make the generated CMake file more portable and won't really hurt performance.
+            # NOTE: standalone focuses on GPU now. For CPU, some of the flags and macros may
+            # be still needed.
+            contents += textwrap.dedent(
+                f"""
+                # Add macro definitions
+                target_compile_definitions({self._target_name} PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options({self._target_name} PRIVATE {self._cflags_args})
+
+                # Backend-specific flags
+                target_compile_options({self._target_name} PRIVATE {self._passthrough_parameters_args} -c)
+
+                """
+            )
+        else:
+            # When compile_standalone is True, use TorchStandalone instead of Torch
+            contents += textwrap.dedent(
+                f"""
+                find_package(TorchStandalone REQUIRED)
+                # Set up include directories to find headers at the correct paths
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}})
+                target_include_directories({self._target_name} PRIVATE ${{TorchStandalone_INCLUDE_DIRS}}/standalone)
+
+                """
+            )
+
         if device_type == "cuda" and torch.version.hip is None:
             from torch._inductor.codecache import _nvcc_arch_as_compile_option
 
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
                 f"""
-                find_package(CUDA REQUIRED)
+                enable_language(CUDA)
+                set(CMAKE_CUDA_STANDARD 17)
+                find_package(CUDAToolkit REQUIRED)
+                target_include_directories({self._target_name} PRIVATE ${{CUDAToolkit_INCLUDE_DIRS}})
+                target_compile_definitions({self._target_name} PRIVATE USE_CUDA)
+                target_link_libraries({self._target_name} PRIVATE cuda CUDA::cudart_static)
 
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
@@ -1783,8 +1901,8 @@ class CppBuilder:
                     # --- PTX to FATBIN Command & Target ---
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
-                        COMMAND ${{CUDA_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_80,code=compute_80
+                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
                                 -gencode arch=compute_{current_arch},code=sm_{current_arch}
                         DEPENDS ${{PTX_FILE}}
                     )
@@ -1819,7 +1937,7 @@ class CppBuilder:
         # Remove the directory part of file_path
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
-            f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+            f.write(f"target_sources({self._target_name} PRIVATE {src_path})\n")
 
     def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
         # TODO: make this work beyond CUDA
@@ -1833,21 +1951,29 @@ class CppBuilder:
                     """
                 )
                 f.write(contents)
-            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
-            f.write(
-                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
-            )
+            if asm_files:
+                f.write(f"add_dependencies({self._target_name} ${{KERNEL_TARGETS}})\n")
+                f.write(
+                    f"target_link_libraries({self._target_name} PRIVATE ${{KERNEL_OBJECT_FILES}})\n"
+                )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
+        if (
+            config.aot_inductor.compile_standalone
+            and not config.test_configs.use_libtorch
+        ):
+            # When compile_standalone is True, do not link with libtorch
+            return
+
         lflags = " ".join(self._build_option.get_ldflags())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
+            target_link_options({self._target_name} PRIVATE {lflags})
 
             # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
+            target_link_libraries({self._target_name} PRIVATE {libs})
          """
         )
 
@@ -1856,3 +1982,33 @@ class CppBuilder:
         )
         with open(cmake_path, "a") as f:
             f.write(contents)
+
+
+def run_asm_build_object(src: str, target: str, cwd: str) -> None:
+    def get_asm_compiler() -> str:
+        if _IS_WINDOWS:
+            ASM_CC = "ml64"
+        else:
+            ASM_CC = get_cpp_compiler()
+            # Intel compiler is not support to compile asm, switch to gcc.
+            if _is_intel_compiler(ASM_CC):
+                ASM_CC = "gcc"
+        return ASM_CC
+
+    def get_command_line(asm_cc: str, src: str, target: str) -> str:
+        if _IS_WINDOWS:
+            # Format reference:
+            # https://learn.microsoft.com/en-us/cpp/assembler/masm/ml-and-ml64-command-line-reference?view=msvc-170
+            cmd = f"{asm_cc} {src} /c /Fo {target}"  # codespell:ignore /Fo
+        else:
+            cmd = f"{asm_cc} -c {src} -o {target}"
+
+        return cmd
+
+    asm_cc = get_asm_compiler()
+    cmd = get_command_line(
+        asm_cc=asm_cc,
+        src=normalize_path_separator(src),
+        target=normalize_path_separator(target),
+    )
+    run_compile_cmd(cmd, cwd=normalize_path_separator(cwd))

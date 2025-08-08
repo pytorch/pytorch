@@ -38,23 +38,55 @@ __global__ void prepare_grouped_gemm_data(
     Strides tensor_StrideA,
     Strides tensor_StrideB,
     Strides tensor_StrideOutput,
+    Strides tensor_ShapeA,
+    Strides tensor_ShapeB,
     int64_t a_scale_stride,
     int64_t b_scale_stride,
     bool a_row_major = true,
     bool b_row_major = false) {
   int32_t tid = threadIdx.x;
   int32_t delta = 0;
+  int32_t offset = 0;
   if (offs != nullptr) {
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
-    delta = offs[tid] - start;
-    int align = 16 / sizeof(DtypeA);
-    CUDA_KERNEL_ASSERT(
-        delta >=0 && delta % align == 0 &&
-        "expected dynamic dimension byte size to be non-negative multiple of 16 \n");
+    offset = offs[tid];
+    delta = offset - start;
+    CUDA_KERNEL_ASSERT(delta >=0 && "expected gemm dimension to be greater or equal 0\n");
+
+    // TMA transfers require global memory tensor addresses to be
+    // aligned to 16 bytes.
+    if (tid < blockDim.x - 1) {
+      // Check this requirement for input tensors, in case group
+      // addresses are increased along the dynamic dimension.
+      if ((K < 0 && a_row_major) ||       // 2D/2D: check along K dimension
+          (M < 0 && !a_row_major)) {      // 3D/2D: check along N dimension
+        int align = 128 / cutlass::sizeof_bits<DtypeA>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+      if ((K < 0 && !b_row_major) ||      // 2D/2D: check along K dimension
+          (N < 0 && b_row_major)) {       // 3D/2D: check along N dimension
+        int align = 128 / cutlass::sizeof_bits<DtypeB>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected input tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+
+      // Check the same requirement for output tensor (that is always
+      // contiguous, and in row-major layout).
+      if (N < 0) {
+        int align = 128 / cutlass::sizeof_bits<DtypeOutput>::value;
+        CUDA_KERNEL_ASSERT(
+                           delta % align == 0 &&
+                           "expected output tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+      }
+    }
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {
     // A and output is 2d
+    CUDA_KERNEL_ASSERT(offset <= tensor_ShapeA[0] && "expected offset to be less than tensor size\n");
     M = delta;
     lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
     ldb = b_row_major ? tensor_StrideB[1] : tensor_StrideB[2];
@@ -67,6 +99,7 @@ __global__ void prepare_grouped_gemm_data(
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1] * ldoutput;
     B_ptrs[tid] = B + tid * tensor_StrideB[0];
   } else if (N < 0) {
+    CUDA_KERNEL_ASSERT(offset <= tensor_ShapeB[1] && "expected offset to be less than tensor size\n");
     N = delta;
     lda = a_row_major ? tensor_StrideA[1] : tensor_StrideA[2];
     ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1]; // B is transposed
@@ -79,9 +112,9 @@ __global__ void prepare_grouped_gemm_data(
       inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
     }
   } else if (K < 0) {
+    CUDA_KERNEL_ASSERT(offset <= tensor_ShapeA[1] && offset <= tensor_ShapeB[0] && "expected offset to be less than tensor size\n");
     // A, B is 2d, output is 3d
     K = delta;
-    CUDA_KERNEL_ASSERT(delta > 0 && "can't handle K=0");
     lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
     ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
     ldoutput = tensor_StrideOutput[1];
