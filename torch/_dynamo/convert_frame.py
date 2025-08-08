@@ -1435,6 +1435,15 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
 
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_exception",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: error_msg,
+            )
+
             if isinstance(e, SkipCodeRecursiveException):
                 return ConvertFrameReturn(
                     frame_exec_strategy=FrameExecStrategy(
