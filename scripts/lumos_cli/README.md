@@ -1,5 +1,5 @@
-# 🔧 Torch Cli
-A  Python CLI tool for building and testing PyTorch-based components, using a YAML configuration file for structured, repeatable workflows.
+# 🔧 Lumos_cli
+A Python CLI tool for building and testing PyTorch-based components, using a YAML configuration file for structured, repeatable workflows.
 
 
 ## Features
@@ -9,7 +9,7 @@ A  Python CLI tool for building and testing PyTorch-based components, using a YA
 ## 📦 Installation
 at the root of the pytorch repo
 ```bash
-pip install -e scripts/torch_cli
+pip install -e scripts/lumos_cli
 ```
 
 ## Run the cli tool
