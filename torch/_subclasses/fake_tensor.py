@@ -2319,7 +2319,6 @@ class FakeTensorMode(TorchDispatchMode):
         device_conversion_skip_const_prop = (
             func is torch.ops.aten._to_copy.default
             and isinstance(args[0], torch.Tensor)
-            and args[0].device.type == "meta"
         )
 
         # To constant propagate through these functions:
