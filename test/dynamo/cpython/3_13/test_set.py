@@ -315,13 +315,14 @@ class _TestJointOps:
             self.assertEqual(self.thetype(it), data - self.thetype((drop,)))
 
     def test_deepcopy(self):
-        class Tracer:
-            def __init__(self, value):
-                self.value = value
-            def __hash__(self):
-                return self.value
-            def __deepcopy__(self, memo=None):
-                return Tracer(self.value + 1)
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Tracer:
+                def __init__(self, value):
+                    self.value = value
+                def __hash__(self):
+                    return self.value
+                def __deepcopy__(self, memo=None):
+                    return Tracer(self.value + 1)
         t = Tracer(10)
         s = self.thetype([t])
         dup = copy.deepcopy(s)
@@ -333,8 +334,9 @@ class _TestJointOps:
 
     def test_gc(self):
         # Create a nest of cycles to exercise overall ref count check
-        class A:
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class A:
+                pass
         s = set(A() for i in range(1000))
         for elem in s:
             elem.cycle = s
@@ -343,9 +345,10 @@ class _TestJointOps:
 
     def test_subclass_with_custom_hash(self):
         # Bug #1257731
-        class H(self.thetype):
-            def __hash__(self):
-                return int(id(self) & 0x7fffffff)
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class H(self.thetype):
+                def __hash__(self):
+                    return int(id(self) & 0x7fffffff)
         s=H()
         f=set()
         f.add(s)
@@ -396,8 +399,9 @@ class _TestJointOps:
 
     def test_container_iterator(self):
         # Bug #3680: tp_traverse was not implemented for set iterator object
-        class C(object):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class C(object):
+                pass
         obj = C()
         ref = weakref.ref(obj)
         container = set([obj, 1])
@@ -654,19 +658,20 @@ class TestSet(_TestJointOps, __TestCase):
         self.assertRaises(ReferenceError, str, p)
 
     def test_rich_compare(self):
-        class TestRichSetCompare:
-            def __gt__(self, some_set):
-                self.gt_called = True
-                return False
-            def __lt__(self, some_set):
-                self.lt_called = True
-                return False
-            def __ge__(self, some_set):
-                self.ge_called = True
-                return False
-            def __le__(self, some_set):
-                self.le_called = True
-                return False
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class TestRichSetCompare:
+                def __gt__(self, some_set):
+                    self.gt_called = True
+                    return False
+                def __lt__(self, some_set):
+                    self.lt_called = True
+                    return False
+                def __ge__(self, some_set):
+                    self.ge_called = True
+                    return False
+                def __le__(self, some_set):
+                    self.le_called = True
+                    return False
 
         # This first tries the builtin rich set comparison, which doesn't know
         # how to handle the custom object. Upon returning NotImplemented, the
@@ -698,28 +703,31 @@ class TestSetSubclass(TestSet):
     basetype = set
 
     def test_keywords_in_subclass(self):
-        class subclass(set):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass(set):
+                pass
         u = subclass([1, 2])
         self.assertIs(type(u), subclass)
         self.assertEqual(set(u), {1, 2})
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        class subclass_with_init(set):
-            def __init__(self, arg, newarg=None):
-                super().__init__(arg)
-                self.newarg = newarg
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass_with_init(set):
+                def __init__(self, arg, newarg=None):
+                    super().__init__(arg)
+                    self.newarg = newarg
         u = subclass_with_init([1, 2], newarg=3)
         self.assertIs(type(u), subclass_with_init)
         self.assertEqual(set(u), {1, 2})
         self.assertEqual(u.newarg, 3)
 
-        class subclass_with_new(set):
-            def __new__(cls, arg, newarg=None):
-                self = super().__new__(cls, arg)
-                self.newarg = newarg
-                return self
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass_with_new(set):
+                def __new__(cls, arg, newarg=None):
+                    self = super().__new__(cls, arg)
+                    self.newarg = newarg
+                    return self
         u = subclass_with_new([1, 2])
         self.assertIs(type(u), subclass_with_new)
         self.assertEqual(set(u), {1, 2})
@@ -810,27 +818,30 @@ class TestFrozenSetSubclass(TestFrozenSet):
     basetype = frozenset
 
     def test_keywords_in_subclass(self):
-        class subclass(frozenset):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass(frozenset):
+                pass
         u = subclass([1, 2])
         self.assertIs(type(u), subclass)
         self.assertEqual(set(u), {1, 2})
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        class subclass_with_init(frozenset):
-            def __init__(self, arg, newarg=None):
-                self.newarg = newarg
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass_with_init(frozenset):
+                def __init__(self, arg, newarg=None):
+                    self.newarg = newarg
         u = subclass_with_init([1, 2], newarg=3)
         self.assertIs(type(u), subclass_with_init)
         self.assertEqual(set(u), {1, 2})
         self.assertEqual(u.newarg, 3)
 
-        class subclass_with_new(frozenset):
-            def __new__(cls, arg, newarg=None):
-                self = super().__new__(cls, arg)
-                self.newarg = newarg
-                return self
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class subclass_with_new(frozenset):
+                def __new__(cls, arg, newarg=None):
+                    self = super().__new__(cls, arg)
+                    self.newarg = newarg
+                    return self
         u = subclass_with_new([1, 2], newarg=3)
         self.assertIs(type(u), subclass_with_new)
         self.assertEqual(set(u), {1, 2})
@@ -1896,12 +1907,13 @@ class TestWeirdBugs(__TestCase):
         list(si)
 
     def test_merge_and_mutate(self):
-        class X:
-            def __hash__(self):
-                return hash(0)
-            def __eq__(self, o):
-                other.clear()
-                return False
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class X:
+                def __hash__(self):
+                    return hash(0)
+                def __eq__(self, o):
+                    other.clear()
+                    return False
 
         other = set()
         other = {X() for i in range(10)}
@@ -1916,17 +1928,18 @@ class _TestOperationsMutating:
     constructor2 = None
 
     def make_sets_of_bad_objects(self):
-        class Bad:
-            def __eq__(self, other):
-                if not enabled:
-                    return False
-                if randrange(20) == 0:
-                    set1.clear()
-                if randrange(20) == 0:
-                    set2.clear()
-                return bool(randrange(2))
-            def __hash__(self):
-                return randrange(2)
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Bad:
+                def __eq__(self, other):
+                    if not enabled:
+                        return False
+                    if randrange(20) == 0:
+                        set1.clear()
+                    if randrange(20) == 0:
+                        set2.clear()
+                    return bool(randrange(2))
+                def __hash__(self):
+                    return randrange(2)
         # Don't behave poorly during construction.
         enabled = False
         set1 = self.constructor1(Bad() for _ in range(randrange(50)))
