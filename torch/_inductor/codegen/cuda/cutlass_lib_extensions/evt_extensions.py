@@ -255,7 +255,8 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             return f"{{{', '.join([render_stride(x) for x in stride])}}}"
 
         elif issubclass(arg_ty, ctypes.c_void_p):
-            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) {arg_renames.new_name(node.get_name())}"
+            name = arg_renames.new_name(node.get_name())
+            return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) ({name} + {name}_offset)"
         elif (
             arg_ty in _CUTLASS_C_DTYPES
         ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently

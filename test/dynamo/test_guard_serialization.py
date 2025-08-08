@@ -1325,6 +1325,27 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         finally:
             builtins_dict["getattr"] = getattr_original
 
+    def test_skipped_objects(self):
+        def foo():
+            pass
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.code = foo.__code__
+                self.foo = foo
+                self.p = torch.nn.Parameter(torch.randn(3, 2))
+
+            def forward(self, x):
+                z = x + 1
+                for p in self.parameters():
+                    z += p
+                return z
+
+        m = Module()
+        ref, loaded = self._test_serialization("TENSOR_MATCH", m, torch.randn(3, 2))
+        self._test_check_fn(ref, loaded, {"self": m, "x": torch.randn(3, 2)}, True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
