@@ -1,25 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
-import hashlib
 import itertools
 from typing import Any, Optional, TYPE_CHECKING, Union
+
 from torch._inductor.ir import ShapeAsConstantBuffer
-from unittest.mock import patch
-
-import sympy
-
-import torch
-from torch._inductor import config
 from torch._inductor.utils import Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import BenchmarkRequest, TensorMeta
-from ...ir import Buffer, CuteDSLTemplateBuffer, IRNode, Layout, ChoiceCaller, TensorBox
-from ...select_algorithm import PartialRender
-from ...utils import IndentedBuffer, unique
-from ...virtualized import V
+from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, Layout, TensorBox
 from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
+
 
 if TYPE_CHECKING:
     from ...scheduler import BaseSchedulerNode
@@ -31,6 +23,7 @@ log = getArtifactLogger(__name__, "output_code")
 
 class CuteDSLBenchmarkRequest(BenchmarkRequest):
     """Benchmark request for CuteDSL (CUTLASS Python DSL) kernels."""
+
     def __init__(
         self,
         kernel_name: str,
@@ -45,6 +38,7 @@ class CuteDSLBenchmarkRequest(BenchmarkRequest):
 
 class CuteDSLTemplate(KernelTemplate):
     """Template for generating CuteDSL (CUTLASS Python DSL) kernels."""
+
     kernel_type: type[Any] = CuteDSLTemplateKernel
     index_counter = itertools.count()
     all_templates: dict[str, "CuteDSLTemplate"] = {}
@@ -62,12 +56,13 @@ class CuteDSLTemplate(KernelTemplate):
         self.grid = grid
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
-        self.template = self._template_from_string(source)
-        assert name not in self.all_templates, "duplicate template name"
+        self.template = CuteDSLTemplate._template_from_string(source)
+        assert name not in self.all_templates, f"duplicate template name, {name}"
         CuteDSLTemplate.all_templates[name] = self
 
+    @staticmethod
     @functools.lru_cache(None)
-    def _template_from_string(self, source: str) -> Any:
+    def _template_from_string(source: str) -> Any:
         return KernelTemplate._template_from_string(source)
 
     def maybe_append_choice(
@@ -95,15 +90,14 @@ class CuteDSLTemplate(KernelTemplate):
         kernel_name = f"cutedsl_{self.name}_{next(self.index_counter)}"
 
         if self.template is None:
-
             raise RuntimeError("Template compilation failed (Jinja2 required)")
 
-        output_node = Buffer(name="buf_out", layout=layout)
+        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
 
         kernel = self.kernel_type(
             kernel_name=kernel_name,
             input_nodes=input_nodes,
-            output_node=output_node,
+            output_node=self.output_node,
         )
 
         code = kernel.render(self.template, **kwargs)
@@ -114,7 +108,7 @@ class CuteDSLTemplate(KernelTemplate):
         bmreq = CuteDSLBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(output_node),
+            output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
             extra_args=tuple(),
             source_code=code,
         )
