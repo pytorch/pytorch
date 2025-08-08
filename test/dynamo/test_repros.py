@@ -7674,7 +7674,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(out1, out2)
 
     @requires_cuda
-    def test_zero_dim_grad_device_mismatch(self):
+    def test_zero_dim_param_mixed_device_grad(self):
         # cpu 0-dim params with cuda grads
         # https://github.com/pytorch/pytorch/issues/160084
         class RegressionModel(torch.nn.Module):
@@ -7682,7 +7682,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.a = torch.nn.Parameter(torch.tensor(a).float())
                 self.b = torch.nn.Parameter(torch.tensor(b).float())
-                self.first_batch = True
 
             def forward(self, x):
                 return x * self.a + self.b
