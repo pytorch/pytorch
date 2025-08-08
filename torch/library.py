@@ -1483,7 +1483,10 @@ def get_kernel(
 
     This function retrieves the kernel that would be executed for a given
     operator and dispatch key combination. The returned SafeKernelFunction
-    can be used to call the kernel in a boxed fashion.
+    can be used to call the kernel in a boxed fashion. The intended use
+    case for this function is to retrieve the original kernel for a given
+    dispatch key and then register another kernel to the same dispatch key
+    that calls into the original kernel for certain cases.
 
     Args:
         op: Operator name (along with the overload) or OpOverload object
@@ -1508,12 +1511,6 @@ def get_kernel(
         >>> # Or use an OpOverload directly
         >>> kernel = torch.library.get_kernel(torch.ops.aten.add.Tensor, "CPU")
         >>>
-        >>> # Use the kernel to call the operator
-        >>> a = torch.tensor([1.0, 2.0])
-        >>> b = torch.tensor([3.0, 4.0])
-        >>> result = kernel.call_boxed(torch._C.DispatchKeySet("CPU"), a, b)
-        >>> print(result)  # tensor([4., 6.])
-        >>>
         >>> # Example: Using get_kernel in a custom op with conditional dispatch
         >>> # Get the original kernel for torch.sin
         >>> original_sin_kernel = torch.library.get_kernel("aten::sin", "CPU")
@@ -1527,6 +1524,7 @@ def get_kernel(
         >>>
         >>> lib = torch.library.Library("aten", "IMPL")
         >>> # with_keyset=True so the first argument to the impl is the current DispatchKeySet
+        >>> which needs to be the first argument to ``kernel.call_boxed``
         >>> lib.impl("sin", conditional_sin_impl, "CPU", with_keyset=True)
         >>>
         >>> # Test the conditional behavior
