@@ -3552,7 +3552,7 @@ def _cutlass_path() -> str:
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cuda.cutlass_dir
+        return config.cutlass.cutlass_dir
 
 
 def _cutlass_paths() -> list[str]:
@@ -3598,7 +3598,7 @@ def cutlass_key() -> bytes:
                 return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
-    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
 
 
@@ -3885,7 +3885,7 @@ class CUDACodeCache:
         Returns the hash key of source code, and the path to the file.
         """
 
-        if config.cuda.cutlass_hash_with_compile_cmd:
+        if config.cutlass.cutlass_hash_with_compile_cmd:
             cuda_command = repr(
                 cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
             )
@@ -3936,7 +3936,7 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 error_path = binary_error_path(output_path)
                 binary_remote_cache = cls.get_kernel_binary_remote_cache(
-                    caching_enabled=config.cuda.use_binary_remote_cache
+                    caching_enabled=config.cutlass.use_binary_remote_cache
                     and not config.force_disable_caches,
                     caching_available=config.is_fbcode(),
                 )
@@ -3951,13 +3951,13 @@ class CUDACodeCache:
                     cmd_parts, error_output = json.loads(error_json)
                     if (
                         binary_remote_cache is not None
-                        and config.cuda.upload_to_binary_remote_cache
+                        and config.cutlass.upload_to_binary_remote_cache
                     ):
                         # This ensures that a local error is uploaded to the remote cache,
                         # as we make no assumptions about the remote cache having the same
                         # information as the local cache
                         binary_remote_cache.put(
-                            error_path, config.cuda.binary_remote_cache_force_write
+                            error_path, config.cutlass.binary_remote_cache_force_write
                         )
                     cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
@@ -4021,11 +4021,11 @@ class CUDACodeCache:
                 # Upload to remote cache if enabled
                 if (
                     binary_remote_cache is not None
-                    and config.cuda.upload_to_binary_remote_cache
+                    and config.cutlass.upload_to_binary_remote_cache
                 ):
                     # will log on errors, but not fail out
                     binary_remote_cache.put(
-                        output_path, config.cuda.binary_remote_cache_force_write
+                        output_path, config.cutlass.binary_remote_cache_force_write
                     )
                 cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                     input_path, output_path, None
@@ -4078,10 +4078,10 @@ class CUDACodeCache:
         # Upload to remote cache directly from memory if enabled
         if (
             binary_remote_cache is not None
-            and config.cuda.upload_to_binary_remote_cache
+            and config.cutlass.upload_to_binary_remote_cache
         ):
             binary_remote_cache.put(
-                error_path, config.cuda.binary_remote_cache_force_write
+                error_path, config.cutlass.binary_remote_cache_force_write
             )
 
 
