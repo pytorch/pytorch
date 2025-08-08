@@ -32,3 +32,22 @@ in which they are defined. Feel free to use either the top-level version in ``to
     unique_consecutive
     unravel_index
 ```
+
+```{eval-rst}
+.. automodule:: torch.serialization
+.. currentmodule:: torch.serialization
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+    check_module_version_greater_or_equal
+    default_restore_location
+    load
+    location_tag
+    mkdtemp
+    normalize_storage_type
+    save
+    storage_to_tensor_type
+    validate_cuda_device
+    validate_hpu_device
+```
