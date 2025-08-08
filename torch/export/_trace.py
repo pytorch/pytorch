@@ -49,15 +49,13 @@ from torch._export.utils import (
 )
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
+from torch._functorch._aot_autograd.graph_capture_wrappers import create_functional_call
 from torch._functorch._aot_autograd.input_output_analysis import (
     _graph_input_names,
     _graph_output_names,
 )
 from torch._functorch._aot_autograd.schemas import GraphSignature
 from torch._functorch._aot_autograd.subclass_utils import get_subclass_typing_container
-from torch._functorch._aot_autograd.traced_function_transforms import (
-    create_functional_call,
-)
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,
@@ -206,7 +204,7 @@ def _strip_root(x):
 
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
     """
-    In-place modifiy input graph module by replacing the export tracepoint with a new node
+    In-place modify input graph module by replacing the export tracepoint with a new node
     that has the same target and args, but with the _export_root stripped from path.
     """
     for node in gm.graph.nodes:
@@ -264,7 +262,7 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
-    # both. Unforunately we can't see what fake mode is attached to the shape
+    # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
     detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
     detected_shape_env = detect_shape_env(fake_inps + fake_vals)
@@ -677,8 +675,8 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
-    # Since the graph module is flattened (no module heirarchy), we
-    # need to noramlize the module by replacing "." with "_". If we
+    # Since the graph module is flattened (no module hierarchy), we
+    # need to normalize the module by replacing "." with "_". If we
     # don't, it will try to save the weight to a submodule which no
     # longer exists.
     for name, fqn in param_buffer_table.items():
@@ -842,7 +840,6 @@ def _export_to_aten_ir(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
     decomp_table=None,
-    _is_torch_jit_trace: bool = False,
     _prettify_placeholder_names: bool = True,
     decompose_custom_triton_ops: bool = False,
 ) -> ATenExportArtifact:
@@ -883,6 +880,8 @@ def _export_to_aten_ir(
             new_output_node = list(new_gm.graph.nodes)[-1]
             assert old_output_node.op == "output" and new_output_node.op == "output"
             # make sure we don't override any meta
+            if "desc" in new_output_node.meta:
+                del new_output_node.meta["desc"]
             assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
@@ -1287,7 +1286,7 @@ def _get_module_call_graph(
             outputs=[],
             in_spec=specs["in_spec"],
             out_spec=specs["out_spec"],
-            forward_arg_names=None,  # we only propage forward_arg_names for the top level module
+            forward_arg_names=None,  # we only propagate forward_arg_names for the top level module
         )
 
     if len(preserve_module_call_signature) > 0:
@@ -1313,7 +1312,6 @@ def _get_range_constraints(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
 ):
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
@@ -1326,24 +1324,21 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(
-        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
-    )
+    combined_args = _combine_args(mod, args, kwargs)
 
     # This is because we trace based on the kwargs passed in from user
     # not based on the signature. I feel it would be better to just enforce
     # one ordering at the start of tracing to avoid confusions, but that is
     # bigger refactor, so do this to unblock for now.
-    if not _is_torch_jit_trace:
-        combined_args_traced_order = {}
-        for arg in combined_args:
-            if arg not in kwargs:
-                combined_args_traced_order[arg] = combined_args[arg]
+    combined_args_traced_order = {}
+    for arg in combined_args:
+        if arg not in kwargs:
+            combined_args_traced_order[arg] = combined_args[arg]
 
-        for key in kwargs:
-            combined_args_traced_order[key] = kwargs[key]
+    for key in kwargs:
+        combined_args_traced_order[key] = kwargs[key]
 
-        combined_args = combined_args_traced_order
+    combined_args = combined_args_traced_order
 
     range_constraints = make_constraints(
         fake_mode,
@@ -1400,7 +1395,6 @@ def _strict_export(
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
-    _is_torch_jit_trace: bool,
     _to_aten_func: Callable,
 ) -> ExportArtifact:
     """
@@ -1731,6 +1725,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(
@@ -1745,7 +1740,7 @@ def _export_to_aten_ir_make_fx(
             buffers_to_mutate={},
             user_inputs_to_mutate={},
             in_spec=in_spec,
-            out_spec=out_spec,  # type: ignore[arg-type]
+            out_spec=out_spec.spec,
             backward_signature=None,
             input_tokens=[],
             output_tokens=[],
@@ -1839,7 +1834,6 @@ def _non_strict_export(
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
-    _is_torch_jit_trace: bool,
     _to_aten_func: Callable,
 ) -> ExportArtifact:
     """
@@ -1933,7 +1927,6 @@ def _non_strict_export(
         args,
         kwargs,
         dynamic_shapes,
-        _is_torch_jit_trace=_is_torch_jit_trace,
         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,  # for shape env initialization
     )
 
@@ -1946,7 +1939,6 @@ def _non_strict_export(
             dynamic_shapes=dynamic_shapes,
             equalities_inputs=equalities_inputs,
             original_signature=original_signature,
-            _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
     tx = TracingContext(fake_mode)
@@ -2041,7 +2033,6 @@ def _export_for_training(
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=orig_in_spec,
         allow_complex_guards_as_runtime_asserts=False,
-        _is_torch_jit_trace=False,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
@@ -2104,7 +2095,6 @@ def _export(
     preserve_module_call_signature: tuple[str, ...] = (),
     pre_dispatch: bool = False,
     allow_complex_guards_as_runtime_asserts: bool = False,
-    _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -2204,18 +2194,14 @@ def _export(
         preserve_module_call_signature=preserve_module_call_signature,
         orig_in_spec=original_in_spec,
         allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        _is_torch_jit_trace=_is_torch_jit_trace,
         _to_aten_func=functools.partial(
             _export_to_aten_ir,
             pre_dispatch=pre_dispatch,
-            _is_torch_jit_trace=_is_torch_jit_trace,
         ),
     )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
-    forward_arg_names = (
-        _get_forward_arg_names(mod, args, kwargs) if not _is_torch_jit_trace else None
-    )
+    forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
     inline_constraints = _get_inline_constraints(export_artifact.fake_mode)
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo.
@@ -2227,7 +2213,6 @@ def _export(
         args,
         kwargs,
         dynamic_shapes,
-        _is_torch_jit_trace=_is_torch_jit_trace,
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
@@ -2238,8 +2223,7 @@ def _export(
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
-    if not _is_torch_jit_trace:
-        _verify_placeholder_names(gm, export_graph_signature)
+    _verify_placeholder_names(gm, export_graph_signature)
 
     # Remove Proxy because they cannot be deepcopied or pickled.
     torch._export.utils.remove_proxy_from_state_dict(original_state_dict, in_place=True)

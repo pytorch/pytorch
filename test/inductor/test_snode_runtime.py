@@ -56,7 +56,7 @@ class TestCase(InductorTestCase):
 
     """
     Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent,
-    stronger comparisons may fail dependending on the host's specs.
+    stronger comparisons may fail depending on the host's specs.
 
     atol/rtol must be provided explicitly with each call, since precision/rel_tol overrides are not always utilized
     """

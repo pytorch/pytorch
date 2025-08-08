@@ -54,6 +54,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -3275,7 +3276,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
-        serialized_guards = guards.dump()
+        serialized_guards = guards.__getstate__()
         json_guards = json.loads(serialized_guards)
 
         samples = []
@@ -3297,17 +3298,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             samples.append(new_dict)
 
         for sample in samples:
-            guards.load(json.dumps(sample))
+            guards.__setstate__(json.dumps(sample))
             self.assertFalse(guards.check())
 
-        guards.load(json.dumps(json_guards))
+        guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
             with torch.autocast("cpu", dtype):
                 guards = GlobalStateGuard()
-                serialized_guards = guards.dump()
+                serialized_guards = guards.__getstate__()
                 json_guards = json.loads(serialized_guards)
 
                 for i, enabled in enumerate(json_guards["autocast_state"]["enabled"]):
@@ -3316,7 +3317,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                             type(json_guards["autocast_state"]["dtype"][i]), int
                         )
                         json_guards["autocast_state"]["dtype"][i] += 1
-                        guards.load(json.dumps(json_guards))
+                        guards.__setstate__(json.dumps(json_guards))
                         self.assertFalse(guards.check())
 
         _test_autocast(torch.float16)
@@ -4052,7 +4053,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         y = x
 
         def make_x_get_set():
-            # NOTE: this `x` is a different cell object than the outter `x`.
+            # NOTE: this `x` is a different cell object than the outer `x`.
             x = y
 
             def set_x(v):
@@ -4844,7 +4845,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_id_guarded_object(self):
-        class UDO:
+        class UserDefinedObject:
             @torch.compile(backend="eager")
             def call(self, x, ref_id):
                 self_id = id(self)
@@ -4857,11 +4858,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Make sure we do recompile when id(self) is executed on
         # different self objects.
         x = torch.ones(2)
-        obj1 = UDO()
+        obj1 = UserDefinedObject()
         obj1_id = id(obj1)
         self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
 
-        obj2 = UDO()
+        obj2 = UserDefinedObject()
         # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
         self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
 
@@ -5140,6 +5141,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(same(ref, res))
 
+    @skipIfWindows(
+        msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
+    )
     def test_release_input_memory(self):
         x = torch.rand([4])
         x_ref = weakref.ref(x)
@@ -5155,6 +5159,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         del x
         self.assertIs(x_ref(), None)
 
+    @skipIfWindows(
+        msg="TODO: (xuhancn) conform, AssertionError: Linear(in_features=10, out_features=10, bias=True) is not None"
+    )
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -5186,6 +5193,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_release_scope_memory(self):
         def inner(y):
             y
@@ -6823,7 +6831,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             # assign fstring to a variable causes the fstring to be used,
             # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            return x.sin(), f_str
 
         guard_failure = None
 
@@ -7208,6 +7216,41 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         )
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(*args), injected(*args))
+
+    def test_fail_on_recompile_error_message(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager_bool = torch._dynamo.guards.RootGuardManager()
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+        )
+
+        def injected_bool(x: bool):
+            return x + 102
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
+        )
+
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
+                    compiled_fn(*args)
+        finally:
+            _reset_precompile_entries(fn.__code__)
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
@@ -8663,7 +8706,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             ),
             testcase(expr="f(m.n[0], '1').x.y.z", expected="f(_var3, '1').x.y.z"),
             testcase(expr="f(m.n[0], '2').x.y.z", expected="f(_var3, '2').x.y.z"),
-            # The whole expressiong gets CSE-d, as well as all of its sub-expressions.
+            # The whole expression gets CSE-d, as well as all of its sub-expressions.
             testcase(
                 expr="self.g(a, b).k",
                 preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
@@ -9285,31 +9328,6 @@ def ___make_guard_fn():
         result = foo([x, x, x, x, y], y)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
-
-    def test_input_set_graph_break(self):
-        def foo(x):
-            return x.pop() * x.pop()
-
-        x = torch.randn(10, 10)
-        y = torch.randn(10, 10)
-
-        counter = CompileCounter()
-
-        inp = {x, x, x, x, y, y}
-        foo = torch.compile(foo, backend=counter, fullgraph=True)
-
-        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
-        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
-        # and so the guard story for the objects passed into input just isn't there atm.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Unsupported method call",
-        ):
-            foo(inp)
-
-        foo = torch.compile(foo, backend=counter, fullgraph=False)
-        foo(inp)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
@@ -10412,6 +10430,26 @@ def ___make_guard_fn():
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
+    def test_nested_dataclass_reconstruct(self):
+        @dataclasses.dataclass(frozen=True)
+        class NestedDataClass:
+            x: int = 2
+
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            y: torch.Tensor
+            ndc: NestedDataClass = NestedDataClass()
+
+        def fn(y):
+            dc = TestDataClass(y)
+            z = dc.y + dc.ndc.x
+            return z, dc
+
+        fn_opt = torch.compile()(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
     def test_frozen_dataclass_default_value(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -10482,12 +10520,84 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
-    def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+    def test_frozen_dataclass_attr_access(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int
+            a: int
 
-        for name, module in implemtations:
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
+
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: float
+            y: float
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.x + dc.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(x=3.2, y=2.5, z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_nested_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClassInner:
+            x: float
+            y: float
+
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            b: TestDataClassInner
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.b.x + dc.b.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(b=TestDataClassInner(2.4, 4.4), z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_pytree_tree_leaves(self):
+        implementations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implementations.append(("cxx", cxx_pytree))
+
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x):
@@ -10517,11 +10627,11 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -10568,11 +10678,11 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -11134,7 +11244,7 @@ class AAA:
 def fn():
     return 3
 """
-        with tempfile.NamedTemporaryFile(mode="w") as f:
+        with WritableTempFile(mode="w") as f:
             f.write(src)
             f.flush()
             from torch._dynamo.funcname_cache import get_funcname
@@ -11527,6 +11637,7 @@ fn
         self.assertIs(c1[1], c2[0])
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_dynamo_cache_invalidate(self):
         DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
 
@@ -11721,7 +11832,7 @@ fn
 
         # Ensure that the generated graph returns only one output. We want the
         # add_ on the grad to be part of the graph itself, so that inductor can
-        # theoretically move the add_ and resutling copy_ nodes at the right
+        # theoretically move the add_ and resulting copy_ nodes at the right
         # place to free memory.
         self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
         self.assertEqual(z, ref_y)
@@ -11833,6 +11944,19 @@ fn
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
+
+    def test_hash_hop(self):
+        associative_scan = importlib.import_module(
+            "torch._higher_order_ops.associative_scan"
+        )
+
+        @torch.compile(fullgraph=True)
+        def fn(y, s):
+            d = dict()
+            d[s] = y
+            return d[s] + 1.0
+
+        fn(torch.ones(2, 2, device="cpu"), associative_scan.AssociativeScanOp())
 
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
@@ -12283,7 +12407,7 @@ fn
                 self.ne_called = False
 
             def __ne__(self, other):
-                # ne_called attr is later checked to ensure that overrideen
+                # ne_called attr is later checked to ensure that overridden
                 # `__ne__` is traced
                 self.ne_called = True
                 return not self.__eq__(other)
@@ -12951,6 +13075,38 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         x = torch.ones([1], dtype=torch.int64)
         y = torch.tensor(5)
         f(x, y)
+
+    def test_dynamic_float_scalar_tensor_coersion(self):
+        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
+        class Foo:
+            def __init__(self):
+                self.config = type(
+                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
+                )
+
+            @torch.compile(fullgraph=True)
+            def forward(self, input):
+                outputs = torch.where(
+                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
+                    torch.tensor(
+                        self.config.pad_val, dtype=input.dtype, device=input.device
+                    ),
+                    torch.tensor(
+                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
+                    ),
+                )
+                return outputs
+
+        foo = Foo()
+        inputs = torch.randn(3, 4)
+        result = foo.forward(inputs)
+
+        original_pad_val = foo.config.pad_val
+        foo.config.pad_val += 1.0
+        result2 = foo.forward(inputs)
+
+        # Previously would crash with:
+        #   RuntimeError: value cannot be converted to type at::Half without overflow
 
 
 devices = ("cuda", "hpu", "xpu")

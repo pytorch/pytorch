@@ -22,7 +22,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   unit-test:
@@ -60,6 +62,7 @@ jobs:
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
@@ -92,6 +95,7 @@ jobs:
           { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
           { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:

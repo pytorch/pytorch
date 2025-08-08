@@ -29,7 +29,7 @@ class PagedAttention:
     """
     PagedAttention supports flex attention inference with a large batch size.
     With PagedAttention, a batch of key/value tensors with varying kv length
-    is splitted into tensor blocks of fixed length and cached in a compact way.
+    is split into tensor blocks of fixed length and cached in a compact way.
     Thus we can avoid redundant memory consumption due to varying kv length and
     support a larger batch size.
     """

@@ -1140,7 +1140,7 @@ class PythonKeyTracer(Tracer):
 
     def unwrap_proxy(self, e: T) -> object:
         if isinstance(e, Tensor):
-            return get_proxy_slot(e, self, e, lambda x: x.proxy)
+            return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
         elif isinstance(e, _AnyScriptObject):
@@ -1158,6 +1158,9 @@ class PythonKeyTracer(Tracer):
         type_expr: Optional[Any] = None,
     ) -> torch.fx.Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
+
+        if node.op in ["placeholder", "output"] and "stack_trace" in node.meta:
+            del node.meta["stack_trace"]
 
         if kind == "get_attr":
             assert isinstance(target, str)
@@ -1412,7 +1415,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
-            # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
+            # TODO(tmanlaibaatar): we should systematically couple it with export verifier,
             # instead of hardcoding it here.
             # T203648563
             if func == torch.amp.autocast_mode._exit_autocast:
@@ -1429,7 +1432,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
-            # into a graph. We don't actualy want to change global autograd state.
+            # into a graph. We don't actually want to change global autograd state.
         return func(*args, **kwargs)
 
 
@@ -2340,7 +2343,7 @@ def make_fx(
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops,
-        record_stack_traces=record_stack_traces or config.trace.enabled,
+        record_stack_traces=record_stack_traces or config.trace.provenance_tracking,
     )
 
     @functools.wraps(f)

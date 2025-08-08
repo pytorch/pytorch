@@ -948,7 +948,7 @@ def exported_program_to_ir(
     Args:
         exported_program: The exported program to convert.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -1026,7 +1026,7 @@ def _exported_program_to_onnx_program(
         exported_program: The exported program to convert. The exported program
             should be the one that is after decompositions have been applied.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """

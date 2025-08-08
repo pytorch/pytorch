@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from contextlib import contextmanager, ExitStack, nullcontext
+from collections.abc import Sequence
+from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 
@@ -111,16 +112,22 @@ def _maybe_compile_and_run_fn(fn, *args):
 
 
 def reenter_make_fx(fn):
+    from torch._guards import detect_fake_mode
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+    from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
     @functools.wraps(fn)
     def wrapped(*args):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "reenter_make_fx")
+            gm.recompile()
+        return gm
 
     return wrapped
 
@@ -236,6 +243,7 @@ def check_meta_consistency(
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
+    _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
     # the top-level frame produces no graph, the default behavior is to fallback to eager.
     # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
@@ -249,19 +257,22 @@ def _set_compilation_env():
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
         torch._dynamo.config.allow_empty_graphs = True
+        torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
+        torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
-    tracing_mode = "real"
-    if fake_mode is None:
-        fake_mode = nullcontext()
-        tracing_mode = "fake"
+    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode: AbstractContextManager = nullcontext()
+    tracing_mode = "fake"
+    if fake_mode_det is not None:
+        fake_mode = fake_mode_det
+        tracing_mode = "real"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
@@ -273,9 +284,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm,
+                fake_mode.shape_env,  # type: ignore[attr-defined]
+                "hoo_maybe_fake_tracing",
+                export=True,  # type: ignore[attr-defined]
             )
         return gm
 
@@ -709,6 +723,69 @@ def saved_tensors_and_symints(ctx):
     return tuple(args)
 
 
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    assert sum(chunk_sizes) == len(iterable), (
+        "the sum of all chunks needs to match the length of the iterable."
+    )
+    elements = []
+    idx = 0
+    for size in chunk_sizes:
+        elements.append(iterable[idx : idx + size])
+        idx += size
+    return elements
+
+
+def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        grad_args = bw_fn(primals, tangents)[1]
+        assert len(args) == len(grad_args)
+
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+
+        return [
+            (
+                torch.zeros_like(arg)
+                if isinstance(arg, torch.Tensor) and grad is None
+                else maybe_clone(grad)
+            )
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+    return flat_fn
+
+
 def get_dummy_aot_autograd_config():
     from torch._functorch.aot_autograd import AOTConfig
 
@@ -782,6 +859,10 @@ def check_input_alias_and_mutation(
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
+def _tensor_storage(t) -> StorageWeakRef:
+    return StorageWeakRef(t._typed_storage())
+
+
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
     fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
@@ -831,9 +912,6 @@ def check_input_alias_and_mutation_return_outputs(
                 return t._version
             return None
 
-        def _tensor_storage(t) -> StorageWeakRef:
-            return StorageWeakRef(t._typed_storage())
-
         def _get_shape_env(
             fake_args,
         ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
@@ -852,11 +930,15 @@ def check_input_alias_and_mutation_return_outputs(
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
-            # We need to re-use prev_fake_mode's shape env to resolve
+            # We need to reuse prev_fake_mode's shape env to resolve
             # the runtime assertions for unbacked symbols.
             new_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
+                # In executorch, there's an scalar_to_tensor pass that turns scalar inputs into a tensor constant
+                # e.g. add(a, 1) 1 is turned into a tensor, which becomes a constant tensor attribute in the graph.
+                # We allow non fake inputs for this purpose. This is fine for mutation detection purpose:
+                # inputs are all fake and all mutations/aliasing are still detected.
+                allow_non_fake_inputs=True,
             )
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.

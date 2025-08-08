@@ -101,6 +101,7 @@ class TestXpu(TestCase):
         self.assertEqual(device_name, torch.xpu.get_device_name())
 
         device_capability = torch.xpu.get_device_capability(current_device)
+        self.assertTrue(device_capability["device_id"] > 0)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertEqual(

@@ -21,6 +21,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._higher_order_ops.schema import find_hop_schema
+from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
     CallFunctionVarArgs,
     PatternMatcherPass,
@@ -619,6 +620,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         res.sum().backward()
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_dropout_checks_joint_graph(self):
         # `dropout` tests that joint graph passes (not just partitioner) is ran
         # on the hop graphs. Inductor rng functionalization happens in the joint
@@ -675,9 +677,9 @@ class GraphModule(torch.nn.Module):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
 
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
+
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
-
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  sin = None
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
@@ -690,6 +692,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_dropout_checks_joint_graph_inference(self):
         # Checks that joint graph results in inductor seeds for just the inference graph
         @nested_compile_region
@@ -719,9 +722,9 @@ class <lambda>(torch.nn.Module):
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]"):
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
+
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
-
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  gt = sin = None
@@ -917,6 +920,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @inductor_config.patch("fx_graph_cache", False)
     def test_view_to_reshape(self):
         @nested_compile_region
         def gn(x):
@@ -1079,7 +1083,7 @@ class GraphModule(torch.nn.Module):
 
         fake_prop_count = 0
 
-        def _mock_invoke_subgraph(mode, subgraph, identifer, *operands):
+        def _mock_invoke_subgraph(mode, subgraph, identifier, *operands):
             nonlocal fake_prop_count
             fake_prop_count += 1
             return (operands[0].clone(),)
@@ -1786,6 +1790,43 @@ class GraphModule(torch.nn.Module):
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
         self.assertEqual(ref, res)
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_ac_rng(self):
+        def fn1(x):
+            return torch.cos(torch.nn.functional.dropout(x, p=0.5))
+
+        @nested_compile_region
+        def fn1_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
+
+        def fn(x):
+            return fn1_checkpoint(x) + fn1_checkpoint(x)
+
+        x = torch.randn(8, requires_grad=True)
+        torch.manual_seed(0)
+        ref = fn(x)
+        ref.sum().backward()
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        # Check that the Dynamo and AOT graphs have just one subgraph module
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
     def test_fake_tensor_checking(self):
         @nested_compile_region
         def gn(x):
@@ -2040,7 +2081,7 @@ class GraphModule(torch.nn.Module):
 
         # NOTE THAT THIS TEST DOES NOT REALLY WORK
         # We wanted one invoke_subgraph called twice, but because of
-        # constant_args_idx changing in the grpah, the graph equivalence fails
+        # constant_args_idx changing in the graph, the graph equivalence fails
 
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(

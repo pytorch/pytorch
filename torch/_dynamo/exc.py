@@ -374,7 +374,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)
-    raise observed_exception_map[exc_type]
+    raise get_dynamo_observed_exception(exc_type)
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -526,15 +526,17 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     Returns:
         A string containing the documentation URL if found, otherwise None.
     """
-    GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
+    GRAPH_BREAK_SITE_URL = (
+        "https://meta-pytorch.github.io/compile-graph-break-site/gb/"  # @lint-ignore
+    )
 
     registry = _load_graph_break_registry()
 
     for k, v in registry.items():
         if v and v[0].get("Gb_type") == gb_type:
-            return f"{GRAPH_BREAK_SITE_URL}{k}"
+            return f"{GRAPH_BREAK_SITE_URL}gb{k.lstrip('GB')}.html"
 
-    return "None"
+    return None
 
 
 # TODO replace old unimplemented later
@@ -560,18 +562,15 @@ def unimplemented_v2(
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
     documentation_link = get_gbid_documentation_link(gb_type)
-    msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
+    if documentation_link:
+        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
         raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
-
-
-def warning(msg: str) -> None:
-    counters["warnings"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
 
 
 # KeyError has special handling for its args

@@ -197,6 +197,34 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    def __init__(self, ctx_manager_vt, mod):
+        self.cm_vt = ctx_manager_vt
+        self.mod = mod
+        # We don't call super().__init__() because we're delegating most methods to cm_vt
+
+    def enter(self, tx: "InstructionTranslator"):
+        # Custom enter implementation with side effects
+
+        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+        return self.cm_vt.enter(tx)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        # Custom exit implementation with side effects
+        x = self.cm_vt.exit(tx, *args)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+        return x
+
+    # Forward all other method calls to self.cm_vt
+    def __getattr__(self, name):
+        # This will be called for any attribute not explicitly defined in this class
+        return getattr(self.cm_vt, name)
+
+
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requires grad"""
 
@@ -779,10 +807,8 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
         )
         torch._C._set_deterministic_algorithms(value)
 

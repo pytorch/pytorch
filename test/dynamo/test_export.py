@@ -3536,7 +3536,7 @@ class GraphModule(torch.nn.Module):
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
+            # Outer shape env should have no guards in it because we never specialize on the outer symbool.
             [[], [], [], []],
         )
 

@@ -75,15 +75,16 @@ from .functions import (
 from .higher_order_ops import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    ReparametrizeModuleCallVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
-    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
+    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -139,6 +140,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -147,6 +149,7 @@ from .user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -165,7 +168,6 @@ __all__ = [
     "CreateTMADescriptorExperimentalVariable",
     "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
-    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",

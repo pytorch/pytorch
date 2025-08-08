@@ -675,6 +675,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
         torch.hardshrink: lambda input, lambd=0.5: -1,
+        torch.hash_tensor: lambda input, dim=None, keepdim=False, mode=0, out=None: -1,
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
@@ -820,6 +821,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch._native_batch_norm_legit: lambda input, weight, bias, training, momentum, eps: -1,
         torch.native_dropout: lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
+        torch._fused_rms_norm: lambda input, normalized_shape, weight=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.native_channel_shuffle: lambda input, groups: -1,
@@ -1511,7 +1513,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
@@ -2003,7 +2005,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    ``__torch_function__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:

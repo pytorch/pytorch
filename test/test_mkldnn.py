@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
 )
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -264,7 +265,10 @@ class TestMkldnn(TestCase):
                     loss1.backward()
             if not train or (train and dim != 1):
                 y_mkldnn = mkldnn_conv(x2).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+                if self.precision != 0:
+                    self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
+                else:
+                    self.assertEqual(y_aten, y_mkldnn)
             if not train:
                 self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
@@ -280,12 +284,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, mkldnn_conv.bias.grad)
 
+    @reduced_f32_on_and_off()
     def test_conv1d(self):
         self._test_conv_base(dim=1)
 
+    @reduced_f32_on_and_off()
     def test_conv2d(self):
         self._test_conv_base(dim=2)
 
+    @reduced_f32_on_and_off()
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
@@ -400,6 +407,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(conv1.bias.grad, conv2.bias.grad, atol=prec, rtol=prec)
                 self.assertEqual(x1.grad, x2.grad, atol=prec, rtol=prec)
 
+    @reduced_f32_on_and_off()
     def test_conv_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
@@ -435,6 +443,7 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
 
+    @reduced_f32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
@@ -483,7 +492,7 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes[dim]
             data = torch.randn(x_shape, dtype=torch.float32)
-            # conv: mkldnn tranpose conv fp32
+            # conv: mkldnn transpose conv fp32
             # conv_ref: thnn transpose conv fp32
             conv = conv_module[dim](in_channels=C,
                                     out_channels=M,
@@ -509,7 +518,11 @@ class TestMkldnn(TestCase):
             if train:
                 y.sum().backward()
 
-            self.assertEqual(y, y_ref)
+            if self.precision != 0:
+                self.assertEqual(y, y_ref, atol=self.precision, rtol=self.precision)
+            else:
+                self.assertEqual(y, y_ref)
+
             if train:
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(conv.weight.grad,
@@ -519,12 +532,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
 
+    @reduced_f32_on_and_off()
     def test_conv_transpose1d(self):
         self._test_conv_transpose_base(dim=1)
 
+    @reduced_f32_on_and_off()
     def test_conv_transpose2d(self):
         self._test_conv_transpose_base(dim=2)
 
+    @reduced_f32_on_and_off()
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
@@ -1664,21 +1680,29 @@ class TestMkldnn(TestCase):
         # get/set mkldnn ops
         with torch.backends.mkldnn.flags(enabled=None, fp32_precision="bf16"):
             self.assertEqual(torch.backends.mkldnn.fp32_precision, "bf16")
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="tf32"):
+            self.assertEqual(torch.backends.mkldnn.fp32_precision, "tf32")
         with torch.backends.mkldnn.flags(enabled=None, fp32_precision="none"):
             self.assertEqual(torch.backends.mkldnn.fp32_precision, "none")
         # get/set matmul
         torch.backends.mkldnn.matmul.fp32_precision = "bf16"
         self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
+        torch.backends.mkldnn.matmul.fp32_precision = "tf32"
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
         torch.backends.mkldnn.matmul.fp32_precision = "none"
         self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
         # get/set conv
         torch.backends.mkldnn.conv.fp32_precision = "bf16"
         self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "bf16")
+        torch.backends.mkldnn.conv.fp32_precision = "tf32"
+        self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "tf32")
         torch.backends.mkldnn.conv.fp32_precision = "none"
         self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "none")
         # get/set rnn
         torch.backends.mkldnn.rnn.fp32_precision = "bf16"
         self.assertEqual(torch.backends.mkldnn.rnn.fp32_precision, "bf16")
+        torch.backends.mkldnn.rnn.fp32_precision = "tf32"
+        self.assertEqual(torch.backends.mkldnn.rnn.fp32_precision, "tf32")
         torch.backends.mkldnn.rnn.fp32_precision = "none"
         self.assertEqual(torch.backends.mkldnn.rnn.fp32_precision, "none")
 
@@ -1694,18 +1718,14 @@ class TestMkldnn(TestCase):
         torch.backends.mkldnn.matmul.fp32_precision = "none"
         with torch.backends.mkldnn.flags(enabled=None, fp32_precision="bf16"):
             self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="tf32"):
+            self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
         with torch.backends.mkldnn.flags(enabled=None, fp32_precision="none"):
             with torch.backends.flags(fp32_precision="bf16"):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
             with torch.backends.flags(fp32_precision="tf32"):
-                # when parent is a not supported precision, use default
-                self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
+                self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
-    @recover_orig_fp32_precision
-    def test_invalid(self):
-        # use default if user set a not supported precision
-        torch.backends.mkldnn.matmul.fp32_precision = "tf32"
-        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 
