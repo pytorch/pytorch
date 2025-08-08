@@ -963,9 +963,12 @@ class PythonWrapperCodegen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
-        aot_inductor_debug_utils = ""
+        inductor_debug_utils = ""
         if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
-            aot_inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
+            inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
+        elif torch._inductor.config.test_configs.track_memory_lifecycle:
+            inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
+
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -983,7 +986,7 @@ class PythonWrapperCodegen(CodeGen):
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
-                {aot_inductor_debug_utils}
+                {inductor_debug_utils}
             """,
             strip=True,
         )
@@ -2773,6 +2776,14 @@ class PythonWrapperCodegen(CodeGen):
             buffer.get_name(), device, dtype, shape, stride, allocation_shape
         )
 
+    @cache_on_self
+    def write_memory_track_allocation_once(self):
+        import_str = """
+            from torch._inductor.runtime.debug_utils import check_memory_step, track_tensor
+            """
+        if not V.graph.cpp_wrapper:
+            self.imports.splice(import_str, strip=True)
+
     def make_allocation(
         self, name, device, dtype, shape, stride, allocation_shape=None
     ):
@@ -2784,7 +2795,16 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-        if device.type in ("cpu", "cuda", "xpu", "mtia"):
+        if torch._inductor.config.test_configs.track_memory_lifecycle:
+            out = (
+                f"{name} = tracked_empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"dtype={dtype}, "
+                f"device='{device.type}', "
+                f"name='{name}')"
+            )
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
