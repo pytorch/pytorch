@@ -391,10 +391,10 @@ def _reorder_communication_preserving_peak_memory_internal(
                     BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
                 ] = defaultdict(list)
                 for (
-                    buf_buf,
+                    buf,
                     snode_last_use,
                 ) in buf_to_snode_last_use.items():
-                    succ_nodes = buf_buf.mpi_buffer.succ_nodes
+                    succ_nodes = buf.mpi_buffer.succ_nodes
                     if candidate not in succ_nodes:
                         continue
 
@@ -408,7 +408,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     # and deallocated this buffer instead of group node.
                     # we need to update size_free accordingly to group_node and candidate,
                     # and recalculate post_alloc, post_free for them.
-                    gn_to_bufs_last_use[snode_last_use].append(buf_buf)
+                    gn_to_bufs_last_use[snode_last_use].append(buf)
 
                 # Caching calculations of memory for group nodes and candidate,
                 # to apply without recalculation after swap.
@@ -426,9 +426,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if gn_post_alloc_mem > potential_peak_after_reorder:
                             potential_peak_after_reorder = gn_post_alloc_mem
 
-                        buf_bufs = gn_to_bufs_last_use.get(gn, None)
-                        if buf_bufs is not None:
-                            for buf in buf_bufs:
+                        bufs = gn_to_bufs_last_use.get(gn, None)
+                        if bufs is not None:
+                            for buf in bufs:
                                 # Candidate will deallocate those buffers
                                 mem_after_reorder_delta += buf.mpi_buffer.size_free
 
@@ -491,9 +491,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # Recompute curr_memory
                 if gn_to_bufs_last_use:
                     # Candidate becomes last use of freeable input buffers
-                    for gn, buf_bufs in gn_to_bufs_last_use.items():
-                        for buf_buf in buf_bufs:
-                            buf_to_snode_last_use[buf_buf] = candidate
+                    for gn, bufs in gn_to_bufs_last_use.items():
+                        for buf in bufs:
+                            buf_to_snode_last_use[buf] = candidate
 
                     size_free_to_move_to_candidate_sum: int = 0
                     for n in gns:
