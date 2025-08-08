@@ -28,7 +28,10 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON, requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    HAS_CUDA_AND_TRITON,
+    requires_cuda_and_triton,
+)
 
 
 # set so that metrics appear

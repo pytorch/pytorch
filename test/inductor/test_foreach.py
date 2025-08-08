@@ -874,7 +874,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inplace_bin_ops
     def test_reinplacing_mut_before(self, op):
         def fn(a0, a1, b0, b1):
