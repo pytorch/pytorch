@@ -27,7 +27,7 @@ cd /
 # adding safe directory for git as the permissions will be
 # on the mounted pytorch repo
 git config --global --add safe.directory /pytorch
-pip install -r /pytorch/requirements.txt
+pip install -r /pytorch/.ci/docker/requirements-manywheel.txt
 pip install auditwheel==6.2.0 wheel
 if [ "$DESIRED_CUDA" = "cpu" ]; then
     echo "BASE_CUDA_VERSION is not set. Building cpu wheel."

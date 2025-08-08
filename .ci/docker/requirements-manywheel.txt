@@ -1,0 +1,10 @@
+# A version of requirements-build.txt pinned to minor versions (to allow for patch releases)
+cmake              ~= 4.0.3
+ninja              ~= 1.11.1
+numpy              ~= 2.0.2
+packaging          ~= 24.2
+PyYAML             ~= 6.0.2
+requests           ~= 2.32.4
+setuptools         ~= 78.1.1 # setuptools develop deprecated on 80.0
+six                ~= 1.17.0
+typing_extensions  ~= 4.14.1
