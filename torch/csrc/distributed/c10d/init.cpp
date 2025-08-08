@@ -3087,7 +3087,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
           .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
-          .def_readwrite("global_ranks_in_group", &::c10d::Backend::Options::global_ranks_in_group)
+          .def_readwrite(
+              "global_ranks_in_group",
+              &::c10d::Backend::Options::global_ranks_in_group)
           .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
 
 #ifdef USE_C10D_GLOO
@@ -3497,18 +3499,18 @@ Example::
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupXCCL>(
           module, "ProcessGroupXCCL", backend)
           .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<::c10d::Backend::Options>
-                              options) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
+              py::init(
+                  [](const c10::intrusive_ptr<::c10d::Store>& store,
+                     int rank,
+                     int size,
+                     c10::intrusive_ptr<::c10d::Backend::Options> options) {
+                    // gil_scoped_release is not safe as a call_guard in init.
+                    // https://github.com/pybind/pybind11/issues/5473
+                    py::gil_scoped_release nogil{};
 
-                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
-                    store, rank, size, std::move(options));
-              }),
+                    return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
+                        store, rank, size, std::move(options));
+                  }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
