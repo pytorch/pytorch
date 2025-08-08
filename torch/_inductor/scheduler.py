@@ -71,7 +71,7 @@ from .utils import (
     maybe_log_cudagraph_partition,
     sympy_product,
 )
-from .virtualized import V
+from .virtualized import NullHandler, V
 
 
 log = logging.getLogger(__name__)
@@ -1140,7 +1140,7 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.sizes = {self._sizes}",
         ]
         for dep in self.read_writes.reads_and_writes():
-            if not isinstance(dep, WeakDep):
+            if not isinstance(dep, WeakDep) and not isinstance(V.graph, NullHandler):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 if not isinstance(buf, ir.TorchBindObject):
@@ -2159,6 +2159,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2541,7 +2547,7 @@ class Scheduler:
             )
 
         graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-        buf_info_list, _ = compute_memory_timeline(
+        buf_info_list, _, _ = compute_memory_timeline(
             self.nodes,
             name_to_freeable_input_buf,
             graph_outputs,
