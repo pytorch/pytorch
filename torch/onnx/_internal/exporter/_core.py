@@ -728,7 +728,7 @@ def _handle_output_node(
     for output in node.args[0]:  # type: ignore[index,union-attr]
         if output is None:
             logger.warning(
-                "Output node %s has None output. This will be ignored and may result in an invalid model/graph.",
+                "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
                 node.name,
             )
             continue
