@@ -1181,7 +1181,7 @@ class OutputGraph(OutputGraphGuardsState):
 
     def _get_stack_values_to_restore(
         self, tx: "InstructionTranslatorBase", stack_pops: int
-    ) -> tuple[list[VariableTracker], list[str], StackLocalsMetadata]:
+    ) -> tuple[list[VariableTracker], StackLocalsMetadata]:
         """
         Gets the stack + locals values belonging to tx that need to be restored.
 
