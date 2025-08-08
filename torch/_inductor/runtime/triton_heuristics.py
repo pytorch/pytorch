@@ -1762,10 +1762,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
             # in AMD's Triton backend, the global scratch size is never provided
             # (but for AMD it's safe to pass an extra null arg, so always include it)
-            global_scratch: Optional[bool] = getattr(
-                kernel_metadata, "global_scratch_size", None
+            global_scratch: Optional[int] = getattr(
+                kernel_metadata,
+                "global_scratch_size",
+                (0 if torch.version.hip else None),
             )
-            profile_scratch: Optional[bool] = getattr(
+            profile_scratch: Optional[int] = getattr(
                 kernel_metadata, "profile_scratch_size", None
             )
             launcher.global_scratch = global_scratch
