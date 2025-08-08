@@ -23,8 +23,6 @@ void THCPMemPool_init(PyObject* module) {
                 allocator, is_user_created, use_on_oom, symmetric);
           }))
       .def_property_readonly("id", &::c10::cuda::MemPool::id)
-      .def_property_readonly(
-          "is_symmetric", &::c10::cuda::MemPool::is_symmetric)
       .def_property_readonly("allocator", &::c10::cuda::MemPool::allocator)
       .def("use_count", &::c10::cuda::MemPool::use_count);
 }

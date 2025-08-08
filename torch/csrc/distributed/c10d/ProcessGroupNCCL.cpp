@@ -1115,7 +1115,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
   // TODO:
-  // if(pool->is_symmetric()) {
+  // if(pool->allocator()->isSymmetric()) {
   //   Allgather to verify len(mempool.snapshot.segments) matches across GPUs
   //   Allgather to verify mempool.alloc_request_counter matches across GPUs
   //   add alloc_request_counter per mempool (How many allocations a mempool has
@@ -1131,7 +1131,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
         reinterpret_cast<void*>(segmentInfo.address),
         segmentInfo.total_size,
         /*errorOnRereg=*/false, // ignores reregistration error
-        /*window=*/pool->is_symmetric()); // whether to use NCCL symmetric
+        /*window=*/pool->allocator()->isSymmetric()); // whether to use NCCL symmetric
                                           // memory
   }
 }
@@ -1164,7 +1164,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
         "Mismatch between CUDA memory segment device and pool's device");
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     ncclComm->deregisterSegment(
-        reinterpret_cast<void*>(segmentInfo.address), pool->is_symmetric());
+        reinterpret_cast<void*>(segmentInfo.address), pool->allocator()->isSymmetric());
   }
 }
 
@@ -5701,7 +5701,7 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 }
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
-std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator(bool symmetric) {
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
   c10::DeviceIndex deviceIdx = guessDeviceId();
   if (!supportsTensorAlloc(deviceIdx)) {
@@ -5711,7 +5711,7 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
       ncclMemAllocator =
           torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-              _ncclMemAlloc, _ncclMemFree);
+              _ncclMemAlloc, _ncclMemFree, symmetric);
   return ncclMemAllocator;
 }
 

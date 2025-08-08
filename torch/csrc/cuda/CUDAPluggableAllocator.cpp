@@ -42,8 +42,11 @@ _AllocationMetadata::_AllocationMetadata(
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn)
-    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
+    std::function<FreeFuncType> free_fn,
+    bool symmetric)
+    : alloc_fn_(std::move(alloc_fn)),
+      free_fn_(std::move(free_fn)),
+      symmetric_(symmetric) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
     : alloc_fn_(other.alloc_fn_),
@@ -287,6 +290,10 @@ void CUDAPluggableAllocator::releasePool(
   }
 }
 
+bool CUDAPluggableAllocator::isSymmetric() {
+  return symmetric_;
+}
+
 void CUDAPluggableAllocator::recordHistory(
     bool enabled,
     c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
@@ -383,9 +390,10 @@ getCurrentAllocator() {
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn) {
+    std::function<FreeFuncType> free_fn,
+    bool symmetric) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
-      new CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn)));
+      new CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn), symmetric));
   allocator->init(device_count);
   return allocator;
 }

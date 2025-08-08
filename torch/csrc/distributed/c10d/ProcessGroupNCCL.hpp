@@ -993,7 +993,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ErrorType getError() override;
 
-  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+  std::shared_ptr<c10::Allocator> getMemAllocator(bool symmetric) override;
 
   // Allocate tensor from communication-optimized memory pool
   at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
