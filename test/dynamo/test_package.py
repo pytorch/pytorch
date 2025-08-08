@@ -24,8 +24,11 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
 )
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
 
 def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)

@@ -26,8 +26,10 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     xfailIf,
 )
-
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,

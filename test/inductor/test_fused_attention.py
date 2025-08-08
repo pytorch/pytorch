@@ -15,14 +15,12 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
 )
-
 
 
 def checkpoint_wrapper(fn):
@@ -1122,7 +1120,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
-
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
         device = GPU_TYPE

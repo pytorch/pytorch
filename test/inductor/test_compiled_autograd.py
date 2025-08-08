@@ -47,7 +47,12 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._python_dispatch import TorchDispatchMode
 
