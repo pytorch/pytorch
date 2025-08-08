@@ -70,6 +70,7 @@ from torch._dynamo.source import (
     is_from_flatten_script_object_source,
     is_from_local_source,
     is_from_optimizer_source,
+    is_from_skip_guard_source,
     is_from_unspecialized_builtin_nn_module_source,
     TensorProperty,
     TensorPropertySource,
@@ -4124,4 +4125,7 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
+
+        if is_from_skip_guard_source(guard.originating_source):
+            continue
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
