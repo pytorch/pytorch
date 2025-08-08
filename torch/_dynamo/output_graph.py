@@ -1317,7 +1317,8 @@ class OutputGraph(OutputGraphGuardsState):
                 if inst.opname == "COPY_FREE_VARS":
                     prefix_insts.append(
                         create_instruction(
-                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
+                            "COPY_FREE_VARS",
+                            arg=len(self.root_tx.code_options["co_freevars"]),
                         )
                     )
                 else:
@@ -1341,6 +1342,9 @@ class OutputGraph(OutputGraphGuardsState):
             if cur_tx is self.root_tx:
                 break
             cur_tx = cur_tx.parent
+
+        # "Garbage collect the heap".
+        self.side_effects.prune_dead_object_new(tx)
 
         self.add_output_instructions(prefix_insts)
 
