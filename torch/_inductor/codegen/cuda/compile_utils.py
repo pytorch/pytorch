@@ -31,13 +31,15 @@ def use_re_build() -> bool:
     return False
 
 
-def _cutlass_path() -> str:
+def _cutlass_path() -> Optional[str]:
     if config.is_fbcode():
         from libfb.py import parutil
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cutlass.cutlass_dir
+        from torch._inductor.codegen.cutlass_utils import try_import_cutlass
+
+        return config.cutlass.cutlass_dir if try_import_cutlass() else None
 
 
 def _cutlass_paths() -> list[str]:
@@ -51,6 +53,8 @@ def _cutlass_paths() -> list[str]:
 
 def _clone_cutlass_paths(build_root: str) -> list[str]:
     cutlass_root = _cutlass_path()
+    if cutlass_root is None:
+        return []
     paths = []
     for path in _cutlass_paths():
         old_path = os.path.join(cutlass_root, path)
