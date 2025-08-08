@@ -61,7 +61,7 @@ running_on_a100_only = skipUnless(
         and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip)
     )
     or (torch.xpu.is_available() and has_triton()),
-    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
+    "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -134,8 +134,8 @@ def skip_on_rocm(test_func):
 
 
 def skip_on_xpu(test_func):
-    """Decorator to skip tests that are not supported on XPU."""
-    decorated_func = skipXPUIf(True, "Not supported on XPU")(test_func)
+    """Decorator to skip tests that are not supported on Intel GPU."""
+    decorated_func = skipXPUIf(True, "Not supported on Intel GPU")(test_func)
     return decorated_func
 
 
@@ -5525,7 +5525,7 @@ supports_learnable_bias = unittest.skipUnless(
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     )
     or (torch.xpu.is_available() and has_triton()),
-    "Requires Triton + A100 or Triton + ROCm or Triton + XPU",
+    "Requires Triton + A100 or Triton + ROCm or Triton + Intel GPU",
 )
 
 

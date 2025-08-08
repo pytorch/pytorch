@@ -1206,7 +1206,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
     """
-    Placeholder child class for XPU specific overrides.
+    Placeholder child class for Intel GPU specific overrides.
     """
 
     def __init__(self) -> None:
