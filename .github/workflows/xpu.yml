@@ -26,27 +26,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-xpu-2025_0-py3_9-build:
-    name: linux-jammy-xpu-2025.0-py3.9
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      sync-tag: linux-xpu-2025-0-build
-      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-xpu-2025.0-py3.9
-      docker-image-name: ci-image:pytorch-linux-jammy-xpu-2025.0-py3
-      runner: linux.12xlarge
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
-        ]}
-    secrets: inherit
-
   linux-jammy-xpu-2025_1-py3_9-build:
     name: linux-jammy-xpu-2025.1-py3.9
     uses: ./.github/workflows/_linux-build.yml
@@ -55,7 +34,7 @@ jobs:
       sync-tag: linux-xpu-2025-1-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-2025.1-py3.9
-      docker-image-name: ci-image:pytorch-linux-jammy-xpu-2025.1-py3
+      docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
       runner: linux.12xlarge
       test-matrix: |
         { include: [
@@ -68,29 +47,40 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-xpu-2025_1-py3_9-test:
-    name: linux-jammy-xpu-2025.1-py3.9
+  linux-jammy-xpu-2025_2-py3_9-build:
+    name: linux-jammy-xpu-2025.2-py3.9
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      sync-tag: linux-xpu-2025-2-build
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      build-environment: linux-jammy-xpu-2025.2-py3.9
+      docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3
+      runner: linux.12xlarge
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 5, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 6, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 7, num_shards: 8, runner: "linux.idc.xpu" },
+          { config: "default", shard: 8, num_shards: 8, runner: "linux.idc.xpu" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-xpu-2025_2-py3_9-test:
+    name: linux-jammy-xpu-2025.2-py3.9
     uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-jammy-xpu-2025_1-py3_9-build
+    needs: linux-jammy-xpu-2025_2-py3_9-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: linux-jammy-xpu-2025.1-py3.9
-      docker-image: ${{ needs.linux-jammy-xpu-2025_1-py3_9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-xpu-2025_1-py3_9-build.outputs.test-matrix }}
-    secrets: inherit
-
-  windows-xpu-2025_0-build:
-    if: github.repository_owner == 'pytorch'
-    name: win-vs2022-xpu-2025_0-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2022-xpu-py3
-      cuda-version: cpu
-      use-xpu: true
-      xpu-version: '2025.0'
-      vc-year: '2022'
+      build-environment: linux-jammy-xpu-n-py3.9
+      docker-image: ${{ needs.linux-jammy-xpu-2025_2-py3_9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-xpu-2025_2-py3_9-build.outputs.test-matrix }}
     secrets: inherit
 
   windows-xpu-2025_1-build:
@@ -102,5 +92,17 @@ jobs:
       cuda-version: cpu
       use-xpu: true
       xpu-version: '2025.1'
+      vc-year: '2022'
+    secrets: inherit
+
+  windows-xpu-2025_2-build:
+    if: github.repository_owner == 'pytorch'
+    name: win-vs2022-xpu-2025_2-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-xpu-py3
+      cuda-version: cpu
+      use-xpu: true
+      xpu-version: '2025.2'
       vc-year: '2022'
     secrets: inherit
