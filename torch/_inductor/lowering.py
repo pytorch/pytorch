@@ -2879,6 +2879,7 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
+make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 
 # Register with type_promotion_kind None.
