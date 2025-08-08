@@ -1115,7 +1115,6 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-
     @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
