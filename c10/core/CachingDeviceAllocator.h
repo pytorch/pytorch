@@ -5,7 +5,6 @@
 #include <c10/core/Stream.h>
 #include <c10/util/flat_hash_map.h>
 
-#include <mutex>
 #include <set>
 
 namespace c10::CachingDeviceAllocator {
@@ -142,8 +141,6 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
 } // namespace c10
 
 namespace c10::CachingDeviceAllocator {
-
-using namespace c10::CachingAllocator;
 
 template <typename BlockT>
 struct BlockComparatorSize {
