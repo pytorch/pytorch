@@ -447,7 +447,8 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
                 return x
 
             if not utils.same_shape(x.shape, common_shape):
-                return x.expand(common_shape)
+                # using broadcast_to to avoid quirks with handling size-1 dimensions
+                return broadcast_to(x, common_shape)
 
             return x
         else:
