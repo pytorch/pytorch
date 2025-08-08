@@ -58,85 +58,11 @@ class CuteDSLSubgraphInfo:
         }
 
 
-class CuteDSLKernel(Kernel):
-    """
-    Base class for CuteDSL (CUTLASS Python DSL) kernels.
-    Follows the same pattern as CUDAKernel, ROCmKernel, etc.
-    Provides CuteDSL-specific functionality for tensor conversion and kernel configuration.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # CuteDSL-specific attributes
-        self.cute_tensors: dict[str, Any] = {}
-        self.kernel_config: dict[str, Any] = {}
-        self.grid_config: Optional[tuple] = None
-
-        # Layout and tensor management for CuteDSL
-        self.tensor_layouts: dict[str, Any] = {}
-        self.cutlass_args: list[Any] = []
-
-    def create_cute_tensor_spec(self, buffer: Buffer, name: str) -> dict[str, Any]:
-        """
-        Convert PyTorch buffer to CuTe tensor specification.
-
-        Args:
-            buffer: PyTorch inductor buffer
-            name: Name for the tensor in CuteDSL context
-
-        Returns:
-            Dictionary containing tensor specification for CuteDSL
-        """
-        layout = buffer.get_layout()
-
-        spec = {
-            'name': name,
-            'shape': layout.size,
-            'stride': layout.stride if hasattr(layout, 'stride') else None,
-            'dtype': layout.dtype,
-            'device': layout.device,
-        }
-
-        self.cute_tensors[name] = spec
-        return spec
-
-    def configure_kernel_launch(self, grid_config: tuple, block_config: Optional[tuple] = None):
-        """
-        Configure CuteDSL kernel launch parameters.
-
-        Args:
-            grid_config: Grid dimensions for kernel launch
-            block_config: Block dimensions (optional)
-        """
-        self.grid_config = grid_config
-        self.kernel_config['grid'] = grid_config
-        if block_config:
-            self.kernel_config['block'] = block_config
-
-    def add_cutlass_arg(self, arg_name: str, arg_value: Any):
-        """Add argument for CUTLASS kernel execution."""
-        self.cutlass_args.append((arg_name, arg_value))
-
-    def get_cute_tensor_conversion_code(self, buffer_name: str, target_name: str) -> str:
-        """
-        Generate code to convert PyTorch tensor to CuTe tensor format.
-
-        Args:
-            buffer_name: Name of the PyTorch buffer
-            target_name: Name for the CuTe tensor
-
-        Returns:
-            Code string for tensor conversion
-        """
-        return f"{target_name} = cute.tensor_from_dlpack({buffer_name})"
-
-
-class CuteDSLTemplateKernel(CuteDSLKernel):
+class CuteDSLTemplateKernel(Kernel):
     """
     Template kernel implementation for CuteDSL (CUTLASS Python DSL).
     Handles code generation and argument management for CuteDSL CUDA kernels.
-    Inherits from CuteDSLKernel to provide proper template infrastructure.
+    Provides CuteDSL-specific functionality for tensor conversion and kernel configuration.
     """
 
     def __init__(
@@ -145,7 +71,7 @@ class CuteDSLTemplateKernel(CuteDSLKernel):
         input_nodes: list[Buffer],
         output_node: Buffer,
     ) -> None:
-        # Call parent CuteDSLKernel constructor (which calls Kernel constructor)
+        # Call parent Kernel constructor
         super().__init__()
         self.kernel_name = kernel_name
         self.input_nodes = input_nodes
@@ -190,7 +116,6 @@ class CuteDSLTemplateKernel(CuteDSLKernel):
         """Render the kernel using the template, returning PartialRender object with hooks."""
         # Available {{}} hooks for jinja rendering
         template_env = {
-            'store_output': self.store_output,
             'def_kernel': self.def_kernel,
         }
 
@@ -265,36 +190,6 @@ class CuteDSLTemplateKernel(CuteDSLKernel):
         )
         with self.set_subgraph_body(body_name):
             yield
-
-    # def split_and_set_ranges(self, ranges):
-    #     """Split and set ranges for template processing. For CuteDSL, just return ranges as-is."""
-    #     return ranges
-
-    # def estimate_kernel_num_bytes(self) -> float:
-    #     """Estimate kernel memory usage in bytes. Placeholder for CuteDSL."""
-    #     return 0.0
-
-    # def imports_for_benchmark_kernel(self) -> str:
-    #     """Generate imports needed for benchmarking. Placeholder for CuteDSL."""
-    #     breakpoint()
-    #     return ""
-
-    # def codegen_kernel_benchmark(self, num_gb: float) -> IndentedBuffer:
-    #     """Generate benchmark code. Placeholder for CuteDSL."""
-    #     return IndentedBuffer()
-
-    def store_output(
-        self,
-        indices,
-        val: str,
-        mask: Optional[str] = None,
-        indent_width: int = 4,
-    ):
-        """Store output for CuteDSL templates. Simplified version of TritonTemplateKernel.store_output."""
-        # TODO need to figure out if / how we want this hook
-        def hook():
-            return None
-        return "<STORE_OUTPUT>"
 
     def def_kernel(self, *argnames):
         """Define kernel function signature for CuteDSL templates."""
