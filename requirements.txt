@@ -1,23 +1,24 @@
 # Python dependencies required for development
-astunparse
-cmake
-expecttest>=0.3.0
-filelock
-fsspec
-hypothesis
-jinja2
-lintrunner ; platform_machine != "s390x"
-networkx
-ninja
+astunparse==1.6.3
+cmake>=3.31.4
+expecttest==0.3.0
+filelock==3.18.0
+fsspec==2025.7.0
+hypothesis==5.35.1
+jinja2==3.1.6
+lintrunner==0.12.7 ; platform_machine != "s390x"
+networkx==2.8.8
+ninja==1.11.1.3
 numpy==2.0.2 ; python_version == "3.9"
 numpy==2.1.2 ; python_version > "3.9"
-optree>=0.13.0
-packaging
-psutil
-pyyaml
-requests
+optree==0.13.0
+packaging==25.0
+psutil==7.0.0
+pyyaml==6.0.2
+requests==2.32.4
 # setuptools develop deprecated on 80.0
-setuptools>=62.3.0,<80.0
-sympy>=1.13.3
-types-dataclasses
-typing-extensions>=4.10.0
+# issue on Windows after >= 75.8.2 - https://github.com/pytorch/pytorch/issues/148877
+setuptools==75.8.2
+sympy==1.13.3
+types-dataclasses==0.6.6
+typing-extensions==4.14.1
