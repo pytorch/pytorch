@@ -2711,6 +2711,22 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_log_message(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
+            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
+                "cudagraph partition into 2 partitions"
+            ).run(captured_output[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
             def f(x, y):
                 return x + y
@@ -2832,6 +2848,28 @@ if HAS_CUDA:
                 foo(x)
 
             self.assertEqual(x, torch.tensor(1, device="cpu"))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_multiple(self):
+            def f(x, y, z):
+                return x + y, x + z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.ones((), device="cpu"),
+                torch.ones((), device="cpu"),
+                torch.ones(2, 2, device="cuda"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_regex(r".copy_.*True").run(code[0])
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
