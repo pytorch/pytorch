@@ -931,7 +931,7 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
 
             # Check types of foo.x
             foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
-            self.assertTrue(foo_x_mgr.is_guarded_value_dict())
+            self.assertTrue(issubclass(foo_x_mgr.get_type_of_guarded_value(), dict))
 
             # Check types of foo.x["a"]
             foo_x_a_source = DictGetItemSource(foo_x_source, "a")
@@ -946,12 +946,14 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             # Check types of foo.z
             foo_z_source = AttrSource(foo_source, "z")
             foo_z_mgr = builder.get_guard_manager_from_source(foo_z_source)
-            self.assertTrue(foo_z_mgr.is_guarded_value_empty_dict())
+            self.assertTrue(issubclass(foo_z_mgr.get_type_of_guarded_value(), dict))
 
             # Check types of mod
             mod_source = LocalSource("mod")
             mod_mgr = builder.get_guard_manager_from_source(mod_source)
-            self.assertTrue(mod_mgr.is_guarded_value_nn_module())
+            self.assertTrue(
+                issubclass(mod_mgr.get_type_of_guarded_value(), torch.nn.Module)
+            )
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
@@ -1006,6 +1008,12 @@ class TagSafetyChecks(RecursiveDictTagTests):
             from torch._dynamo.source import AttrSource, LocalSource
 
             foo_source = LocalSource("foo")
+            foo_mgr = builder.get_guard_manager_from_source(foo_source)
+            for accessor in foo_mgr.get_accessors():
+                if isinstance(accessor, GetAttrGuardAccessor):
+                    self.assertTrue(
+                        accessor.get_attr_name() in ("a", "b", "c", "d", "e")
+                    )
 
             # Check types of foo.a
             foo_a_source = AttrSource(foo_source, "a")
