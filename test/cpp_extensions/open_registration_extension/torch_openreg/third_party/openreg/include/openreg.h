@@ -37,12 +37,23 @@ typedef enum orEventFlags {
   orEventEnableTiming = 0x1,
 } orEventFlags;
 
+struct orStream;
+struct orEvent;
+typedef struct orStream* orStream_t;
+typedef struct orEvent* orEvent_t;
+
 // Memory
 orError_t orMalloc(void** devPtr, size_t size);
 orError_t orFree(void* devPtr);
 orError_t orMallocHost(void** hostPtr, size_t size);
 orError_t orFreeHost(void* hostPtr);
 orError_t orMemcpy(void* dst, const void* src, size_t count, orMemcpyKind kind);
+orError_t orMemcpyAsync(
+    void* dst,
+    const void* src,
+    size_t count,
+    orMemcpyKind kind,
+    orStream_t stream);
 orError_t orPointerGetAttributes(
     orPointerAttributes* attributes,
     const void* ptr);
@@ -53,11 +64,6 @@ orError_t orMemoryProtect(void* devPtr);
 orError_t orGetDeviceCount(int* count);
 orError_t orSetDevice(int device);
 orError_t orGetDevice(int* device);
-
-struct orStream;
-struct orEvent;
-typedef struct orStream* orStream_t;
-typedef struct orEvent* orEvent_t;
 
 // Stream
 orError_t orStreamCreateWithPriority(
@@ -76,6 +82,7 @@ orError_t orStreamWaitEvent(
 
 // Event
 orError_t orEventCreateWithFlags(orEvent_t* event, unsigned int flags);
+orError_t orEventCreate(orEvent_t* event);
 orError_t orEventDestroy(orEvent_t event);
 orError_t orEventRecord(orEvent_t event, orStream_t stream);
 orError_t orEventSynchronize(orEvent_t event);
@@ -94,13 +101,6 @@ orError_t orDeviceSynchronize(void);
 #ifdef __cplusplus
 
 #define OPENREG_H
-
-template <typename Func, typename... Args>
-inline orError_t orLaunchKernel(
-    orStream* stream,
-    Func&& kernel_func,
-    Args&&... args);
-
 #include "openreg.inl"
 
 #endif

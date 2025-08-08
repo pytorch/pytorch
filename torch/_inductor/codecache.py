@@ -1711,12 +1711,6 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
-        from .utils import aoti_model_name_from_config
-
-        model_class_name = ""
-        if config.aot_inductor.compile_standalone:
-            model_class_name = aoti_model_name_from_config()
-
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1749,6 +1743,8 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
+                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
+                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1763,7 +1759,7 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
+                    key=model_class_name,
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
@@ -1888,7 +1884,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "S"
+                return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
@@ -1913,7 +1909,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "cpp"
+                return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
                 align_bytes: int,
@@ -1979,6 +1975,7 @@ end
                 consts_code,
                 code_ext,
                 specified_dir=str(specified_sub_dir),
+                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -2279,7 +2276,13 @@ end
             asm_files = []
             if not _IS_WINDOWS:
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if kernel_name not in kernels:
+                        # It is possible that CudaKernelParamCache contains more Triton kernels
+                        # than what the current graph uses
+                        continue
+
                     if asm_file := value["asm"]:
                         asm_files.append(asm_file)
 
