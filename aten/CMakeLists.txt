@@ -17,7 +17,9 @@ cmake_policy(SET CMP0012 NEW)
 
 #############################################
 
-set(ATen_CPU_SRCS)
+set(ATen_CPU_SRCS
+  ${ATen_CPU_NATIVE_SRC_DIR}
+)
 set(ATen_MTIA_SRCS)
 set(ATen_XPU_SRCS)
 set(ATen_XPU_INCLUDE)
