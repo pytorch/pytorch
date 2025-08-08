@@ -57,6 +57,7 @@ class VllmBuildRunner(BuildRunner):
         clone_vllm()
         cfg = self._to_vllm_build_config()
         self.cfg = cfg
+        logger.info(f"setup vllm build config: {self.cfg}")
 
         ensure_dir_exists(self.cfg.artifact_dir)
         self.cp_dockerfile_if_exist()

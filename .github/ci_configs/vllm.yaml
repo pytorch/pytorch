@@ -3,11 +3,11 @@ external_build:
   build_target: vllm
   torch_whl_dir: dist
   work_directory: vllm
+  artifact_dir: shared
   # if set, overrides the base image used in vllm build
   base_image: ${DOCKER_IMAGE} # replace with the env_var DOCKER_IMAGE
   # if set, replaces the vllm dockerfile.torch_nightly with the local dockerfile.
   dockerfile_path: "./.github/docker/Dockerfile.tmp_vllm"
-
 test:
   - preset: # this is a test preset, the preset steps runs before each test group
   - name: Basic Correctness Test # name of the test
