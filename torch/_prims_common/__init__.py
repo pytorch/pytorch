@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from collections.abc import Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
@@ -446,7 +446,10 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     if a.is_sparse:
         return False
@@ -491,7 +494,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if guard_size_oblivious(length == 1):
+        if guard_or_false(length == 1):
             continue
 
         if guard_size_oblivious(stride != expected_stride):
@@ -2087,7 +2090,9 @@ def alert_not_deterministic(caller: str):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+    def get_torch_state_as_tuple(
+        fake_mode: AbstractContextManager[Any] = nullcontext(),
+    ):
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA not available")
 

@@ -9,6 +9,7 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
+from collections import OrderedDict
 from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
 from typing import Any, Callable, TYPE_CHECKING
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
     )
 
@@ -74,6 +76,17 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
 def accumulate_grad(x, new_grad):
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
@@ -99,6 +112,20 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
 
     # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
+
+
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    if all(isinstance(a, OrderedDict) for a in (d, other)):
+        return list(d.items()) == list(other.items())
+
+    for k, v in d.items():
+        if v != other[k]:
+            return False
+
+    return True
 
 
 def set_symmetric_difference(set1, set2):
@@ -225,12 +252,6 @@ def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
 
 
-def generator___contains__(gen, item):
-    # "any" lazily consumes the generator, which is important to prevent
-    # unintended side effects.
-    return any(e == item for e in gen)
-
-
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
@@ -261,6 +282,9 @@ def construct_dict(cls, /, *args, **kwargs):
 
     if args:
         src = args[0]
+
+        if not isinstance(src, Iterable):
+            raise TypeError(f"{type(src)} object is not iterable")
 
         # Ensure that the overridden __iter__ method is invoked
         if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):

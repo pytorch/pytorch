@@ -2007,8 +2007,6 @@
     "cast_symbool_to_symint_guardless",
     "constrain_range",
     "constrain_unify",
-    "guard_or_true",
-    "guard_or_false",
     "error",
     "eval_guards",
     "eval_is_non_overlapping_and_dense",
@@ -2649,11 +2647,6 @@
   ],
   "torch.export.graph_signature": [
     "TokenArgument"
-  ],
-  "torch.export.pt2_archive": [
-    "PT2ArchiveWriter",
-    "PT2ArchiveReader",
-    "is_pt2_package"
   ],
   "torch.fx.experimental.shape_inference.infer_shape": [
     "DimDynamic",

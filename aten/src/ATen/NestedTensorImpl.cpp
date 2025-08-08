@@ -211,7 +211,7 @@ NestedTensorImpl::NestedTensorImpl(
 }
 
 // assume contiguous, `nested_strides` and `offsets`
-// can be infered from `nested_sizes`
+// can be inferred from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
     const at::Tensor& buffer,
     const at::Tensor& nested_sizes)
