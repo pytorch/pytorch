@@ -1693,6 +1693,11 @@ class _DispatchModule:
 _after_ADInplaceOrView_keyset: DispatchKeySet
 _after_autograd_keyset: DispatchKeySet
 
+class _SafeKernelFunction:
+    def call_boxed(self, keyset: DispatchKeySet, *args, **kwargs) -> Any: ...
+    @property
+    def op_handle(self) -> _DispatchOperatorHandle: ...
+
 def _dispatch_library(
     kind: str,
     name: str,
@@ -1730,6 +1735,10 @@ def _dispatch_has_computed_kernel_for_dispatch_key(
     name: str,
     dispatch: _dispatchkey,
 ) -> _bool: ...
+def _dispatch_get_computed_kernel_for_dispatch_key(
+    name: str,
+    dispatch: _dispatchkey,
+) -> _SafeKernelFunction: ...
 def _dispatch_find_dangling_impls() -> list[str]: ...
 def _dispatch_get_all_op_names() -> list[str]: ...
 def _dispatch_tls_set_dispatch_key_excluded(
