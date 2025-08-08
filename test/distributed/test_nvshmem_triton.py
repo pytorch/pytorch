@@ -2,12 +2,11 @@
 # To run:
 # python test/distributed/test_nvshmem_triton.py
 
-import triton.language as tl
-
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
+import triton.language as tl
 from torch._inductor.runtime.triton_compat import triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
@@ -1170,21 +1169,14 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         src_hdl = symm_mem.rendezvous(src, group=group_name)
         dst_hdl = symm_mem.rendezvous(dst, group=group_name)
         # Calculate expected results
-        expected = []
-        for i in range(nreduce):
-            # Product across all ranks
-            product = 1
-            for r in range(world_size):
-                if i == 0:
-                    # rank 0,2,4... contributes 1, rank 1,3,5... contributes 2
-                    product *= 1 if r % 2 == 0 else 2  # 2^(world_size//2)
-                elif i == 1:
-                    # all ranks contribute 1
-                    product *= 1  # result is 1
-                else:
-                    # rank 0,1 contribute 1, rank 2,3 contribute 2, etc.
-                    product *= 1 if (r // 2) % 2 == 0 else 2
-            expected.append(product)
+        vals = torch.empty(nreduce, world_size, dtype=dtype)
+        vals[0, ::2] = 1
+        vals[0, 1::2] = 2
+        vals[1] = 1
+        vals2 = vals[2].view(-1, 2, 2)
+        vals2[:, 0] = 1
+        vals2[:, 1] = 2
+        expected = vals.prod(-1).tolist()
 
         # Synchronize before reduction
         dist.barrier()
