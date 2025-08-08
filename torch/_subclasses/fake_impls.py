@@ -601,6 +601,18 @@ def _view_meta(fake_mode, func, a, *shape):
         return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
 
 
+@register_op_impl(aten.view_copy.default)
+def _view_meta_copy(fake_mode, func, a, *shape, out=None):
+    result = _view_meta(fake_mode, func, a, *shape)
+    if out is not None:
+        return result
+
+    return pytree.tree_map(
+        lambda x: x.clone(memory_format=torch.contiguous_format),
+        result,
+    )
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
