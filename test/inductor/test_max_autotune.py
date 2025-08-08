@@ -1336,8 +1336,8 @@ class TestMaxAutotune(TestCase):
             if not TEST_WITH_ROCM:
                 expected = """{
                     'input_nodes':[
-                        "[[s77,s17],[s17,1],torch.float32,device(type='cuda',index=0),0]",
-                        "[[s17,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
+                        "[[s77,s27],[s27,1],torch.float32,device(type='cuda',index=0),0]",
+                        "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
@@ -2155,6 +2155,9 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -2319,6 +2322,9 @@ class TestPrologueFusion(TestCase):
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
         M, K, N = sizes
