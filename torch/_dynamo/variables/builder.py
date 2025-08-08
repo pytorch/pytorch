@@ -1311,9 +1311,8 @@ class VariableBuilder:
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
             args = [
-                LazyVariableTracker.create(
-                    arg, source=GetItemSource(self.source, i)
-                ) for i, arg in enumerate(value.args)
+                LazyVariableTracker.create(arg, source=GetItemSource(self.source, i))
+                for i, arg in enumerate(value.args)
             ]
             return ExceptionVariable(type(value), args, source=self.source)
         elif issubclass(type(value), type):
