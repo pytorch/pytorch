@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-set -ex
+# e - exit immediately if a command fails
+# u - treat unset variables as an error
+# x - print each command before running it
+set -eux
 
 export ROCM_HOME=/opt/rocm
 export MAGMA_HOME=$ROCM_HOME/magma
