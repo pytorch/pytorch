@@ -11847,8 +11847,11 @@ op_db: list[OpInfo] = [
                        safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-                    ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-                    else np.add(input, np.multiply(alpha, other)),
+                    ref=lambda input, other, *, alpha=1: (
+                        np.add(input, other)
+                        if alpha == 1
+                        else np.add(input, np.multiply(alpha, other))
+                    ),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                      torch.float16, torch.chalf),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -20498,8 +20501,11 @@ op_db: list[OpInfo] = [
         'jiterator_binary',
         op=torch.cuda.jiterator._create_jit_fn(
             "template <typename T> T binary(T x, T y, T alpha) { return x + alpha * y; }", alpha=1),
-        ref=lambda input, other, *, alpha=1: np.add(input, other) if alpha == 1 \
-            else np.add(input, np.multiply(alpha, other)),
+        ref=lambda input, other, *, alpha=1: (
+            np.add(input, other)
+            if alpha == 1
+            else np.add(input, np.multiply(alpha, other))
+        ),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-3.14),
         supports_out=False,
