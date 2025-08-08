@@ -1769,7 +1769,7 @@ Dynamic shape operator
 
   Developer debug context: _torch_testing.numpy_nonzero.default
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0036.html""",
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0036.html""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
