@@ -415,13 +415,13 @@ def estimate_peak_memory(
     # get peak memory by compute the cumulative memories
     max_memory = 0
     cur_memory = 0
-    snodes_curr_memory = []
+    memories_at_nodes = []
     for t in range(len(nodes) + 1):
         cur_memory += memory[t]
-        snodes_curr_memory.append(cur_memory)
+        memories_at_nodes.append(cur_memory)
         max_memory = max(max_memory, cur_memory)
 
-    return (max_memory, snodes_curr_memory)
+    return (max_memory, memories_at_nodes)
 
 
 @dataclasses.dataclass

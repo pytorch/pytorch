@@ -402,7 +402,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                         continue
 
                     # candidate and one of group nodes are successors of the same buffer
-                    # The last use deallocates it.
+                    # and last use of the buffer happen in group nodes.
+                    # This last use deallocates it.
                     # If we swap [candidate [group]] to [[group] candidate],
                     # candidate becomes the last use
                     # and deallocated this buffer instead of group node.

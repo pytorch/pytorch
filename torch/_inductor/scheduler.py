@@ -2183,7 +2183,6 @@ class Scheduler:
                 ),
             )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
-
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
