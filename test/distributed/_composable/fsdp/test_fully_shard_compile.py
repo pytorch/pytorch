@@ -549,7 +549,7 @@ Unsupported Tensor.backward() call
 
   Developer debug context: call_method TensorVariable() backward () {}
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
