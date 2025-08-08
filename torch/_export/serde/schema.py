@@ -461,7 +461,6 @@ class Model:
     # Backend-specialized Lowered GraphModule
     # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
     delegates: Annotated[dict[str, Program], 50]
-    deviceAllocationMap: Annotated[dict[str, str], 60]
     # key is the FQN of constant in exported program (constant tensor or torchbind objs)
     # value is the archive path of serialized constants
     constantPaths: Annotated[dict[str, str], 70]

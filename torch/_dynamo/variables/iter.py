@@ -361,6 +361,10 @@ class ZipVariable(IteratorVariable):
 
     def next_variable(self, tx):
         assert self.is_mutable()
+
+        if len(self.iterables) == 0:
+            raise_observed_exception(StopIteration, tx)
+
         old_index = self.index
         args = []
 
