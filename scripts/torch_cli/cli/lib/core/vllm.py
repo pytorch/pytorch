@@ -52,7 +52,6 @@ class VllmBuildConfig(LinuxExternalBuildBaseConfig):
     dockerfile_path: str = ""
     target: str = field(default_factory=lambda: get_env("TARGET", "export-wheels"))
     tag_name: str = field(default_factory=lambda: get_env("TAG", "vllm-wheels"))
-    vllm_fa_cmake_gpu_arches: str = "80-real;90-real"
 
 
 class VllmBuildRunner(BuildRunner):
@@ -109,7 +108,6 @@ class VllmBuildRunner(BuildRunner):
             base_image=base_image,
             dockerfile_path=dockerfile_path,
         )
-        config.vllm_fa_cmake_gpu_arches = f"{'; '.join(f'{arch}-real' for arch in config.torch_cuda_arch_list.split())}"
         return config
 
     def cp_torch_whls_if_exist(self):
@@ -196,7 +194,6 @@ def _generate_docker_build_cmd(
             --build-arg SCCACHE_BUCKET_NAME={cfg.sccache_bucket} \
             --build-arg SCCACHE_REGION_NAME={cfg.sccache_region} \
             --build-arg torch_cuda_arch_list='{cfg.torch_cuda_arch_list}' \
-            --build-arg vllm_fa_cmake_gpu_arches={cfg.vllm_fa_cmake_gpu_arches}\
             --target {cfg.target} \
             -t {cfg.tag_name} \
             --progress=plain .

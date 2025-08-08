@@ -2090,6 +2090,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
