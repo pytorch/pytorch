@@ -1943,6 +1943,31 @@ def skipIfRocmArch(arch: tuple[str, ...]):
         return wrap_fn
     return dec_fn
 
+# Checks if current ROCm device has enough VRAM against the required amount in GB
+def skipIfRocmNotEnoughMemory(required_amount):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                device = torch.cuda.current_device()
+                props = torch.cuda.get_device_properties(device)
+
+                total = props.total_memory / (1024 ** 3)  # in GB
+                # This will probably return 0 because it only counts tensors
+                # and doesn't take into account any small supporting allocations
+                allocated = torch.cuda.memory_allocated(device) / (1024 ** 3)
+                free_global = total - allocated
+
+                result = free_global > required_amount
+
+                if not result:
+                    reason = f"skipIfRocm: Not enough free VRAM on current ROCm device. " \
+                        f"Available: {free_global:.2f} GB | Required: {required_amount:.2f} GB."
+                    raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
+
 def runOnRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

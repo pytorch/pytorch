@@ -45,8 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     TEST_WITH_ROCM,
-    NAVI_ARCH,
-    skipIfRocmArch,
+    skipIfRocmNotEnoughMemory,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import has_triton_tma_device
@@ -819,6 +818,8 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    # Some ROCm GPUs don't have enough VRAM to run all autotune configurations and padding benchmarks
+    @skipIfRocmNotEnoughMemory(30)
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -837,7 +838,6 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
@@ -872,6 +872,8 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
+    # Some ROCm GPUs don't have enough VRAM to run all autotune configurations and padding benchmarks
+    @skipIfRocmNotEnoughMemory(30)
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
