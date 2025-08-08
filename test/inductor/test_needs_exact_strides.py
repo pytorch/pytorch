@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestNeedsExactStrides(InductorTestCase):
@@ -98,5 +98,5 @@ class TestNeedsExactStrides(InductorTestCase):
 instantiate_parametrized_tests(TestNeedsExactStrides)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_CUDA:
         run_tests(needs="filelock")
