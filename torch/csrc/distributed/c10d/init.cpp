@@ -3086,7 +3086,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
-          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
+          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
+          .def_readwrite("global_ranks_in_group", &::c10d::Backend::Options::global_ranks_in_group)
+          .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
@@ -3102,12 +3104,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupGloo::Options::group_name);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo
       .def_static(
@@ -3464,11 +3461,6 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
       .def(
           "__copy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self) {
@@ -3508,7 +3500,7 @@ Example::
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size,
-                          c10::intrusive_ptr<::c10d::ProcessGroupXCCL::Options>
+                          c10::intrusive_ptr<::c10d::Backend::Options>
                               options) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
@@ -3522,15 +3514,6 @@ Example::
               py::arg("size"),
               py::arg("options"),
               R"(Create a new ProcessGroupXCCL instance.)");
-
-  intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
-      processGroupXCCL, "Options", backendOptions)
-      .def(py::init<>())
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupXCCL::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupXCCL::Options::group_name);
   module
       .def(
           "_dump_xccl_trace",
