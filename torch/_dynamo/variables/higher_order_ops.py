@@ -26,6 +26,7 @@ import itertools
 import logging
 import types
 import warnings
+from collections.abc import Sequence
 from typing import Optional, TYPE_CHECKING
 
 import torch._C
@@ -899,7 +900,20 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: list[VariableTracker],
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
+
+        return self._call_function(tx, args, kwargs)
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
@@ -913,7 +927,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     Wraps torch._functorch.autograd_function.custom_function_call
     """
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -935,7 +949,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="Cond doesn't work unless it is captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -1119,7 +1133,7 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self.script_obj_var = script_obj_var
         self.method_name = method_name
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -1172,7 +1186,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -1422,7 +1436,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="associative_scan must be captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -1627,7 +1641,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="scan must be captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -1828,7 +1842,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="map doesn't work unless it is captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -1924,7 +1938,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2074,7 +2088,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return proxy_args, {}, example_value, body_r, treespec, body_gmod, body_name
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2262,7 +2276,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="Hints_wrapper doesn't work unless it is captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
     ) -> "VariableTracker":
         _check_supported_callable_arg(tx, args[0], "body_fn")
@@ -2332,7 +2346,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2370,7 +2384,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="strict_mode HOO doesn't work unless it is captured completely with torch.compile."
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2431,7 +2445,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -2507,7 +2521,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, hop, source) -> None:
         super().__init__(hop, source)
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: list[VariableTracker],
@@ -2594,7 +2608,7 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2617,7 +2631,7 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
+    def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
@@ -2654,7 +2668,7 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         else:
             return arg.as_proxy()
 
-    def call_function(
+    def _call_function(
         self, tx, args: "list[VariableTracker]", kwargs: "dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
@@ -2686,7 +2700,7 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     here in the call to dynamo from compiled autograd.
     """
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -2777,17 +2791,12 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         return proxy_args
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
-
-        if can_dispatch_torch_function(tx, args, kwargs):
-            return dispatch_torch_function(tx, self, args, kwargs)
-
         from .builder import wrap_fx_proxy
 
         (
@@ -3264,7 +3273,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
     def python_type(self):
         return type(self.value)
 
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
@@ -3361,7 +3370,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     @raise_hard_error_if_graph_break(
         reason="torch.compile requires the `nested_compile_region` decorated function to be capturable into a single graph",
     )
-    def call_function(
+    def _call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",

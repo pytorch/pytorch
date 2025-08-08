@@ -56,13 +56,18 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ClosureSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     counters,
-    create_nested_fn_cache,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -270,11 +275,6 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
-    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
-    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
-    if create_nested_fn_cache.get(cache_key):
-        return create_nested_fn_cache.get(cache_key)
-
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -286,7 +286,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-    create_nested_fn_cache.set(cache_key, func)
+
     return func
 
 
@@ -442,9 +442,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 cell_var = side_effects[cell]
 
             elif self.source:
-                closure_cell = GetItemSource(
-                    AttrSource(self.source, "__closure__"), idx
-                )
+                closure_cell = GetItemSource(ClosureSource(self.source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -1124,12 +1122,25 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
+        if name == "__func__":
+            # self.source points to the source of the function object and not
+            # the method object
+            return VariableTracker.build(tx, self.fn, self.source)
         if name == "__self__":
             return self.obj
-        if name == "__func__":
-            return VariableTracker.build(tx, self.fn, source)
         return super().var_getattr(tx, name)
+
+    def reconstruct(self, codegen):
+        if not self.obj.source or not self.source:
+            raise NotImplementedError
+
+        def get_bound_method():
+            codegen(self.source)
+            codegen.extend_output(codegen.create_load_attrs("__get__"))
+
+        codegen.add_push_null(get_bound_method)
+        codegen(self.obj.source)
+        codegen.extend_output(create_call_function(1, False))
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -1433,13 +1444,7 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
-            install_guard(
-                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
-                    GuardBuilder.FUNCTION_MATCH
-                )
-            )
-        elif not is_wrapper_or_member_descriptor(value):
+        if not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.

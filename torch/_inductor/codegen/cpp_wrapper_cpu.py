@@ -1275,7 +1275,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if not is_inplace:
+        if (
+            extern_kernel.python_kernel_name
+            == "torch.ops._c10d_functional.wait_tensor.default"
+        ):
+            # wait_tensor returns its input, and the returned tensor is not used anywhere,
+            # so we can delete the returned AtenTensorHandle to reduce its lifetime.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
+            )
+        elif not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):

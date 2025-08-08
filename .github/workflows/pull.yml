@@ -434,6 +434,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3-clang12-executorch-build:
+    if: false  # Docker build needs pin update
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type

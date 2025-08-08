@@ -393,7 +393,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
-@large_tensor_test_class("2GB")
+@large_tensor_test_class("2GB", device="cuda")
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -2867,7 +2867,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
-    @skip_on_cpu
     @common_utils.parametrize(
         "permute_order",
         [
@@ -4959,7 +4958,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(cpu_mask.q_indices)
 
 
-@large_tensor_test_class("2GB")
+@large_tensor_test_class("2GB", device="cuda")
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -5409,7 +5408,7 @@ supports_learnable_bias = unittest.skipUnless(
 
 
 @supports_learnable_bias
-@large_tensor_test_class("2GB")
+@large_tensor_test_class("2GB", device="cuda")
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()

@@ -33,6 +33,23 @@ class TestMode(BaseTorchFunctionMode):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+class HopDetectionError(Exception):
+    pass
+
+
+class TestModeRaises(BaseTorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        import torch._higher_order_ops
+
+        if func == torch._higher_order_ops.flex_attention:
+            raise HopDetectionError("test")
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -659,6 +676,49 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
+
+    @requires_gpu
+    def test_hop(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device("cuda"):
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                # This runs in fullgraph already
+                with TestModeRaises():
+                    flex_attention(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
+
+    @requires_gpu
+    def test_hop_eager(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device("cuda"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                with TestModeRaises():
+                    flex_attention_eager(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
 
 
 if __name__ == "__main__":

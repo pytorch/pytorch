@@ -633,8 +633,8 @@ class GuardsSet:
         if collect_debug_stack:
             if guard.stack is None:
                 guard.stack = CapturedTraceback.extract(skip=1 + skip)
-            if guard.user_stack is None:
-                guard.user_stack = TracingContext.extract_stack()
+        if guard.user_stack is None:
+            guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: set[Guard]) -> None:
