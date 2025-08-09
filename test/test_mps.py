@@ -12696,9 +12696,11 @@ class TestSparseMPS(TestCaseMPS):
         sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
         self.assertEqual(sparse, sparse_cpu)
 
-    def test_coalesce(self):
+    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64,
+                           torch.float32, torch.float16, torch.bfloat16, torch.bool])
+    def test_coalesce(self, dtype):
         indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
-        values = torch.tensor([1., 2., 3., 4.], dtype=torch.float32, device="mps")
+        values = torch.tensor([1., 2., 3., 4.], dtype=dtype, device="mps")
         size = (2, 3)
         indices_cpu = indices.cpu()
         values_cpu = values.cpu()
@@ -12770,6 +12772,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestSparseMPS)
 
 if __name__ == "__main__":
     run_tests()
