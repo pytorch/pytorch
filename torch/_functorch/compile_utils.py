@@ -9,9 +9,9 @@ import sympy
 import torch
 import torch.fx as fx
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
+from torch.utils.weak import StorageWeakRef
 
 
 aten = torch.ops.aten

@@ -46,6 +46,7 @@ from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
+from torch.utils.weak import StorageWeakRef
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
