@@ -56,7 +56,7 @@ OpenReg currently provides a set of APIs covering basic memory and device manage
 | `orMallocHost`           | `cudaMallocHost`           | Allocate page-locked (Pinned) host memory |
 | `orFreeHost`             | `cudaFreeHost`             | Free page-locked host memory              |
 | `orMemcpy`               | `cudaMemcpy`               | Synchronous memory copy                   |
-| `orMemcpyAsyn`           | `cudaMemcpyAsyn`           | Asynchronous memory copy                   |
+| `orMemcpyAsyn`           | `cudaMemcpyAsyn`           | Asynchronous memory copy                  |
 | `orPointerGetAttributes` | `cudaPointerGetAttributes` | Get pointer attributes                    |
 
 ### Stream APIs
