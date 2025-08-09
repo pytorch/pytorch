@@ -1,0 +1,24 @@
+name: riscv64
+
+on:
+  push:
+    tags:
+      - ciflow/riscv64/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build:
+    if: github.repository_owner == 'pytorch'
+    name: pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-noble-riscv64-py3.12-gcc14
+      docker-image-name: pytorch-linux-noble-riscv64-py3.12-gcc14
+      runner: linux.2xlarge
+    secrets: inherit
