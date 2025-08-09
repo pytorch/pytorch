@@ -14,7 +14,10 @@ RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
 
 
 def get_pytorch_dir():
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
+
+    os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
     return os.path.dirname(os.path.realpath(torch.__file__))
 
@@ -84,6 +87,11 @@ def main():
         ext_modules=ext_modules,
         cmdclass={
             "clean": BuildClean,  # type: ignore[misc]
+        },
+        entry_points={
+            "torch.backends": [
+                "torch_openreg = torch_openreg:_autoload",
+            ],
         },
         include_package_data=False,
     )
