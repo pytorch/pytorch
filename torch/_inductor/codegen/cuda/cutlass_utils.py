@@ -89,6 +89,34 @@ def try_import_cutlass() -> bool:
 
         return True
 
+    try:
+        import cutlass  # type: ignore[import-not-found]  # noqa: F811
+        import cutlass_library  # type: ignore[import-not-found]  # noqa: F811
+
+        cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
+        if cutlass_minor_vesion < 7:
+            log.warning("CUTLASS version < 3.7 is not recommended.")
+
+        log.debug(
+            "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
+        )
+        cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
+        assert os.path.isdir(cutlass_library_dir), (
+            f"{cutlass_library_dir} is not a directory"
+        )
+        config.cuda.cutlass_dir = os.path.abspath(
+            os.path.join(
+                cutlass_library_dir,
+                "source",
+            )
+        )
+
+        return True
+    except ModuleNotFoundError:
+        log.debug(
+            "cutlass_library not found in sys.path, trying to import from config.cuda.cutlass_dir"
+        )
+
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
@@ -156,7 +184,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401, F811
+            import cutlass  # noqa: F401
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
