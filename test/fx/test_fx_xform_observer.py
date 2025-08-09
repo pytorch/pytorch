@@ -179,6 +179,32 @@ class TestGraphTransformObserver(TestCase):
         self.assertEqual(len(gm2._erase_node_hooks), 0)
         self.assertEqual(len(gm2._deepcopy_hooks), 0)
 
+    @torch._inductor.config.patch("trace.provenance_tracking", True)
+    def test_graph_transform_observer_replace(self):
+        # the node sohuld should not be duplicated
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                z = y * 2
+                w = y * 3
+                return z, w
+
+        model = Model()
+        gm = symbolic_trace(model)
+
+        with GraphTransformObserver(gm, "test"):
+            for node in gm.graph.nodes:
+                if node.name == "add":
+                    new_node = gm.graph.call_function(
+                        torch.ops.aten.add.Tensor, (node.args[0], node.args[1])
+                    )
+                    node.replace_all_uses_with(new_node)
+                    new_node.name = "new_add"
+
+        self.assertEqual(len(new_node.meta["from_node"]), 1)
+        self.assertEqual(new_node.meta["from_node"][0].name, "add")
+        self.assertEqual(new_node.meta["from_node"][0].pass_name, "test")
+
 
 if __name__ == "__main__":
     raise RuntimeError(
