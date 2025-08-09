@@ -7462,7 +7462,7 @@
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: indices_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: indices_sparse
     CompositeExplicitAutograd: indices_default
   device_check: NoCheck
   device_guard: False
@@ -7470,7 +7470,7 @@
 - func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: values_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: values_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: values_nested
     CompositeExplicitAutograd: values_default
