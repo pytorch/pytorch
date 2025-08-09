@@ -353,9 +353,7 @@ class TestOptimRenewed(TestCase):
             if "lr" in kwargs:
                 del kwargs["lr"]
 
-            params = [weight, bias]
-            if optim_cls.__name__ == "Muon":
-                params = [weight]
+            params = [weight, bias] if optim_cls.__name__ != "Muon" else [weight]
             kwargs["lr"] = 1.0 if optim_info.step_requires_closure else 1e-3
             optimizer_r = optim_cls(params, **kwargs)
 
@@ -1563,25 +1561,23 @@ class TestOptimRenewed(TestCase):
             device, dtype, optim_info, skip=("differentiable",)
         )
 
-        def _get_model_and_input(device, dtype, optim_cls):
+        def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                model = torch.nn.Sequential(
-                    torch.nn.Linear(10, 4, bias=False),
-                )
-                model.to(dtype=dtype, device=device)
+                # Muon only accepts 2D parameter.
+                model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
                 model = torch.nn.Sequential(
                     torch.nn.Conv2d(4, 2, 1, stride=2),
                     torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
                 )
-                model.to(dtype=dtype, device=device)
                 input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+            model.to(dtype=dtype, device=device)
             return model, input
 
         for optim_input in all_optim_inputs:
             torch.manual_seed(1)
-            model, input = _get_model_and_input(device, dtype, optim_cls)
+            model, input = _get_model_and_input_tensor(device, dtype, optim_cls)
             optimizer = optim_cls(model.parameters(), **optim_input.kwargs)
 
             def fwd_bwd(optim, mod, i):
@@ -1630,25 +1626,23 @@ class TestOptimRenewed(TestCase):
             device, dtype, optim_info, skip=("differentiable",)
         )
 
-        def _get_model_and_input(device, dtype, optim_cls):
+        def _get_model_and_input_tensor(device, dtype, optim_cls):
             if optim_cls.__name__ == "Muon":
-                model = torch.nn.Sequential(
-                    torch.nn.Linear(10, 4, bias=False),
-                )
-                model.to(dtype=dtype, device=device)
+                # Muon only accepts 2D parameter.
+                model = torch.nn.Linear(10, 4, bias=False)
                 input = torch.rand(10, device=device, dtype=dtype)
             else:
                 model = torch.nn.Sequential(
                     torch.nn.Conv2d(4, 2, 1, stride=2),
                     torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
                 )
-                model.to(dtype=dtype, device=device)
                 input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+            model.to(dtype=dtype, device=device)
             return model, input
 
         for optim_input in all_optim_inputs:
             torch.manual_seed(1)
-            model, input = _get_model_and_input(device, dtype, optim_cls)
+            model, input = _get_model_and_input_tensor(device, dtype, optim_cls)
 
             def fwd_bwd(optim, mod, i):
                 optim.zero_grad()
@@ -2035,6 +2029,7 @@ class TestOptimRenewed(TestCase):
             nonlocal data
             data += 2
 
+        # Create a random 2D tensor for compatibility with Muon.
         params = [torch.tensor([[1, 1]], device=device, dtype=dtype)]
 
         def dummy_closure():
@@ -2285,6 +2280,7 @@ class TestOptimRenewed(TestCase):
     def test_non_empty_state(self, device, dtype, optim_info):
         # There are internal tests that check that the state is not empty
         optim_cls = optim_info.optim_cls
+        # Muon only accepts 2D parameter.
         model = torch.nn.Linear(5, 5, bias=False)
         model.to(dtype=dtype, device=device)
         inpt = torch.rand(2, 5, dtype=dtype, device=device)

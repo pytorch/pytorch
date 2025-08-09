@@ -16,6 +16,7 @@ from .optimizer import _disable_dynamo_if_unsupported, _to_scalar, Optimizer, Pa
 
 __all__ = ["Muon"]
 
+# Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
 EPS = 1e-7
 DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750
@@ -80,7 +81,7 @@ def zeropower_via_newtonschulz(grad: Tensor, ns_config: BaseMsignFnConfig) -> Te
 
 
 def default_adjust_lr(lr: float, param_shape: torch.Size) -> float:
-    """Default learning rate adjustment used by Muon. Method reported in the paper https://arxiv.org/pdf/2502.16982."""
+    """Default learning rate adjustment used by Muon. Method reported in the tech report https://arxiv.org/pdf/2502.16982."""
     A, B = param_shape[:2]
     adjusted_ratio = 0.2 * math.sqrt(max(A, B))
     return lr * adjusted_ratio
@@ -91,6 +92,8 @@ class Muon(Optimizer):
 
     This optimizer performs momentum SGD followed by an optional orthogonalization
     step computed via a user provided callable.
+
+    Default parameters are taken from Moonshot reference implementation: https://github.com/MoonshotAI/Moonlight.
     """
 
     def __init__(
@@ -126,7 +129,7 @@ class Muon(Optimizer):
             for p in group["params"]:
                 if p.ndim != 2:
                     raise ValueError(
-                        f"Muon only supports 2D parameters where as the parameter has size: {p.size()}"
+                        f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
                     )
 
         self._msign_fn = msign_fn
@@ -154,11 +157,11 @@ class Muon(Optimizer):
 
             state = self.state[p]
 
-            buf = state.get("momentum_buffer")
-            if buf is None:
-                buf = torch.zeros_like(p.grad, memory_format=torch.preserve_format)
-                state["momentum_buffer"] = buf
-            muon_momentum_bufs.append(buf)
+            if "momentum_buffer" not in state:
+                state["momentum_buffer"] = torch.zeros_like(
+                    p.grad, memory_format=torch.preserve_format
+                )
+            muon_momentum_bufs.append(state["momentum_buffer"])
 
         return False  # has_complex
 
@@ -241,8 +244,8 @@ def muon(
     params: list[Tensor],
     grads: list[Tensor],
     muon_momentum_bufs: list[Tensor],
-    foreach: Optional[bool] = None,
     *,
+    foreach: Optional[bool] = None,
     lr: float,
     weight_decay: float,
     momentum: float,
