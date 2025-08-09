@@ -271,6 +271,16 @@ void CUDAPluggableAllocator::beginAllocateToPool(
   }
 }
 
+void CUDAPluggableAllocator::captureAboutToEnd(
+    c10::DeviceIndex device,
+    c10::cuda::MempoolId_t mempool_id,
+    cudaStream_t capture_stream) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support captureAboutToEnd. "
+      "If you need it, please file an issue describing your use case.");
+};
+
 void CUDAPluggableAllocator::endAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id) {
