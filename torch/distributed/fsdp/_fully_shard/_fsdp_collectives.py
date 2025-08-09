@@ -529,7 +529,9 @@ def foreach_reduce(
     else:
         padded_unsharded_sizes = tuple(grad.size() for grad in unsharded_grads)
         reduce_output = torch.cat([grad.view(-1) for grad in unsharded_grads])
+        _div_if_needed(reduce_output, predivide_factor)
         reduce_scatter_input = torch.empty(0, device=device)
+
         # Define reduce_scatter_output_numel for world_size <= 1 to satisfy mypy
         reduce_scatter_output_numel = 0
 
