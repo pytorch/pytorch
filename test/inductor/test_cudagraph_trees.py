@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -55,11 +55,10 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+
 
 
 aten = torch.ops.aten
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda and triton")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
