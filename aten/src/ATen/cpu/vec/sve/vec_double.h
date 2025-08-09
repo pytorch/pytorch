@@ -5,12 +5,6 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 #include <cmath>
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF)
-#include <sleef.h>
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
-#endif
 
 namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
@@ -179,6 +173,180 @@ class Vectorized<double> {
   Vectorized<double> conj() const {
     return *this;
   }
+#ifdef CPU_CAPABILITY_SVE128
+
+  Vectorized(float64x2_t v) : values(svset_neonq(svundef_f64(), v)) {}
+
+  operator float64x2_t() const {
+    return svget_neonq(values);
+  }
+
+  Vectorized<double> acos() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_acosd2_u10(svget_neonq(values))), map(std::acos));
+  }
+  Vectorized<double> acosh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_acoshd2_u10(svget_neonq(values))), map(std::acosh));
+  }
+  Vectorized<double> asin() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_asind2_u10(svget_neonq(values))), map(std::asin));
+  }
+  Vectorized<double> asinh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_asinhd2_u10(svget_neonq(values))), map(std::asinh));
+  }
+  Vectorized<double> atan() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_atand2_u10(svget_neonq(values))), map(std::atan));
+  }
+  Vectorized<double> atanh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_atanhd2_u10(svget_neonq(values))), map(std::atanh));
+  }
+  Vectorized<double> atan2(const Vectorized<double>& b) const {USE_SLEEF(
+      { return Vectorized<double>(Sleef_atan2d2_u10(svget_neonq(values), b)); },
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::atan2(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      })} 
+  Vectorized<double> copysign(const Vectorized<double>& sign) const {
+      USE_SLEEF(
+          { return Vectorized<double>(Sleef_copysignd2(svget_neonq(values), sign)); },
+          {
+            __at_align__ double tmp[size()];
+            __at_align__ double tmp_sign[size()];
+            store(tmp);
+            sign.store(tmp_sign);
+            for (int64_t i = 0; i < size(); i++) {
+              tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+            }
+            return loadu(tmp);
+          })} Vectorized<double> erf() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_erfd2_u10(svget_neonq(values))), map(std::erf));
+  }
+  Vectorized<double> erfc() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_erfcd2_u15(svget_neonq(values))), map(std::erfc));
+  }
+  Vectorized<double> exp() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_expd2_u10(svget_neonq(values))), map(std::exp));
+  }
+  Vectorized<double> exp2() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_exp2d2_u10(svget_neonq(values))), map(std::exp2));
+  }
+  Vectorized<double> expm1() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_expm1d2_u10(svget_neonq(values))), map(std::expm1));
+  }
+  Vectorized<double> fmod(const Vectorized<double>& q) const {USE_SLEEF(
+      { return Vectorized<double>(Sleef_fmodd2(svget_neonq(values), q)); },
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_q[size()];
+        store(tmp);
+        q.store(tmp_q);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::fmod(tmp[i], tmp_q[i]);
+        }
+        return loadu(tmp);
+      })} 
+  Vectorized<double> hypot(const Vectorized<double>& b) const {
+      USE_SLEEF(
+          { return Vectorized<double>(Sleef_hypotd2_u05(svget_neonq(values), b)); },
+          {
+            __at_align__ double tmp[size()];
+            __at_align__ double tmp_b[size()];
+            store(tmp);
+            b.store(tmp_b);
+            for (int64_t i = 0; i < size(); i++) {
+              tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+            }
+            return loadu(tmp);
+          })} Vectorized<double> i0() const {
+    return map(calc_i0);
+  }
+  Vectorized<double> nextafter(const Vectorized<double>& b) const {USE_SLEEF(
+      { return Vectorized<double>(Sleef_nextafterd2(svget_neonq(values), b)); },
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (int64_t i = 0; i < size(); ++i) {
+          tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      })} Vectorized<double> log() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_logd2_u10(svget_neonq(values))), map(std::log));
+  }
+  Vectorized<double> log2() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_log2d2_u10(svget_neonq(values))), map(std::log2));
+  }
+  Vectorized<double> log10() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_log10d2_u10(svget_neonq(values))), map(std::log10));
+  }
+  Vectorized<double> log1p() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_log1pd2_u10(svget_neonq(values))), map(std::log1p));
+  }
+  Vectorized<double> frac() const;
+  Vectorized<double> sin() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_sind2_u10(svget_neonq(values))), map(std::sin));
+  }
+  Vectorized<double> sinh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_sinhd2_u10(svget_neonq(values))), map(std::sinh));
+  }
+  Vectorized<double> cos() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_cosd2_u10(svget_neonq(values))), map(std::cos));
+  }
+  Vectorized<double> cosh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_coshd2_u10(svget_neonq(values))), map(std::cosh));
+  }
+  Vectorized<double> pow(const Vectorized<double>& b) const {USE_SLEEF(
+      { return Vectorized<double>(Sleef_powd2_u10(svget_neonq(values), b)); },
+      {
+        __at_align__ double tmp[size()];
+        __at_align__ double tmp_b[size()];
+        store(tmp);
+        b.store(tmp_b);
+        for (int64_t i = 0; i < size(); i++) {
+          tmp[i] = std::pow(tmp[i], tmp_b[i]);
+        }
+        return loadu(tmp);
+      })} // Comparison using the _CMP_**_OQ predicate.
+          //   `O`: get false if an operand is NaN
+          //   `Q`: do not raise if an operand is NaN
+  Vectorized<double> tan() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_tand2_u10(svget_neonq(values))), map(std::tan));
+  }
+  Vectorized<double> tanh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_tanhd2_u10(svget_neonq(values))), map(std::tanh));
+  }
+  Vectorized<double> lgamma() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_lgammad2_u10(svget_neonq(values))), map(std::lgamma));
+  }
+#else
   Vectorized<double> acos() const {
     return USE_SLEEF(
         Vectorized<double>(Sleef_acosdx_u10sve(values)), map(std::acos));
@@ -214,7 +382,8 @@ class Vectorized<double> {
           tmp[i] = std::atan2(tmp[i], tmp_b[i]);
         }
         return loadu(tmp);
-      })} Vectorized<double> copysign(const Vectorized<double>& sign) const {
+      })} 
+  Vectorized<double> copysign(const Vectorized<double>& sign) const {
       USE_SLEEF(
           { return Vectorized<double>(Sleef_copysigndx_sve(values, sign)); },
           {
@@ -234,9 +403,6 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_erfcdx_u15sve(values)), map(std::erfc));
   }
-  Vectorized<double> erfinv() const {
-    return map(calc_erfinv);
-  }
   Vectorized<double> exp() const {
     return USE_SLEEF(
         Vectorized<double>(Sleef_expdx_u10sve(values)), map(std::exp));
@@ -249,12 +415,6 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_expm1dx_u10sve(values)), map(std::expm1));
   }
-  Vectorized<double> exp_u20() const {
-    return exp();
-  }
-  Vectorized<double> fexp_u20() const {
-    return exp();
-  }
   Vectorized<double> fmod(const Vectorized<double>& q) const {USE_SLEEF(
       { return Vectorized<double>(Sleef_fmoddx_sve(values, q)); },
       {
@@ -266,7 +426,8 @@ class Vectorized<double> {
           tmp[i] = std::fmod(tmp[i], tmp_q[i]);
         }
         return loadu(tmp);
-      })} Vectorized<double> hypot(const Vectorized<double>& b) const {
+      })} 
+  Vectorized<double> hypot(const Vectorized<double>& b) const {
       USE_SLEEF(
           { return Vectorized<double>(Sleef_hypotdx_u05sve(values, b)); },
           {
@@ -280,32 +441,6 @@ class Vectorized<double> {
             return loadu(tmp);
           })} Vectorized<double> i0() const {
     return map(calc_i0);
-  }
-  Vectorized<double> i0e() const {
-    return map(calc_i0e);
-  }
-  Vectorized<double> digamma() const {
-    return map(calc_digamma);
-  }
-  Vectorized<double> igamma(const Vectorized<double>& x) const {
-    __at_align__ double tmp[size()];
-    __at_align__ double tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
-  }
-  Vectorized<double> igammac(const Vectorized<double>& x) const {
-    __at_align__ double tmp[size()];
-    __at_align__ double tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
   }
   Vectorized<double> nextafter(const Vectorized<double>& b) const {USE_SLEEF(
       { return Vectorized<double>(Sleef_nextafterdx_sve(values, b)); },
@@ -351,42 +486,6 @@ class Vectorized<double> {
     return USE_SLEEF(
         Vectorized<double>(Sleef_coshdx_u10sve(values)), map(std::cosh));
   }
-  Vectorized<double> ceil() const {
-    return svrintp_f64_x(ptrue, values);
-  }
-  Vectorized<double> floor() const {
-    return svrintm_f64_x(ptrue, values);
-  }
-  Vectorized<double> neg() const {
-    return svneg_f64_x(ptrue, values);
-  }
-  Vectorized<double> round() const {
-    return svrinti_f64_x(ptrue, values);
-  }
-  Vectorized<double> tan() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_tandx_u10sve(values)), map(std::tan));
-  }
-  Vectorized<double> tanh() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_tanhdx_u10sve(values)), map(std::tanh));
-  }
-  Vectorized<double> trunc() const {
-    return svrintz_f64_x(ptrue, values);
-  }
-  Vectorized<double> lgamma() const {
-    return USE_SLEEF(
-        Vectorized<double>(Sleef_lgammadx_u10sve(values)), map(std::lgamma));
-  }
-  Vectorized<double> sqrt() const {
-    return svsqrt_f64_x(ptrue, values);
-  }
-  Vectorized<double> reciprocal() const {
-    return svdivr_f64_x(ptrue, values, ONE_F64);
-  }
-  Vectorized<double> rsqrt() const {
-    return svdivr_f64_x(ptrue, svsqrt_f64_x(ptrue, values), ONE_F64);
-  }
   Vectorized<double> pow(const Vectorized<double>& b) const {USE_SLEEF(
       { return Vectorized<double>(Sleef_powdx_u10sve(values, b)); },
       {
@@ -401,6 +500,80 @@ class Vectorized<double> {
       })} // Comparison using the _CMP_**_OQ predicate.
           //   `O`: get false if an operand is NaN
           //   `Q`: do not raise if an operand is NaN
+  Vectorized<double> tan() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_tandx_u10sve(values)), map(std::tan));
+  }
+  Vectorized<double> tanh() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_tanhdx_u10sve(values)), map(std::tanh));
+  }
+  Vectorized<double> lgamma() const {
+    return USE_SLEEF(
+        Vectorized<double>(Sleef_lgammadx_u10sve(values)), map(std::lgamma));
+  }
+#endif
+  Vectorized<double> erfinv() const {
+    return map(calc_erfinv);
+  }
+  Vectorized<double> exp_u20() const {
+    return exp();
+  }
+  Vectorized<double> fexp_u20() const {
+    return exp();
+  }
+  Vectorized<double> i0e() const {
+    return map(calc_i0e);
+  }
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
+  }
+  Vectorized<double> igamma(const Vectorized<double>& x) const {
+    __at_align__ double tmp[size()];
+    __at_align__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vectorized<double> igammac(const Vectorized<double>& x) const {
+    __at_align__ double tmp[size()];
+    __at_align__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vectorized<double> ceil() const {
+    return svrintp_f64_x(ptrue, values);
+  }
+  Vectorized<double> floor() const {
+    return svrintm_f64_x(ptrue, values);
+  }
+  Vectorized<double> neg() const {
+    return svneg_f64_x(ptrue, values);
+  }
+  Vectorized<double> round() const {
+    return svrinti_f64_x(ptrue, values);
+  }
+  
+  Vectorized<double> trunc() const {
+    return svrintz_f64_x(ptrue, values);
+  }
+  Vectorized<double> sqrt() const {
+    return svsqrt_f64_x(ptrue, values);
+  }
+  Vectorized<double> reciprocal() const {
+    return svdivr_f64_x(ptrue, values, ONE_F64);
+  }
+  Vectorized<double> rsqrt() const {
+    return svdivr_f64_x(ptrue, svsqrt_f64_x(ptrue, values), ONE_F64);
+  }
+  
   Vectorized<double> operator==(const Vectorized<double>& other) const {
     svbool_t mask = svcmpeq_f64(ptrue, values, other);
     return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
