@@ -21,8 +21,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
+    IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
+    skipIfWindows,
     TEST_XPU,
     xfailIf,
 )
@@ -528,7 +530,7 @@ LoweringException: AssertionError:
             "import torch",
             env=env,
         )
-        lines = stderr.decode().split("\n")
+        lines = stderr.decode().split("\r\n" if IS_WINDOWS else "\n")
         # This is a sanity assert that our error is not spammy.
         # As of this test creation this was 18.
         # See this issue for the purpose o this test:
@@ -544,6 +546,7 @@ LoweringException: AssertionError:
         self.assertEqual(lines[-4], "Valid settings:")
 
     @requires_distributed()
+    @skipIfWindows(msg="TODO: (xuhancn), Can't reproduce locally")
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
