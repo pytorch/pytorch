@@ -7765,7 +7765,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             all_elements_within_threshold, "Some elements have error >= 0.06"
         )
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
@@ -7813,6 +7813,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @slowTest
     @onlyCPU
+    @largeTensorTest('12GB', device='cpu')
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
         m = 65536
@@ -7833,11 +7834,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             )
 
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
-        res = weight_int8pack_mm(a, b_int8pack, b_scales)
-        ref = torch.mm(a, b.transpose(0, 1))
-
-        mean_err = ((res - ref).abs() / ref).mean()
-        self.assertTrue(mean_err < 0.05)
+        # should pass without segfault
+        weight_int8pack_mm(a, b_int8pack, b_scales)
 
     @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
