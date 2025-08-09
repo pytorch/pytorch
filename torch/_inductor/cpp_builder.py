@@ -1297,11 +1297,10 @@ def _get_openmp_args(
             libs.append("libiomp5md")
             perload_icx_libomp_win(cpp_compiler)
         else:
-            # /openmp, /openmp:llvm
-            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
             cflags.append("openmp")
-            cflags.append("openmp:experimental")  # MSVC CL
+            # cflags.append("openmp:experimental")  # MSVC Openmp, it has some issue for inductor.
+            libs.append("libiomp5md")  # intel-openmp
+            ldflags.append("nodefaultlib:vcomp")
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
