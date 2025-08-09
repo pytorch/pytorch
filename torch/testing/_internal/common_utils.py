@@ -297,7 +297,7 @@ if os.getenv("SLOW_TESTS_FILE", ""):
 if os.getenv("DISABLED_TESTS_FILE", ""):
     disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
-NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', torch._C._get_privateuse1_backend_name())
+NATIVE_DEVICES = ('cpu', 'cuda', 'xpu', 'meta', 'mps', torch._C._get_privateuse1_backend_name())
 
 # used for managing devices testing for torch profiler UTs
 # for now cpu, cuda and xpu are added for testing torch profiler UTs
@@ -329,9 +329,10 @@ def extract_test_fn() -> Optional[Callable]:
             self_val = frame.f_locals["self"]
             if isinstance(self_val, unittest.TestCase):
                 test_id = self_val.id()
-                test_name = test_id.split('.')[2]
-                test_fn = getattr(self_val, test_name).__func__
-                return test_fn
+                *_, cls_name, test_name = test_id.rsplit('.', 2)
+                if cls_name == type(self_val).__name__ and test_name.startswith("test"):
+                    test_fn = getattr(self_val, test_name).__func__
+                    return test_fn
     except Exception:
         pass
     return None
@@ -5764,3 +5765,16 @@ def recover_orig_fp32_precision(fn):
             torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
 
     return recover()(fn)
+
+def skipIfPythonVersionMismatch(predicate):
+    vi = sys.version_info
+
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if predicate(vi.major, vi.minor, vi.micro):
+                return fn(self, *args, **kwargs)
+            else:
+                raise unittest.SkipTest("Python version mismatch")
+        return wrap_fn
+    return dec_fn

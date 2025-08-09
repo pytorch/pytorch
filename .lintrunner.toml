@@ -39,16 +39,16 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'flake8==6.1.0',
-    'flake8-bugbear==23.3.23',
-    'flake8-comprehensions==3.15.0',
+    'flake8==7.3.0',
+    'flake8-bugbear==24.12.12',
+    'flake8-comprehensions==3.16.0',
     'flake8-executable==2.1.3',
-    'flake8-logging-format==0.9.0',
-    'flake8-pyi==23.3.1',
-    'flake8-simplify==0.19.3',
+    'flake8-logging-format==2024.24.12',
+    'flake8-pyi==25.5.0',
+    'flake8-simplify==0.22.0',
     'mccabe==0.7.0',
-    'pycodestyle==2.11.1',
-    'pyflakes==3.1.0',
+    'pycodestyle==2.14.0',
+    'pyflakes==3.4.0',
     'torchfix==0.4.0 ; python_version >= "3.9" and python_version < "3.13"',
 ]
 
@@ -158,16 +158,16 @@ init_command = [
     'mypy==1.16.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
-    'types-pyyaml==6.0.1',
+    'types-pyyaml==6.0.2',
     'types-tabulate==0.8.8',
     'types-protobuf==5.29.1.20250403',
     'types-setuptools==79.0.0.20250422',
     'types-jinja2==2.11.9',
     'types-colorama==0.4.6',
-    'filelock==3.13.1',
+    'filelock==3.18.0',
     'junitparser==2.1.1',
-    'rich==10.9.0',
-    'pyyaml==6.0.1',
+    'rich==14.1.0',
+    'pyyaml==6.0.2',
     'optree==0.13.0',
     'dataclasses-json==0.6.7',
     'pandas==2.2.3',
@@ -1111,7 +1111,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0.1',
+    'pyyaml==6.0.2',
 ]
 
 [[linter]]
@@ -1133,7 +1133,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0.1',
+    'pyyaml==6.0.2',
 ]
 
 [[linter]]
