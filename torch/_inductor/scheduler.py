@@ -4315,10 +4315,6 @@ class Scheduler:
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
 
-        # Currently graph partition only brings benefit to cudagraph
-        if not torch._inductor.config.triton.cudagraphs:
-            return False
-
         # avoid duplicating logs when should_partition is called multiple times
         # on the same node
         def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
