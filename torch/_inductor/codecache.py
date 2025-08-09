@@ -3622,9 +3622,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
