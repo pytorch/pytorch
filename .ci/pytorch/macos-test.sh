@@ -175,6 +175,8 @@ checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
 
+  pip install transformers==4.54.0
+
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
