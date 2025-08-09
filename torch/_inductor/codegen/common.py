@@ -484,6 +484,10 @@ def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
 
 @functools.cache
 def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
@@ -492,6 +496,7 @@ def init_backend_registration() -> None:
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -539,6 +544,14 @@ def init_backend_registration() -> None:
             CppWrapperMps,
         )
 
+    if get_scheduling_for_device("mtia") is None:
+        register_backend_for_device(
+            "mtia",
+            TritonScheduling,
+            PythonWrapperMtia,
+            CppWrapperGpu,
+        )
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
@@ -584,6 +597,7 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     return device_op_overrides_dict[device]

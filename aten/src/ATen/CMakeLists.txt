@@ -247,6 +247,50 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
+
+# FBGEMM GenAI
+IF(USE_FBGEMM_GENAI)
+  set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
+  set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+
+  if(USE_ROCM)
+    # Only include the kernels we want to build to avoid increasing binary size.
+    file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
+      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+    set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+    # Add additional HIPCC compiler flags for performance
+    set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
+      -mllvm
+      -amdgpu-coerce-illegal-types=1
+      -mllvm
+      -enable-post-misched=0
+      -mllvm
+      -greedy-reverse-local-assignment=1
+      -fhip-new-launch-api)
+
+    hip_add_library(
+      fbgemm_genai STATIC
+      ${fbgemm_genai_native_rocm_hip}
+      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+
+    target_include_directories(fbgemm_genai PUBLIC
+      # FBGEMM version of Composable Kernel is used due to some customizations
+      ${FBGEMM_THIRD_PARTY}/composable_kernel/include
+      ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
+      ${FBGEMM_GENAI_DIR}/include/
+      ${FBGEMM_GENAI_DIR}/common/include/
+    )
+  endif()
+endif()
+
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
 
@@ -395,6 +439,7 @@ if(USE_ROCM)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
   _pytorch_rocm_generate_ck_conf()
@@ -659,21 +704,17 @@ if(USE_MPS)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
-            string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
-            metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
-                          DEPENDS kernels_basic.metallib kernels_bfloat.metallib
+                          DEPENDS kernels_basic.metallib
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib metallib_dummy.cpp)
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal})
