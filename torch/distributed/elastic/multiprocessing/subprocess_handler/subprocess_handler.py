@@ -11,6 +11,8 @@ import sys
 from subprocess import Popen
 from typing import Any, Optional
 
+from torch.numa.binding import maybe_wrap_command_with_numa_bindings, NumaOptions
+
 
 __all__ = ["SubprocessHandler"]
 
@@ -39,6 +41,7 @@ class SubprocessHandler:
         stdout: Optional[str],
         stderr: Optional[str],
         local_rank_id: int,
+        numa_options: Optional[NumaOptions],
     ):
         self._stdout = open(stdout, "w") if stdout else None
         self._stderr = open(stderr, "w") if stderr else None
@@ -47,6 +50,15 @@ class SubprocessHandler:
         env_vars.update(env)
 
         args_str = (entrypoint, *[str(e) for e in args])
+        args_str = (
+            maybe_wrap_command_with_numa_bindings(
+                command_args=args_str,
+                gpu_index=local_rank_id,
+                numa_options=numa_options,
+            )
+            or args_str
+        )
+
         self.local_rank_id = local_rank_id
         self.proc: Popen = self._popen(args_str, env_vars)
 
