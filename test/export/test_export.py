@@ -6349,7 +6349,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             efoo = torch.export.export(
                 foo,
                 inputs,
-                dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
+                dynamic_shapes={
+                    "kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}, None, None]
+                },
             )
             self.assertEqual(
                 [out.shape for out in efoo.module()(*inputs)],
