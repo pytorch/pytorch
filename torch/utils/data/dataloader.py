@@ -1183,7 +1183,6 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
                     i,
                     self._num_workers,
                     self._persistent_workers,
-                    self._shared_seed,
                 ),
                 daemon=True,
             )
@@ -1194,9 +1193,6 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
         self._initialize_pin_memory()
 
         self._reset(loader, first_iter=True)
-
-    # Threading-specific implementation uses the base class method
-    # No overrides needed as the base class handles all common logic
 
     def __del__(self):
         self._shutdown_workers()
