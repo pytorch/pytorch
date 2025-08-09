@@ -62,6 +62,7 @@ from ..source import (
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    SkipGuardSource,
 )
 from ..utils import (
     check_constant_args,
@@ -303,6 +304,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
@@ -1122,25 +1130,12 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        if name == "__func__":
-            # self.source points to the source of the function object and not
-            # the method object
-            return VariableTracker.build(tx, self.fn, self.source)
+        source = self.source and AttrSource(self.source, name)
         if name == "__self__":
             return self.obj
+        if name == "__func__":
+            return VariableTracker.build(tx, self.fn, source)
         return super().var_getattr(tx, name)
-
-    def reconstruct(self, codegen):
-        if not self.obj.source or not self.source:
-            raise NotImplementedError
-
-        def get_bound_method():
-            codegen(self.source)
-            codegen.extend_output(codegen.create_load_attrs("__get__"))
-
-        codegen.add_push_null(get_bound_method)
-        codegen(self.obj.source)
-        codegen.extend_output(create_call_function(1, False))
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
