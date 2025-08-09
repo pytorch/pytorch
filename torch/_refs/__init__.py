@@ -2780,7 +2780,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+    )
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
