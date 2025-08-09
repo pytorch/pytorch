@@ -895,7 +895,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and not ir.IRNode.is_realized_node(n)
+        return isinstance(n, ir.IRNode) and not isinstance(
+            n,
+            (
+                ir.ComputedBuffer,
+                ir.InputsKernel,
+                ir.InputBuffer,
+                ir.TemplateBuffer,
+            ),
+        )
 
     # kwargs and args may include a container of node, for example torch.cat([t1, t2])
     # flatten them before search the unrealized nodes
