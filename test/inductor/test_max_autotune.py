@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
+    skipIfRocmNotEnoughMemory,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -833,6 +834,8 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    # Some ROCm GPUs don't have enough VRAM to run all autotune configurations and padding benchmarks
+    @skipIfRocmNotEnoughMemory(30)
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -885,6 +888,8 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
+    # Some ROCm GPUs don't have enough VRAM to run all autotune configurations and padding benchmarks
+    @skipIfRocmNotEnoughMemory(30)
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 2048), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((2048, 768), (768, 1), device=GPU_TYPE)
