@@ -132,7 +132,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             break
 
     os.mkdir(f"{folder}/cuda_wheel")
-    os.system(f"cd {folder}/tmp/; zip -r {folder}/cuda_wheel/{wheelname} *")
+    os.system(f"wheel pack {folder}/tmp/ -d {folder}/cuda_wheel/")
     shutil.move(
         f"{folder}/cuda_wheel/{wheelname}",
         f"{folder}/{wheelname}",
