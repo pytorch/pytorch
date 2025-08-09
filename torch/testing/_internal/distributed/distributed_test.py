@@ -459,6 +459,14 @@ def require_world_size(world_size):
     return lambda func: func
 
 
+def require_exact_world_size(world_size):
+    if int(os.environ["WORLD_SIZE"]) != world_size:
+        return skip_but_pass_in_sandcastle(
+            f"Test requires an exact world size of {world_size:d}"
+        )
+    return lambda func: func
+
+
 @contextmanager
 def _lock():
     TEMP_DIR = os.environ["TEMP_DIR"]
@@ -921,8 +929,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
-        @require_world_size(4)
-        @skip_if_lt_x_gpu(4)
+        @require_exact_world_size(4)
         def test_new_subgroups_with_group_param(self):
             # Initialize global test environment
             self._init_global_test()
@@ -967,9 +974,10 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
+            expected_msg = f"The world size ({dist.get_world_size()}) must be divisible by 'group_size=3'"
             with self.assertRaisesRegex(
                 ValueError,
-                re.escape("The world size (4) must be divisible by 'group_size=3'"),
+                re.escape(expected_msg),
             ):
                 dist.new_subgroups(3)
 
@@ -1247,10 +1255,27 @@ class DistributedTest:
                     (global_avg_period, world_size),
                 ]
             )
+
+            # Record the process group count before creating the averager to get baseline
+            pg_count_before = dist.get_pg_count()
+
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
-            self.assertEqual(dist.get_pg_count(), len(period_group_size_dict))
+
+            # Calculate how many new process groups should have been created
+            # new_subgroups(group_size) creates world_size // group_size process groups
+            # For group_size == world_size, it reuses the existing default process group
+            expected_new_groups = 0
+            for period, group_size in period_group_size_dict.items():
+                if group_size != world_size:
+                    expected_new_groups += world_size // group_size
+                # group_size == world_size reuses default group, adds 0 new groups
+
+            # Check that the expected number of new groups were created
+            pg_count_after = dist.get_pg_count()
+            actual_new_groups = pg_count_after - pg_count_before
+            self.assertEqual(actual_new_groups, expected_new_groups)
 
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
