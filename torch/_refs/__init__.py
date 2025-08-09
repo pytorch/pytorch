@@ -385,7 +385,11 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+        is_nested_int,
+    )
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -407,16 +411,24 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            # if both 1, or statically known the same, we rather pick non-broadcast path.
-            if guard_or_false(common_shape[idx] == shape[idx]):
-                continue
-            elif guard_or_false(common_shape[idx] == 1):
+            if is_nested_int(shape[idx]):
+                # maintian nested int behaviour added in PR 145957.
+                if is_nested_int(common_shape[idx]) and guard_or_false(
+                    shape[idx] == common_shape[idx]
+                ):
+                    continue
+            else:
+                if guard_or_false(shape[idx] == common_shape[idx]):
+                    continue
+
+            if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_or_false(shape[idx] == 1):
+
+            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
                 # broadcast case .
                 continue
             else:
@@ -2780,10 +2792,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2837,7 +2846,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
                 # through), and is load bearing for our Inductor lowerings
                 # (which assume that size oblivious tests are OK to determine
                 # if a shape is permissibly zero.)
-                guard_size_oblivious(tensor.shape[0] == 0),
+                guard_or_false(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
