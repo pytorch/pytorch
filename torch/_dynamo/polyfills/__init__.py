@@ -318,6 +318,12 @@ def foreach_map_fn(*args):
     if not at_least_one_list:
         return op(*args[1:])
 
+    # Special handling for torch.mm
+    if op is torch.mm:
+        if len(new_args) != 2:
+            raise ValueError("torch.mm requires exactly two argument lists")
+        return [torch.mm(a, b) for a, b in zip(new_args[0], new_args[1])]
+
     out = []
     for unpacked in zip(*new_args):
         out.append(op(*unpacked))
