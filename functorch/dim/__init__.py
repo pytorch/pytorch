@@ -24,6 +24,7 @@ from . import op_properties
 # use dict to avoid writing C++ bindings for set
 pointwise = dict.fromkeys(op_properties.pointwise, True)
 
+
 class _Tensor:
     # fast path around slow wrapping/unwrapping logic for simply queries used
     # by the implementation...
@@ -66,9 +67,11 @@ def cat(tensors, dim, new_dim):
 
 _wrap = _C._wrap
 
+
 def _def(name, *args, **kwargs):
     orig = getattr(torch.Tensor, name)
     setattr(_Tensor, name, _C._instancemethod(_wrap(orig, *args, **kwargs)))
+
 
 t__getitem__ = _C._instancemethod(_C.__getitem__)
 stack = _C.stack
