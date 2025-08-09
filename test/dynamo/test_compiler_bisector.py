@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from contextlib import contextmanager
 from importlib import import_module
 

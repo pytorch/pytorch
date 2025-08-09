@@ -54,8 +54,9 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 from torch.testing._internal.logging_utils import logs_to_string
-from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._python_dispatch import TorchDispatchMode
+
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 

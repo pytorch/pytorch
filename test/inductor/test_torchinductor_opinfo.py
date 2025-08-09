@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
-    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
@@ -50,10 +49,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+
 
 try:
     try:

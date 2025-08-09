@@ -11,7 +11,6 @@ from torch._dynamo.test_case import TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
-
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32

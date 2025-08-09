@@ -40,9 +40,10 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -54,8 +55,6 @@ if IS_WINDOWS and IS_CI:
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
-
-
 
 
 aten = torch.ops.aten

@@ -31,9 +31,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+
 
 def nontraceable_subclass(c):
     return torch._dynamo.config.patch("nontraceable_tensor_subclasses", {c})
@@ -142,7 +143,6 @@ def get_view_test_cases():
 
 
 VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
-
 
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)

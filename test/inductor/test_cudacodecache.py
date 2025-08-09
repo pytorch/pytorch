@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
-import unittest
 
 import torch
 from torch._inductor.async_compile import AsyncCompile
@@ -11,7 +10,6 @@ from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
-
 
 
 _SOURCE_CODE = r"""

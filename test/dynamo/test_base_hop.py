@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 import unittest.mock as mock
-
 import torch
 import torch._dynamo.test_case
 import torch._functorch.config
@@ -13,7 +11,6 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
-
 
 
 def normalize_graph(gm):

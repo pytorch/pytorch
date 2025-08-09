@@ -10,6 +10,7 @@ from torch._guards import CompileId
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
+
 class CallbackTests(TestCase):
     def setUp(self) -> None:
         super().setUp()

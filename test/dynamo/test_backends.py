@@ -19,8 +19,6 @@ from torch.testing._internal.common_utils import skipIfHpu
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-
-
 class Seq(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
