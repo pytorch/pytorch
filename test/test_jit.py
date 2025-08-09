@@ -3,6 +3,13 @@
 
 import torch
 
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR and SEED depend on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
 # do not run these test files directly.
@@ -97,7 +104,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -158,6 +165,7 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -201,6 +209,7 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
+assert GRAPH_EXECUTOR
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
