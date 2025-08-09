@@ -2200,7 +2200,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
-    @requires_cuda
+    @requires_cuda_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159

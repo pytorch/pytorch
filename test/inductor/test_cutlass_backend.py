@@ -159,7 +159,7 @@ def select_no_algorithm(*args, **kwargs):
 class TestCutlassBackend(TestCase):
     def setUp(self):
         if not HAS_CUDA_AND_TRITON:
-            self.skipTest("CUDA is not available")
+            self.skipTest("CUDA and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
 

@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -556,7 +556,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):
@@ -1447,7 +1447,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_return_none(self):
         from torch.nn import functional as F
 
