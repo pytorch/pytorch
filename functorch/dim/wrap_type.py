@@ -12,10 +12,6 @@ from types import (
     WrapperDescriptorType,
 )
 
-from functorch._C import dim as _C
-
-
-_wrap_method = _C._wrap_method
 
 FUNC_TYPES = (
     FunctionType,
@@ -26,8 +22,19 @@ FUNC_TYPES = (
 PROPERTY_TYPES = (GetSetDescriptorType, property)
 
 
+def _py_wrap_method(orig, __torch_function__):
+    def impl(*args, **kwargs):
+        return __torch_function__(orig, None, args, kwargs)
+
+    # Copy metadata from original function
+    impl.__name__ = getattr(orig, "__name__", "")
+    impl.__doc__ = getattr(orig, "__doc__", None)
+
+    return impl
+
+
 def wrap_type(to_patch, pattern, __torch_function__):
-    wrap_method = _wrap_method
+    wrap_method = _py_wrap_method
 
     all = {}
     for t in reversed(pattern.mro()[:-1]):  # skip object
