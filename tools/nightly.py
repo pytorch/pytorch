@@ -436,7 +436,7 @@ class Venv:
             check=check,
             text=True,
             encoding="utf-8",
-            env={**self._env, **env},
+            env={**os.environ, **self._env, **env},
             **popen_kwargs,
         )
 
@@ -481,7 +481,7 @@ class Venv:
             check=check,
             text=True,
             encoding="utf-8",
-            env={**self._env, **env, "UV_PYTHON": str(python)},
+            env={**os.environ, **self._env, **env, "UV_PYTHON": str(python)},
             **popen_kwargs,
         )
 
