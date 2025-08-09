@@ -100,6 +100,15 @@ log = logging.getLogger(__name__)
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
 
+def _cap_stages(num_stages: int) -> int:
+    is_amd = torch.version.hip is not None
+    if is_amd:
+        # AMD GPUs supports 1 stage.
+        return 1
+    else:
+        return num_stages
+
+
 def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
     fn_strip_name = re.sub(triton_name_sub, "(", source_code.strip(), count=1)
@@ -598,14 +607,28 @@ class CachingAutotuner(KernelInterface):
 
             launchers = []
             exc = None
+            kernel_name = self.inductor_meta.get("kernel_name", None)
+            triton_config = None
+            compile_meta = None
+            inductor_meta = None
             for result in self.compile_results:
+                triton_config = result.config
+                compile_meta = result.compile_meta
+                inductor_meta = result.inductor_meta
                 try:
                     launchers.append(result.make_launcher())
 
                 except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
                     exc = e
         if len(launchers) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            raise RuntimeError(
+                f"No valid triton configs. {type(exc).__name__}: {exc}\n"
+                f"kernel_name:{kernel_name}\n"
+                f"triton_config={triton_config}\n"
+                f"compile_meta={compile_meta}\n"
+                f"inductor_meta={inductor_meta}\n"
+            )
+
         self.launchers = launchers
 
     def prepare_for_pickle(self) -> tuple[Any, Any, Any, Any, Any]:
@@ -673,7 +696,7 @@ class CachingAutotuner(KernelInterface):
             ):
                 compile_meta["constants"][arg_name] = getattr(cfg, arg_name)
         compile_meta["num_warps"] = cfg.num_warps
-        compile_meta["num_stages"] = cfg.num_stages
+        compile_meta["num_stages"] = _cap_stages(cfg.num_stages)
         if HAS_WARP_SPEC:
             compile_meta["num_consumer_groups"] = getattr(cfg, "num_consumer_groups", 0)
             compile_meta["num_buffers_warp_spec"] = getattr(
@@ -2884,7 +2907,7 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     config_dict = {
         **config.kwargs,
         "num_warps": config.num_warps,
-        "num_stages": config.num_stages,
+        "num_stages": _cap_stages(config.num_stages),
     }
     if HAS_WARP_SPEC:
         config_dict.update(
