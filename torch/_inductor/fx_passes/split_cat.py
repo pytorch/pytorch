@@ -307,8 +307,6 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     cat_node = match.nodes[0]
     graph = match.graph
     tensors = get_arg_value(cat_node, 0, "tensors")

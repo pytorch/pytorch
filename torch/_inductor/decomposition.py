@@ -34,11 +34,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    guard_or_false,
-    guard_size_oblivious,
-    statically_known_true,
-)
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
 from .utils import (
