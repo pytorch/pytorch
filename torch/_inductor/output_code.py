@@ -203,8 +203,6 @@ def cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
-    print("GALVEZ:cudagraph_post_compile")
-
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
         static_input_idxs = fx_kwargs["static_input_idxs"]
@@ -212,7 +210,6 @@ def cudagraph_post_compile(
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
 
-        # What does this do?
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
@@ -221,7 +218,6 @@ def cudagraph_post_compile(
 
         current_callable = compiled_graph.current_callable
         assert current_callable is not None
-        # Okay, I just need to pass compiled_graph into here, somehow...
         compiled_graph.current_callable = cudagraphify(
             current_callable,
             static_input_idxs=static_input_idxs or (),
@@ -391,8 +387,6 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
         return {**constants, **frozen_params}
 
 
-# So this is not being called more than once.
-# I imagine that this is being hit twice...
 @dataclasses.dataclass
 class CompiledFxGraph(OutputCode):
     """
@@ -454,7 +448,6 @@ class CompiledFxGraph(OutputCode):
         inductor_post_grad_graph_str: str,
         compiled_fn_runner: Optional[Any] = None,
     ) -> None:
-        # TODO: How is this 
         self.current_callable = current_callable
         self.compiled_fn_runner = compiled_fn_runner
         self.recursively_apply_fns = (
@@ -545,7 +538,6 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
-                # What cases might have complex memory overlap?
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
@@ -589,7 +581,6 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
-            # This does not have access to my GraphModule
             return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
@@ -615,11 +606,6 @@ class CompiledFxGraph(OutputCode):
         assert graph_kwargs["is_backward"] is not None
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
-
-        print("GALVEZ:post_compile")
-
-        # import ipdb; ipdb.set_trace()
-
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.

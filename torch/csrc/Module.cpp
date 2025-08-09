@@ -1574,7 +1574,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_userEnabledFlashSDP,
      METH_NOARGS,
      nullptr},
-    // hooray!
     {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
     {"_get_sdp_priority_order",
      THPModule_sDPPriorityOrder,

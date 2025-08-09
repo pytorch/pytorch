@@ -365,7 +365,6 @@ def get_builtins_dict(global_scope):
     return f_builtins
 
 
-# TODO: Can I access the OutputGraph in a torch.compile backend?
 class OutputGraph(OutputGraphGuardsState):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the

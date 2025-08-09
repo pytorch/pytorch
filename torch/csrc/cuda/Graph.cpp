@@ -108,7 +108,6 @@ void THCPGraph_init(PyObject* module) {
               void* ptr = reinterpret_cast<void*>(p.first);
               dynamic_tensors_ptrs2.emplace_back(ptr, p.second);
             }
-
             self.become_dynamic(dynamic_tensors_ptrs, graph2, dynamic_tensors_ptrs2);
           },
          py::arg("dynamic_tensors"),

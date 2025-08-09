@@ -332,8 +332,6 @@ def get_container(device_index: int) -> TreeManagerContainer:
     container_dict = get_obj(local, "tree_manager_containers")
     lock = get_obj(local, "tree_manager_locks")[device_index]
 
-    # What does the lock do if the lock sits in thread-local storage?
-    # Inforce sequential consistency?
     with lock:
         if device_index not in container_dict:
             container_dict[device_index] = TreeManagerContainer(device_index)
@@ -362,7 +360,6 @@ def is_cudagraph_capture_sizes(int_key: Union[int, tuple[int, ...]]) -> bool:
 
 def cudagraphify_impl(
     model: ModelType,
-    # Some inputs are ints, while others are SymInts, hmmm....
     inputs: list[InputType],
     static_input_idxs: Sequence[int],
     *args: Any,
@@ -381,8 +378,6 @@ def cudagraphify_impl(
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
         nonlocal has_warn
 
-        # Okay, so these form a key that we use to create different
-        # cuda graphs.
         int_key = get_ints(inputs)
 
         if not is_cudagraph_capture_sizes(int_key):
@@ -392,7 +387,6 @@ def cudagraphify_impl(
         if fn is not None:
             return fn(inputs)
 
-        # Yeah, recording a graph key
         if int_key is None:
             log.info("recording cudagraph tree for graph without symints")
         else:
@@ -407,7 +401,6 @@ def cudagraphify_impl(
         new_static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
         copy_misaligned_inputs(inputs, check_input_idxs)
 
-        # here is thre real cudagraphify
         fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
         # cudagraph will already clones input locally, no need to copy back
         mutated_input_idxs: OrderedSet[int] = OrderedSet()
@@ -464,7 +457,6 @@ def cudagraphify(
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
 
-    # What is this context manager good for?
     with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
         manager = get_container(device_index).get_tree_manager()
 
@@ -570,7 +562,6 @@ def maybe_deref(
     return r, weak_ref.data_ptr()
 
 
-# Be worried about this.
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(
     device: int, mem_pool: tuple[int, int], stream: torch.cuda.Stream
@@ -986,7 +977,6 @@ class CUDAGraphNode:
         self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
 
         # TODO: register_generator_state should potentially take explicit device
-        # TODO: Understand the purpose of this
         with torch.cuda.device(self.device):
             for rng_state in rng_states:
                 self.graph.register_generator_state(rng_state)
@@ -998,8 +988,6 @@ class CUDAGraphNode:
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
 
-        # Okay, so he reconstructs the state of this cuda
-        # graph. Should I do this as well? Unclear...
         self.reconstructed_inputs: list[InputType] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)
@@ -1116,7 +1104,6 @@ class CUDAGraphNode:
         return outputs
 
     def run(self, new_inputs: list[InputType]) -> OutputType:
-        # Okay, here is what I need to play around with.
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
@@ -1679,7 +1666,6 @@ class CUDAGraphNode:
         self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs: list[InputType] = []
 
-        # The recording inputs get allocated within this cudagraph itself...
         with (
             warnings.catch_warnings(record=True),
             torch.cuda.device(self.device),
@@ -1694,14 +1680,11 @@ class CUDAGraphNode:
                     assert isinstance(inp, (int, torch.Generator))
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
-                    # static_input does an allocation. Therefore, you
-                    # could say that it forbids inputs from
-                    # overlapping...
+                    # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
                 else:
                     recording_inputs.append(inp)
 
-            # Why is it important to do this copy here?
             self._copy_inputs_and_remove_from_src(recording_inputs, inputs)
 
         return recording_inputs
@@ -1932,7 +1915,9 @@ class CUDAGraphTreeManager:
         # warn only once if a function mutates inputs
         self.warned_mutation: OrderedSet[FunctionID] = OrderedSet()
 
-        # Good to know:
+        # It is possible that we could alleviate this problem. See
+        # discussion at https://github.com/pytorch/pytorch/pull/158352
+
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -1944,7 +1929,7 @@ class CUDAGraphTreeManager:
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
 
-            # Keeps Memory Pool Alive <- Clever
+            # Keeps Memory Pool Alive
             self.graph: Optional[torch.cuda.CUDAGraph] = torch.cuda.CUDAGraph()
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 

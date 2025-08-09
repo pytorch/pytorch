@@ -345,8 +345,6 @@ class CudagraphCachedInfo:
     placeholders: Sequence[PlaceholderInfo]
     stack_traces: list[Optional[str]]
     cudagraph_fail_reasons: list[str]
-    # gm: GraphModule #TODO!
-    # outputs_only_for_side_effects: None # TODO!
 
 
 @dataclasses.dataclass(frozen=True)

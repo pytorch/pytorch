@@ -808,7 +808,6 @@ class SideEffects:
             )
         return self.ca_final_callbacks_var
 
-    # Can I inspect this generated code somehow?
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
@@ -1101,7 +1100,6 @@ class SideEffects:
                     cg.call_function(1, False)
                     cg.pop_top()
             elif isinstance(var, variables.RandomVariable):
-                # This one is interes
                 # set correct random seed state
                 def gen_fn():
                     cg(var.source)  # type: ignore[attr-defined]
