@@ -2035,8 +2035,12 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
+            backend_options = torch._C._distributed_c10d.Backend.Options("xccl")
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
+            backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
-                backend_prefix_store, group_rank, group_size
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
