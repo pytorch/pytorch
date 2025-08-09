@@ -351,10 +351,10 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-You can run the same linting steps that are used in CI locally via `make`:
+You can run the same linting steps that are used in CI locally via `lintrunner`:
 
 ```bash
-make lint
+lintrunner
 ```
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
