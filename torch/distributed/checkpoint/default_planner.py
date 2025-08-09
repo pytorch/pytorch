@@ -347,15 +347,17 @@ class DefaultLoadPlanner(LoadPlanner):
                 # Set it back to None so that later we can save to a new version.
                 _version._derived_version = None
 
-        return create_default_local_load_plan(
+        local_plan = create_default_local_load_plan(
             self.state_dict, self.metadata, not self.allow_partial_load
         )
+        self.local_plan = local_plan
+        return LoadPlan(items=[])
 
     def create_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
         return create_default_global_load_plan(global_plan)
 
     def finish_plan(self, new_plan: LoadPlan) -> LoadPlan:
-        return new_plan
+        return self.local_plan
 
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:
         if self.flatten_state_dict:
