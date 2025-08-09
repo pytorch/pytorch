@@ -1583,6 +1583,16 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and len(graph.scheduler.nodes) == 1
+                    ):
+                        # no benefits from cudagraph when there is only 1 fused kernel
+                        V.graph.disable_cudagraphs_reason = (
+                            "only one kernel in generated code"
+                        )
+
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     return CompiledFxGraph(
