@@ -1150,12 +1150,14 @@ class TagSafetyChecks(RecursiveDictTagTests):
 
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
+            c = 2
+
             def __init__(self):
                 super().__init__()
                 self.a = 4
 
             def forward(self, x):
-                return x + self.a
+                return x + self.a + self.c
 
         foo = Foo()
 
