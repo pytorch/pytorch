@@ -41,32 +41,16 @@ inline namespace CPU_CAPABILITY {
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
-template <int index, bool mask_val>
+template <int index>
 struct BlendRegs {
   static float32x4_t impl(
       const float32x4_t& a,
       const float32x4_t& b,
-      float32x4_t& res);
-};
-
-template <int index>
-struct BlendRegs<index, true> {
-  static float32x4_t impl(
-      const float32x4_t& a,
-      const float32x4_t& b,
-      float32x4_t& res) {
-    return vsetq_lane_f32(vgetq_lane_f32(b, index), res, index);
-  }
-};
-
-template <int index>
-struct BlendRegs<index, false> {
-  static float32x4_t impl(
-      const float32x4_t& a,
-      const float32x4_t& b,
-      float32x4_t& res) {
-    return vsetq_lane_f32(vgetq_lane_f32(a, index), res, index);
-  }
+      float32x4_t& res,
+      bool mask_val
+    ) {
+      return vsetq_lane_f32(vgetq_lane_f32(mask_val ? b : a, index), res, index);
+    }
 };
 
 template <>
@@ -94,19 +78,15 @@ class Vectorized<float> {
   operator float32x4_t() const {
     return values;
   }
-  template <int64_t mask>
   static Vectorized<float> blend(
       const Vectorized<float>& a,
-      const Vectorized<float>& b) {
+      const Vectorized<float>& b,
+      int64_t mask) {
     Vectorized<float> vec;
-    vec.values = BlendRegs < 0,
-    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
-    vec.values = BlendRegs < 1,
-    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
-    vec.values = BlendRegs < 2,
-    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
-    vec.values = BlendRegs < 3,
-    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs <0>::impl(a.values, b.values, vec.values, (mask & 0x01) != 0);
+    vec.values = BlendRegs <1> ::impl(a.values, b.values, vec.values, (mask & 0x02) != 0);
+    vec.values = BlendRegs <2> ::impl(a.values, b.values, vec.values, (mask & 0x04) != 0);
+    vec.values = BlendRegs <3> ::impl(a.values, b.values, vec.values, (mask & 0x08) != 0);
     return vec;
   }
   static Vectorized<float> blendv(

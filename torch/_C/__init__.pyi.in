@@ -1165,6 +1165,7 @@ def _show_config() -> str: ...  # THPModule_showConfig
 def _cxx_flags() -> str: ...  # THPModule_cxxFlags
 def _parallel_info() -> str: ...  # THPModule_parallelInfo
 def _get_cpu_capability() -> str: ...  # THPModule_getCpuCapability
+def _get_sve_len() -> _int: ...  # THPModule_getCpuSveLen
 def _set_backcompat_broadcast_warn(
     arg: _bool,
 ) -> None: ...  # THPModule_setBackcompatBroadcastWarn
