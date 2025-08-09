@@ -260,8 +260,9 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
-                       "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
@@ -322,7 +323,6 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
   "USE_DISTRIBUTED" OFF)

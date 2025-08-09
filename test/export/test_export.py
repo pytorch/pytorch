@@ -8913,7 +8913,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             self.assertExpectedInline(
                 str(ep_decompose_linear.graph_module.code).strip(),
                 """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None

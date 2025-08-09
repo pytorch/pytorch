@@ -331,6 +331,9 @@ class BlockDescriptorOptions:
 
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
+        if V.kernel.no_x_dim:
+            assert range_trees[0].prefix == "x"
+            final_shape.pop(0)
 
         reduction_ndim = V.kernel.num_reduction_dims
         if (
@@ -411,6 +414,10 @@ class BlockDescriptorOptions:
                             sympy_subs(self.block_shape[idx], block_to_max),
                         )
                     )
+                )
+                and not (
+                    V.kernel.no_x_dim
+                    and self.block_shape[idx] == TritonSymbols.block_sizes[SymT.XBLOCK]
                 )
             )
         ]
@@ -1704,6 +1711,17 @@ class TMACompatibilityChecker:
             )
             return False
 
+        # `no_x_dim` => XBLOCK=1, and for reductions this means only one element
+        # is to be stored . However the TMA API requires that
+        # the store will be 16 byte aligned, which is not attainable with a single
+        # element
+        if self.for_store and self.kernel.no_x_dim:
+            log.debug(
+                "%s stores with `no_x_dim` cannot load 16 bytes.",
+                self.failed_debug_prefix,
+            )
+            return False
+
         return True
 
     def are_block_parameters_compatible(
@@ -1923,7 +1941,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
     def init_cooperative_reduction_mask(self):
-        rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)[None, :]"
+        rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
+        if not self.no_x_dim:
+            rsplit_arange = f"{rsplit_arange}[None, :]"
         self.body.writeline(f"rsplit_arange = {rsplit_arange}")
 
         if self._has_constant_xmask():
@@ -1936,6 +1956,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 """
             )
         else:
+            assert not self.no_x_dim
             self.body.writeline(
                 "rsplit_mask = xmask if RSPLIT_IS_POWER_OF_2 else ((rsplit_arange < RSPLIT) & xmask)"
             )
@@ -1977,6 +1998,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def should_use_persistent_reduction(self) -> bool:
         return self.inside_reduction and V.choices.should_use_persistent_reduction(
             self.features, self.cooperative_reduction
+        )
+
+    def want_no_x_dim(self):
+        return (
+            self.persistent_reduction
+            and len(self.numels) == self.num_reduction_dims + 1
+            and self.fixed_config
+            and self.fixed_config["XBLOCK"] == 1
         )
 
     @property
@@ -3939,12 +3968,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            # Triton will not accept an OrderedSet for autotune_hints
             "grid_type": self._get_grid_type().__name__,
+            # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
+            "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
@@ -4099,6 +4129,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     val = self._get_persistent_RBLOCK(tree.numel)
                 code.writeline(f"{tree.prefix.upper()}BLOCK: tl.constexpr = {val}")
 
+            if tree.prefix == "x" and self.no_x_dim:
+                code.writeline("XBLOCK: tl.constexpr = 1")
+
     def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
         n = sum([int(not tree.is_reduction) for tree in self.range_trees])
         if self.cooperative_reduction:
@@ -4236,6 +4269,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # (We use the fact that BLOCK is required by triton to be a power of 2)
         if tree.is_reduction and self.persistent_reduction:
             max_block = self._get_persistent_RBLOCK(tree.numel)
+        elif tree.prefix == "x" and self.no_x_dim:
+            max_block = 1
         else:
             max_block = self.max_block(tree.prefix)
 
@@ -4446,6 +4481,11 @@ class TritonScheduling(SIMDScheduling):
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
+            if config.aot_inductor.model_name_for_generated_files:
+                # When AOTI compiles multiple submodules, we need to use the model name to
+                # distinguish kernel related symbols.
+                kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
+
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"

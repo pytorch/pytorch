@@ -413,6 +413,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_persistent_reduction is not None
             else self.should_use_persistent_reduction()
         )
+        self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
 
         # define this in a closure to make cache local to object
@@ -443,12 +444,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def index_dtype(self) -> str:
         return self.dtype_to_str(self.get_index_dtype_as_torch_dtype())
 
+    def want_no_x_dim(self) -> bool:
+        return False
+
     def construct_range_trees(
         self,
         pid_cache: Optional[dict[str, str]],
         inside_reduction: bool,
         is_reduction: bool,
         numels: dict[str, sympy.Expr],
+        no_x_dim: bool,
     ) -> list[IterationRangesRoot]:
         active_prefixes = OrderedSet(
             prefix for prefix in all_prefixes if prefix in numels
@@ -463,7 +468,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         grid_dims = ["x", "y", "z"]
         pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
-        if no_r_dim:
+        if no_x_dim:
+            tensor_dims = reduction_dims
+        elif no_r_dim:
             tensor_dims = pointwise_tensor_dims
         else:
             tensor_dims = pointwise_tensor_dims + reduction_dims
@@ -501,6 +508,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             self.inside_reduction,
             self.features.is_reduction(),
             self.numels,
+            self.no_x_dim,
         )
         self.range_trees.extend(range_trees)
 
@@ -1983,7 +1991,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -1998,7 +2006,7 @@ class SIMDScheduling(BaseScheduling):
         cls,
         tiling: Sequence[sympy.Expr],
         is_pointwise: bool,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         return cls.create_tiling(
             tiling if is_pointwise else [],
             tiling if not is_pointwise else [],
@@ -2010,7 +2018,7 @@ class SIMDScheduling(BaseScheduling):
         tiling: dict[str, sympy.Expr],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
@@ -2031,7 +2039,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         pointwise_numel,
         reduction_numel,
-    ) -> list[dict[str, tuple[sympy.Expr]]]:
+    ) -> list[immutable_dict[str, sympy.Expr]]:
         """
         Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
@@ -2039,7 +2047,7 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
         is_pointwise = reduction_numel == 1
-        tilings = OrderedSet[dict[str, sympy.Expr]]()
+        tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
@@ -2304,7 +2312,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
-        tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
+        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr]]] = []
         for (pw_split, pw_score), (red_split, red_score) in score_split:
             candidate = CandidateTiling(
                 cls.create_tiling(pw_split, red_split),
