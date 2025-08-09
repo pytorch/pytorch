@@ -1135,6 +1135,7 @@ REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
+    "dot": ops_wrapper("add"),
     "xor_sum": ops_wrapper("bitwise_xor"),
 }
 
@@ -1295,8 +1296,13 @@ class Reduction(Loops):
             )
             and config.split_reductions
         )
+
         if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
             # We don't support unbacked symints
+            return ReductionHint.DEFAULT, 1
+
+        if reduction_type == "dot":
+            # Don't split when doing native matmul
             return ReductionHint.DEFAULT, 1
 
         props = DeviceProperties.create(device)
@@ -1551,7 +1557,10 @@ class Reduction(Loops):
             and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
+            and not (reduction_type == "dot")
         ):
+            # When native matmul, don't unroll the dot reduction.
+
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
             return Pointwise.create(
@@ -1663,6 +1672,7 @@ class Reduction(Loops):
         return {
             "sum": zero,
             "prod": one,
+            "dot": zero,
             "xor_sum": zero,
             "any": zero,
             "welford_reduce": (zero, zero, zero),
@@ -4622,9 +4632,27 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-            sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs
-            )
+            # When doing native matmul, the codegen assumes the following loop order
+            #
+            # for z:
+            #  for y:
+            #   for x:
+            #    for r:
+            #      C[z,y,x] += A[z,y,r] * B[z,r,x]
+            #
+            # For now, the tiling and the loop order is fixed. This may not be the
+            # optimal loop order when strides does not align with this default order.
+            # Maybe sth we should modify tl.dot codegen to support random loop order
+            if self.get_reduction_type() == "dot":
+                order = list(range(len(sizes)))
+                sizes = sizes
+                reindex0 = same_reorder(order)
+                reindex1 = inverse_reorder(order)
+            else:
+                sizes, reindex0, reindex1 = self._apply_loop_reordering(
+                    x_vars, support_vars, sizes, memory_addrs
+                )
+
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
 

@@ -2718,6 +2718,9 @@ class AOTInductorTestsTemplate:
                 result_package = model_package(*inputs_on_device)
             self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "sin and mm are fused in native matmul"
+    )
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2735,9 +2738,11 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
         )
         model = Model()
+
+        # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
         self.check_model(
             model, example_inputs, atol=1e-4, rtol=1e-4
-        )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
+        )  
 
         if self.device == "mps":
             self.code_check_count(
@@ -4914,7 +4919,10 @@ class AOTInductorTestsTemplate:
             "target_size": None,
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
-
+    
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "matmul is generated"
+    )
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -5607,7 +5615,13 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(attach_weights, False, False)
         expected = model(test_inputs)
         output = runner_call(test_inputs)
-        self.assertEqual(expected, output)
+
+        if config.triton.enable_native_matmul:
+            atol, rtol = 2e-4, 2e-4
+        else :
+            atol, rtol = None, None 
+
+        self.assertEqual(expected, output, atol=atol, rtol=rtol)
 
     def test_weight_on_disk_legacy(self):
         class Model(torch.nn.Module):
