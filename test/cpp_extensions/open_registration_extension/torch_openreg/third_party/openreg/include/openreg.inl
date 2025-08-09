@@ -15,14 +15,29 @@ inline orError_t orLaunchKernel(
     orStream* stream,
     Func&& kernel_func,
     Args&&... args) {
-  if (!stream)
-    return orErrorUnknown;
+    if (!stream) {
+        return orErrorUnknown;
+    }
 
-  auto task = [func = std::forward<Func>(kernel_func),
-               args_tuple =
-                   std::make_tuple(std::forward<Args>(args)...)]() mutable {
-    std::apply(func, std::move(args_tuple));
-  };
+/*
+ * std::apply is only supported in C++17, so for C++11/14, std::bind is
+ * a more appropriate approach, but since the former has better performance,
+ * we use conditional macros to select different approaches for different
+ * C++ versions.
+ */
+#if __cplusplus >= 201703L
+    auto task = [
+        func = std::forward<Func>(kernel_func),
+        args_tuple = std::make_tuple(std::forward<Args>(args)...)
+    ]() mutable {
+        std::apply(func, std::move(args_tuple));
+    };
+#else
+    auto task = std::bind(
+        std::forward<Func>(kernel_func),
+        std::forward<Args>(args)...
+    );
+#endif
 
-  return internal::addTaskToStream(stream, std::move(task));
+    return internal::addTaskToStream(stream, std::move(task));
 }
