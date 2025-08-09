@@ -818,27 +818,38 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     return grad_in_strategy
 
 
-@register_op_strategy(
-    [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+def _common_norm_forward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common forward strategy logic for layer_norm and rms_norm."""
     mesh = op_schema.get_mesh_from_args()
 
-    # args must be: input, normalized_shape, weight, bias, eps
-    # for None weight and bias, their corresponding objects will
-    # be None as well. layer_norm_strategy returns one OpStrategy
-    # for the triple return values (out, mean, rstd).
-    assert len(op_schema.args_schema) == 5
-    (
-        input_strategy,
-        normalized_shape,
-        weight_strategy,
-        bias_strategy,
-        _,
-    ) = op_schema.args_schema
+    if not rms_norm:
+        # layer_norm args: input, normalized_shape, weight, bias, eps
+        # for None weight and bias, their corresponding objects will
+        # be None as well. layer_norm_strategy returns one OpStrategy
+        # for the triple return values (out, mean, rstd).
+        assert len(op_schema.args_schema) == 5
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            bias_strategy,
+            _,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: input, normalized_shape, weight, eps
+        assert len(op_schema.args_schema) == 4
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            _,
+        ) = op_schema.args_schema
+        bias_strategy = None
 
-    # the current layer norm implementation requires that all
+    # the current norm implementation requires that all
     # input DTensor's sharding must be in form of OpStrategy
     assert isinstance(input_strategy, OpStrategy)
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
@@ -847,7 +858,7 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
 
-    # we use OpStrategy because the output (out, mean, rstd)
+    # we use OpStrategy because the output values (out, mean, rstd)
     # should have the same placements
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -913,6 +924,22 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return output_strategy
+
+
+@register_op_strategy(
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema)
+
+
+@register_op_strategy(
+    [aten._fused_rms_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fused_rms_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema, rms_norm=True)
 
 
 def _common_norm_backward_strategy(
