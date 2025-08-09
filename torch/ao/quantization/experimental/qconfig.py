@@ -54,3 +54,6 @@ apot_qconfig_4bit = QConfig(
     activation=APoTFakeQuantize.with_args(b=4, k=2, dtype=torch.quint8),
     weight=APoTFakeQuantize.with_args(b=4, k=2, dtype=torch.qint8),
 )
+
+
+__all__ = ["default_symmetric_fake_quant", "default_weight_symmetric_fake_quant"]
