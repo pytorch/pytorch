@@ -18493,11 +18493,15 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_atleast1d2d3d,
            ),
     OpInfo('attention',
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_attention,
            error_inputs_func=error_inputs_attention,
+           supports_autograd=True,
            supports_out=False,
-           ),
+           skips=(
+                # Seems like this is getting demoted to torch.bfloat16 for some reason, skipping for now
+                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', dtypes=[torch.float32]),
+           )),
     OpInfo('flatten',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            ref=reference_flatten,

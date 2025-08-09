@@ -1055,6 +1055,8 @@
 
 - func: attention(Tensor query, Tensor key, Tensor value) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attention
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
