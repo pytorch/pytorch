@@ -1470,11 +1470,19 @@ class _InProcessFxCompile(FxCompile):
                                 )
 
                             serialized_extern_kernel_nodes = None
-                            if graph.extern_kernel_nodes:
-                                serialized_extern_kernel_nodes = (
-                                    graph.extern_node_serializer(
-                                        graph.extern_kernel_nodes
+                            extern_kernel_nodes = graph.extern_kernel_nodes or []
+                            for subgraph in graph.seen_subgraphs.values():
+                                if (
+                                    subgraph.graph
+                                    and subgraph.graph.extern_kernel_nodes
+                                ):
+                                    extern_kernel_nodes.extend(
+                                        subgraph.graph.extern_kernel_nodes
                                     )
+
+                            if extern_kernel_nodes:
+                                serialized_extern_kernel_nodes = (
+                                    graph.extern_node_serializer(extern_kernel_nodes)
                                 )
                                 output_code_log.debug(
                                     "Serialized Extern Kernel Nodes: \n%s",

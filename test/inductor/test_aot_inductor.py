@@ -6708,6 +6708,31 @@ class AOTInductorTestsTemplate:
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
+    def test_custom_op_in_subgraph(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo_add",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo_add", "CompositeExplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo_add", lib=lib)
+            def foo_add_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + a
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(
+                        x.shape[0] < 5,
+                        torch.ops.mylib.foo_add,
+                        torch.ops.mylib.foo_add,
+                        (x,),
+                    )
+
+            self.check_model(M(), (torch.ones(3, device=self.device),))
+
     def test_clamp_decomposition(self):
         class Model1(torch.nn.Module):
             def forward(self, x):
