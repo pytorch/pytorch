@@ -8,6 +8,7 @@ static methods.
 import os
 import queue
 import random
+import threading
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
@@ -234,54 +235,24 @@ def _base_worker_loop(
     auto_collation,
     collate_fn,
     drop_last,
-    base_seed,
+    seed,
     init_fn,
     worker_id,
     num_workers,
     persistent_workers,
-    shared_seed,
+    shared_rng=None,
     is_process=True,
-    worker_context_fn=None,
     watchdog_constructor=None,
     error_prefix="worker process",
 ):
     """
     Base worker loop with common functionality for both process and thread workers.
-
-    Args:
-        is_process: Whether this is running in a separate process (True) or thread (False)
-        worker_context_fn: Function to set up worker-specific context (signal handlers, thread names, etc.)
-        watchdog_constructor: Function to create a watchdog object that checks if parent is alive
-        error_prefix: Prefix for error messages (e.g., "worker process" or "worker thread")
     """
     try:
-        # Set up worker context (different for process vs thread)
-        if worker_context_fn is not None:
-            worker_context_fn()
-
         # Common initialization for both process and thread workers
         torch.set_num_threads(1)
-        seed = base_seed + worker_id
-        random.seed(seed)
-        torch.manual_seed(seed)
-        if HAS_NUMPY:
-            np_seed = _generate_state(base_seed, worker_id)
-            import numpy as np
 
-            np.random.seed(np_seed)
-
-        from torch.utils.data import IterDataPipe
-        from torch.utils.data.graph_settings import apply_random_seed
-
-        shared_rng = torch.Generator()
-        if isinstance(dataset, IterDataPipe):
-            if shared_seed is None:
-                raise AssertionError(
-                    "shared_seed must be provided for IterDataPipe workers"
-                )
-            shared_rng.manual_seed(shared_seed)
-            dataset = apply_random_seed(dataset, shared_rng)
-
+        # TODO: Does this make sense for thread ?
         global _worker_info
         _worker_info = WorkerInfo(
             id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
@@ -325,13 +296,18 @@ def _base_worker_loop(
                 data_queue.put((r, None))
                 iteration_end = False
 
-                if isinstance(dataset, IterDataPipe):
-                    if r.seed is None:
-                        raise AssertionError(
-                            "resume iteration seed is None for IterDataPipe"
-                        )
-                    shared_rng.manual_seed(r.seed)
-                    dataset = apply_random_seed(dataset, shared_rng)
+                # Note: DataPipe is not supported in thread mode
+                if is_process:
+                    from torch.utils.data import IterDataPipe
+                    from torch.utils.data.graph_settings import apply_random_seed
+
+                    if isinstance(dataset, IterDataPipe):
+                        if r.seed is None:
+                            raise AssertionError(
+                                "resume iteration seed is None for IterDataPipe"
+                            )
+                        shared_rng.manual_seed(r.seed)
+                        dataset = apply_random_seed(dataset, shared_rng)
 
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
@@ -379,6 +355,7 @@ def _base_worker_loop(
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
+        # TODO: Does this make sense for thread ?
         pass
 
     # Process-specific cleanup
@@ -406,14 +383,32 @@ def _worker_loop(
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
-    def _worker_process_context():
-        # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
-        # module's handlers are executed after Python returns from C low-level
-        # handlers, likely when the same fatal signal had already happened
-        # again.
-        # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
-        signal_handling._set_worker_signal_handlers()
-        torch.multiprocessing._set_thread_name("pt_data_worker")
+    # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+    # module's handlers are executed after Python returns from C low-level
+    # handlers, likely when the same fatal signal had already happened
+    # again.
+    # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
+    signal_handling._set_worker_signal_handlers()
+    torch.multiprocessing._set_thread_name("pt_data_worker")
+
+    # RNG setup
+    seed = base_seed + worker_id
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if HAS_NUMPY:
+        np_seed = _generate_state(base_seed, worker_id)
+        import numpy as np
+
+        np.random.seed(np_seed)
+
+    from torch.utils.data import IterDataPipe
+    from torch.utils.data.graph_settings import apply_random_seed
+
+    shared_rng = torch.Generator()
+    if isinstance(dataset, IterDataPipe):
+        assert shared_seed is not None
+        shared_rng.manual_seed(shared_seed)
+        dataset = apply_random_seed(dataset, shared_rng)
 
     _base_worker_loop(
         dataset_kind=dataset_kind,
@@ -424,14 +419,13 @@ def _worker_loop(
         auto_collation=auto_collation,
         collate_fn=collate_fn,
         drop_last=drop_last,
-        base_seed=base_seed,
+        seed=seed,
         init_fn=init_fn,
         worker_id=worker_id,
         num_workers=num_workers,
         persistent_workers=persistent_workers,
-        shared_seed=shared_seed,
+        shared_rng=shared_rng,
         is_process=True,
-        worker_context_fn=_worker_process_context,
         watchdog_constructor=ManagerWatchdog,
         error_prefix="worker process",
     )
@@ -451,17 +445,30 @@ def _thread_worker_loop(
     worker_id,
     num_workers,
     persistent_workers,
-    shared_seed,
 ):
     """
     Thread worker loop that uses the common base worker loop for threads.
+    Sets up thread-local RNG state to avoid race conditions.
     """
 
-    def _thread_worker_context():
-        # Set the thread name for better debugging
-        import threading
+    # Set the thread name for better debugging
+    threading.current_thread().name = f"DataLoader_thread_{worker_id}"
 
-        threading.current_thread().name = f"DataLoader_thread_{worker_id}"
+    # Thread-local RNG setup to avoid race conditions with global state
+    seed = base_seed + worker_id
+
+    thread_local = threading.local()
+
+    # Set up thread-local random generators
+    thread_local.random_state = random.Random(seed)
+    thread_local.torch_generator = torch.Generator()
+    thread_local.torch_generator.manual_seed(seed)
+
+    if HAS_NUMPY:
+        np_seed = _generate_state(base_seed, worker_id)
+        import numpy as np
+
+        thread_local.numpy_generator = np.random.default_rng(np_seed)
 
     # Use the common base worker loop with thread-specific settings
     _base_worker_loop(
@@ -473,14 +480,12 @@ def _thread_worker_loop(
         auto_collation=auto_collation,
         collate_fn=collate_fn,
         drop_last=drop_last,
-        base_seed=base_seed,
+        seed=seed,
         init_fn=init_fn,
         worker_id=worker_id,
         num_workers=num_workers,
         persistent_workers=persistent_workers,
-        shared_seed=shared_seed,
         is_process=False,
-        worker_context_fn=_thread_worker_context,
         watchdog_constructor=None,  # No watchdog needed for threads
         error_prefix="worker thread",
     )
