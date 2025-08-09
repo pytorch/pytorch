@@ -5,7 +5,7 @@ set -ex
 NCCL_VERSION=""
 if [[ ${CUDA_VERSION:0:2} == "11" ]]; then
   NCCL_VERSION=$(cat ci_commit_pins/nccl-cu11.txt)
-elif [[ ${CUDA_VERSION:0:2} == "12" ]]; then
+elif [[ ${CUDA_VERSION:0:2} == 1[23] ]]; then
   NCCL_VERSION=$(cat ci_commit_pins/nccl-cu12.txt)
 else
   echo "Unexpected CUDA_VERSION ${CUDA_VERSION}"
