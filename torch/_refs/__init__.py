@@ -412,7 +412,7 @@ def _broadcast_shapes(*_shapes):
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if is_nested_int(shape[idx]):
-                # maintian nested int behaviour added in PR 145957.
+                # maintain nested int behaviour added in PR 145957.
                 if is_nested_int(common_shape[idx]) and guard_or_false(
                     shape[idx] == common_shape[idx]
                 ):
