@@ -841,7 +841,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
     # The future will be awaited at scheduling time in select_algorithm.py
     if torch._inductor.config.remote_gemm_autotune_cache:
-        best_config_future = gen_best_config(mat1, mat2)
+        best_config_future = gen_best_config("mm", [mat1, mat2])
 
     return autotune_select_algorithm(
         name,
@@ -946,13 +946,19 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             if use_aten_gemm_kernels()
             else []
         )
+
+        best_config_future = None
+        if torch._inductor.config.remote_gemm_autotune_cache:
+            best_config_future = gen_best_config("addmm", [mat1, mat2, inp])
+
+        # TODO(coconutruben): replace with kernel_inputs.nodes()
+        # once that supports the unexpanded nodes as well
         return autotune_select_algorithm(
-            # TODO(coconutruben): replace with kernel_inputs.nodes()
-            # once that supports the unexpanded nodes as well
             "addmm",
             choices,
             [inp, mat1, mat2],
             layout,
+            best_config_future=best_config_future,
         )
 
     choices = (
@@ -1055,7 +1061,19 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm("addmm", choices, kernel_inputs.nodes(), layout)
+    best_config_future = None
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config(
+            "addmm", [mat1, mat2, inp], alpha=alpha, beta=beta
+        )
+
+    return autotune_select_algorithm(
+        "addmm",
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
