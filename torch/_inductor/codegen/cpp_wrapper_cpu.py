@@ -1651,7 +1651,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
-    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+    def codegen_alloc_from_pool(
+        self, name, offset, dtype, shape, stride
+    ) -> tuple[str, list[str]]:
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(stride)
         tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1668,11 +1670,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
-        self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
-        )
-        return f"RAIIAtenTensorHandle({tmp_name})"
+        # We return the lines instead of writing here because writing here is bug prune.
+        # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
+        # as well, otherwise you get memory leaks
+        allocations_to_write = [
+            f"AtenTensorHandle {tmp_name};",
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));",
+        ]
+        return f"RAIIAtenTensorHandle({tmp_name})", allocations_to_write
 
     def codegen_reinterpret_view(
         self,
