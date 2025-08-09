@@ -12696,7 +12696,8 @@ class TestSparseMPS(TestCaseMPS):
         sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
         self.assertEqual(sparse, sparse_cpu)
 
-    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64, torch.float32, torch.float16, torch.bfloat16, torch.bool])
+    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64,
+                           torch.float32, torch.float16, torch.bfloat16, torch.bool])
     def test_coalesce(self, dtype):
         indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
         values = torch.tensor([1., 2., 3., 4.], dtype=dtype, device="mps")
