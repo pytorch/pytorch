@@ -36,12 +36,12 @@ def enable_symm_mem_for_group(group_name: str) -> None:
         return
 
     group = c10d._resolve_process_group(group_name)
-    global_ranks = sorted(c10d._world.pg_group_ranks[group].keys())
+    global_ranks = sorted(c10d._world.pg_group_ranks[group].keys())  # type: ignore[index]
     # Different subgroups with the same name should use different stores
     global_ranks_str = "_".join(map(str, global_ranks))
     store = c10d.PrefixStore(
         f"symmetric_memory-{global_ranks_str}",
-        c10d._get_process_group_store(group),
+        c10d._get_process_group_store(group),  # type: ignore[arg-type]
     )
     _group_name_to_store[group_name] = store
     _SymmetricMemory.set_group_info(
@@ -1492,7 +1492,7 @@ def _low_contention_all_gather(
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
         symm_mem.barrier()
-        _register_work(output, Work())
+        _register_work(output, Work())  # type: ignore[arg-type]
         return output
 
 
@@ -1540,7 +1540,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        _register_work(ret, Work())  # type: ignore[arg-type]
         return ret
 
 
@@ -1575,7 +1575,7 @@ def _low_contention_reduce_scatter_with_workspace(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        _register_work(ret, Work())  # type: ignore[arg-type]
         return ret
 
 

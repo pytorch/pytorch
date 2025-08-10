@@ -7,7 +7,7 @@ This is intended as a proving ground for more flexible and object oriented distr
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Protocol, Union
+from typing import Protocol, Union, TYPE_CHECKING, Any
 
 import torch
 from torch.distributed._distributed_c10d import (
@@ -155,7 +155,7 @@ def new_group(
     return _BACKENDS[backend](store, rank, world_size, timeout, device, **kwargs)
 
 
-def current_process_group() -> ProcessGroup:
+def current_process_group() -> Any:
     """
     Get the current process group. Thread local method.
 
@@ -166,7 +166,7 @@ def current_process_group() -> ProcessGroup:
 
 
 @contextmanager
-def process_group(pg: ProcessGroup) -> Generator[None, None, None]:
+def process_group(pg: Any) -> Generator[None, None, None]:
     """
     Context manager for process groups. Thread local method.
 
