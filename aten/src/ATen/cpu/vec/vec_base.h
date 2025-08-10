@@ -1248,6 +1248,16 @@ inline Vectorized<T> fmadd(
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
 
 template <typename T>
+inline Vectorized<T> fnmadd(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c) {
+  return -(a * b) + c;
+}
+
+VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmadd)
+
+template <typename T>
 inline Vectorized<T> fmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
@@ -1256,6 +1266,16 @@ inline Vectorized<T> fmsub(
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
+
+template <typename T>
+inline Vectorized<T> fnmsub(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c) {
+  return -(a * b) - c;
+}
+
+VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmsub)
 
 template <typename T>
 Vectorized<T> inline operator&&(

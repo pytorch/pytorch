@@ -13,17 +13,20 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
+      "manylinux_2_28"  # rocm6.5
       "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.3"
       "rocm6.4"
+      "rocm6.5"
       "rocm7.0"
       )
   set(__AOTRITON_CI_COMMIT "6fca155f4deeb8d9529326f7b69f350aeeb93477")
   set(__AOTRITON_SHA256_LIST
       "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
       "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
+      "7e29c325d5bd33ba896ddb106f5d4fc7d715274dca7fe937f724fffa82017838"  # rocm6.5
       "1e9b3dddf0c7fc07131c6f0f5266129e83ce2331f459fa2be8c63f4ae91b0f5b"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
@@ -59,7 +62,7 @@ if(NOT __AOTRITON_INCLUDED)
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_EXTERN_PREFIX}")
   else()
-    set(__AOTRITON_SYSTEM_ROCM "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}")
+    set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(GET __AOTRITON_ROCM_LIST 0 __AOTRITON_ROCM_DEFAULT_STR)
     # Initialize __AOTRITON_ROCM to lowest version, in case all builds > system's ROCM
     string(SUBSTRING ${__AOTRITON_ROCM_DEFAULT_STR} 4 -1 __AOTRITON_ROCM)

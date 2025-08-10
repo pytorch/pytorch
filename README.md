@@ -276,7 +276,7 @@ conda install pkg-config libuv
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv=1.39
+conda install -c conda-forge libuv
 ```
 
 #### Install PyTorch
@@ -294,14 +294,12 @@ Install PyTorch
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
-python -m pip install -r requirements-build.txt
 python -m pip install --no-build-isolation -v -e .
 ```
 
