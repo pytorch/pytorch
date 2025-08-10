@@ -86,7 +86,7 @@ def order(
 
     orig_ndim = ndim_of_levels(levels)
 
-    def append_dim(d: DimEntry):
+    def append_dim(d: DimEntry) -> None:
         """Add a dimension to the reordering, removing it from available levels."""
         try:
             idx = levels.index(d)
@@ -136,7 +136,7 @@ def order(
 
     # Build new level ordering
     insert_point = -1
-    new_levels = []
+    new_levels: list[DimEntry] = []
 
     # Add remaining (non-reordered) levels, finding insertion point for new dimensions
     for level in levels:

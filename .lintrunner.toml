@@ -123,6 +123,7 @@ is_formatter = true
 code = 'MYPY'
 include_patterns = [
     'setup.py',
+    'functorch/dim/**/*.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',

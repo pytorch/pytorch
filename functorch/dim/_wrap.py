@@ -7,9 +7,7 @@ and _wrap_method functionality from functorch/csrc/dim/dim.cpp to Python.
 
 from __future__ import annotations
 
-import inspect
-import types
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import torch
 from torch.utils._pytree import tree_map
@@ -51,10 +49,10 @@ class WrappedOperator:
         if self.doc and self.dim_name:
             self.doc = f"{self.doc}\nArgument '{self.dim_name}' can be either an integer or a torchdim.Dim object.\n"
 
-    def function(self):
+    def function(self) -> Callable:
         """Create a wrapped function that calls our wrapper implementation."""
 
-        def wrapped_func(*args, **kwargs):
+        def wrapped_func(*args: Any, **kwargs: Any) -> Any:
             return self.wrapper_implementation(self, *args, **kwargs)
 
         # Copy metadata
@@ -64,7 +62,7 @@ class WrappedOperator:
         return wrapped_func
 
 
-def _wrap_dim(dim, ndim: int, keepdim: bool = False) -> DimEntry:
+def _wrap_dim(dim: Any, ndim: int, keepdim: bool = False) -> DimEntry:
     """Convert single dimension specification to DimEntry object."""
     from . import Dim
 
@@ -81,7 +79,7 @@ def _wrap_dim(dim, ndim: int, keepdim: bool = False) -> DimEntry:
         return DimEntry()
 
 
-def _wrap_dims(dim, ndim: int, keepdim: bool = False) -> list[DimEntry]:
+def _wrap_dims(dim: Any, ndim: int, keepdim: bool = False) -> list[DimEntry]:
     """Convert dimension specification to list of DimEntry objects."""
     de = _wrap_dim(dim, ndim, keepdim)
     result = []
@@ -93,7 +91,7 @@ def _wrap_dims(dim, ndim: int, keepdim: bool = False) -> list[DimEntry]:
     return result
 
 
-def patched_dim_method(wrapper: WrappedOperator, *args, **kwargs):
+def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> Any:
     """
     Python port of the C++ patched_dim_method function.
 
@@ -112,11 +110,12 @@ def patched_dim_method(wrapper: WrappedOperator, *args, **kwargs):
 
     # If no dimension argument provided, fall back to standard functorch handling
     if dim_arg is None:
-        info = TensorInfo.create(args[0], enable_layers=True, use_local_info=False)
+        info = TensorInfo.create(args[0], ensure_batched=True, ensure_present=False)
         if not info:
             return wrapper.orig(*args, **kwargs)
 
         with EnableAllLayers(info.levels) as guard:
+            assert info.batchedtensor is not None
             guard.inplace_update_layers(info.batchedtensor, info.levels)
             new_args = list(args)
             new_args[0] = handle_from_tensor(info.batchedtensor)
@@ -144,7 +143,7 @@ def patched_dim_method(wrapper: WrappedOperator, *args, **kwargs):
     dims = _wrap_dims(dim_arg, ndim, keepdim)
 
     # Convert dimensions to indices and validate
-    dim_indices = []
+    dim_indices: list[int] = []
     seen = [False] * len(info.levels)
 
     for d in dims:
@@ -181,13 +180,14 @@ def patched_dim_method(wrapper: WrappedOperator, *args, **kwargs):
 
     # Create dimension indices for the original function
     if len(dim_indices) == 1:
-        py_indices = dim_indices[0]
+        py_indices: Any = dim_indices[0]
     else:
         py_indices = tuple(dim_indices)
 
     # Update arguments
     new_args = list(args)
     new_kwargs = kwargs.copy()
+    assert info.tensor is not None
     new_args[0] = handle_from_tensor(info.tensor)
 
     # Update dimension argument
@@ -203,7 +203,7 @@ def patched_dim_method(wrapper: WrappedOperator, *args, **kwargs):
     result = wrapper.orig(*new_args, **new_kwargs)
 
     # Wrap results
-    def wrap_result(obj):
+    def wrap_result(obj: Any) -> Any:
         if isinstance(obj, torch.Tensor):
             from . import Tensor
 
@@ -220,7 +220,7 @@ def _wrap(
     dim_name: Optional[str] = None,
     single_dim: Optional[bool] = None,
     reduce: Optional[bool] = None,
-):
+) -> Callable:
     """
     Python port of the C++ _wrap function.
 
@@ -250,7 +250,13 @@ def _wrap(
     return wrapper.function()
 
 
-def call_torch_function(wrapper: WrappedOperator, func, types, args=(), kwargs=None):
+def call_torch_function(
+    wrapper: WrappedOperator,
+    func: Callable,
+    types: tuple,
+    args: tuple = (),
+    kwargs: Optional[dict] = None,
+) -> Any:
     """
     Python port of the C++ call_torch_function.
 
@@ -266,7 +272,7 @@ def call_torch_function(wrapper: WrappedOperator, func, types, args=(), kwargs=N
     return _Tensor.__torch_function__(func, types, args, kwargs)
 
 
-def _wrap_method(orig: Callable, python_func: Optional[Callable] = None):
+def _wrap_method(orig: Callable, python_func: Optional[Callable] = None) -> Callable:
     """
     Python port of the C++ _wrap_method function.
 
@@ -287,7 +293,7 @@ def _wrap_method(orig: Callable, python_func: Optional[Callable] = None):
     wrapper = WrappedOperator(orig, call_torch_function)
     wrapper.is_pointwise = is_pointwise
 
-    def wrapped_method(self, *args, **kwargs):
+    def wrapped_method(self: Any, *args: Any, **kwargs: Any) -> Any:
         return call_torch_function(wrapper, orig, (type(self),), (self, *args), kwargs)
 
     # Copy metadata

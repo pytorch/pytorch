@@ -21,12 +21,17 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
+    IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
+    skipIfWindows,
     TEST_XPU,
     xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -34,10 +39,11 @@ from torch.testing._internal.logging_utils import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 requires_gpu = unittest.skipUnless(
-    HAS_CUDA or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
+    HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
 )
+
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -524,7 +530,7 @@ LoweringException: AssertionError:
             "import torch",
             env=env,
         )
-        lines = stderr.decode().split("\n")
+        lines = stderr.decode().split("\r\n" if IS_WINDOWS else "\n")
         # This is a sanity assert that our error is not spammy.
         # As of this test creation this was 18.
         # See this issue for the purpose o this test:
@@ -540,6 +546,7 @@ LoweringException: AssertionError:
         self.assertEqual(lines[-4], "Valid settings:")
 
     @requires_distributed()
+    @skipIfWindows(msg="TODO: (xuhancn), Can't reproduce locally")
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"

@@ -11,13 +11,19 @@ from ._tensor_info import TensorInfo
 
 def _safe_index(lst, item):
     """
-    Helper function to find index of item in list using 'is' comparison
-    to avoid triggering __torch_function__ on Dim objects.
+    Helper function to find index of item in list.
+
+    For DimEntry objects, uses __eq__ comparison which properly handles
+    both positional and Dim entries.
 
     Returns the index if found, None if not found.
     """
     for i, list_item in enumerate(lst):
-        if list_item is item:
+        # Use == for DimEntry objects as they have proper __eq__ implementation
+        if isinstance(item, DimEntry) and isinstance(list_item, DimEntry):
+            if list_item == item:
+                return i
+        elif list_item is item:
             return i
     return None
 
@@ -66,9 +72,7 @@ def _bind_dims_to_size(sz: int, sd: int, dims: list, nsz: list, nsd: list):
             # Calculate the size for this unbound dimension
             if sz % rhs_prod != 0:
                 # Create tuple showing bound vs unbound dimensions like C++ version
-                tup = tuple(
-                    dim.size if dim.is_bound else "?" for dim in dims
-                )
+                tup = tuple(dim.size if dim.is_bound else "?" for dim in dims)
                 raise DimensionBindError(
                     f"inferred dimension does not evenly fit into larger dimension: {sz} vs {tup}"
                 )
@@ -159,6 +163,65 @@ def getitem(cls, func, types, args, kwargs):
     return invoke_getitem(iinfo)
 
 
+def setitem(self, index, rhs):
+    """Set values in tensor using first-class dimensions."""
+    from . import DimensionBindError, TensorInfo
+
+    iinfo = getsetitem(self, index, has_dims(self) or has_dims(rhs))
+
+    if iinfo.can_call_original:
+        # Call original tensor __setitem__ directly, bypassing __torch_function__
+        torch._C.TensorBase.__setitem__(self, index, rhs)
+        return
+
+    # Handle RHS tensor with dimensions
+    rhs_info = TensorInfo.create(rhs, False, False)
+
+    if rhs_info:
+        # Check that rhs dimensions are compatible with result dimensions
+        for l in rhs_info.levels:
+            if not l.is_positional():
+                # Find this dimension in result levels
+                found = False
+                for result_level in iinfo.result_levels:
+                    if (
+                        not result_level.is_positional()
+                        and result_level.dim() is l.dim()
+                    ):
+                        found = True
+                        break
+
+                if not found:
+                    # Create tuple representation of result levels for error message
+                    result_dims = []
+                    for rl in iinfo.result_levels:
+                        if rl.is_positional():
+                            result_dims.append(rl.position())
+                        else:
+                            result_dims.append(rl.dim())
+
+                    raise DimensionBindError(
+                        f"rhs of setitem contains dimension {l.dim()!r} which is not in the dimension on the left ({tuple(result_dims)!r})"
+                    )
+
+        # Match RHS tensor to result levels
+        matched_rhs = _match_levels(
+            rhs_info.tensor, rhs_info.levels, iinfo.result_levels
+        )
+    else:
+        matched_rhs = rhs
+
+    # For advanced indexing with dimensions, we need special handling
+    # We'll use the simpler approach that follows the C++ implementation more closely
+    if iinfo.advanced_indexing:
+        # Use advanced indexing - the flat_inputs already contain matched tensors
+        tup = slice_to_tuple(iinfo.flat_inputs)
+        torch._C.TensorBase.__setitem__(iinfo.self_tensor, tup, matched_rhs)
+    else:
+        # Simple copy operation
+        iinfo.self_tensor.copy_(matched_rhs)
+
+
 def invoke_getitem(iinfo: IndexingInfo):
     if iinfo.advanced_indexing:
         self_tensor = iinfo.self_tensor
@@ -244,13 +307,14 @@ def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
 
     self_info = TensorInfo.create(self, False, True)
     ndim = self_info.ndim()
-    if dims_indexed > ndim:
+    total_dims = len(self_info.levels)  # Total dimensions (positional + named)
+    if dims_indexed > total_dims:
         raise ValueError(
-            f"at least {dims_indexed} indices were supplied but the tensor only has {ndim} dimensions"
+            f"at least {dims_indexed} indices were supplied but the tensor only has {total_dims} dimensions"
         )
 
     # Expand any unbound dimension list, or expand ... into individual : slices.
-    expanding_dims = ndim - dims_indexed
+    expanding_dims = total_dims - dims_indexed
     if expanding_object != -1:
         if unbound_dim_list is not None:
             # Bind unbound dimension list to the expanding dimensions

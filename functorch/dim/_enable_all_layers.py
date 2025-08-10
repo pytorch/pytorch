@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING
+
 import torch
+
+from ._dim_entry import DimEntry
+
+
+if TYPE_CHECKING:
+    from . import Dim, Tensor
 
 
 class EnableAllLayers:
@@ -22,18 +30,21 @@ class EnableAllLayers:
             levels: List of dimension entries to create layers for
         """
 
+        from . import Dim
+
         self.levels_start = 0
         self.levels_to_dim = []
 
         for l in levels:
             if not l.is_positional():
                 d = l.dim()
+                assert isinstance(d, Dim)
                 self.levels_to_dim.append(d)
 
         # Sort by level for stable ordering
         self.levels_to_dim.sort(key=lambda d: d._level)
 
-    def __enter__(self):
+    def __enter__(self) -> EnableAllLayers:
         # Create functorch dynamic layers
         for i, dim in enumerate(self.levels_to_dim):
             batch_size = dim.size
@@ -42,7 +53,7 @@ class EnableAllLayers:
                 self.levels_start = level
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Clean up dynamic layers in reverse order."""
         to_remove = self.levels_start + len(self.levels_to_dim) - 1
         for i in range(len(self.levels_to_dim)):
@@ -65,9 +76,9 @@ class EnableAllLayers:
             Tensor with appropriate levels
         """
         # Create positional levels for base dimensions
-        levels = []
+        levels: list[DimEntry] = []
         for i in range(-batchedtensor.dim(), 0):
-            levels.append(i)
+            levels.append(DimEntry(i))
 
         tensor = batchedtensor
 
@@ -77,7 +88,7 @@ class EnableAllLayers:
             assert level >= self.levels_start and level < self.levels_start + len(
                 self.levels_to_dim
             )
-            dim = self.levels_to_dim[level - self.levels_start]
+            dim = DimEntry(self.levels_to_dim[level - self.levels_start])
             bdim = torch._C._functorch.maybe_get_bdim(tensor)
             assert bdim is not None
             levels.insert(bdim, dim)
@@ -92,7 +103,9 @@ class EnableAllLayers:
         result._levels = levels
         return result
 
-    def inplace_update_layers(self, batchtensor: torch.Tensor, levels: list[DimEntry]):
+    def inplace_update_layers(
+        self, batchtensor: torch.Tensor, levels: list[DimEntry]
+    ) -> None:
         """
         Update the levels of a batched tensor in place.
 
@@ -113,8 +126,8 @@ class EnableAllLayers:
             if impl is None:
                 break
 
-            if any(l == self.levels_to_dim[i] for l in levels):
-                torch._C._functorch._unsafe_set_level(
-                    impl, self.levels_start + i
-                )
-                impl = torch._C._functorch.get_unwrapped(batchtensor)
+            if any(l == DimEntry(self.levels_to_dim[i]) for l in levels):
+                # This is very interesting!  The level on batch tensor is
+                # meaningless!  We set it RIGHT before we go into vmap
+                torch._C._functorch._unsafe_set_level(impl, self.levels_start + i)
+                impl = torch._C._functorch.get_unwrapped(impl)

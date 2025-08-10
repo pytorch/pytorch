@@ -1,5 +1,5 @@
 import dis
-from typing import Optional
+from typing import Any, Optional
 
 
 class _PyInstDecoder:
@@ -10,7 +10,7 @@ class _PyInstDecoder:
     following the algorithm from functorch/csrc/dim/dim_creation.cpp
     """
 
-    def __init__(self, code_object, lasti: int):
+    def __init__(self, code_object: Any, lasti: int) -> None:
         self.code_object = code_object
         self.instructions = list(dis.get_instructions(code_object))
         self.offset = self._find_instruction_index(lasti)
@@ -27,11 +27,11 @@ class _PyInstDecoder:
                 break
         return best_idx
 
-    def next(self):
+    def next(self) -> None:
         """Advance to the next instruction."""
         self.offset += 1
 
-    def opcode(self) -> str:
+    def opcode(self) -> Optional[str]:
         """Get the opcode name of the current instruction."""
         if self.offset < len(self.instructions):
             return self.instructions[self.offset].opname

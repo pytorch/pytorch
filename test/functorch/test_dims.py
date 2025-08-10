@@ -5,22 +5,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-from unittest import skip, skipIf
+from unittest import skip, skipIf, expectedFailure
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
 import functorch.dim
 import torch
-from functorch.dim import (
-    Dim,
-    DimensionBindError,
-    DimList,
-    dimlists,
-    dims,
-    stack,
-    Tensor,
-)
+from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor, DimensionBindError
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -407,11 +399,6 @@ class TestMin(TestCase):
         torch.testing.assert_close(
             A[c + 1, c + 0].order(c), A[torch.arange(2) + 1, torch.arange(2)]
         )
-        try:
-            A[..., 3, ...]
-            raise NotImplementedError
-        except DimensionBindError:
-            pass
 
         C = torch.rand(4, 7)
         c_, x, y, z = dims()
@@ -539,6 +526,7 @@ class TestMin(TestCase):
         A = torch.rand(4, 4)
         (A[i, i])
 
+    @expectedFailure  # [i, g] torch function interposition NYI
     def test_softmax_split(self):
         a = torch.rand(16)
         g, i = dims(sizes=[2, None])

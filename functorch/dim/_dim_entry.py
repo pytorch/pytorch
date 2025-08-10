@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Union
+from typing import TYPE_CHECKING, Union
+
+
+if TYPE_CHECKING:
+    from . import Dim
 
 import torch
 
@@ -12,14 +16,18 @@ class DimEntry:
     # The dimension this is from the rhs, or a FCD
     data: Union[Dim, int]
 
-    def __init__(self, data=None):
+    def __init__(self, data: Union[Dim, int, None] = None) -> None:
+        from . import Dim
+
         if type(data) is int:
             assert data < 0
-        if data is None:
+        elif data is None:
             data = 0
+        else:
+            assert isinstance(data, Dim)
         self.data = data
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, DimEntry):
             return False
         # Use 'is' for Dim objects to avoid triggering __torch_function__
@@ -34,10 +42,10 @@ class DimEntry:
             # One is positional, one is Dim - they can't be equal
             return False
 
-    def is_positional(self):
+    def is_positional(self) -> bool:
         return type(self.data) is int and self.data < 0
 
-    def is_none(self):
+    def is_none(self) -> bool:
         # Use isinstance to check for Dim objects, avoid triggering __torch_function__
         from . import Dim
 
@@ -56,7 +64,7 @@ class DimEntry:
         assert not isinstance(self.data, int)
         return self.data
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return repr(self.data)
 
 

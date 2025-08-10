@@ -11,6 +11,7 @@ from types import (
     MethodDescriptorType,
     WrapperDescriptorType,
 )
+from typing import Any, Callable
 
 
 FUNC_TYPES = (
@@ -22,8 +23,8 @@ FUNC_TYPES = (
 PROPERTY_TYPES = (GetSetDescriptorType, property)
 
 
-def _py_wrap_method(orig, __torch_function__):
-    def impl(*args, **kwargs):
+def _py_wrap_method(orig: Callable, __torch_function__: Callable) -> Callable:
+    def impl(*args: Any, **kwargs: Any) -> Any:
         return __torch_function__(orig, None, args, kwargs)
 
     # Copy metadata from original function
@@ -33,14 +34,14 @@ def _py_wrap_method(orig, __torch_function__):
     return impl
 
 
-def wrap_type(to_patch, pattern, __torch_function__):
+def wrap_type(to_patch: Any, pattern: type, __torch_function__: Callable) -> None:
     wrap_method = _py_wrap_method
 
-    all = {}
+    all: dict[str, Any] = {}
     for t in reversed(pattern.mro()[:-1]):  # skip object
         all.update(t.__dict__)
 
-    def wrap_attr(orig):
+    def wrap_attr(orig: Any) -> property:
         return property(wrap_method(orig.__get__, __torch_function__))
 
     for name, obj in all.items():

@@ -526,7 +526,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
-  m.def("unsafe_set_level", &unsafe_set_level);
+  m.def("_unsafe_set_level", &unsafe_set_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
   m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);

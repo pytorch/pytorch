@@ -6,11 +6,14 @@
 import os
 import signal
 import subprocess
+from collections.abc import Generator
 from contextlib import contextmanager
 
 
 @contextmanager
-def magic_trace(output="trace.fxt", magic_trace_cache="/tmp/magic-trace"):
+def magic_trace(
+    output: str = "trace.fxt", magic_trace_cache: str = "/tmp/magic-trace"
+) -> Generator[None, None, None]:
     pid = os.getpid()
     if not os.path.exists(magic_trace_cache):
         print(f"Downloading magic_trace to: {magic_trace_cache}")
@@ -26,6 +29,8 @@ def magic_trace(output="trace.fxt", magic_trace_cache="/tmp/magic-trace"):
         subprocess.run(["chmod", "+x", magic_trace_cache])
     args = [magic_trace_cache, "attach", "-pid", str(pid), "-o", output]
     p = subprocess.Popen(args, stderr=subprocess.PIPE, encoding="utf-8")
+    if p.stderr is None:
+        raise RuntimeError("Failed to capture stderr")
     while True:
         x = p.stderr.readline()
         print(x)
@@ -36,7 +41,8 @@ def magic_trace(output="trace.fxt", magic_trace_cache="/tmp/magic-trace"):
     finally:
         p.send_signal(signal.SIGINT)
         r = p.wait()
-        print(p.stderr.read())
-        p.stderr.close()
+        if p.stderr is not None:
+            print(p.stderr.read())
+            p.stderr.close()
         if r != 0:
             raise ValueError(f"magic_trace exited abnormally: {r}")
