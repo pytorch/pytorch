@@ -303,12 +303,12 @@ class ShardingPropagator:
         # This is generally ok because this only happens during tracing in torch.compile,
         # and compile autograd initial tracing, which do not need to be as fast as
         # eagermode DTensor usages.
-        if _are_we_tracing():
-            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-        else:
-            output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
-            )
+        # if _are_we_tracing():
+        #     output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        # else:
+        output_sharding = cast(
+            OutputSharding, self.propagate_op_sharding(op_info.schema)
+        )
         op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:

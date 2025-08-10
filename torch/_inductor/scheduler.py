@@ -52,6 +52,14 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
+from .simple_fsdp import (
+    auto_bucket_plan,
+    bucket,
+    bucket_utils,
+    estimator,
+    manual_bucket_plan,
+    reorder,
+)
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -1913,7 +1921,8 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
         for snode in self.snodes:
             self.scheduler.name_to_fused_node[snode.get_name()] = snode
-        del self.scheduler.name_to_fused_node[self.get_name()]
+        if self.get_name() in self.scheduler.name_to_fused_node:
+            del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
     def add_fake_dep(self, fake_dep: Dep) -> None:
@@ -2043,6 +2052,10 @@ class NodeUser:
 
 
 _post_grad_graph_counter = itertools.count()
+comm_cache, comp_cache = (
+    estimator.CommPerfCache(),
+    estimator.CompPerfCache(),
+)
 
 
 class Scheduler:
@@ -2111,11 +2124,11 @@ class Scheduler:
 
         # Must run first to correctly set dependencies, before all other passes that rely on
         # reading from .read_writes.reads or .unmet_dependencies
-        self.nodes = comms.decide_global_ordering_of_comms(
-            self.nodes,
-            self.name_to_buf,
-            self.name_to_fused_node,
-        )
+        # self.nodes = comms.decide_global_ordering_of_comms(
+        #     self.nodes,
+        #     self.name_to_buf,
+        #     self.name_to_fused_node,
+        # )
 
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2155,6 +2168,83 @@ class Scheduler:
             )
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        print("torch._inductor.config.simplefsdp.bucketing_type", torch._inductor.config.simplefsdp.bucketing_type)
+        if config.simplefsdp.enable_bucket_ir:
+            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
+            assert not config.allow_buffer_reuse, (
+                "bucketing algorithm requires torch._inductor.config.allow_buffer_reuse to be False"
+            )
+            if config.simplefsdp.bucketing_type == "manual":
+                bucketing_plan = config.simplefsdp.bucketing_plan
+                if has_reduce_scatter:
+                    bucketing_plan.reverse()
+                all_gather_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                    "nn_module_stack",
+                )
+                reduce_scatter_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    "fwd_nn_module_stack",
+                )
+            elif config.simplefsdp.bucketing_type == "auto":
+                all_gather_plan, reduce_scatter_plan = (
+                    auto_bucket_plan.get_bucketing_plan(
+                        self,
+                        self.nodes,
+                        self.name_to_buf,
+                        self.name_to_fused_node,
+                        has_reduce_scatter,
+                        comm_cache,
+                        comp_cache,
+                        verbose=True,
+                    )
+                )
+                print("all_gather_plan", len(all_gather_plan))
+                print("reduce_scatter_plan", len(reduce_scatter_plan))
+            else:
+                all_gather_plan = [[]]
+                reduce_scatter_plan = [[]]
+
+            print("start bucketing")
+            self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
+                self,
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+                all_gather_plan,
+            )
+            if has_reduce_scatter:
+                self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
+                    self,
+                    self.nodes,
+                    self.name_to_buf,
+                    self.name_to_fused_node,
+                    reduce_scatter_plan,
+                )
+
+            print("start reordering")
+            if config.simplefsdp.enable_reorder_ir:
+                node_length = len(self.nodes)
+                self.nodes = reorder.reorder_all_gather(
+                    self.nodes,
+                    all_gather_before_last_wait=True if has_reduce_scatter and config.simplefsdp.bucketing_type != "auto" else False,
+                )
+                assert node_length == len(self.nodes), (
+                    "missed nodes in reordering all gather"
+                )
+                if has_reduce_scatter:
+                    self.nodes = reorder.reorder_reduce_scatter(self.nodes)
+                    assert node_length == len(self.nodes), (
+                        "missed nodes in reordering reduce scatter"
+                    )
+
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
