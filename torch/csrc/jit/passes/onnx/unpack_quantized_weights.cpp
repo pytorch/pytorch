@@ -21,6 +21,7 @@ using namespace ::c10::onnx;
 
 }
 
+#if 0
 // Get the scale of the input to quantized op. There are two cases here
 // 1. For ops with output_scale specified in op signature, we get the output
 // scale
@@ -97,6 +98,7 @@ static double getScaleFromInput(Node* input_node) {
       "Unrecognized quantized operator while trying to compute q_scale for operator ",
       input_name);
 }
+#endif
 
 static std::vector<Node*> CreateQuantizedWeights(
     std::shared_ptr<Graph>& graph,
