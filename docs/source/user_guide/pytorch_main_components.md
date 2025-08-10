@@ -8,8 +8,7 @@ PyTorch is a flexible and powerful library for deep learning that provides a com
 Some of the basic PyTorch components include:
 
 * **Tensors** - N-dimensional arrays that serve as PyTorch's fundamental
-data structure. They support automatic differentiation, hardware acceleration, and provide a comprehensive
-API for mathematical operations. 
+data structure. They support automatic differentiation, hardware acceleration, and provide a comprehensive API for mathematical operations.
 
 * **Autograd** - PyTorch's automatic differentiation engine
 that tracks operations performed on tensors and builds a computational
