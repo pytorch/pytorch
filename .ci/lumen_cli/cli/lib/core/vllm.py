@@ -2,17 +2,16 @@ import logging
 import os
 import textwrap
 from dataclasses import dataclass, field
-from typing import Any
 
+from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker import local_image_exists
-from cli.lib.common.git_utils import clone_external_repo
+from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.path_helper import (
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
     is_path_exist,
 )
-from cli.lib.common.type import BaseRunner
 from cli.lib.common.utils import get_env, run_cmd
 
 
@@ -108,9 +107,8 @@ class VllmBuildParameters:
                     raise FileNotFoundError(error_msg)
                 if handler:
                     setattr(self, attr_name, handler(value))
-                logger.info(f"found flag {flag} -> field  {attr_name}")
             else:
-                logger.info(f"flag {flag} is not set")
+                logger.info("flag  %s is not set", flag)
 
 
 @dataclass
@@ -121,7 +119,6 @@ class VllmDockerBuildArgs:
     cuda: str = field(default_factory=lambda: get_env("CUDA_VERSION", "12.8.1"))
     py: str = field(default_factory=lambda: get_env("PYTHON_VERSION", "3.12"))
     max_jobs: str = field(default_factory=lambda: get_env("MAX_JOBS", "64"))
-    target: str = field(default_factory=lambda: get_env("TARGET", "export-wheels"))
     sccache_bucket: str = field(default_factory=lambda: get_env("SCCACHE_BUCKET"))
     sccache_region: str = field(default_factory=lambda: get_env("SCCACHE_REGION"))
     torch_cuda_arch_list: str = field(
@@ -146,7 +143,7 @@ class VllmBuildRunner(BaseRunner):
     def __init__(self, args=None):
         self.work_directory = "vllm"
 
-    def run(self, args: Any):
+    def run(self):
         """
         main function to run vllm build
         1. prepare vllm build environment
@@ -165,7 +162,7 @@ class VllmBuildRunner(BaseRunner):
         output_path = get_abs_path(inputs.output_dir)
 
         cmd = self._generate_docker_build_cmd(inputs, output_path, torch_whl_path)
-        logger.info(f"Running docker build: \n{cmd}")
+        logger.info("Running docker build: \n %s", cmd)
         run_cmd(cmd, cwd="vllm", env=os.environ.copy())
 
     def cp_torch_whls_if_exist(self, inputs) -> str:
@@ -228,11 +225,11 @@ class VllmBuildRunner(BaseRunner):
         final_base_image_arg = f"--build-arg FINAL_BASE_IMAGE={base_image}"
 
         if local_image_exists(base_image):
-            logger.info(f"[INFO] Found local image: {base_image}")
+            logger.info("[INFO] Found local image:%s", {base_image})
             pull_flag = "--pull=false"
             return base_image_arg, final_base_image_arg, pull_flag
         logger.info(
-            f"[INFO] Local image not found: {base_image}, will try to pull from remote"
+            "[INFO] Local image not found:%s will try to pull from remote", {base_image}
         )
         return base_image_arg, final_base_image_arg, ""
 
