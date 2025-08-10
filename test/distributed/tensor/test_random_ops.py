@@ -92,7 +92,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
     def test_init_with_user_generator(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
-        rng = torch.Generator(device="cuda").manual_seed(42)
+        rng = torch.Generator(device=self.device_type).manual_seed(42)
         t1 = torch.distributed.tensor.empty(
             (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
         )
