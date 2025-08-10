@@ -17,6 +17,11 @@ from torch.testing._internal.common_device_type import ops, OpDTypes, instantiat
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
+from torch.testing._internal.common_utils import slowTestIf
+from torch.testing._internal.common_utils import (
+    skipIfWindows,
+)
+
 def secretly_aliasing(x):
     return x.view(-1)
 
@@ -493,9 +498,9 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
-
 class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
+    @slowTestIf(skipIfWindows)
     def test_schema_correctness(self, device, dtype, op):
         # Currently torch.equal isn't supported with torch.complex32
         # There's also errors with complex64 and complex128
