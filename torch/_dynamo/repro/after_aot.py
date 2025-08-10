@@ -58,6 +58,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
@@ -289,6 +290,8 @@ def generate_compiler_repro_string(
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
 ) -> str:
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
     # Add distributed imports if needed
     distributed_imports = ""
     if has_distributed_ops:
@@ -396,6 +399,9 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
 
     # Check if the graph contains distributed operations
     has_distributed_ops = any(
