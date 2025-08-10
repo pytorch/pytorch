@@ -193,7 +193,7 @@ def _gen_transform_infos_non_cached(
                         and dst_device_order_to_mesh_dims[j] == [mesh_dim]
                     ):
                         mesh_dim_size = device_mesh.size(mesh_dim=mesh_dim)
-                        current_placement = sorted_dst_placement[mesh_dim]   # <<<<<<<<<<<<<<<<<<<<<<, error
+                        current_placement = sorted_dst_placement[mesh_dim]
                         assert isinstance(current_placement, Shard)
                         # alltoall from Shard(tensor_dim) to Shard()
                         transform_infos.append(
