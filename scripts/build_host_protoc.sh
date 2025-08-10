@@ -13,7 +13,10 @@
 
 set -e
 
-CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
+CAFFE2_ROOT="$(
+  cd "$(dirname -- "$0")"/..
+  pwd -P
+)"
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_host_protoc"}
 mkdir -p $BUILD_ROOT/build
 cd $BUILD_ROOT/build
@@ -28,17 +31,20 @@ if [ -x "$(command -v ninja)" ]; then
 fi
 
 while true; do
-    case "$1" in
-        --other-flags)
-            shift;
-            CMAKE_ARGS+=("$@")
-            break ;;
-        "")
-            break ;;
-        *)
-            echo "Unknown option passed as argument: $1"
-            break ;;
-    esac
+  case "$1" in
+    --other-flags)
+      shift
+      CMAKE_ARGS+=("$@")
+      break
+      ;;
+    "")
+      break
+      ;;
+    *)
+      echo "Unknown option passed as argument: $1"
+      break
+      ;;
+  esac
 done
 
 # Use ccache if available (this path is where Homebrew installs ccache symlinks)
