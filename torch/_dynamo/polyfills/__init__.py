@@ -76,6 +76,17 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
 def accumulate_grad(x, new_grad):
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
@@ -239,12 +250,6 @@ def assert_multi_line_equal(self_, first, second, msg=None):
 # The original impl. uses difflib
 def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
-
-
-def generator___contains__(gen, item):
-    # "any" lazily consumes the generator, which is important to prevent
-    # unintended side effects.
-    return any(e == item for e in gen)
 
 
 def getattr_and_trace(*args, **kwargs):

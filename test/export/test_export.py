@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 import re
+import traceback
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -58,6 +59,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     TensorArgument,
 )
+from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
@@ -84,7 +86,7 @@ from torch.testing._internal.custom_tensor import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -145,7 +147,7 @@ torch.library.define(
 
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
-@torch.library.impl_abstract("testlib::returns_tensor_symint")
+@torch.library.register_fake("testlib::returns_tensor_symint")
 def returns_tensor_symint_impl(x):
     return x, x.shape[0]
 
@@ -158,7 +160,7 @@ def foo_impl(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::foo")
+@torch.library.register_fake("testlib::foo")
 def foo_abstract(x, z):
     return x, z, x + z
 
@@ -1542,6 +1544,9 @@ graph():
         torch.export.export(M(), (torch.randn(7),), strict=strict)
 
     def test_cond_branches_return_constant_int(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class M(torch.nn.Module):
             def forward(self, x):
                 idx = torch.cond(x.sum() > 3, lambda: 0, lambda: 1, tuple())
@@ -1587,6 +1592,7 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -1902,6 +1908,54 @@ class GraphModule(torch.nn.Module):
             annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
+
+    def test_unflatten_closure(self):
+        class Dummy(torch.nn.Module):
+            def forward(self, fn, x):
+                y = x + 2
+                z = fn(y)
+                return z + 4
+
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x + 3
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dummy = Dummy()
+                self.n = N()
+
+            def forward(self, x):
+                y = x + 1
+                z = self.dummy(lambda k: self.n(y + k) + y, y)
+                return z + 5
+
+        m = M()
+        x = torch.randn(3)
+        ep = export(m, (x,))
+        print(ep)
+        ufm = torch.export.unflatten(ep)
+        self.assertExpectedInline(
+            str(ufm.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    dummy = self.dummy(add);  add = None
+    add_6 = torch.ops.aten.add.Tensor(dummy, 5);  dummy = None
+    return (add_6,)""",
+        )
+        self.assertExpectedInline(
+            str(ufm.dummy.graph_module.code).strip(),
+            """\
+def forward(self, add):
+    add_1 = torch.ops.aten.add.Tensor(add, 2)
+    add_2 = torch.ops.aten.add.Tensor(add, add_1);  add_1 = None
+    add_3 = torch.ops.aten.add.Tensor(add_2, 3);  add_2 = None
+    add_4 = torch.ops.aten.add.Tensor(add_3, add);  add_3 = add = None
+    add_5 = torch.ops.aten.add.Tensor(add_4, 4);  add_4 = None
+    return add_5""",
+        )
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -2277,6 +2331,9 @@ def forward(self, x, y):
                 ep = export(model, inputs)
 
     def test_subclasses_parameterization(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2329,6 +2386,7 @@ graph():
 
         self.assertEqual(res, ref_out)
 
+    @testing.expectedFailureCppRuntimeNonStrict
     def test_subclasses_parameterization_nested(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -4354,6 +4412,20 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(ref[0], actual[0]))
         self.assertTrue(torch.allclose(ref[1], actual[1]))
 
+    def test_unbacked_3d_matmul(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, repeat):
+                u0 = repeat.item()
+                t1 = x.unsqueeze(1).expand(x.size(0), u0 // 2, x.size(-1))
+                t2 = torch.ones(3)
+                return torch.matmul(t1, t2)
+
+        model = Model()
+        inputs = (torch.randn(4, 3), torch.scalar_tensor(2, dtype=torch.int))
+
+        exported = export(model, inputs).module()
+        self.assertEqual(model(*inputs), exported(*inputs))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -4969,6 +5041,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
 
     def test_simple_unbacked_view(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def forward(self, x):
                 u0 = x.item()
@@ -5300,6 +5375,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
     def test_map(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
                 def body(x, y, z):
@@ -6271,7 +6349,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             efoo = torch.export.export(
                 foo,
                 inputs,
-                dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
+                dynamic_shapes={
+                    "kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}, None, None]
+                },
             )
             self.assertEqual(
                 [out.shape for out in efoo.module()(*inputs)],
@@ -7946,6 +8026,9 @@ def forward(self, x):
         self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
     def test_unbacked_noncontig_lin(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8010,6 +8093,9 @@ def forward(self, x):
         self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
 
     def test_sym_or_sym_and(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
         class Foo(torch.nn.Module):
@@ -8231,6 +8317,29 @@ def forward(self, b_a_buffer, x):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_ccode_python_mod(self):
+        import sympy
+
+        from torch.utils._sympy.functions import PythonMod
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                torch._check_is_size(u1)
+                return u0, u1
+
+        ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
+        u0_node, u1_node = list(ep.graph.nodes)[-1].args[0]
+        u0 = u0_node.meta["val"]
+        u1 = u1_node.meta["val"]
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, 3)), """(u0 % 3) < 0 ? u0 % 3 + 3 : u0 % 3"""
+        )
+        self.assertExpectedInline(
+            sympy.ccode(PythonMod(u0, u1)),
+            """(u0 % u1) < 0 ? u0 % u1 + abs(u1) : u0 % u1""",
+        )
+
     def test_aten_lift_fresh_copy(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -8273,7 +8382,7 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
         device = torch.device("cuda")
@@ -8298,7 +8407,7 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
         device = torch.device("cuda")
@@ -8323,8 +8432,11 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_export_associative_scan_lifted_buffers(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         device = torch.device("cuda")
         combine_mode = "pointwise"
 
@@ -8803,7 +8915,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             self.assertExpectedInline(
                 str(ep_decompose_linear.graph_module.code).strip(),
                 """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
@@ -11976,6 +12088,30 @@ graph():
             )
         )
 
+    def test_filter_traceback_frames(self):
+        class TestTracer(torch.fx.Tracer):
+            def __init__(self) -> None:
+                super().__init__()
+
+                self.record_stack_traces = True
+
+            def _filter_traceback_frames(
+                self, user_stack_summary: traceback.StackSummary
+            ) -> traceback.StackSummary:
+                # Keep the last frame
+                user_frames = [user_stack_summary[-1]]
+                return traceback.StackSummary.from_list(user_frames)
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x *= 2.0
+                return x
+
+        graph = TestTracer().trace(Foo())
+
+        trace_x = [node for node in graph.nodes if node.name == "x"][0].stack_trace
+        self.assertTrue(re.search(r"proxy.py.*in create_node\n", trace_x))
+
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_register_constant(self):
@@ -13217,6 +13353,9 @@ def forward(self, x, y):
         self.assertTrue(placeholders[2].meta["val"].requires_grad)
 
     def test_unbacked_expand(self):
+        if "cpp_runtime_nonstrict" in self.id():
+            self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
+
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 u0, u1, u2 = xs.tolist()
@@ -14810,6 +14949,51 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.sin(), ep.module()(x))
         pytree._deregister_pytree_node(torch.FunctionSchema)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+                self.register_buffer("buffer", torch.ones(4, 4))
+                self.register_buffer("param", torch.ones(4, 4))
+
+            def forward(self, x):
+                token_ids = torch.randint(0, 10, (4,), device=x.device)
+                embedded = self.embedding(token_ids).sum()
+                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
+
+        class BarModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = Model()
+
+            def forward(self, x):
+                if "cuda" in str(x.device):
+                    mod = self.mod.to(x.device)
+                    return mod(x)
+                else:
+                    return x.sum()
+
+        class BarBar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = BarModel()
+
+            def forward(self, x):
+                with torch.amp.autocast(device_type="cuda"):
+                    y = self.mod(x)
+                return y
+
+        with torch.no_grad():
+            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+                _ = torch.export.export(
+                    BarBar(),
+                    (),
+                    {"x": torch.randn(4, 4, 4, device="cuda")},
+                    strict=False,
+                ).module()
+
     def test_export_for_training_with_state_dict_hooks(self):
         def _state_dict_pre_hook(mod, prefix, keep_vars):
             mod._buffers["test"] = torch.Tensor([1])
@@ -15105,6 +15289,109 @@ def forward(self, args_0):
     abs_1 = torch.ops.aten.abs.default(args_0);  args_0 = None
     return (abs_1,)""",
         )
+
+    def test_sdpa_gqa(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        class Foo(torch.nn.Module):
+            def forward(self, q, k, v):
+                return F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
+
+        q = torch.randn(1, 32, 256, 128)
+        k = torch.randn(1, 8, 256, 128)
+        v = torch.randn(1, 8, 256, 128)
+        with sdpa_kernel(SDPBackend.MATH):
+            ep_math = export(Foo(), (q, k, v))
+            ep_math = ep_math.run_decompositions()
+            self.assertExpectedInline(
+                ep_math.graph_module.code.strip(),
+                """\
+def forward(self, q, k, v):
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
+    logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
+    where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    return (view_7,)""",
+            )
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            ep_flash = export(Foo(), (q, k, v))
+            ep_flash = ep_flash.run_decompositions()
+            self.assertExpectedInline(
+                ep_flash.graph_module.code.strip(),
+                """\
+def forward(self, q, k, v):
+    mul = torch.ops.aten.mul.Scalar(q, 0.29730177875068026);  q = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(k, 2);  k = None
+    expand = torch.ops.aten.expand.default(unsqueeze, [1, 8, 4, 256, 128]);  unsqueeze = None
+    clone = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+    view = torch.ops.aten.view.default(clone, [1, 32, 256, 128]);  clone = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(v, 2);  v = None
+    expand_1 = torch.ops.aten.expand.default(unsqueeze_1, [1, 8, 4, 256, 128]);  unsqueeze_1 = None
+    clone_1 = torch.ops.aten.clone.default(expand_1, memory_format = torch.contiguous_format);  expand_1 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [1, 32, 256, 128]);  clone_1 = None
+    permute = torch.ops.aten.permute.default(view, [0, 1, 3, 2]);  view = None
+    mul_1 = torch.ops.aten.mul.Scalar(permute, 0.29730177875068026);  permute = None
+    expand_2 = torch.ops.aten.expand.default(mul, [1, 32, 256, 128]);  mul = None
+    view_2 = torch.ops.aten.view.default(expand_2, [32, 256, 128]);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(mul_1, [1, 32, 128, 256]);  mul_1 = None
+    view_3 = torch.ops.aten.view.default(expand_3, [32, 128, 256]);  expand_3 = None
+    bmm = torch.ops.aten.bmm.default(view_2, view_3);  view_2 = view_3 = None
+    view_4 = torch.ops.aten.view.default(bmm, [1, 32, 256, 256]);  bmm = None
+    _softmax = torch.ops.aten._softmax.default(view_4, -1, False)
+    eq = torch.ops.aten.eq.Scalar(view_4, -inf);  view_4 = None
+    logical_not = torch.ops.aten.logical_not.default(eq);  eq = None
+    any_1 = torch.ops.aten.any.dim(logical_not, -1, True);  logical_not = None
+    logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
+    full_like = torch.ops.aten.full_like.default(_softmax, 0, pin_memory = False, memory_format = torch.preserve_format)
+    where = torch.ops.aten.where.self(logical_not_1, full_like, _softmax);  logical_not_1 = full_like = _softmax = None
+    expand_4 = torch.ops.aten.expand.default(where, [1, 32, 256, 256]);  where = None
+    view_5 = torch.ops.aten.view.default(expand_4, [32, 256, 256]);  expand_4 = None
+    expand_5 = torch.ops.aten.expand.default(view_1, [1, 32, 256, 128]);  view_1 = None
+    view_6 = torch.ops.aten.view.default(expand_5, [32, 256, 128]);  expand_5 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_5, view_6);  view_5 = view_6 = None
+    view_7 = torch.ops.aten.view.default(bmm_1, [1, 32, 256, 128]);  bmm_1 = None
+    permute_1 = torch.ops.aten.permute.default(view_7, [2, 0, 1, 3]);  view_7 = None
+    clone_2 = torch.ops.aten.clone.default(permute_1, memory_format = torch.contiguous_format);  permute_1 = None
+    permute_2 = torch.ops.aten.permute.default(clone_2, [1, 2, 0, 3]);  clone_2 = None
+    return (permute_2,)""",
+            )
+        # test backend check for invalid inputs
+        error_type = (
+            RuntimeError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with self.assertRaisesRegex(
+            error_type,
+            r"Number of heads in key and value must divide the number of heads",
+        ):
+            export(Foo(), (torch.randn(1, 33, 256, 128), k, v))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -15630,6 +15917,22 @@ def forward(self, x):
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
 
+    @requires_cuda_and_triton
+    def test_assert_tensor_metadata_device_index(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x.float()
+                y = y.float()
+                return x + y
+
+        inp = (torch.randn(3, device="cuda"), torch.randn(3, device="cuda"))
+        ep = export(N(), inp)
+        ep = move_to_device_pass(ep, {"cuda:0": "cuda"})
+        ep.module()(torch.randn(3, device="cuda:0"), torch.randn(3, device="cuda:0"))
+
     def test_input_output_no_stacktrace(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -15861,6 +16164,28 @@ def forward(self, x, mask):
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",
+            ignore_empty_lines=True,
+        )
+
+    def test_unbacked_select_index(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = y.item()
+                return x.select(0, u0)
+
+        example_inputs = (
+            torch.randn((3, 3), dtype=torch.bfloat16),
+            torch.tensor([0]),
+        )
+
+        traced = export(MyModel(), example_inputs).run_decompositions({})
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
+def forward(self, x, y):
+    item = torch.ops.aten.item.default(y);  y = None
+    select = torch.ops.aten.select.int(x, 0, item);  x = item = None
+    return (select,)""",
             ignore_empty_lines=True,
         )
 
