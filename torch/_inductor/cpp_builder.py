@@ -1130,8 +1130,15 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
             str(
                 (
                     Path(sysconfig.get_path("include", scheme="nt")).parent / "libs"
-                ).absolute()
-            )
+                ).absolute()  # python[ver].lib
+            ),
+            str(
+                (
+                    Path(sysconfig.get_path("include", scheme="nt")).parent
+                    / "Library"
+                    / "lib"
+                ).absolute()  # install python librarys location, such as intel-openmp
+            ),
         ]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
