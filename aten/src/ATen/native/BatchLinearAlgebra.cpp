@@ -2453,7 +2453,7 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
 
   // geqrf requires m x n workspace input that is modified in-place
   // We try to use Q. If it doesn't fit, we try to use R
-  // If m > n and compute_q==false, it won't fit into Q or R, so we neet to create an auxiliary tensor
+  // If m > n and compute_q==false, it won't fit into Q or R, so we need to create an auxiliary tensor
   Tensor QR;
   if (compute_q && Q.size(-1) == n) {
     QR = Q;
@@ -4095,7 +4095,7 @@ Tensor linalg_vander_symint(
   const auto n = N.value_or(shape.back());
   TORCH_CHECK(n > 1, "N must be greater than 1.");
 
-  // Append cumprod of the oher 0...n-1 powers
+  // Append cumprod of the other 0...n-1 powers
   shape.push_back(n - 1);
   auto result = at::cumprod(x_.unsqueeze(-1).expand_symint(shape), -1);
   // The row of ones

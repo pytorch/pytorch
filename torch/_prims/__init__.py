@@ -2174,7 +2174,7 @@ def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
 _resize_doc = """
   Gives a tensor with no elements a new shape, returning the modified tensor.
 
-  The tensor's strides are contiguous and its values are unitialized.
+  The tensor's strides are contiguous and its values are uninitialized.
   """
 
 # TODO: review support arbitrary resizes

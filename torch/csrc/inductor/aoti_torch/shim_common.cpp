@@ -981,16 +981,17 @@ AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
-    AtenTensorHandle bias,
+    AtenTensorHandle bias, // optional argument
     int64_t out_channel,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
     at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
-    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    auto optional_bias_tensor =
+        pointer_to_optional(tensor_handle_to_tensor_pointer(bias));
 
     *out = new_tensor_handle(at::fbgemm_linear_fp16_weight_fp32_activation(
-        *input_tensor, *weight_tensor, *bias_tensor));
+        *input_tensor, *weight_tensor, optional_bias_tensor));
   });
 }
 
