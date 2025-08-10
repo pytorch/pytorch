@@ -31,16 +31,16 @@ else
   GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
   rm -f $GRADLE_LOCAL_PROPERTIES
 
-  echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
-  echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
+  echo "sdk.dir=/opt/android/sdk" >>$GRADLE_LOCAL_PROPERTIES
+  echo "ndk.dir=/opt/ndk" >>$GRADLE_LOCAL_PROPERTIES
 
-  echo "SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" >> $GRADLE_PROPERTIES
-  echo "mavenCentralRepositoryUsername=${SONATYPE_NEXUS_USERNAME}" >> $GRADLE_PROPERTIES
-  echo "SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" >> $GRADLE_PROPERTIES
-  echo "mavenCentralRepositoryPassword=${SONATYPE_NEXUS_PASSWORD}" >> $GRADLE_PROPERTIES
+  echo "SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" >>$GRADLE_PROPERTIES
+  echo "mavenCentralRepositoryUsername=${SONATYPE_NEXUS_USERNAME}" >>$GRADLE_PROPERTIES
+  echo "SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" >>$GRADLE_PROPERTIES
+  echo "mavenCentralRepositoryPassword=${SONATYPE_NEXUS_PASSWORD}" >>$GRADLE_PROPERTIES
 
-  echo "signing.keyId=${ANDROID_SIGN_KEY}" >> $GRADLE_PROPERTIES
-  echo "signing.password=${ANDROID_SIGN_PASS}" >> $GRADLE_PROPERTIES
+  echo "signing.keyId=${ANDROID_SIGN_KEY}" >>$GRADLE_PROPERTIES
+  echo "signing.password=${ANDROID_SIGN_PASS}" >>$GRADLE_PROPERTIES
 
   $GRADLE_PATH -p ~/workspace/android/ uploadArchives
 fi
