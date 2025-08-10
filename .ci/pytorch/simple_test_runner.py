@@ -94,6 +94,35 @@ class SmokeTestSuite(SimpleTestSuite):
     
     def get_test_names(self) -> List[str]:
         return ["test_smoke"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run the smoke test suite by calling shell functions."""
+        from .utils.shell_utils import source_and_run, get_ci_dir
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        success = True
+        ci_dir = get_ci_dir()
+        
+        for test_func in self.get_test_names():
+            self.logger.info(f"Running {test_func}")
+            
+            # Call the original shell function
+            result = source_and_run(
+                str(ci_dir / "test.sh"),
+                test_func,
+                cwd=str(ci_dir.parent.parent)
+            )
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                success = False
+        
+        return success
 
 
 class InductorTestSuite(SimpleTestSuite):

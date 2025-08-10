@@ -53,14 +53,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_python_tests_via_delegation(dry_run: bool = False, verbose: bool = False) -> bool:
-    """Run tests by delegating to simple_test_runner.py which has working imports."""
+def run_python_tests_via_delegation(dry_run: bool = False, verbose: bool = False) -> int:
+    """Run tests by delegating to simple_test_runner.py which has working imports.
+    
+    Returns:
+        int: The exit code from the delegated test runner (0 for success, non-zero for failure)
+    """
     ci_dir = Path(__file__).parent
     simple_runner = ci_dir / "simple_test_runner.py"
     
     if not simple_runner.exists():
         logging.error(f"simple_test_runner.py not found at {simple_runner}")
-        return False
+        return 1
     
     cmd = [sys.executable, str(simple_runner)]
     if dry_run:
@@ -70,11 +74,13 @@ def run_python_tests_via_delegation(dry_run: bool = False, verbose: bool = False
     
     try:
         logging.info(f"Delegating to: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=ci_dir)
-        return result.returncode == 0
+        # Properly capture and propagate the exit code
+        result = subprocess.run(cmd, cwd=ci_dir, capture_output=False)
+        logging.info(f"Delegated test runner completed with exit code: {result.returncode}")
+        return result.returncode
     except Exception as e:
         logging.error(f"Failed to run simple_test_runner.py: {e}")
-        return False
+        return 1
 
 
 def fallback_to_shell(args: list) -> int:
@@ -118,17 +124,17 @@ def main() -> int:
     
     try:
         # Run Python-based tests via delegation
-        success = run_python_tests_via_delegation(dry_run=args.dry_run, verbose=verbose)
+        exit_code = run_python_tests_via_delegation(dry_run=args.dry_run, verbose=verbose)
         
-        if success:
+        if exit_code == 0:
             logging.info("All tests completed successfully")
             return 0
         else:
-            logging.error("Some tests failed")
+            logging.error(f"Tests failed with exit code: {exit_code}")
             if args.fallback_on_error:
                 logging.info("Attempting fallback to shell script")
                 return fallback_to_shell(sys.argv[1:])
-            return 1
+            return exit_code
             
     except Exception as e:
         logging.error(f"Python test runner failed: {e}")
