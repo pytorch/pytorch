@@ -18,7 +18,7 @@ from torch._inductor.utils import (
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_quantization import (
     _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
@@ -312,6 +312,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
+                continue
             metrics.reset()
             if dim == 4:
                 x_shape = (1, 3, 56, 56)
@@ -350,7 +355,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv2d_unary(self, device):
         self.device = device
         self._test_conv_unary_base(dim=4)
@@ -358,7 +363,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv3d_unary(self, device):
         self.device = device
         self._test_conv_unary_base(dim=5)
@@ -442,7 +447,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv_transpose2d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=4)
@@ -453,7 +458,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
@@ -508,6 +513,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
+                continue
             metrics.reset()
             if dim == 4:
                 x_shape = (1, 3, 56, 56)
@@ -543,7 +553,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off(0.02)
+    @reduced_f32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=4)
@@ -551,7 +561,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off(0.02)
+    @reduced_f32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=5)
@@ -650,7 +660,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=4)
@@ -658,7 +668,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv3d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
@@ -667,7 +677,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
         self.device = device
 
@@ -699,7 +709,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
 
@@ -730,10 +740,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
-        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+        if torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]:
             dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
+                continue
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
@@ -761,7 +776,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 expected_kernel_count -= 1
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self, device="cpu"):
         self.device = device
@@ -909,7 +924,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
 
@@ -931,7 +946,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
-        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+        if torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]:
             dtypes.append(torch.float32)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
@@ -940,6 +955,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
+                continue
 
             def matcher_check_fn():
                 self.assertEqual(
@@ -2951,6 +2971,104 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_qat=is_qat,
             is_dynamic=is_dynamic,
         )
+
+    def _test_qlinear_fp8_inductor_cpu_helper(self, qlinear_op, post_op="none"):
+        dtype = torch.float8_e4m3fn
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        post_op_algo = "none"
+        unary_post_op_args = ()
+        batch_size = 1
+        output_dtype = torch.float8_e4m3fn
+        y_scale, y_zp = 0.07, 0
+        ic = 4
+        oc = 16
+
+        torch._dynamo.reset()
+        used_y_scale = y_scale
+        used_y_zp = y_zp
+        x = torch.rand(batch_size, ic)
+        w = torch.rand(oc, ic)
+        qx = x.to(dtype)
+        qw = w.to(dtype)
+        x_scale = 0.5
+        w_scales = torch.randn(oc)
+        b = torch.rand(oc)
+
+        x_zp = 0
+        w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+        if post_op == "none":
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                def forward(self, qx):
+                    qy = qlinear_op(
+                        qx,
+                        x_scale,
+                        x_zp,
+                        self.qw_packed,
+                        w_scales,
+                        w_zps,
+                        b,
+                        used_y_scale,
+                        used_y_zp,
+                        output_dtype,
+                        post_op,
+                        unary_post_op_args,
+                        post_op_algo,
+                    )
+                    return qy
+
+        elif post_op == "add":
+            x2 = torch.rand(batch_size, oc)
+            binary_alpha = 1.0  # we only support alpha=1.0 now
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                def forward(self, qx):
+                    qy = qlinear_op(
+                        qx,
+                        x_scale,
+                        x_zp,
+                        self.qw_packed,
+                        w_scales,
+                        w_zps,
+                        x2,
+                        b,
+                        used_y_scale,
+                        used_y_zp,
+                        output_dtype,
+                        1.0,
+                        0,
+                        "add",
+                        binary_alpha,
+                        "none",
+                        unary_post_op_args,
+                        post_op_algo,
+                    )
+                    return qy
+
+        with torch.no_grad():
+            model = Mod()
+            y_refe = model(qx)
+            y_test = torch.compile(model)(qx)
+            self.assertEqual(y_refe.float(), y_test.float())
+
+    @skipIfNoONEDNN
+    def test_qlinear_fp8_inductor_cpu(self):
+        qlinear_op = torch.ops.onednn.qlinear_pointwise.default
+        self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "none")
+
+    @skipIfNoONEDNN
+    def test_qlinear_add_fp8_inductor_cpu(self):
+        qlinear_op = torch.ops.onednn.qlinear_pointwise.binary
+        self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "add")
 
     def _qlinear_dequant_promotion_test_helper(
         self,

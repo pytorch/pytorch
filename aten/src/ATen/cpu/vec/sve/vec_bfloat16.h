@@ -5,6 +5,7 @@
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/bit_cast.h>
 #include <cmath>
 namespace at {
 namespace vec {
@@ -36,7 +37,7 @@ class Vectorized<BFloat16> {
     return VECTOR_WIDTH / sizeof(BFloat16);
   }
 
-  Vectorized() {}
+  Vectorized();
   Vectorized(svbfloat16_t v) : values(v) {}
   Vectorized(int val);
   Vectorized(BFloat16 val);
@@ -161,6 +162,9 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> exp2() const;
   Vectorized<BFloat16> expm1() const;
   Vectorized<BFloat16> exp_u20() const {
+    return exp();
+  }
+  Vectorized<BFloat16> fexp_u20() const {
     return exp();
   }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
@@ -301,6 +305,11 @@ Vectorized<c10::BFloat16> inline operator/(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
+}
+
+inline Vectorized<BFloat16>::Vectorized() {
+  const short zero = 0;
+  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {

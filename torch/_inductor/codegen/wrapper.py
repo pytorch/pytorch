@@ -40,6 +40,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -50,7 +51,6 @@ from ..utils import (
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     LineContext,
-    set_kernel_post_grad_provenance_tracing,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -479,7 +479,7 @@ class ExternKernelOutLine(WrapperLine):
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
         # set provenance tracing kernel mapping for ExternKernel types
-        if config.trace.enabled:
+        if config.trace.provenance_tracking:
             set_kernel_post_grad_provenance_tracing(node, kernel_name, is_extern=True)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
@@ -963,9 +963,12 @@ class PythonWrapperCodegen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
-        aot_inductor_debug_utils = ""
+        inductor_debug_utils = ""
         if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
-            aot_inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
+            inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
+        elif torch._inductor.config.test_configs.track_memory_lifecycle:
+            inductor_debug_utils = "from torch._inductor.runtime.debug_utils import tracked_empty_strided\n"
+
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -983,7 +986,7 @@ class PythonWrapperCodegen(CodeGen):
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
-                {aot_inductor_debug_utils}
+                {inductor_debug_utils}
             """,
             strip=True,
         )
@@ -997,6 +1000,7 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+                empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 async_compile = AsyncCompile()
@@ -1247,9 +1251,6 @@ class PythonWrapperCodegen(CodeGen):
                 f"with {V.graph.device_ops.device_guard(device_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
-            self.kernel_autotune_calls.writeline(
-                V.graph.device_ops.set_device(device_idx)
-            )
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
@@ -1804,6 +1805,14 @@ class PythonWrapperCodegen(CodeGen):
         result_name = node.get_name()
         arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
+
+    def codegen_dynamic_select_index(self, node):
+        index_str = f"{node.index} + {node.size} if {node.index} < 0 else {node.index}"
+        self.writeline(
+            f"{node.unbacked_offset_symbol} = {node.base_offset} + {node.base_dim_stride} * ({index_str})"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -2544,8 +2553,16 @@ class PythonWrapperCodegen(CodeGen):
         original_fxnode_name=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
-        if not (triton or device.type != "cpu"):
-            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+        if not triton and device.type != "cuda":
+            if device.type == "cpu":
+                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            elif device.type == "mps":
+                # TODO: Fix me, MPS does not expose streams now
+                self.writeline(
+                    self.wrap_kernel_call(f"{kernel_name}.generated_kernel", call_args)
+                )
+            else:
+                raise RuntimeError(f"device {device.type} nyi")
             return
 
         call_args_str = self.prepare_triton_kernel_call(call_args)
@@ -2679,9 +2696,16 @@ class PythonWrapperCodegen(CodeGen):
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
+            # Make sure kernel launch under a device guard because models don't always run on device 0
+            self.kernel_autotune_calls.writeline(
+                f"with {V.graph.device_ops.device_guard(device.index)}:"
+            )
+            self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
+            self.kernel_autotune_calls.do_unindent()
+
             self.kernel_autotune_calls.writeline(
                 DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )
@@ -2752,6 +2776,14 @@ class PythonWrapperCodegen(CodeGen):
             buffer.get_name(), device, dtype, shape, stride, allocation_shape
         )
 
+    @cache_on_self
+    def write_memory_track_allocation_once(self):
+        import_str = """
+            from torch._inductor.runtime.debug_utils import check_memory_step, track_tensor
+            """
+        if not V.graph.cpp_wrapper:
+            self.imports.splice(import_str, strip=True)
+
     def make_allocation(
         self, name, device, dtype, shape, stride, allocation_shape=None
     ):
@@ -2763,7 +2795,16 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-        if device.type in ("cpu", "cuda", "xpu"):
+        if torch._inductor.config.test_configs.track_memory_lifecycle:
+            out = (
+                f"{name} = tracked_empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"dtype={dtype}, "
+                f"device='{device.type}', "
+                f"name='{name}')"
+            )
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("

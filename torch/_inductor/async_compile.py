@@ -8,6 +8,7 @@ import json
 import logging
 import multiprocessing
 import os
+import re
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -48,6 +49,7 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
+from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -66,6 +68,10 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 log = logging.getLogger(__name__)
 
 _triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+
+size_hints_regex = re.compile(
+    r"size_hints=(\{.*?\})",
+)
 
 
 def pre_fork_setup():
@@ -415,6 +421,27 @@ class AsyncCompile:
                 "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
             }
 
+            if len(torch._inductor.config.autotune_lookup_table) > 0:
+                m = size_hints_regex.search(source_code)
+                if m:
+                    size_hints_str = m.group(1)
+                else:
+                    size_hints_str = str(None)
+
+                triton_src = source_code.split("@triton.jit\n")[1]
+                from torch._inductor.runtime.triton_heuristics import (
+                    generate_lookup_hash_from_source_code,
+                )
+
+                fn_hash = generate_lookup_hash_from_source_code(
+                    size_hints_str, triton_src
+                )
+
+                if fn_hash in torch._inductor.config.autotune_lookup_table:
+                    extra_config["autotune_lookup_table"] = {  # type: ignore[assignment]
+                        fn_hash: torch._inductor.config.autotune_lookup_table[fn_hash]
+                    }
+
             task = self.process_pool().submit(
                 _worker_compile_triton,
                 load_kernel,
@@ -453,22 +480,29 @@ class AsyncCompile:
                 log_waitcounter=True,
                 waitcounter_name_override="compile_triton",
             ):
-                start_ns = time_ns()
-                _set_triton_ptxas_path()
-                kernel = load_kernel()
-                kernel.set_compile_info(compile_id, is_backward)
-                kernel.precompile(
-                    warm_cache_only=False,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
-                elapsed_us = (time_ns() - start_ns) // 1000
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
-                info = kernel.autotune_cache_info or {}
-                info["compile_time_us"] = elapsed_us
-                _add_triton_kernel_info(kernel_name, info)
-                return kernel
+                fail = None
+                try:
+                    start_ns = time_ns()
+                    _set_triton_ptxas_path()
+                    kernel = load_kernel()
+                    kernel.set_compile_info(compile_id, is_backward)
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                    elapsed_us = (time_ns() - start_ns) // 1000
+                    get_metrics_context().add_top_n(
+                        "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                    )
+                    info = kernel.autotune_cache_info or {}
+                    info["compile_time_us"] = elapsed_us
+                    _add_triton_kernel_info(kernel_name, info)
+                    return kernel
+                except Exception as e:
+                    fail = str(e)
+                    raise
+                finally:
+                    log_triton_builds(fail=fail)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall

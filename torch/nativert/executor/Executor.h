@@ -15,7 +15,6 @@
 #include <torch/nativert/executor/ExecutionPlanner.h>
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/GraphExecutorBase.h>
-#include <torch/nativert/executor/Placement.h>
 #include <torch/nativert/executor/memory/FunctionSchema.h>
 #include <torch/nativert/executor/memory/LayoutPlanner.h>
 #include <torch/nativert/graph/Graph.h>
@@ -79,11 +78,9 @@ class Executor {
   Executor(
       torch::nativert::ExecutorConfig executorConfig,
       std::shared_ptr<Graph> graph,
-      std::shared_ptr<Weights> weights,
-      const Placement& placement = Placement(),
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
-          pytorchStreamReader = nullptr,
-      const MakeProxyExecutorFn& makeProxyExecutorFunc = nullptr);
+      const std::shared_ptr<Weights>& weights,
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
+          pytorchStreamReader = nullptr);
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -91,7 +88,7 @@ class Executor {
     return ret;
   }
 
-  void processWeights(std::shared_ptr<Weights> weights);
+  void processWeights(const std::shared_ptr<Weights>& weights);
   void atomicSwapWeights(std::shared_ptr<Weights> weights);
 
   // This API only returns the flattened UserOutputs,
@@ -106,7 +103,7 @@ class Executor {
       const ITreeSpec& inputTreeSpec);
 
   ProfileMetrics benchmarkIndividualNodes(
-      std::vector<std::vector<c10::IValue>> inputsList,
+      const std::vector<std::vector<c10::IValue>>& inputsList,
       const uint32_t warmupRuns,
       const uint32_t mainRuns);
 
@@ -125,7 +122,7 @@ class Executor {
   std::vector<DelegateExecutor*> getDelegates();
 
   // Get the number of execution frames in the pool
-  int getNumExecutionFrames() const {
+  auto getNumExecutionFrames() const {
     return numExecutionFrames_.load();
   }
 
@@ -141,8 +138,8 @@ class Executor {
   c10::Synchronized<std::shared_ptr<Weights>> weights_;
 
   void initialize(
-      std::shared_ptr<Weights> weights,
-      std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
+      const std::shared_ptr<Weights>& weights,
+      const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader);
 
   ExecutorFramePtr getExecutorFrameFromPool();
@@ -152,34 +149,15 @@ class Executor {
   void clearStaleExecutionFrames();
 
  private:
-  // Structure to track execution frame usage
-  struct ExecutionFrameEntry {
-    bool used{false};
-    std::unique_ptr<ExecutionFrame> frame;
-
-    // Add move constructor and assignment operator
-    ExecutionFrameEntry() = default;
-    ExecutionFrameEntry(ExecutionFrameEntry&& other) noexcept
-        : used(other.used), frame(std::move(other.frame)) {}
-    ExecutionFrameEntry& operator=(ExecutionFrameEntry&& other) noexcept {
-      used = other.used;
-      frame = std::move(other.frame);
-      return *this;
-    }
-    // Delete copy constructor and assignment operator
-    ExecutionFrameEntry(const ExecutionFrameEntry&) = delete;
-    ExecutionFrameEntry& operator=(const ExecutionFrameEntry&) = delete;
-  };
-
-  void maybeRunConstantFolding(std::shared_ptr<Weights> weights);
+  void maybeRunConstantFolding(const std::shared_ptr<Weights>& weights);
   void validateInputs(const std::vector<c10::IValue>& inputs) const;
 
   // Helper method to get current timestamp in seconds
   int64_t getCurrentTimestampSeconds() const;
 
-  std::unique_ptr<GraphExecutorBase> graphExecutor_;
+  void initWeights(const std::shared_ptr<Weights>& weights);
 
-  const Placement placement_;
+  std::unique_ptr<GraphExecutorBase> graphExecutor_;
 
   // NOTE: delegateExecutors_ is used by nodeKernels_ inside graphExecutor_.
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors_;
@@ -188,13 +166,11 @@ class Executor {
 
   std::optional<ConstantFolder> constantFolder_;
 
-  MakeProxyExecutorFn makeProxyExecutorFunc_;
-
   c10::Semaphore sem_;
   torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>>
       executionFrames_;
-  torch::nativert::detail::MPMCQueue<ExecutionFrameEntry>
-      clearedExecutionFrames_;
+  torch::nativert::detail::MPMCQueue<std::unique_ptr<ExecutionFrame>>
+      inactiveExecutionFrames_;
   std::atomic_int64_t numExecutionFrames_;
 
   std::unique_ptr<LayoutPlanner> layoutPlanner_;

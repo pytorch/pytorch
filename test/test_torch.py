@@ -59,7 +59,7 @@ import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU,
     _create_scaling_case, _create_scaling_models_optimizers)
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -2557,7 +2557,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.08)
+    @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2568,7 +2568,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
-    @bf32_on_and_off(0.08)
+    @reduced_f32_on_and_off(0.08)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2578,7 +2578,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.04)
+    @reduced_f32_on_and_off(0.04)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2606,7 +2606,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.04)
+    @reduced_f32_on_and_off(0.04)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -8337,7 +8337,7 @@ class TestTorch(TestCase):
         self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
         torch.set_printoptions(sci_mode=False)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        self.assertExpectedInline(str(x), '''tensor([100.0000,   0.0100])''')
         torch.set_printoptions(sci_mode=None)  # reset to the default value
 
         # test no leading space if all elements positive
@@ -9432,7 +9432,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                    f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
-            with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+            with self.assertRaisesRegex(ValueError, r'Overflow when unpacking long long'):
                 torch.manual_seed(invalid_seed)
 
         torch.set_rng_state(rng_state)
@@ -10851,8 +10851,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_invalid_arg_error_handling(self) -> None:
         """ Tests that errors from old TH functions are propagated back """
         for invalid_val in [-1, 2**65]:
-            self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
-            self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_interop_threads(invalid_val))
 
     def _get_tensor_prop(self, t):
         preserved = (

@@ -878,6 +878,23 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         ):
             self._test_serialization("ID_MATCH", fn, torch.randn(3))
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_id_match_with_config(self):
+        def fn(x):
+            return x + id(x)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
+        def fn(x):
+            # usage of this context manager installs a FUNCTION_MATCH guard
+            with torch.no_grad():
+                y = x * 2
+            return y
+
+        ref, loaded = self._test_serialization("FUNCTION_MATCH", fn, torch.randn(3))
+        self._test_check_fn(ref, loaded, {"x": torch.randn(3)}, True)
+
     def test_dispatch_key_set_match(self):
         def fn(x, dks):
             if dks.has("CPU"):
@@ -1307,6 +1324,27 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         finally:
             builtins_dict["getattr"] = getattr_original
+
+    def test_skipped_objects(self):
+        def foo():
+            pass
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.code = foo.__code__
+                self.foo = foo
+                self.p = torch.nn.Parameter(torch.randn(3, 2))
+
+            def forward(self, x):
+                z = x + 1
+                for p in self.parameters():
+                    z += p
+                return z
+
+        m = Module()
+        ref, loaded = self._test_serialization("TENSOR_MATCH", m, torch.randn(3, 2))
+        self._test_check_fn(ref, loaded, {"self": m, "x": torch.randn(3, 2)}, True)
 
 
 if __name__ == "__main__":

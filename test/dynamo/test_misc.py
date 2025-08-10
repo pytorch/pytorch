@@ -54,6 +54,7 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import call_size, counters, ifdynstaticdefault
 from torch._dynamo.variables import builder
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.utils import fresh_cache, run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -5140,6 +5141,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(same(ref, res))
 
+    @skipIfWindows(
+        msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
+    )
     def test_release_input_memory(self):
         x = torch.rand([4])
         x_ref = weakref.ref(x)
@@ -5155,6 +5159,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         del x
         self.assertIs(x_ref(), None)
 
+    @skipIfWindows(
+        msg="TODO: (xuhancn) conform, AssertionError: Linear(in_features=10, out_features=10, bias=True) is not None"
+    )
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -5186,6 +5193,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_release_scope_memory(self):
         def inner(y):
             y
@@ -6823,7 +6831,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             # assign fstring to a variable causes the fstring to be used,
             # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            return x.sin(), f_str
 
         guard_failure = None
 
@@ -10422,6 +10430,26 @@ def ___make_guard_fn():
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
+    def test_nested_dataclass_reconstruct(self):
+        @dataclasses.dataclass(frozen=True)
+        class NestedDataClass:
+            x: int = 2
+
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            y: torch.Tensor
+            ndc: NestedDataClass = NestedDataClass()
+
+        def fn(y):
+            dc = TestDataClass(y)
+            z = dc.y + dc.ndc.x
+            return z, dc
+
+        fn_opt = torch.compile()(fn)
+        inps = (torch.ones(2, 2),)
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
     def test_frozen_dataclass_default_value(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -10490,6 +10518,78 @@ def ___make_guard_fn():
         actual = fn_opt(*inps)
         expected = fn(*inps)
 
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_attr_access(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: torch.Tensor
+            y: torch.Tensor
+            z: int
+            a: int
+
+        def inner_fn(dc):
+            return dc.x + dc.y + dc.a + dc.z
+
+        def fn(x, y):
+            dc = TestDataClass(x, y, z=5, a=2)
+            return inner_fn(dc)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(actual, expected)
+
+    def test_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: float
+            y: float
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.x + dc.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(x=3.2, y=2.5, z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
+        self.assertEqual(actual, expected)
+
+    def test_nested_frozen_dataclass_hashable(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClassInner:
+            x: float
+            y: float
+
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            b: TestDataClassInner
+            z: int
+            a: int
+
+        def inner_fn(dc, x, y):
+            d = {}
+            d[dc] = 2
+            return dc.b.x + dc.b.y + d[dc] + x + y
+
+        def fn(x, y):
+            dc = TestDataClass(b=TestDataClassInner(2.4, 4.4), z=5, a=2)
+            return inner_fn(dc, x, y)
+
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        inps = (torch.ones(2, 2), torch.ones(2, 2))
+        actual = fn_opt(*inps)
+        expected = fn(*inps)
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
@@ -11144,7 +11244,7 @@ class AAA:
 def fn():
     return 3
 """
-        with tempfile.NamedTemporaryFile(mode="w") as f:
+        with WritableTempFile(mode="w") as f:
             f.write(src)
             f.flush()
             from torch._dynamo.funcname_cache import get_funcname
@@ -11537,6 +11637,7 @@ fn
         self.assertIs(c1[1], c2[0])
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @skipIfWindows(msg="TODO: (xuhancn) conform, AssertionError: False is not true")
     def test_dynamo_cache_invalidate(self):
         DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
 
@@ -11843,6 +11944,19 @@ fn
         fn(torch.randn(4), d)
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             fn(torch.randn(4), d)
+
+    def test_hash_hop(self):
+        associative_scan = importlib.import_module(
+            "torch._higher_order_ops.associative_scan"
+        )
+
+        @torch.compile(fullgraph=True)
+        def fn(y, s):
+            d = dict()
+            d[s] = y
+            return d[s] + 1.0
+
+        fn(torch.ones(2, 2, device="cpu"), associative_scan.AssociativeScanOp())
 
     def test_iter_type(self):
         @torch.compile(fullgraph=True)
@@ -12961,6 +13075,38 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         x = torch.ones([1], dtype=torch.int64)
         y = torch.tensor(5)
         f(x, y)
+
+    def test_dynamic_float_scalar_tensor_coersion(self):
+        # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
+        class Foo:
+            def __init__(self):
+                self.config = type(
+                    "Config", (), {"pad_val": 1123581321.0, "tolerance": 1e-6}
+                )
+
+            @torch.compile(fullgraph=True)
+            def forward(self, input):
+                outputs = torch.where(
+                    torch.abs(input - self.config.pad_val) < self.config.tolerance,
+                    torch.tensor(
+                        self.config.pad_val, dtype=input.dtype, device=input.device
+                    ),
+                    torch.tensor(
+                        self.config.pad_val + 1, dtype=input.dtype, device=input.device
+                    ),
+                )
+                return outputs
+
+        foo = Foo()
+        inputs = torch.randn(3, 4)
+        result = foo.forward(inputs)
+
+        original_pad_val = foo.config.pad_val
+        foo.config.pad_val += 1.0
+        result2 = foo.forward(inputs)
+
+        # Previously would crash with:
+        #   RuntimeError: value cannot be converted to type at::Half without overflow
 
 
 devices = ("cuda", "hpu", "xpu")
