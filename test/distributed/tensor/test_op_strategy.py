@@ -454,16 +454,30 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
         None
     """
     propagator = DTensor._op_dispatcher.sharding_propagator
+    _origin_op_strategy_funcs = None
+    _origin_op_strategy_schema = None
     try:
         # register the op strategy
+        if op_overload in propagator.op_strategy_funcs:
+            _origin_op_strategy_funcs = propagator.op_strategy_funcs[op_overload]
+            del propagator.op_strategy_funcs[op_overload]
+        if op_overload in propagator.op_to_schema_info:
+            _origin_op_strategy_schema = propagator.op_to_schema_info[op_overload]
+            del propagator.op_to_schema_info[op_overload]
         register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
         yield
     finally:
         # clear this op strategy cache
-        if op_overload in propagator.op_strategy_funcs:
-            del propagator.op_strategy_funcs[op_overload]
-        if op_overload in propagator.op_to_schema_info:
-            del propagator.op_to_schema_info[op_overload]
+        if _origin_op_strategy_funcs is None:
+            if op_overload in propagator.op_strategy_funcs:
+                del propagator.op_strategy_funcs[op_overload]
+        else:
+            propagator.op_strategy_funcs[op_overload] = _origin_op_strategy_funcs
+        if _origin_op_strategy_schema is None:
+            if op_overload in propagator.op_to_schema_info:
+                del propagator.op_to_schema_info[op_overload]
+        else:
+            propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
         propagator.propagate_op_sharding.cache.cache_clear()
 
 
@@ -605,6 +619,29 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
             output_dt = test_op(input_x_dt, input_y_dt, input_z_dt)
             self.assertEqual(output_dt.full_tensor(), output)
             self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
+
+
+class TestStrategyHashing(DTensorTestBase):
+    @with_comms
+    def test_call_with_different_nontensor_args(self):
+        mesh = self.build_device_mesh()
+        global_tensor = torch.tensor(
+            [
+                [29.0, 45.0, 3.0, 61.0],
+                [25.0, 6.0, 21.0, 0.0],
+                [1.0, 63.0, 49.0, 38.0],
+                [48.0, 9.0, 55.0, 18.0],
+            ]
+        )
+        shard_spec = [Shard(1)]
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, shard_spec)
+        with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
+            # intentionally do not supply `schema_info=RuntimeSchemaInfo(1)`
+            torch.sort(sharded_dtensor, dim=0)  # sort each column
+            out1, _ = torch.sort(sharded_dtensor, dim=1)  # sort each row
+        with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
+            out2, _ = torch.sort(sharded_dtensor, dim=1)
+        self.assertEqual(out1.full_tensor(), out2.full_tensor())
 
 
 if __name__ == "__main__":
