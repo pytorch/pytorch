@@ -1,10 +1,11 @@
 """
 Git Utility helpers for CLI tasks.
 """
+
 import logging
 from pathlib import Path
 
-from cli.lib.common.file_utils import remove_dir
+from cli.lib.common.path_helper import remove_dir
 from git import GitCommandError, RemoteProgress, Repo
 
 
@@ -64,7 +65,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
             logger.info("skipping submodule update.")
         else:
             if r.submodules:
-                logger.info(f" update repo submodules ....")
+                logger.info(" update repo submodules ....")
                 for sm in r.submodules:
                     sm.update(init=True, recursive=True, progress=PrintProgress())
             else:

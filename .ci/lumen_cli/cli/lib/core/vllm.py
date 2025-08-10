@@ -2,22 +2,21 @@ import logging
 import os
 import textwrap
 from dataclasses import dataclass, field
+from typing import Any
 
+from cli.lib.common.docker import local_image_exists
 from cli.lib.common.git_utils import clone_external_repo
-from cli.lib.common.type import BaseRunner
-
-from scripts.lumen_cli.cli.lib.common.docker import local_image_exists
-
-
-logger = logging.getLogger(__name__)
-
-from cli.lib.common.file_utils import (
+from cli.lib.common.path_helper import (
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
     is_path_exist,
 )
+from cli.lib.common.type import BaseRunner
 from cli.lib.common.utils import get_env, run_cmd
+
+
+logger = logging.getLogger(__name__)
 
 
 # default path for docker build artifacts
@@ -147,7 +146,7 @@ class VllmBuildRunner(BaseRunner):
     def __init__(self, args=None):
         self.work_directory = "vllm"
 
-    def run(self):
+    def run(self, args: Any):
         """
         main function to run vllm build
         1. prepare vllm build environment
