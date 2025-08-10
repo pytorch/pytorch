@@ -111,25 +111,6 @@ class VllmBuildRunner(BaseRunner):
     def __init__(self, args = None):
         self.work_directory = "vllm"
 
-<<<<<<< Updated upstream
-    def prepare(self):
-        """
-        Prepare the vllm build environment:
-        - clone vllm repo with  pinned commit
-        - create result dir if it does not exist
-        - copy torch whls to vllm work directory if provided
-        - copy user provided dockerfile to vllm work directory if provided
-        """
-        clone_vllm()
-        cfg = self._to_vllm_build_config()
-        self.cfg = cfg
-
-        ensure_dir_exists(self.cfg.artifact_dir)
-        self.cp_dockerfile_if_exist()
-        self.cp_torch_whls_if_exist()
-
-=======
->>>>>>> Stashed changes
     def run(self):
         """
         main function to run vllm build
