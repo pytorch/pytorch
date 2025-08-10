@@ -75,12 +75,12 @@ def _gen_transform_infos_non_cached(
     # map sharded tensor dim to device mesh dim with device ordering
     def _map_tensor_dim_to_mesh_dim(placements, device_order):
         tensor_dim_to_mesh_dims: dict[int, list[int]] = {}
-        for tensor_dim, mesh_dim in zip(placements, device_order):
-            if tensor_dim.is_shard():
-                assert isinstance(tensor_dim, Shard)
-                if tensor_dim.dim not in tensor_dim_to_mesh_dims:
-                    tensor_dim_to_mesh_dims[tensor_dim.dim] = []
-                tensor_dim_to_mesh_dims[tensor_dim.dim].append(mesh_dim)
+        for placement, mesh_dim in zip(placements, device_order):
+            if placement.is_shard():
+                assert isinstance(placement, Shard)
+                if placement.dim not in tensor_dim_to_mesh_dims:
+                    tensor_dim_to_mesh_dims[placement.dim] = []
+                tensor_dim_to_mesh_dims[placement.dim].append(mesh_dim)
         return tensor_dim_to_mesh_dims
 
     src_tensor_dim_to_mesh_dims = _map_tensor_dim_to_mesh_dim(
@@ -193,7 +193,7 @@ def _gen_transform_infos_non_cached(
                         and dst_device_order_to_mesh_dims[j] == [mesh_dim]
                     ):
                         mesh_dim_size = device_mesh.size(mesh_dim=mesh_dim)
-                        current_placement = sorted_dst_placement[mesh_dim]
+                        current_placement = sorted_dst_placement[mesh_dim]   # <<<<<<<<<<<<<<<<<<<<<<, error
                         assert isinstance(current_placement, Shard)
                         # alltoall from Shard(tensor_dim) to Shard()
                         transform_infos.append(
@@ -555,6 +555,7 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
+            None,
             None,
             None,
             None,
