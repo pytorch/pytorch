@@ -4,6 +4,7 @@ File And Path Utility helpers for CLI tasks.
 
 import logging
 import os
+import shutil
 
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,10 @@ def ensure_dir_exists(path: str):
     Ensure the directory exists. Create it if it doesn't exist.
     """
     if not os.path.exists(path):
-        logger.info(f"Creating directory '{path}' ....")
+        logger.info("Creating directory '%s' ....", path)
         os.makedirs(path, exist_ok=True)
     else:
-        logger.info(f"Directory already exists'{path}' ")
+        logger.info("Directory already exists'%s' ", path)
 
 
 def remove_dir(path: str):
@@ -36,10 +37,10 @@ def remove_dir(path: str):
     Remove a directory if it exists.
     """
     if os.path.exists(path):
-        logger.info(f"Removing directory '{path}'...")
+        logger.info("Removing directory '%s'...", path)
         shutil.rmtree(path)
     else:
-        logger.info(f"skip remove operation, Directory not found: {path}")
+        logger.info("skip remove operation, Directory not found: %s", path)
 
 
 def get_abs_path(path: str):
