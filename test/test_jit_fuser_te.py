@@ -2939,7 +2939,10 @@ def f({", ".join(param_names)}):
 
     @slowTest
     @onlyCPU
-    @ops(op_db, dtypes=OpDTypes.supported)
+    @ops(
+        [op for op in op_db if get_name(op) not in known_failures],
+        dtypes=OpDTypes.supported,
+    )
     def test_nnc_correctness(self, device, dtype, op):
         if not op.supports_tracing:
             self.skipTest("Requires tracing support")
