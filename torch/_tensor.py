@@ -641,6 +641,7 @@ class Tensor(torch._C.TensorBase):
             First-class tensor with specified dimensions bound
         """
         from functorch.dim import index
+
         return index(self, positions, dims)
 
     def register_hook(self, hook):

@@ -804,16 +804,16 @@ def generate_tensor_like_override_tests(cls):
         obj = IntLike(1)
 
         # pad takes [left, right, top, bottom] as padding
-        result = F.pad(x, [1, obj, 0, 0])
+        _ = F.pad(x, [1, obj, 0, 0])
         self.assertTrue(obj.torch_function_called,
-                       "torch_function should be called for object in int list")
+                        "torch_function should be called for object in int list")
 
         # Test multiple objects in list
         obj1 = IntLike(1)
         obj2 = IntLike(2)
-        result = F.pad(x, [obj1, obj2, 0, 0])
+        _ = F.pad(x, [obj1, obj2, 0, 0])
         self.assertTrue(obj1.torch_function_called or obj2.torch_function_called,
-                       "torch_function should be called for at least one object")
+                        "torch_function should be called for at least one object")
 
     def test_torch_function_in_float_lists(self):
         """Test that __torch_function__ is called for objects inside float lists"""
@@ -839,9 +839,9 @@ def generate_tensor_like_override_tests(cls):
         obj = FloatLike(4.0)
 
         # layer_norm takes normalized_shape as int/float list
-        result = F.layer_norm(x, [3, obj])
+        _ = F.layer_norm(x, [3, obj])
         self.assertTrue(obj.torch_function_called,
-                       "torch_function should be called for object in float list")
+                        "torch_function should be called for object in float list")
 
     def test_torch_function_in_scalar_lists(self):
         """Test that __torch_function__ is called for scalar objects inside lists"""
@@ -869,9 +869,9 @@ def generate_tensor_like_override_tests(cls):
         obj2 = ScalarLike(2.0)
 
         # Create a tensor with scalar list containing torch function objects
-        result = torch.as_tensor([obj1, obj2])
+        _ = torch.as_tensor([obj1, obj2])
         self.assertTrue(obj1.torch_function_called or obj2.torch_function_called,
-                       "torch_function should be called for scalar objects in list")
+                        "torch_function should be called for scalar objects in list")
 
     def test_torch_function_precedence_in_lists(self):
         """Test precedence when multiple torch function objects are in a list"""
@@ -900,7 +900,7 @@ def generate_tensor_like_override_tests(cls):
 
         # Test with both objects in list
         call_order.clear()
-        result = F.pad(x, [1, high, low, 0])
+        _ = F.pad(x, [1, high, low, 0])
 
         # High priority should be called first
         self.assertEqual(call_order[0], 'high',
@@ -938,7 +938,7 @@ def generate_tensor_like_override_tests(cls):
         CountingInt.reset()
 
         # Mix regular ints with torch function object
-        result = F.pad(x, [1, obj, 0, 0])
+        _ = F.pad(x, [1, obj, 0, 0])
 
         self.assertEqual(CountingInt.call_count, 1,
                         "torch_function should be called exactly once for mixed list")
@@ -990,9 +990,9 @@ def generate_tensor_like_override_tests(cls):
 
         # Test with torch_function object as last item
         obj_last = IntLikeNotFirst(1)
-        result = F.pad(x, [1, 1, 1, obj_last])
+        _ = F.pad(x, [1, 1, 1, obj_last])
         self.assertTrue(obj_last.torch_function_called,
-                       "torch_function should be called when object is last in list")
+                        "torch_function should be called when object is last in list")
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
 

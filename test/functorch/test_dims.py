@@ -5,14 +5,22 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-from unittest import skip, skipIf, expectedFailure
+from unittest import expectedFailure, skip, skipIf
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
 import functorch.dim
 import torch
-from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor, DimensionBindError
+from functorch.dim import (
+    Dim,
+    DimensionBindError,
+    DimList,
+    dimlists,
+    dims,
+    stack,
+    Tensor,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,

@@ -1,11 +1,10 @@
 # Owner(s): ["module: functorch"]
-import unittest
-
 import torch
 from functorch.dim import Dim, dims, Tensor
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestSplit(unittest.TestCase):
+class TestSplit(TestCase):
     """Comprehensive tests for first-class dimension split operations."""
 
     def setUp(self):
@@ -449,4 +448,4 @@ class TestSplit(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

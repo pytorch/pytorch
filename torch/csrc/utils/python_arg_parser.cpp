@@ -810,8 +810,7 @@ static bool is_scalar_list(
 
     // Check if this element has torch function
     if (overloaded_args &&
-        check_has_torch_function(iobj, /*ignore_mode*/ true) &&
-        !THPVariable_Check(iobj)) {
+        check_has_torch_function(iobj, /*ignore_mode*/ true)) {
       append_overloaded_arg(overloaded_args, iobj, /*obj_is_type*/ false);
       has_torch_func = true;
     }
@@ -884,8 +883,7 @@ static bool is_float_or_complex_list(
 
     // Check if this element has torch function
     if (overloaded_args &&
-        check_has_torch_function(iobj, /*ignore_mode*/ true) &&
-        !THPVariable_Check(iobj)) {
+        check_has_torch_function(iobj, /*ignore_mode*/ true)) {
       append_overloaded_arg(overloaded_args, iobj, /*obj_is_type*/ false);
       has_torch_func = true;
     }
@@ -945,33 +943,32 @@ static bool is_int_or_symint_list(
 
     // Check all elements, not just the first one, when looking for torch
     // functions
-    const auto size = PySequence_Size(obj);
+    const bool is_tuple = PyTuple_Check(obj);
+    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
     bool has_torch_func = false;
 
     for (Py_ssize_t idx = 0; idx < size; idx++) {
-      auto item =
-          py::reinterpret_steal<py::object>(PySequence_GetItem(obj, idx));
+      PyObject* item_ptr =
+          is_tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
 
       // Check if this element has torch function
       if (overloaded_args &&
-          check_has_torch_function(item.ptr(), /*ignore_mode*/ true) &&
-          !THPVariable_Check(item.ptr())) {
-        append_overloaded_arg(
-            overloaded_args, item.ptr(), /*obj_is_type*/ false);
+          check_has_torch_function(item_ptr, /*ignore_mode*/ true)) {
+        append_overloaded_arg(overloaded_args, item_ptr, /*obj_is_type*/ false);
         has_torch_func = true;
       }
 
       // For the first element, do the original type checking
       if (idx == 0) {
-        if (is_int_or_symint(item.ptr())) {
+        if (is_int_or_symint(item_ptr)) {
           continue;
         }
 
         // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
         // in an intlist argument. Even float or complex scalar tensors.
         bool r =
-            (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-             THPVariable_Unpack(item.ptr()).sizes().empty());
+            (jit::tracer::isTracing() && THPVariable_Check(item_ptr) &&
+             THPVariable_Unpack(item_ptr).sizes().empty());
         if (!r && failed_idx != nullptr) {
           *failed_idx = 0;
         }

@@ -1,11 +1,10 @@
 # Owner(s): ["module: functorch"]
-import unittest
-
 import torch
 from functorch.dim import Dim, DimList, dims, Tensor
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestGetSetItem(unittest.TestCase):
+class TestGetSetItem(TestCase):
     """Comprehensive tests for first-class dimension indexing operations."""
 
     def setUp(self):
@@ -272,4 +271,4 @@ class TestGetSetItem(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

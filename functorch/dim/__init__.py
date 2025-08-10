@@ -16,6 +16,7 @@ from ._tensor_info import TensorInfo
 
 
 POINTWISE_OPTIMIZE = True
+DOT_OPTIMIZED = True
 
 # Global dimension level counter (similar to C++ n_dims_created)
 _n_dims_created = 0
@@ -478,6 +479,51 @@ class _Tensor:
         if kwargs is None:
             kwargs = {}
 
+        # Delayed multiplication optimization port from C++
+        if DOT_OPTIMIZED and func is torch.Tensor.__mul__:
+            # Check conditions: 2 args, both are tensor-like, both 0-dimensional
+            if (
+                len(args) == 2
+                and not kwargs
+                and isinstance(args[0], (_Tensor, torch.Tensor))
+                and isinstance(args[1], (_Tensor, torch.Tensor))
+            ):
+                # Get tensor info for both operands
+                lhs_info = TensorInfo.create(
+                    args[0], ensure_batched=False, ensure_present=False
+                )
+                rhs_info = TensorInfo.create(
+                    args[1], ensure_batched=False, ensure_present=False
+                )
+
+                if (
+                    lhs_info
+                    and rhs_info
+                    and lhs_info.tensor.dim() == 0
+                    and rhs_info.tensor.dim() == 0
+                ):
+                    # Check that tensors are floating point (following C++ logic)
+                    if (
+                        lhs_info.tensor.is_floating_point()
+                        and rhs_info.tensor.is_floating_point()
+                    ):
+                        # Collect all unique levels and has_device
+                        has_device = lhs_info.has_device or rhs_info.has_device
+                        levels = []
+
+                        for level in lhs_info.levels:
+                            if level not in levels:
+                                levels.append(level)
+                        for level in rhs_info.levels:
+                            if level not in levels:
+                                levels.append(level)
+
+                        # Debug print
+                        # print(f"DEBUG: Creating delayed mul, levels: {levels}, has_device: {has_device}")
+
+                        # Create delayed tensor
+                        return Tensor.create_delayed(func, args, levels, has_device)
+
         if func is torch.Tensor.__getitem__:
             from functorch.dim._getsetitem import getitem
 
@@ -927,7 +973,9 @@ class Tensor(_Tensor):
     _batchtensor: torch.Tensor
     _levels: list[DimEntry]
     _has_device: bool
-    _delayed: Callable[[], torch.Tensor]
+    _delayed: Optional[Callable[[], torch.Tensor]]
+    _delayed_orig: Optional[Callable]
+    _delayed_args: Optional[tuple]
 
     # NB: capture_levels is just assign to _levels
 
@@ -984,6 +1032,8 @@ class Tensor(_Tensor):
         result._has_device = has_device
         result._batchtensor = None  # Will be created lazily if needed
         result._delayed = None
+        result._delayed_orig = None
+        result._delayed_args = None
 
         # Validate tensor dimensionality matches levels
         assert tensor.dim() == len(levels), (
@@ -995,12 +1045,53 @@ class Tensor(_Tensor):
 
         return result
 
+    @classmethod
+    def create_delayed(
+        cls, orig: Callable, args: tuple, levels: list[DimEntry], has_device: bool
+    ):
+        """
+        Create a delayed tensor that defers the operation until later.
+
+        Port of the C++ Tensor::create_delayed method.
+        """
+        result = cls()
+        result._tensor = None  # Will be computed when needed
+        result._levels = levels
+        result._has_device = has_device
+        result._batchtensor = None
+        result._delayed_orig = orig
+        result._delayed_args = args
+
+        # Create delayed evaluation function that unwraps Tensor objects
+        def evaluate_delayed():
+            unwrapped_args = []
+            for arg in args:
+                if hasattr(arg, "_get_tensor"):
+                    unwrapped_args.append(arg._get_tensor())
+                else:
+                    unwrapped_args.append(arg)
+            return orig(*unwrapped_args)
+
+        result._delayed = evaluate_delayed
+
+        # Calculate ndim from levels
+        result.ndim = ndim_of_levels(levels)
+
+        return result
+
     def _get_tensor(self):
         """Get the underlying tensor, handling delayed operations if needed."""
-        if hasattr(self, "_delayed") and self._delayed is not None:
-            # Handle delayed operations (simplified version of C++ logic)
-            # In a full implementation, this would execute the delayed operation
-            pass
+        if (
+            hasattr(self, "_delayed")
+            and self._delayed is not None
+            and self._tensor is None
+        ):
+            # Execute the delayed operation
+            self._tensor = self._delayed()
+            # Clear delayed operation to avoid re-execution
+            self._delayed = None
+            self._delayed_orig = None
+            self._delayed_args = None
         return self._tensor
 
     def _get_levels(self):
@@ -1256,6 +1347,154 @@ def split(tensor, split_size_or_sections, dim=None):
 def cat(tensors, dim, new_dim):
     n = dims()
     return stack(tensors, n, dim).index([n, dim], new_dim)
+
+
+class DotPart:
+    """
+    Helper class for organizing dimensions in dot products.
+    Port of C++ DotPart structure.
+    """
+
+    def __init__(self):
+        self.dims = []
+        self.total_size = 1
+
+    def append(self, dim_entry):
+        """Add a dimension entry to this part."""
+        self.dims.append(dim_entry)
+        if not dim_entry.is_positional():
+            self.total_size *= dim_entry.dim().size
+
+
+def dot_prepare(parts: list[DotPart], tensor_info: TensorInfo) -> torch.Tensor:
+    """
+    Prepare tensor for dot product by matching levels and reshaping.
+    Port of C++ dot_prepare function.
+    """
+    new_levels = []
+    needs_reshape = False
+
+    for part in parts:
+        if len(part.dims) != 1:
+            needs_reshape = True
+        new_levels.extend(part.dims)
+
+    result = _match_levels(tensor_info.tensor, tensor_info.levels, new_levels)
+
+    if not needs_reshape:
+        return result
+
+    # Reshape for matrix operations
+    view = [part.total_size for part in parts]
+    return result.reshape(view)
+
+
+def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
+    """
+    Finish dot product by reshaping result and creating Tensor.
+    Port of C++ dot_finish function.
+    """
+    result_levels = []
+    needs_reshape = False
+
+    for part in parts:
+        if len(part.dims) != 1:
+            needs_reshape = True
+        result_levels.extend(part.dims)
+
+    if needs_reshape:
+        new_size = []
+        for level in result_levels:
+            new_size.append(level.dim().size)
+        result_tensor = result_tensor.reshape(new_size)
+
+    return Tensor.from_positional(result_tensor, result_levels, True)
+
+
+def dot(lhs, rhs, sum_dims):
+    """
+    Perform dot product between two tensors along specified dimensions.
+    Port of C++ dot function.
+
+    Args:
+        lhs: Left-hand side tensor
+        rhs: Right-hand side tensor
+        sum_dims: Dimensions to sum over (contract)
+
+    Returns:
+        Result of dot product
+    """
+    # Get tensor info
+    lhs_info = TensorInfo.create(lhs, ensure_batched=False, ensure_present=False)
+    rhs_info = TensorInfo.create(rhs, ensure_batched=False, ensure_present=False)
+
+    if not (lhs_info and rhs_info):
+        # Fall back to regular operations
+        return torch.matmul(lhs, rhs)
+
+    lhs_strides = lhs_info.tensor.stride()
+    rhs_strides = rhs_info.tensor.stride()
+
+    # Create dot parts for different dimension categories
+    lro_dims = DotPart()  # Left-right-output (batch dims)
+    lo_dims = DotPart()  # Left-output only
+    ro_dims = DotPart()  # Right-output only
+    lr_dims = DotPart()  # Left-right (contracted dims)
+
+    def insert_dim(d, lhs_idx, rhs_idx):
+        """Insert dimension into appropriate part based on stride pattern."""
+        reduced = d in sum_dims
+        lhs_stride = lhs_strides[lhs_idx] if lhs_idx is not None else 0
+        rhs_stride = rhs_strides[rhs_idx] if rhs_idx is not None else 0
+
+        if reduced:
+            lr_dims.append(d)
+        else:
+            if (lhs_stride == 0) == (rhs_stride == 0):
+                lro_dims.append(d)  # Both have or both lack this dim
+            elif lhs_stride != 0:
+                lo_dims.append(d)  # Only lhs has this dim
+            else:
+                ro_dims.append(d)  # Only rhs has this dim
+
+    # Track which rhs dimensions we've seen
+    rhs_seen = [False] * len(rhs_info.levels)
+
+    # Process lhs dimensions
+    for i, lhs_level in enumerate(lhs_info.levels):
+        rhs_idx = None
+        for j, rhs_level in enumerate(rhs_info.levels):
+            if lhs_level == rhs_level:
+                rhs_idx = j
+                rhs_seen[j] = True
+                break
+
+        insert_dim(lhs_level, i, rhs_idx)
+
+    # Process remaining rhs dimensions
+    for i, rhs_level in enumerate(rhs_info.levels):
+        if not rhs_seen[i]:
+            insert_dim(rhs_level, None, i)
+
+    # Validate sum dimensions exist
+    if len(lr_dims.dims) != len(sum_dims):
+        for d in sum_dims:
+            if d not in lhs_info.levels and d not in rhs_info.levels:
+                raise ValueError(f"summing over non-existent dimension {d}")
+
+    # Prepare tensors and perform matrix multiplication
+    if len(lro_dims.dims) != 0:
+        # Batched matrix multiply
+        lhs_tensor = dot_prepare([lro_dims, lo_dims, lr_dims], lhs_info)
+        rhs_tensor = dot_prepare([lro_dims, lr_dims, ro_dims], rhs_info)
+        result = torch.bmm(lhs_tensor, rhs_tensor)
+        return dot_finish([lro_dims, lo_dims, ro_dims], result)
+    else:
+        # Regular matrix multiply
+        lhs_tensor = dot_prepare([lo_dims, lr_dims], lhs_info)
+        rhs_tensor = dot_prepare([lr_dims, ro_dims], rhs_info)
+        result = torch.mm(lhs_tensor, rhs_tensor)
+        return dot_finish([lo_dims, ro_dims], result)
 
 
 from functorch.dim._wrap import _wrap
