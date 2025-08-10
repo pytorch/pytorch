@@ -361,6 +361,7 @@ skip_guards_on_constant_func_defaults = True
 #
 #     • __code__        • __closure__
 #     • __defaults__    • __kwdefaults__
+#     • __annotations__ • __mro__
 #
 # It is fine to mutate the objects they already point to (e.g. tweak an element
 # inside __defaults__), but assignments like
@@ -370,11 +371,7 @@ skip_guards_on_constant_func_defaults = True
 # would invalidate the optimization.  This type of rebinding is rare, so we
 # assume that the rebinding never happens for guard purposes.  Set the flag
 # below to False only in environments where such rebinding is known to occur.
-assume_function_dunder_attributes_remain_unchanged = True
-
-# assume function dunder attributes will not be reaassigned to some other object
-# - __code__, __closure__, __defaults__, __kwdefaults__
-assume_function_dunder_attributes_remain_unchanged = True
+assume_dunder_attributes_remain_unchanged = True
 
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
