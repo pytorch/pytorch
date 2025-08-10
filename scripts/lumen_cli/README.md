@@ -21,7 +21,8 @@ this will run the build steps with default behaviour for vllm project.
 
 with config file, we store the ci configs in .github/ci_configs:
 ```bash
-python3 -m cli.run --config ".github/ci_configs/CONFIG_TEMPLATE.yaml" build external vllm
+export 
+python3 -m cli.run build external vllm
 ```
 this will run the build steps defined in the config file for vllm project
 
