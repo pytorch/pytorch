@@ -2,10 +2,20 @@
 
 from unittest import mock
 
+import torch
 import torch.distributed as c10d
-from torch.distributed.collective_utils import all_gather, broadcast
+from torch.distributed.collective_utils import (
+    _check_rng_sync,
+    all_gather,
+    broadcast,
+    check_rng_sync,
+)
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -116,6 +126,49 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
+    @parametrize("device", ["cpu", "cuda"])
+    def test_check_rng_sync(
+        self,
+        device,
+    ) -> None:
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = torch.distributed.distributed_c10d._get_default_group()
+        generator = torch.Generator(device=device)
+        generator.manual_seed(123)
+        value_ranks, _ = _check_rng_sync(generator, group)
+        self.assertEqual(len(value_ranks), 1, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0, 1, 2, 3}]):
+            self.assertEqual(actual, expected, actual)
+
+        if torch.distributed.get_rank() == 1:
+            torch.randn((10,), device=device, generator=generator)
+        value_ranks, _ = _check_rng_sync(generator, group)
+        self.assertEqual(len(value_ranks), 2, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0, 2, 3}, {1}]):
+            self.assertEqual(actual, expected, actual)
+
+        if torch.distributed.get_rank() == 0:
+            generator.manual_seed(456)
+        value_ranks, _ = _check_rng_sync(generator, group)
+        self.assertEqual(len(value_ranks), 3, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0}, {1}, {2, 3}]):
+            self.assertEqual(actual, expected, actual)
+
+        # Prints something like this, I was too lazy to figure out how to check the log but at least make sure the
+        # function does not crash
+        # [rank0]:E0808 ] Generator desync detected:
+        # [rank0]:E0808 ] Ranks    (Seed, Offset) values
+        # [rank0]:E0808 ] -------  -----------------------
+        # [rank0]:E0808 ] 0        (456, 0)
+        # [rank0]:E0808 ] 1        (123, 4)
+        # [rank0]:E0808 ] 2-3      (123, 0)
+        check_rng_sync(generator, group)
+
+
+instantiate_parametrized_tests(TestCollectiveUtils)
 
 if __name__ == "__main__":
     run_tests()
