@@ -42,7 +42,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
     """
     try:
         # Clone
-        logger.info(f"cloning {target}....")
+        logger.info("cloning %s....", target)
 
         # if no dst is provided, use the target name
         if not dst:
@@ -54,10 +54,10 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
         # Fetch all refs/tags to ensure commit is present
         r.git.fetch("--all", "--tags")
 
-        logger.info(f"try to find the pinned commit for {target}....")
+        logger.info("try to find the pinned commit for %s ...", target)
         commit = get_post_build_pinned_commit(target)
 
-        logger.info(f"checkout {commit}....")
+        logger.info("checkout %s", commit)
         r.git.checkout(commit)
         # Only update submodules if present
 
@@ -70,10 +70,10 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
                     sm.update(init=True, recursive=True, progress=PrintProgress())
             else:
                 logger.info("No submodules found, skipping submodule update.")
-        logger.info(f"Checked out {target} at {commit} in {dst}")
+        logger.info("Checked out %s at %s in  %s", target, commit, dst)
         return r
     except GitCommandError as e:
-        logger.error(f"Git operation failed: {e}")
+        logger.error("Git operation failed: %v", e)
 
 
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:

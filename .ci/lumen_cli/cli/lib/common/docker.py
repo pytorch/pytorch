@@ -29,13 +29,13 @@ def local_image_exists(
     Return True if a local Docker image (by name:tag, id, or digest) exists.
     """
     client = client or _get_client()
-    logger.info(f"Checking if image {image_name} exists...")
+    logger.info("Checking if image %s exists...", image_name)
     try:
         client.images.get(image_name)
-        logger.info(f"Found {image_name}...")
+        logger.info("Found %s...", image_name)
         return True
     except NotFound:
-        logger.info(f"Image {image_name} not found locally...")
+        logger.info("Image %s not found locally...", image_name)
         return False
     except APIError:
         # Surface daemon/connection problems as False or re-raise — your choice.

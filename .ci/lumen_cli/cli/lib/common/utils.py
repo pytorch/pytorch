@@ -46,7 +46,7 @@ def run_shell(
         subprocess.CalledProcessError: If the command fails.
     """
     if log_cmd:
-        logger.info(f"[shell] {cmd}")
+        logger.info("[shell] %s", cmd)
     try:
         subprocess.run(
             cmd,
@@ -60,11 +60,9 @@ def run_shell(
         )
     except subprocess.CalledProcessError as e:
         logger.error(
-            f"[shell] Command failed.\n"
-            f"Command: {cmd}\n"
-            f"Exit code: {e.returncode}\n"
-            f"STDOUT:\n{getattr(e, 'stdout', '')}\n"
-            f"STDERR:\n{getattr(e, 'stderr', '')}"
+            "[shell] Command failed.\n Command: %s\n Exit code: %s\n",
+            cmd,
+            e.returncode,
         )
         raise
 
@@ -93,7 +91,7 @@ def run_cmd(
     args = shlex.split(cmd)
 
     if log_cmd:
-        logger.info(f"[cmd] {' '.join(args)}")
+        logger.info("[cmd] %s", " ".join(args))
     try:
         subprocess.run(
             args,
@@ -106,11 +104,9 @@ def run_cmd(
         )
     except subprocess.CalledProcessError as e:
         logger.error(
-            f"[cmd] Command failed.\n"
-            f"Command: {cmd}\n"
-            f"Exit code: {e.returncode}\n"
-            f"STDOUT:\n{getattr(e, 'stdout', '')}\n"
-            f"STDERR:\n{getattr(e, 'stderr', '')}"
+            "[cmd] Command failed.\n Command: %s\n Exit code: %s\n",
+            cmd,
+            e.returncode,
         )
         raise
 
