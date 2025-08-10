@@ -52,7 +52,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -1394,12 +1394,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
             # constant fold
-            return ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
+            try:
+                return ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+            except (OverflowError, TypeError, ValueError) as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
 
         if self.is_tensor_method():
             name = self.value.__name__
@@ -1689,6 +1696,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
+        if config.graph_break_on_nn_param_ctor:
+            # Need user to manually move since we cannot
+            unimplemented_v2(
+                gb_type="Attempted to use `torch.nn.Parameter()` constructor with Dynamo",
+                context="",
+                explanation="Dynamo does not support this",
+                hints=[
+                    "Try to construct `torch.nn.Parameter()` outside the compiled region.",
+                    "If this is not possible, turn `graph_break_on_nn_param_ctor` off",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        # TODO[@lucaskabela]: Remove the behavior below since it is deprecated
         if isinstance(
             data, TensorWithTFOverrideVariable
         ) or is_traceable_wrapper_subclass_type(data.class_type):

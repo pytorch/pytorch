@@ -53,13 +53,11 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
   */
-#ifdef _WIN32
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-  return normalized_path;
-#else
-  return orig_path;
 #endif
+  return normalized_path;
 }
 
 bool file_exists(const std::string& path) {
@@ -109,6 +107,14 @@ const char* extension_file_ext() {
   return ".so";
 #endif
 }
+
+bool _is_windows_os() {
+#ifdef _WIN32
+  return true;
+#else
+  return false;
+#endif
+}
 } // namespace
 
 namespace torch::inductor {
@@ -143,7 +149,8 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     source_args += source + " ";
   }
 
-  std::string file_ext = compile_only ? ".o" : ".so";
+  std::string file_ext =
+      compile_only ? object_file_ext() : extension_file_ext();
   std::string target_file = output_dir + filename + file_ext;
   std::string target_dir = output_dir;
   if (target_dir.empty()) {
@@ -153,32 +160,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
-    cflags_args += "-" + arg.get<std::string>() + " ";
+    cflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
-    definitions_args += "-D " + arg.get<std::string>() + " ";
+    definitions_args +=
+        _is_windows_os() ? "/D" : "-D " + arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
-    include_dirs_args += "-I" + arg.get<std::string>() + " ";
+    include_dirs_args +=
+        _is_windows_os() ? "/I" : "-I" + arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
-    ldflags_args += "-" + arg.get<std::string>() + " ";
+    ldflags_args += _is_windows_os() ? "/" : "-" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
-    libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_dirs_args +=
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
+    } else {
+      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
-    libraries_args += "-l" + arg.get<std::string>() + " ";
+    if (_is_windows_os()) {
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
+    } else {
+      libraries_args += "-l" + arg.get<std::string>() + " ";
+    }
   }
 
   std::string passthrough_parameters_args;
@@ -191,21 +209,39 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     passthrough_parameters_args += arg_str + " ";
   }
 
-  std::string compile_only_arg = compile_only ? "-c" : "";
+  std::string compile_only_arg =
+      compile_only ? (_is_windows_os() ? "/c" : "-c") : "";
 
-  std::string cmd = normalize_path_separator(fmt::format(
-      "{} {} {} {} {} {} {} {} {} {} -o {}",
-      compiler,
-      source_args,
-      definitions_args,
-      cflags_args,
-      include_dirs_args,
-      passthrough_parameters_args,
-      ldflags_args,
-      libraries_args,
-      libraries_dirs_args,
-      compile_only_arg,
-      target_file));
+  std::string cmd;
+  if (_is_windows_os()) {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} /LD /Fe{} {} /link {} {} {}",
+        compiler,
+        include_dirs_args,
+        definitions_args,
+        cflags_args,
+        source_args,
+        passthrough_parameters_args,
+        target_file,
+        compile_only_arg,
+        libraries_dirs_args,
+        libraries_args,
+        ldflags_args));
+  } else {
+    cmd = normalize_path_separator(fmt::format(
+        "{} {} {} {} {} {} {} {} {} {} -o {}",
+        compiler,
+        source_args,
+        definitions_args,
+        cflags_args,
+        include_dirs_args,
+        passthrough_parameters_args,
+        ldflags_args,
+        libraries_args,
+        libraries_dirs_args,
+        compile_only_arg,
+        target_file));
+  }
 
   return std::make_tuple(cmd, target_file);
 }
@@ -405,6 +441,69 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
   }
 }
 
+class RAIIMinizArchive {
+ public:
+  RAIIMinizArchive(const std::string& zip_path) {
+    mz_zip_zero_struct(&_zip_archive);
+    if (!mz_zip_reader_init_file(&_zip_archive, zip_path.c_str(), 0)) {
+      throw std::runtime_error(fmt::format(
+          "Failed to initialize zip archive: {}",
+          mz_zip_get_error_string(mz_zip_get_last_error(&_zip_archive))));
+    }
+  }
+  RAIIMinizArchive(const RAIIMinizArchive&) = delete;
+  RAIIMinizArchive& operator=(const RAIIMinizArchive&) = delete;
+  RAIIMinizArchive(RAIIMinizArchive&&) noexcept = delete;
+  RAIIMinizArchive& operator=(RAIIMinizArchive&&) noexcept = delete;
+  ~RAIIMinizArchive() {
+    // Unconditionally close the file.  We can't handle any errors here without
+    // terminating the program.
+    mz_zip_reader_end(&_zip_archive);
+  }
+
+  std::vector<std::string> get_filenames() {
+    const unsigned num_zip_files{mz_zip_reader_get_num_files(&_zip_archive)};
+    std::vector<std::string> zip_filenames{};
+    zip_filenames.reserve(num_zip_files);
+
+    for (unsigned i{0}; i < num_zip_files; ++i) {
+      // filename_buf_size == 0 returns the filename length, including null
+      // terminator
+      const auto zip_filename_len{
+          mz_zip_reader_get_filename(&_zip_archive, i, nullptr, 0)};
+      if (!zip_filename_len) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename length at index {}", i));
+      }
+      // std::string implicitly appends a character for the null terminator
+      std::string zip_filename(zip_filename_len - 1, '\0');
+      if (!mz_zip_reader_get_filename(
+              &_zip_archive, i, zip_filename.data(), zip_filename_len)) {
+        throw std::runtime_error(
+            fmt::format("Failed to read zip filename at index {}", i));
+      }
+      zip_filenames.emplace_back(zip_filename);
+    }
+
+    return zip_filenames;
+  }
+
+  void extract_file(
+      const std::string& zip_filename,
+      const std::string& dest_filename) {
+    if (!mz_zip_reader_extract_file_to_file(
+            &_zip_archive, zip_filename.c_str(), dest_filename.c_str(), 0)) {
+      throw std::runtime_error(fmt::format(
+          "Failed to extract zip file {} to destination file {}",
+          zip_filename,
+          dest_filename));
+    }
+  }
+
+ private:
+  mz_zip_archive _zip_archive{};
+};
+
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
@@ -424,34 +523,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   // Extract all files within the zipfile to a temporary directory
-  mz_zip_archive zip_archive;
-  memset(&zip_archive, 0, sizeof(zip_archive));
-
-  if (!mz_zip_reader_init_file(&zip_archive, model_package_path.c_str(), 0)) {
-    throw std::runtime_error(
-        std::string("Failed to initialize zip archive: ") +
-        mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
-  }
-
-  std::vector<std::string> found_filenames;
-  for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
-    uint32_t zip_filename_len =
-        mz_zip_reader_get_filename(&zip_archive, i, nullptr, 0);
-    if (zip_filename_len == 0) {
-      throw std::runtime_error("Failed to read filename");
-    }
-    // zip_filename_len returned by mz_zip_reader_get_filename includes the null
-    // terminator, so we need to subtract 1 here.
-    std::string zip_filename_str(zip_filename_len - 1, '\0');
-    // zip_filename_str can't be normalize_path_separator, because it should be
-    // as index for mz_zip_reader_extract_file_to_file.
-    if (!mz_zip_reader_get_filename(
-            &zip_archive, i, zip_filename_str.data(), zip_filename_len)) {
-      throw std::runtime_error("Failed to read filename");
-    }
-    found_filenames.push_back(zip_filename_str);
-  }
-
+  RAIIMinizArchive zip_archive{model_package_path};
+  auto found_filenames{zip_archive.get_filenames()};
   if (found_filenames.empty()) {
     throw std::runtime_error("No files found in zip archive.");
   }
@@ -486,7 +559,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   // zip_filename_str can't be normalize_path_separator, because it should be
   // as index for mz_zip_reader_extract_file_to_file.
-  for (auto zip_filename_str : found_filenames) {
+  for (auto const& zip_filename_str : found_filenames) {
     auto cur_filename = normalize_path_separator(zip_filename_str);
     // Only compile files in the specified model directory
     if (c10::starts_with(cur_filename, model_directory) ||
@@ -529,14 +602,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       }
 
       // Extracts file to the temp directory
-      mz_bool b_extract = mz_zip_reader_extract_file_to_file(
-          &zip_archive, zip_filename_str.c_str(), output_file_path.c_str(), 0);
-      if (b_extract == MZ_FALSE) {
-        throw std::runtime_error(fmt::format(
-            "Failed to extract file {} to {}",
-            zip_filename_str,
-            output_file_path));
-      }
+      zip_archive.extract_file(zip_filename_str, output_path_str);
 
       // Save the file for bookkeeping
       size_t extension_idx = output_file_path.find_last_of('.');
@@ -551,14 +617,6 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         }
       }
     }
-  }
-
-  // Close the zip archive as we have extracted all files to the temp
-  // directory
-  if (!mz_zip_reader_end(&zip_archive)) {
-    throw std::runtime_error(
-        std::string("Failed to close zip archive: {}") +
-        mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
   if (cpp_filename.empty() && so_filename.empty()) {
