@@ -3,9 +3,8 @@ Argparse Utility helpers for CLI tasks.
 """
 
 import argparse
-from typing import Any, Callable, Dict, Protocol, Required, Type, TypedDict
-from unittest.mock import Base
-from scripts.lumen_cli.cli.lib.common.type import BaseRunner
+from typing import Any, Callable, Protocol, Required, TypedDict
+
 
 # Pretty help: keep newlines + show defaults
 class RichHelp(
@@ -16,8 +15,8 @@ class RichHelp(
 
 # Any class that can be constructed with (args) and has .run()
 class RunnerLike(Protocol):
-    def __init__(self, args: Any) -> None: ...
-    def run(self) -> None: ...
+    def run(self, args: Any) -> None: ...
+
 
 class TargetSpec(TypedDict, total=False):
     runner: Required[type[RunnerLike]]
@@ -26,7 +25,11 @@ class TargetSpec(TypedDict, total=False):
     add_arguments: Callable[[argparse.ArgumentParser], None]
 
 
-def register_target_commands_and_runner(parser: argparse.ArgumentParser, target_specs: Dict[str, TargetSpec]) -> None:
+def register_target_commands_and_runner(
+    parser: argparse.ArgumentParser,
+    target_specs: dict[str, TargetSpec],
+    common_args: Callable[[argparse.ArgumentParser], None] = lambda _: None,
+) -> None:
     targets = parser.add_subparsers(
         dest="target",
         required=True,
@@ -48,5 +51,12 @@ def register_target_commands_and_runner(parser: argparse.ArgumentParser, target_
             epilog=epilog,
             formatter_class=RichHelp,
         )
-        p.set_defaults(func=lambda args, _cls=spec["runner"]: _cls(args).run(),
-        _runner_class=spec["runner"])
+        p.set_defaults(
+            func=lambda args, _cls=spec["runner"]: _cls(args).run(args),
+            _runner_class=spec["runner"],
+        )
+
+        if "add_arguments" in spec and callable(spec["add_arguments"]):
+            spec["add_arguments"](p)
+        if common_args:
+            common_args(p)

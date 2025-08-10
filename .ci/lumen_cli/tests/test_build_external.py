@@ -1,11 +1,7 @@
 import os
 import types
-import unittest
-from unittest import mock
-from unittest.mock import MagicMock, patch
 
 import pytest
-from cli.lib.core.vllm import VllmBuildRunner
 
 
 MODULE = "cli.lib.core.vllm_build"  # <-- CHANGE ME to your module path

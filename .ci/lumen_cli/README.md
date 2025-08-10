@@ -9,7 +9,7 @@ A Python CLI tool for building and testing PyTorch-based components, using a YAM
 ## 📦 Installation
 at the root of the pytorch repo
 ```bash
-pip install -e scripts/lumos_cli
+pip install -e .ci/lumen_cli
 ```
 
 ## Run the cli tool
@@ -18,13 +18,6 @@ The cli tool must be used at root of pytorch repo, as example to run build exter
 python -m cli.run build external vllm
 ```
 this will run the build steps with default behaviour for vllm project.
-
-with config file, we store the ci configs in .github/ci_configs:
-```bash
-export
-python3 -m cli.run build external vllm
-```
-this will run the build steps defined in the config file for vllm project
 
 to see help messages, run
 ```bash

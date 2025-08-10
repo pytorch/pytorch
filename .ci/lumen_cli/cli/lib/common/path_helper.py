@@ -1,9 +1,9 @@
 """
-File Utility helpers for CLI tasks.
+File And Path Utility helpers for CLI tasks.
 """
+
 import logging
 import os
-import shutil
 
 
 logger = logging.getLogger(__name__)
