@@ -30,9 +30,8 @@ def register_build_external_commands(subparsers):
 # Mappings to build external targets
 # add new build external targets here
 EXTERNAL_BUILD_TARGET_DISPATCH = {
-    "vllm": lambda args: VllmBuildRunner(config_path=args.config),
+    "vllm": VllmBuildRunner,
 }
-
 
 def run_build_external(args):
     target = args.target

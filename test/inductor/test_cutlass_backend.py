@@ -159,7 +159,7 @@ def select_no_algorithm(*args, **kwargs):
 class TestCutlassBackend(TestCase):
     def setUp(self):
         if not HAS_CUDA_AND_TRITON:
-            self.skipTest("CUDA is not available")
+            self.skipTest("CUDA and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
 
@@ -199,6 +199,19 @@ class TestCutlassBackend(TestCase):
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
+
+    def test_check_paths(self):
+        cutlass_mock_imports_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
+        )
+        cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
+        cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
+        cutlass_mock_scipy_path = os.path.join(cutlass_mock_imports_path, "scipy")
+        self.assertTrue(os.path.exists(cutlass_mock_imports_path))
+        self.assertTrue(os.path.exists(cutlass_mock_cuda_path))
+        self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
+        self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})

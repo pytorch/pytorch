@@ -70,6 +70,7 @@ def run_cmd(
     log_cmd: bool = True,
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
+    check: bool = True,
 ):
     """
     Run a command using subprocess with shell=False (i.e., direct exec).
@@ -95,7 +96,7 @@ def run_cmd(
             shell=False,
             stdout=sys.stdout,
             stderr=sys.stderr,
-            check=True,
+            check=check,
             env=env,
             cwd=cwd,
         )
