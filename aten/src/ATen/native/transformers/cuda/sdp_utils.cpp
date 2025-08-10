@@ -395,7 +395,7 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
 
 bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
   // Check that all tensors are on the GPU device
-  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // This should be handled by the stub dispatch, but we call can_use_*_attention
   // directly from python we need to ensure that the tensors are on cuda
   if (params.query.device().type() != at::DeviceType::CUDA) {
     if (debug) {

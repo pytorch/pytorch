@@ -1845,6 +1845,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
     def test_triton_interpret(self):
         import subprocess
 
@@ -2098,6 +2099,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertIn("znumel", code)
 
     @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
+    @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
@@ -2216,7 +2218,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CUDA
+    from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
-    if HAS_CUDA and not TEST_WITH_ASAN:
+    if HAS_CUDA_AND_TRITON and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

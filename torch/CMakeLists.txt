@@ -29,7 +29,6 @@ endif()
 set(LIBSHM_SRCDIR ${TORCH_SRC_DIR}/lib/${LIBSHM_SUBDIR})
 add_subdirectory(${LIBSHM_SRCDIR})
 
-
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
@@ -266,7 +265,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
-    ${CMAKE_COMMAND} -E env PYTHONPATH="${TORCH_ROOT}"
+    ${CMAKE_COMMAND} -E env --modify PYTHONPATH=path_list_prepend:"${TORCH_ROOT}" --
     "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"

@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9,<3.14"
+requires-python = ">=3.9"
 # TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
 # FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
 # TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
@@ -46,6 +46,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dynamic = [
     "entry-points",
@@ -67,9 +68,6 @@ opt-einsum = ["opt-einsum>=3.3"]
 pyyaml = ["pyyaml"]
 
 # Linter tools #################################################################
-
-[tool.black]
-line-length = 88
 
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]

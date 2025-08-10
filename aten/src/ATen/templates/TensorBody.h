@@ -491,7 +491,7 @@ class TORCH_API Tensor: public TensorBase {
         "attribute won't be populated during autograd.backward(). If you indeed want the .grad "
         "field to be populated for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. "
         "If you access the non-leaf Tensor by mistake, make sure you access the leaf Tensor "
-        "instead. See github.com/pytorch/pytorch/pull/30531 for more informations.");
+        "instead. See github.com/pytorch/pytorch/pull/30531 for more information.");
     }
     return maybe_grad;
   }

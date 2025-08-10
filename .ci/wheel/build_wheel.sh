@@ -184,16 +184,14 @@ tmp_env_name="wheel_py$python_nodot"
 conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
 source activate "$tmp_env_name"
 
-pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
+retry pip install -r "${pytorch_rootdir}/requirements-build.txt"
+pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
-if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
-    export CMAKE_OSX_ARCHITECTURES=arm64
-fi
 export USE_MKLDNN=OFF
 export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
@@ -201,16 +199,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 CMAKE_FRESH=1 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
-    python setup.py bdist_wheel -d "$whl_tmp_dir"
-fi
+python setup.py bdist_wheel -d "$whl_tmp_dir"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 

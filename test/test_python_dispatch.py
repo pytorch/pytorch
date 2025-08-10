@@ -2480,6 +2480,39 @@ def forward(self, x_1):
         self.assertEqual(res, t.a)
         self.assertIs(type(res), torch.Tensor)
 
+    def test_custom_dispatch_mode_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = True
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with Mode():
+            out = torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+        self.assertEqual(out, torch.ones(3, 3))
+
+    def test_custom_dispatch_mode_not_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = False
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "There was no rule registered for HigherOrderOperator cond and mode",
+        ):
+            with Mode():
+                torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):

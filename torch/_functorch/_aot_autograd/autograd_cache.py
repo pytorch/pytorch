@@ -44,6 +44,7 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.output_code import (
     CompiledFxGraph,
     CompiledFxGraphConstants,
@@ -77,7 +78,6 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -95,7 +95,7 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
 
 
 def should_use_remote_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     if config.enable_remote_autograd_cache is not None:
         return config.enable_remote_autograd_cache
@@ -116,7 +116,7 @@ def should_use_remote_autograd_cache():
 
 
 def should_use_local_autograd_cache():
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
 
@@ -1023,8 +1023,14 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
         # which is set by compile_fx. But in precompile, we never actually call compile_fx
         # so we don't have a place to track cudagraphs here.
         cudagraphs = torch._inductor.config.triton.cudagraphs
+        boxed_forward_device_index = BoxedDeviceIndex(None)
         compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs}
+            [],
+            entry.sanitized_aot_config,
+            {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            },
         )
 
         # TODO: this ignores flat_params, which can exist
@@ -1080,8 +1086,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             pass
 
     @staticmethod
-    def load(
-        dispatch_and_compile: Callable,
+    def try_load(
         mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
         args,
         aot_config: AOTConfig,
@@ -1089,7 +1094,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         boxed_forward_device_index: Optional[BoxedDeviceIndex],
         local: bool,
         remote: bool,
-    ) -> Callable:
+    ) -> Optional[Callable]:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
@@ -1198,7 +1203,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                         time.time_ns(),
                         forward_symints=symints,
                     )
-                compiled_fn = dispatch_and_compile()
 
             cache_info.update(
                 {
@@ -1232,6 +1236,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
+
             return compiled_fn
 
     @classmethod
@@ -1351,7 +1356,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(
-                    BundledAOTAutogradCacheArtifact.type(), precompile_key, content
+                    BundledAOTAutogradCacheArtifact.type(),
+                    precompile_key,
+                    entry,
+                    editable=True,
                 )
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1

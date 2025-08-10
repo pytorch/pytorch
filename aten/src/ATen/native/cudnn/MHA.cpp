@@ -2,9 +2,13 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || \
-    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900)
+#if AT_CUDNN_ENABLED()
+#include <cudnn_frontend.h>
+#endif
 
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() ||         \
+    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900) || \
+    (defined(CUDNN_FRONTEND_VERSION) && CUDNN_FRONTEND_VERSION < 10100)
 namespace at {
 namespace native {
 
@@ -126,7 +130,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/transformers/sdp_utils.h>
 
 #include <ATen/cuda/Exceptions.h>
-#include <cudnn_frontend.h>
 
 #include <ATen/TensorUtils.h>
 #include <ATen/native/utils/ParamsHash.h>

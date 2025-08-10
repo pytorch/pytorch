@@ -41,6 +41,7 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 if TYPE_CHECKING:
     from ..ir import IRNode
 
+from ..debug import set_kernel_post_grad_provenance_tracing
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -51,7 +52,6 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
-    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -1453,7 +1453,7 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule,  # type: ignore[arg-type]
                     kernel_name,
@@ -1639,11 +1639,16 @@ class SIMDScheduling(BaseScheduling):
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if isinstance(partial_code, str):
-                    src_code = partial_code
-                else:
+                if not isinstance(partial_code, str):
                     partial_code.finalize_hook("<STORE_OUTPUT>")
-                    src_code = partial_code.code
+
+            if isinstance(partial_code, str):
+                src_code = partial_code
+            else:
+                # Ensure all hooks are finalized before the kernel is defined.
+                # Note: some of these hooks may have been registered by a kernel subclass
+                src_code = partial_code.finalize_remaining()
+
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
@@ -1659,7 +1664,7 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     node_schedule, kernel.kernel_name
                 )
@@ -1844,7 +1849,7 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             # dump provenance node info for ComboKernelNode/ForeachKernel type
-            if config.trace.enabled:
+            if config.trace.provenance_tracking:
                 set_kernel_post_grad_provenance_tracing(
                     combo_kernel_node.snodes, kernel_name
                 )
@@ -1986,7 +1991,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -2001,7 +2006,7 @@ class SIMDScheduling(BaseScheduling):
         cls,
         tiling: Sequence[sympy.Expr],
         is_pointwise: bool,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         return cls.create_tiling(
             tiling if is_pointwise else [],
             tiling if not is_pointwise else [],
@@ -2013,7 +2018,7 @@ class SIMDScheduling(BaseScheduling):
         tiling: dict[str, sympy.Expr],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr,
-    ) -> dict[str, sympy.Expr]:
+    ) -> immutable_dict[str, sympy.Expr]:
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
@@ -2034,7 +2039,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         pointwise_numel,
         reduction_numel,
-    ) -> list[dict[str, tuple[sympy.Expr]]]:
+    ) -> list[immutable_dict[str, sympy.Expr]]:
         """
         Creates N-dimensional tiling candidates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
@@ -2042,7 +2047,7 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
         is_pointwise = reduction_numel == 1
-        tilings = OrderedSet[dict[str, sympy.Expr]]()
+        tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
@@ -2307,7 +2312,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
-        tilings: list[tuple[CandidateTiling, dict[str, sympy.Expr]]] = []
+        tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr]]] = []
         for (pw_split, pw_score), (red_split, red_score) in score_split:
             candidate = CandidateTiling(
                 cls.create_tiling(pw_split, red_split),
