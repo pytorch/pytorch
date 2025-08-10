@@ -30,43 +30,30 @@ sys.path.insert(0, str(ci_dir))
 # Also add parent directory to help with imports
 sys.path.insert(0, str(ci_dir.parent))
 
-try:
-    # Use direct execution of simple_test_runner.py which has working imports
-    import subprocess
-    import json
+# Import required modules
+import subprocess
+
+# For now, delegate to the working simple_test_runner.py
+def run_python_tests_via_simple_runner(dry_run=False, verbose=False):
+    """Run tests by delegating to simple_test_runner.py which has working imports."""
+    cmd = [sys.executable, str(ci_dir / "simple_test_runner.py")]
+    if dry_run:
+        cmd.append("--dry-run")
+    if verbose:
+        cmd.append("--verbose")
     
-    # For now, delegate to the working simple_test_runner.py
-    def run_python_tests_via_simple_runner(dry_run=False, verbose=False):
-        """Run tests by delegating to simple_test_runner.py which has working imports."""
-        cmd = [sys.executable, str(ci_dir / "simple_test_runner.py")]
-        if dry_run:
-            cmd.append("--dry-run")
-        if verbose:
-            cmd.append("--verbose")
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=ci_dir)
-            print(result.stdout)
-            if result.stderr:
-                print(result.stderr, file=sys.stderr)
-            return result.returncode == 0
-        except Exception as e:
-            logging.error(f"Failed to run simple_test_runner.py: {e}")
-            return False
-    
-    # Set flag to use simple runner delegation
-    USE_SIMPLE_RUNNER_DELEGATION = True
-    
-except ImportError as e:
-    print(f"Failed to import Python test infrastructure: {e}")
-    print("Falling back to shell-based test.sh")
-    # Fallback to original shell script
-    shell_script = ci_dir / "test.sh"
-    if shell_script.exists():
-        os.execv("/bin/bash", ["bash", str(shell_script)] + sys.argv[1:])
-    else:
-        print(f"ERROR: Neither Python test runner nor shell script found")
-        sys.exit(1)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=ci_dir)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode == 0
+    except Exception as e:
+        logging.error(f"Failed to run simple_test_runner.py: {e}")
+        return False
+
+# Set flag to use simple runner delegation
+USE_SIMPLE_RUNNER_DELEGATION = True
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -109,16 +96,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def check_environment() -> EnvironmentConfig:
+def check_environment():
     """Check and validate the CI environment."""
     try:
-        env_config = EnvironmentConfig()
-        logging.info(f"Build Environment: {env_config.build_environment}")
-        logging.info(f"Test Config: {env_config.test_config}")
-        logging.info(f"Shard: {env_config.shard_number}/{env_config.num_test_shards}")
-        return env_config
+        # Log environment variables directly since we delegate to simple_test_runner.py
+        build_env = os.environ.get('BUILD_ENVIRONMENT', '')
+        test_config = os.environ.get('TEST_CONFIG', '')
+        shard_number = os.environ.get('SHARD_NUMBER', '1')
+        num_shards = os.environ.get('NUM_TEST_SHARDS', '1')
+        
+        logging.info(f"Build Environment: {build_env}")
+        logging.info(f"Test Config: {test_config}")
+        logging.info(f"Shard: {shard_number}/{num_shards}")
+        
+        return {
+            'build_environment': build_env,
+            'test_config': test_config,
+            'shard_number': int(shard_number),
+            'num_test_shards': int(num_shards)
+        }
     except Exception as e:
-        logging.error(f"Failed to initialize environment config: {e}")
+        logging.error(f"Failed to check environment: {e}")
         raise
 
 
@@ -126,58 +124,7 @@ def run_python_tests(dry_run: bool = False, verbose: bool = False) -> bool:
     """Run tests using the Python test infrastructure."""
     try:
         # Use delegation to simple_test_runner.py which has working imports
-        if 'USE_SIMPLE_RUNNER_DELEGATION' in globals() and USE_SIMPLE_RUNNER_DELEGATION:
-            return run_python_tests_via_simple_runner(dry_run=dry_run, verbose=verbose)
-        
-        # Fallback approach (this code path may have import issues)
-        from test_config.environment import EnvironmentConfig
-        from test_config.test_registry import TestRegistry
-        
-        env_config = EnvironmentConfig()
-        registry = TestRegistry()
-        selected_suites = registry.select_test_suites(env_config)
-        
-        if not selected_suites:
-            logging.warning("No test suites selected for current environment")
-            return True
-        
-        logging.info(f"Selected {len(selected_suites)} test suite(s):")
-        for suite in selected_suites:
-            logging.info(f"  - {suite.name}: {suite.description}")
-        
-        # Execute selected test suites
-        overall_success = True
-        continue_on_error = os.environ.get('CONTINUE_THROUGH_ERROR', '').lower() in ('1', 'true')
-        
-        for suite in selected_suites:
-            logging.info(f"Running test suite: {suite.name}")
-            
-            if dry_run:
-                logging.info(f"DRY RUN - Would execute test suite: {suite.name}")
-                test_names = suite.get_test_names()
-                for test_name in test_names:
-                    logging.info(f"  - {test_name}")
-                continue
-            
-            try:
-                success = suite.run(env_config, dry_run=dry_run)
-                if not success:
-                    overall_success = False
-                    logging.error(f"Test suite {suite.name} failed")
-                    if not continue_on_error:
-                        logging.error("Stopping execution due to test failure")
-                        break
-                else:
-                    logging.info(f"Test suite {suite.name} completed successfully")
-            except Exception as e:
-                logging.error(f"Exception in test suite {suite.name}: {e}")
-                overall_success = False
-                if not continue_on_error:
-                    logging.error("Stopping execution due to exception")
-                    break
-        
-        return overall_success
-        
+        return run_python_tests_via_simple_runner(dry_run=dry_run, verbose=verbose)
     except Exception as e:
         logging.error(f"Failed to run Python tests: {e}")
         return False
@@ -185,7 +132,8 @@ def run_python_tests(dry_run: bool = False, verbose: bool = False) -> bool:
 
 def fallback_to_shell(args: list) -> int:
     """Fallback to the original shell-based test.sh script."""
-    logging.warning("Falling back to shell-based test.sh")
+    logging.info("Falling back to shell-based test.sh")
+    
     shell_script = Path(__file__).parent / "test.sh"
     
     if not shell_script.exists():
@@ -194,7 +142,7 @@ def fallback_to_shell(args: list) -> int:
     
     # Execute the shell script with the same arguments
     try:
-        result = run_command(["bash", str(shell_script)] + args)
+        result = subprocess.run(["bash", str(shell_script)] + args, cwd=ci_dir)
         return result.returncode
     except Exception as e:
         logging.error(f"Failed to execute shell script: {e}")
@@ -216,7 +164,7 @@ def main() -> int:
         # Check environment configuration (for logging purposes)
         try:
             check_environment()
-        except:
+        except Exception:
             logging.info("Environment check had issues, continuing with delegation approach")
         
         # Run Python-based tests using delegation approach
