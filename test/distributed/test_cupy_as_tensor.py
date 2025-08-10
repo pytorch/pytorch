@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -54,6 +53,9 @@ class CupyAsTensorTest(MultiProcContinousTest):
         return "gloo"
 
     def _init_device(self) -> None:
+        # need to use vmm api to test it,
+        # see https://forums.developer.nvidia.com/t/inconsistent-behavior-of-cudapointergetattributes-between-cudamalloc-ipc-and-vmm-based-ipc/339025/5 # noqa: E501
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         # init and pin the process to the device
         device_module.set_device(self.device)
         torch.empty(1, device=self.device)
