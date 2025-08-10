@@ -11,10 +11,22 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from ..test_config.base import TestSuite
-from ..test_config.environment import EnvironmentConfig
-from ..utils.shell_utils import run_command, source_and_run, get_ci_dir
-from ..utils.install_utils import install_pip_dependencies
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from test_config.base import TestSuite
+    from test_config.environment import EnvironmentConfig
+    from utils.shell_utils import run_command, source_and_run, get_ci_dir
+    from utils.install_utils import install_torchvision, install_torchaudio
+except ImportError:
+    from ..test_config.base import TestSuite
+    from ..test_config.environment import EnvironmentConfig
+    from ..utils.shell_utils import run_command, source_and_run, get_ci_dir
+    from ..utils.install_utils import install_torchvision, install_torchaudio
 
 
 class BackwardTestSuite(TestSuite):

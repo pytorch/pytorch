@@ -67,6 +67,13 @@ on:
         required: false
         type: number
         default: 1
+      use-python-test-runner:
+        description: |
+          [Experimental] Use Python-based test runner instead of shell script.
+          Currently enabled for smoke tests and limited configurations for gradual rollout.
+        required: false
+        type: boolean
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -289,6 +296,7 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          USE_PYTHON_TEST_RUNNER: ${{ inputs.use-python-test-runner && '1' || '0' }}
         run: |
           set -x
 
@@ -296,6 +304,9 @@ jobs:
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
             TEST_COMMAND=.ci/onnx/test.sh
+          elif [[ $USE_PYTHON_TEST_RUNNER == '1' ]]; then
+            # Use Python-based test runner with automatic fallback to shell script
+            TEST_COMMAND="python3 .ci/pytorch/test_python_ci.py --fallback-on-error"
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi

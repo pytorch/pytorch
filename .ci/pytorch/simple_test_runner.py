@@ -105,8 +105,73 @@ class InductorTestSuite(SimpleTestSuite):
     def matches(self, env_config: EnvironmentConfig) -> bool:
         return "inductor" in env_config.test_config
     
+    def get_test_names(self, env_config: EnvironmentConfig = None) -> List[str]:
+        base_tests = ["test_inductor"]
+        if env_config and "distributed" in env_config.test_config:
+            base_tests.append("test_inductor_distributed")
+        if env_config and "cpp_wrapper" in env_config.test_config:
+            base_tests.append("test_inductor_cpp_wrapper")
+        return base_tests
+
+
+class DocsTestSuite(SimpleTestSuite):
+    """Documentation test suite."""
+    
+    def __init__(self):
+        super().__init__("docs_test", "Documentation tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return env_config.test_config == "docs_test"
+    
     def get_test_names(self) -> List[str]:
-        return ["test_inductor"]
+        return ["test_docs", "test_tutorials"]
+
+
+class DistributedTestSuite(SimpleTestSuite):
+    """Distributed test suite."""
+    
+    def __init__(self):
+        super().__init__("distributed", "Distributed tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return env_config.test_config == "distributed"
+    
+    def get_test_names(self) -> List[str]:
+        return ["test_distributed", "test_c10d_nccl", "test_c10d_gloo"]
+
+
+class JitTestSuite(SimpleTestSuite):
+    """JIT test suite."""
+    
+    def __init__(self):
+        super().__init__("jit_legacy", "JIT Legacy tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return env_config.test_config == "jit_legacy"
+    
+    def get_test_names(self) -> List[str]:
+        return ["test_jit", "test_jit_legacy"]
+
+
+class BenchmarkTestSuite(SimpleTestSuite):
+    """Benchmark test suite."""
+    
+    def __init__(self):
+        super().__init__("benchmark", "Benchmark tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return any(pattern in env_config.test_config for pattern in
+                  ["benchmark", "torchbench", "huggingface", "timm"])
+
+    def get_test_names(self, env_config: EnvironmentConfig = None) -> List[str]:
+        tests = ["test_benchmarks"]
+        if env_config and "torchbench" in env_config.test_config:
+            tests.append("test_torchbench")
+        if env_config and "huggingface" in env_config.test_config:
+            tests.append("test_huggingface")
+        if env_config and "timm" in env_config.test_config:
+            tests.append("test_timm")
+        return tests
 
 
 class DefaultTestSuite(SimpleTestSuite):
@@ -142,6 +207,10 @@ class SimpleTestRegistry:
         self.test_suites = [
             PythonTestSuite(),
             SmokeTestSuite(),
+            DocsTestSuite(),
+            DistributedTestSuite(),
+            JitTestSuite(),
+            BenchmarkTestSuite(),
             InductorTestSuite(),
             DefaultTestSuite()  # Keep as last (fallback)
         ]
@@ -150,16 +219,24 @@ class SimpleTestRegistry:
         """Select the appropriate test suite based on environment config."""
         
         # Try to find a matching test suite
-        for suite in self.test_suites[:-1]:  # Exclude default suite from this loop
+        selected_suite = self.test_suites[-1]  # Default to last (fallback) suite
+        for suite in self.test_suites:
             if suite.matches(env_config):
-                self.logger.info(f"Selected test suite: {suite.name}")
-                return suite
+                selected_suite = suite
+                break
         
-        # Fall back to default suite
-        self.logger.info("No specific test suite matched, using default suite")
-        default_suite = self.test_suites[-1]
-        self.logger.info(f"Selected test suite: {default_suite.name}")
-        return default_suite
+        # Pass env_config to get_test_names if the method supports it
+        if hasattr(selected_suite, 'get_test_names'):
+            import inspect
+            sig = inspect.signature(selected_suite.get_test_names)
+            if len(sig.parameters) > 0:
+                test_names = selected_suite.get_test_names(env_config)
+            else:
+                test_names = selected_suite.get_test_names()
+            selected_suite._test_names = test_names
+        
+        self.logger.info(f"Selected test suite: {selected_suite.name}")
+        return selected_suite
 
 
 def main():

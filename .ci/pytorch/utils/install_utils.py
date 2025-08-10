@@ -132,3 +132,23 @@ def install_pandas() -> bool:
 
 # Import the run_command_with_output function
 from .shell_utils import run_command_with_output
+
+
+def install_pip_dependencies(dependencies: List[str]) -> bool:
+    """
+    Install a list of pip dependencies.
+    
+    Args:
+        dependencies: List of package names or requirements to install
+    
+    Returns:
+        True if installation succeeded, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+    
+    if not dependencies:
+        logger.info("No dependencies to install")
+        return True
+    
+    logger.info(f"Installing pip dependencies: {', '.join(dependencies)}")
+    return pip_install(dependencies)

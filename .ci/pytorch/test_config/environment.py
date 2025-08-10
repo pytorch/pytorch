@@ -72,9 +72,19 @@ class EnvironmentConfig:
         """Check if this is a CUDA build."""
         return 'cuda' in self.build_environment
     
+    @property
+    def is_cuda(self) -> bool:
+        """Property alias for is_cuda_build() for compatibility."""
+        return self.is_cuda_build()
+    
     def is_rocm_build(self) -> bool:
         """Check if this is a ROCm build."""
         return 'rocm' in self.build_environment
+    
+    @property
+    def is_rocm(self) -> bool:
+        """Property alias for is_rocm_build() for compatibility."""
+        return self.is_rocm_build()
     
     def is_asan_build(self) -> bool:
         """Check if this is an ASAN build."""

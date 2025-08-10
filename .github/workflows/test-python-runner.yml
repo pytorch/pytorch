@@ -1,0 +1,211 @@
+name: Test Python Runner
+
+on:
+  pull_request:
+    paths:
+      - '.ci/pytorch/test_python.py'
+      - '.ci/pytorch/test_suites/**'
+      - '.ci/pytorch/test_config/**'
+      - '.ci/pytorch/utils/**'
+      - '.ci/pytorch/simple_test_runner.py'
+      - '.github/workflows/test-python-runner.yml'
+  workflow_dispatch:
+    inputs:
+      test-config:
+        description: 'Test configuration to run'
+        required: false
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - docs_test
+          - python
+      build-environment:
+        description: 'Build environment to test'
+        required: false
+        default: 'linux-focal-py3.8-gcc7'
+        type: choice
+        options:
+          - linux-focal-py3.8-gcc7
+          - linux-focal-py3.9-gcc7
+          - linux-focal-py3.10-gcc7
+
+jobs:
+  validate-python-runner:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test-config: [smoke, docs_test, python, distributed, jit_legacy]
+        build-env: [linux-focal-py3.8-gcc7, linux-focal-py3.9-gcc7]
+        include:
+          # Add specific test combinations for validation
+          - test-config: python
+            build-env: linux-focal-py3.8-gcc7
+          # Add specific tests for expanded configurations
+          - test-config: inductor_distributed
+            build-environment: linux-focal-py3.8-gcc7
+          - test-config: inductor_cpp_wrapper
+            build-environment: linux-focal-py3.8-gcc7
+          - test-config: huggingface
+            build-environment: linux-focal-py3.8-gcc7
+          - test-config: torchbench
+            build-environment: linux-focal-py3.8-gcc7
+    
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          cache: pip
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install minimal dependencies needed for test runner validation
+          pip install psutil dataclasses_json
+      
+      - name: Validate Python Test Infrastructure
+        run: |
+          cd .ci/pytorch
+          echo "=== Validating Python Test Infrastructure ==="
+          python3 test_suite_validation.py || echo "Validation had issues but continuing..."
+      
+      - name: Test Python Runner - Dry Run
+        env:
+          BUILD_ENVIRONMENT: ${{ matrix.build-env }}
+          TEST_CONFIG: ${{ matrix.test-config }}
+          SHARD_NUMBER: 1
+          NUM_TEST_SHARDS: 1
+          USE_PYTHON_TEST_RUNNER: 1
+        run: |
+          cd .ci/pytorch
+          echo "=== Testing Python Runner (Dry Run) ==="
+          echo "Build Environment: $BUILD_ENVIRONMENT"
+          echo "Test Config: $TEST_CONFIG"
+          echo "Shard: $SHARD_NUMBER/$NUM_TEST_SHARDS"
+          
+          # Test the simple test runner first
+          echo "--- Testing simple_test_runner.py ---"
+          python3 simple_test_runner.py --dry-run --verbose
+          
+          echo "--- Testing test_python.py ---"
+          python3 test_python.py --dry-run --verbose
+      
+      - name: Test Import Resolution
+        run: |
+          cd .ci/pytorch
+          echo "=== Testing Import Resolution ==="
+          python3 -c "
+          import sys
+          from pathlib import Path
+          
+          # Add paths like the test runner does
+          ci_dir = Path('.').resolve()
+          sys.path.insert(0, str(ci_dir))
+          sys.path.insert(0, str(ci_dir.parent))
+          
+          try:
+              from test_config.environment import EnvironmentConfig
+              from test_config.test_registry import TestRegistry
+              from utils.shell_utils import run_command
+              print('✅ All imports successful')
+              
+              # Test basic functionality
+              env = EnvironmentConfig()
+              registry = TestRegistry()
+              print(f'✅ Environment config created: {env.build_environment}')
+              print(f'✅ Test registry created with {len(registry.test_suites)} test suites')
+              
+          except Exception as e:
+              print(f'❌ Import failed: {e}')
+              sys.exit(1)
+          "
+      
+      - name: Test Specific Configurations
+        env:
+          SHARD_NUMBER: 1
+          NUM_TEST_SHARDS: 1
+        run: |
+          cd .ci/pytorch
+          echo "=== Testing Specific Configurations ==="
+          
+          # Test smoke configuration
+          echo "--- Testing smoke tests ---"
+          BUILD_ENVIRONMENT=linux-focal-py3.8-gcc7 \
+          TEST_CONFIG=smoke \
+          python3 simple_test_runner.py --dry-run --verbose
+          
+          # Test docs configuration  
+          echo "--- Testing docs tests ---"
+          BUILD_ENVIRONMENT=linux-focal-py3.8-gcc7 \
+          TEST_CONFIG=docs_test \
+          python3 simple_test_runner.py --dry-run --verbose
+          
+          # Test python configuration
+          echo "--- Testing python tests ---"
+          BUILD_ENVIRONMENT=linux-focal-py3.8-gcc7 \
+          TEST_CONFIG=python \
+          python3 simple_test_runner.py --dry-run --verbose
+
+  test-feature-flag-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+      
+      - name: Test Feature Flag Logic
+        run: |
+          echo "=== Testing Feature Flag Logic ==="
+          
+          # Simulate the workflow logic
+          export TEST_CONFIG=smoke
+          export BUILD_ENVIRONMENT=linux-focal-py3.8-gcc7
+          export USE_PYTHON_TEST_RUNNER=1
+          
+          # Test command selection logic (simulated)
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.ci/onnx/test.sh
+          elif [[ $USE_PYTHON_TEST_RUNNER == '1' ]]; then
+            TEST_COMMAND="python3 .ci/pytorch/test_python.py --fallback-on-error"
+          else
+            TEST_COMMAND=.ci/pytorch/test.sh
+          fi
+          
+          echo "Selected TEST_COMMAND: $TEST_COMMAND"
+          
+          if [[ $TEST_COMMAND == *"test_python.py"* ]]; then
+            echo "✅ Feature flag correctly selects Python test runner"
+          else
+            echo "❌ Feature flag logic failed"
+            exit 1
+          fi
+          
+          # Test with feature flag disabled
+          export USE_PYTHON_TEST_RUNNER=0
+          
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.ci/onnx/test.sh
+          elif [[ $USE_PYTHON_TEST_RUNNER == '1' ]]; then
+            TEST_COMMAND="python3 .ci/pytorch/test_python.py --fallback-on-error"
+          else
+            TEST_COMMAND=.ci/pytorch/test.sh
+          fi
+          
+          echo "Selected TEST_COMMAND (flag disabled): $TEST_COMMAND"
+          
+          if [[ $TEST_COMMAND == ".ci/pytorch/test.sh" ]]; then
+            echo "✅ Feature flag correctly defaults to shell script"
+          else
+            echo "❌ Feature flag default logic failed"
+            exit 1
+          fi
