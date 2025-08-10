@@ -29,6 +29,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
@@ -1806,7 +1807,9 @@ class TestStandaloneCompile(TestCase):
         assert not kwargs
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            path = os.path.join(temp_dir, "compiled_artifact.bin")
+            path = normalize_path_separator(
+                os.path.join(temp_dir, "compiled_artifact.bin")
+            )
 
             with fresh_cache():
                 compiled_artifact = torch._inductor.standalone_compile(gm, args)
