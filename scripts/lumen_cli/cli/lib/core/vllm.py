@@ -3,19 +3,19 @@ import os
 import textwrap
 from dataclasses import dataclass, field
 
+from cli.lib.common.git_utils import clone_external_repo
 from cli.lib.common.type import BaseRunner
+
+from scripts.lumen_cli.cli.lib.common.docker import local_image_exists
 
 
 logger = logging.getLogger(__name__)
 
-
 from cli.lib.common.file_utils import (
-    clone_external_repo,
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
     is_path_exist,
-    local_image_exists,
 )
 from cli.lib.common.utils import get_env, run_cmd
 
@@ -28,32 +28,51 @@ _VLLM_TEMP_FOLDER = "tmp"
 
 
 @dataclass
-class VllmBuildInputs:
+class VllmBuildParameters:
     """
-    Configuration specific to vLLM build jobs.
+    Parameters controlling a vLLM build.
+
+    Inputs come primarily from environment variables (see each field's comment).
+    Flags are strings "0"/"1" (not bool). In __post_init__, when a flag is "1",
+    the corresponding resource is validated and (if it’s a path) normalized to
+    an absolute path via get_abs_path(). On failure, FileNotFoundError is raised.
     """
 
-    # vllm pre-build args
-    use_torch_whl: str = field(default_factory=lambda: get_env("USE_TORCH_WHEEL", "0"))
+    # --- Pre-build feature flags (string "0"/"1") -----------------------------
+    # USE_TORCH_WHEEL: when "1", use local Torch wheels; requires TORCH_WHEELS_PATH.
+    #  Otherwise docker build pull torch nightly during build
+    use_torch_whl: str = field(default_factory=lambda: get_env("USE_TORCH_WHEEL", "1"))
+
+    # USE_LOCAL_BASE_IMAGE: when "1", use an existing local Docker base image; requires BASE_IMAGE
+    # Otherwise, pull dockerfile's default image remotely
     use_local_base_image: str = field(
-        default_factory=lambda: get_env("USE_LOCAL_BASE_IMAGE", "0")
-    )
-    use_local_dockrfile: str = field(
-        default_factory=lambda: get_env("USE_LOCAL_DOCKERFILE", "0")
+        default_factory=lambda: get_env("USE_LOCAL_BASE_IMAGE", "1")
     )
 
-    # vllm pre-build args
-    base_image: str = field(default_factory=lambda: get_env("BASE_IMAGE", ""))
+    # USE_LOCAL_DOCKERFILE: when "1", use a local Dockerfile; requires DOCKERFILE_PATH.
+    # otherwise, use vllm's default dockerfile.torch_nightly for build
+    use_local_dockerfile: str = field(
+        default_factory=lambda: get_env("USE_LOCAL_DOCKERFILE", "1")
+    )
+
+    # --- Pre-build condition inputs ------------------------------------------
+    # BASE_IMAGE: name:tag (only needed when use_local_base_image == "1")
+    base_image: str = field(default_factory=lambda: get_env("BASE_IMAGE"))
+
+    # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile == "1"
     dockerfile_path: str = field(
         default_factory=lambda: get_env(
             "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
         )
     )
+
+    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl == "1"
     torch_whls_path: str = field(
         default_factory=lambda: get_env("TORCH_WHEELS_PATH", "dist")
     )
 
-    # vllm build args
+    # --- Build output ---------------------------------------------------------
+    # output_dir: where docker buildx (local exporter) will write artifacts
     output_dir: str = field(default_factory=lambda: get_env("output_dir", "shared"))
 
     def __post_init__(self):
@@ -64,28 +83,32 @@ class VllmBuildInputs:
                 "torch_whls_path",  # resource
                 is_path_exist,  # check_func
                 "torch whl path is not provided, but use_torch_whl is set to 1",
+                get_abs_path,
             ),
             (
                 self.use_local_base_image,
                 "1",
                 "base_image",
                 local_image_exists,
-                "base_image does not found, but use_local_base_image is set to 1",
+                f"base_image {self.base_image} does not found, but use_local_base_image is set to 1",
+                None,
             ),
             (
-                self.use_local_dockrfile,
+                self.use_local_dockerfile,
                 "1",
                 "dockerfile_path",
                 is_path_exist,
-                "dockerfile path does not found, but use_local_dockrfile is set to 1",
+                "dockerfile path does not found, but use_local_dockerfile is set to 1",
+                get_abs_path,
             ),
         ]
-        for flag, trigger_value, attr_name, check_func, error_msg in checks:
+        for flag, trigger_value, attr_name, check_func, error_msg, handler in checks:
             value = getattr(self, attr_name)
             if flag == trigger_value:
                 if not value or not check_func(value):
                     raise FileNotFoundError(error_msg)
-                setattr(self, attr_name, get_abs_path(value))
+                if handler:
+                    setattr(self, attr_name, handler(value))
                 logger.info(f"found flag {flag} -> field  {attr_name}")
             else:
                 logger.info(f"flag {flag} is not set")
@@ -108,7 +131,20 @@ class VllmDockerBuildArgs:
 
 
 class VllmBuildRunner(BaseRunner):
-    def __init__(self, args = None):
+    """
+    Build vLLM using docker buildx.
+
+    Environment variable options:
+        "USE_TORCH_WHEEL":      "1: use local wheels; 0: pull nightly from pypi",
+        "USE_LOCAL_BASE_IMAGE": "1: use local base image; 0: default image",
+        "USE_LOCAL_DOCKERFILE": "1: use local Dockerfile; 0: vllm repo default dockerfile.torch_nightly",
+        "TORCH_WHEELS_PATH":    "Path to local wheels (when USE_TORCH_WHEEL=1)",
+        "DOCKERFILE_PATH":      "Path to Dockerfile (when USE_LOCAL_DOCKERFILE=1)",
+        "BASE_IMAGE":           "name:tag for local base image (when USE_LOCAL_BASE_IMAGE=1)",
+        "TORCH_CUDA_ARCH_LIST": "e.g. '8.0' or '8.0;9.0'",
+    """
+
+    def __init__(self, args=None):
         self.work_directory = "vllm"
 
     def run(self):
@@ -118,7 +154,7 @@ class VllmBuildRunner(BaseRunner):
         2. prepare the docker build command args
         3. run docker build
         """
-        inputs = VllmBuildInputs()
+        inputs = VllmBuildParameters()
         clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
@@ -149,7 +185,7 @@ class VllmBuildRunner(BaseRunner):
         return tmp_dir
 
     def cp_dockerfile_if_exist(self, inputs):
-        if inputs.use_local_dockrfile == "0":
+        if inputs.use_local_dockerfile == "0":
             logger.info("using vllm default dockerfile.torch_nightly for build")
             return
 
@@ -176,19 +212,14 @@ class VllmBuildRunner(BaseRunner):
             return ""
         return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
 
-    def _get_base_image_args(self, inputs: VllmBuildInputs) -> tuple[str, str, str]:
+    def _get_base_image_args(self, inputs: VllmBuildParameters) -> tuple[str, str, str]:
         """
         Returns:
             - base_image_arg: docker buildx arg string for base image
             - final_base_image_arg:  docker buildx arg string for vllm-base stage
             - pull_flag: --pull=true or --pull=false depending on whether the image exists locally
         """
-        if inputs.use_local_base_image == "1":
-            if not inputs.base_image or not local_image_exists(inputs.base_image):
-                raise FileNotFoundError(
-                    "base image is not found, but replace_base_image is set to 1"
-                )
-        else:
+        if inputs.use_local_base_image == "0":
             return "", "", ""
 
         base_image = inputs.base_image
@@ -208,7 +239,7 @@ class VllmBuildRunner(BaseRunner):
 
     def _generate_docker_build_cmd(
         self,
-        inputs: VllmBuildInputs,
+        inputs: VllmBuildParameters,
         output_dir: str,
         torch_whl_path: str,
     ) -> str:
@@ -243,5 +274,8 @@ class VllmBuildRunner(BaseRunner):
 
 def clone_vllm():
     clone_external_repo(
-        target="vllm", repo="https://github.com/vllm-project/vllm.git", cwd="vllm"
+        target="vllm",
+        repo="https://github.com/vllm-project/vllm.git",
+        dst="vllm",
+        update_submodules=True,
     )
