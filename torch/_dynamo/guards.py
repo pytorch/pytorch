@@ -57,6 +57,7 @@ from torch._C._dynamo.guards import (
     FuncKwDefaultsGuardAccessor,
     GetAttrGuardAccessor,
     GetGenericDictGuardAccessor,
+    GuardAccessor,
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
@@ -211,6 +212,17 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+
+
+dunder_attrs_assumed_constants = (
+    "__defaults__",
+    "__kwdefaults__",
+    "__code__",
+    "__closure__",
+    "__annotations__",
+    "__func__",
+    "__mro__",
+)
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -381,7 +393,9 @@ class GuardManagerWrapper:
         subset that are tag safe roots.
         """
 
-        def check_tag_safety(node, accepted_accessors):
+        def check_tag_safety(
+            node: GuardManager, accepted_accessors: tuple[type[GuardAccessor], ...]
+        ) -> bool:
             accessors = node.get_accessors()
             child_mgrs = node.get_child_managers()
             return all(
@@ -462,7 +476,7 @@ class GuardManagerWrapper:
                     types.FunctionType,
                     types.MethodType,
                 )
-                and config.assume_function_dunder_attributes_remain_unchanged
+                and config.assume_dunder_attributes_remain_unchanged
             ):
                 # Assumption: callers will not reassignthe attributes
                 #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
@@ -483,33 +497,26 @@ class GuardManagerWrapper:
 
                 for accessor in node.get_accessors():
                     if isinstance(accessor, GetAttrGuardAccessor):
-                        is_subtree_tag_safe &= accessor.get_attr_name() in (
-                            "__defaults__",
-                            "__kwdefaults__",
-                            "__code__",
-                            "__closure__",
-                            "__annotations__",
+                        is_subtree_tag_safe &= (
+                            accessor.get_attr_name() in dunder_attrs_assumed_constants
                         )
 
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), types.CellType):
-                is_subtree_tag_safe = check_tag_safety(node, GetAttrGuardAccessor)
+                is_subtree_tag_safe = check_tag_safety(node, (GetAttrGuardAccessor,))
 
                 is_subtree_tag_safe &= all(
-                    accessor.get_attr_name() == "cell_contents"
+                    isinstance(accessor, GetAttrGuardAccessor)
+                    and accessor.get_attr_name() == "cell_contents"
                     for accessor in node.get_accessors()
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif (
                 issubclass(node.get_type_of_guarded_value(), tuple)
-                and (
-                    "__closure__" in node.get_source()
-                    or "__defaults__" in node.get_source()
-                    or "__mro__" in node.get_source()
-                )
-                and config.assume_function_dunder_attributes_remain_unchanged
+                and node.get_source().endswith(dunder_attrs_assumed_constants)
+                and config.assume_dunder_attributes_remain_unchanged
             ):
                 # We trust tuples obtained from a function’s __closure__ or
                 # __defaults__. Any *other* tuple-valued attribute can be
@@ -520,10 +527,12 @@ class GuardManagerWrapper:
                 #
                 # Therefore only tuples from __closure__ / __defaults__ participate in the
                 # recursive-dict-tag optimization; all others are ignored.
-                is_subtree_tag_safe = check_tag_safety(node, TupleGetItemGuardAccessor)
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (TupleGetItemGuardAccessor,)
+                )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-            elif node.get_type_of_guarded_value() in (type, torch._C._TensorMeta):
+            elif issubclass(node.get_type_of_guarded_value(), type):
                 is_subtree_tag_safe = check_tag_safety(
                     node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
                 )
