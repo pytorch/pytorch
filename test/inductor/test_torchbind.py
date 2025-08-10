@@ -1,6 +1,5 @@
 # Owner(s): ["module: functorch"]
 import json
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -11,6 +10,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops.torchbind import CallTorchBind, enable_torchbind_tracing
 from torch._inductor import aot_compile, ir
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
@@ -280,7 +280,7 @@ class TestTorchbind(TestCase):
             )
 
         # Test that the files are packaged
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, aoti_files)
 
             with zipfile.ZipFile(package_path, "r") as zip_ref:

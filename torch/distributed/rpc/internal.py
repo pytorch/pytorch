@@ -226,7 +226,7 @@ def _handle_exception(result):
         exc = None
         try:
             exc = result.exception_type(exception_msg)
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             raise RuntimeError(  # noqa: B904
                 f"Failed to create original exception type. Error msg was {str(e)}"
                 f" Original exception on remote side was {exception_msg}"
