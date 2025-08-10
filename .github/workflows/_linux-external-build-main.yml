@@ -249,7 +249,7 @@ jobs:
             cd scripts/lumen_cli
             python3 -m pip install -e .
           )
-          python3 -m cli.run --config "$CI_CONFIG" build external "$BUILD_TARGET"
+          python3 -m cli.run build external "$BUILD_TARGET"
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
