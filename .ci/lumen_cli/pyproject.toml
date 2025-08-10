@@ -3,7 +3,7 @@ name = "torch-ci"
 version = "0.1.0"
 dependencies = [
     "pyyaml>=6.0",
-    "GitPython>=4.0.12",
+    "GitPython>=3.1.45",
     "docker"
 ]
 

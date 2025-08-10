@@ -1,10 +1,7 @@
 import argparse
 import logging
-import textwrap
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Protocol, Required, Type, TypedDict
 
-from cli.lib.common.argparser import (
+from cli.lib.common.cli_helper import (
     register_target_commands_and_runner,
     RichHelp,
     TargetSpec,
@@ -15,7 +12,7 @@ from cli.lib.core.vllm import VllmBuildRunner
 logger = logging.getLogger(__name__)
 
 # tarfets dicts that maps target name to target spec
-_TARGETS: Dict[str, TargetSpec] = {
+_TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmBuildRunner,
         "help": "Build vLLM using docker buildx.",

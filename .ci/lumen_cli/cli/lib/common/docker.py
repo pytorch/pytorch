@@ -1,9 +1,10 @@
 """
 Docker Utility helpers for CLI tasks.
-""""
+"""
 
 import logging
 from typing import Optional
+
 import docker
 from docker.errors import APIError, NotFound
 
@@ -36,7 +37,7 @@ def local_image_exists(
     except NotFound:
         logger.info(f"Image {image_name} not found locally...")
         return False
-    except APIError as e:
+    except APIError:
         # Surface daemon/connection problems as False or re-raise — your choice.
         # Here we choose False to match the old "inspect fails => False" behavior.
         return False
