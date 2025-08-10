@@ -452,6 +452,28 @@ AOTITorchError aoti_torch_empty_strided(
   });
 }
 
+AOTITorchError aoti_torch_empty_strided_pinned(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    TORCH_CHECK(
+        c10::DeviceType(device_type) == c10::DeviceType::CPU,
+        "only CPU tensors can be pinned");
+    *ret_new_tensor = new_tensor_handle(at::detail::empty_strided_cpu(
+        sizes,
+        strides,
+        static_cast<c10::ScalarType>(dtype),
+        /*is_pinned=*/true));
+  });
+}
+
 AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
     int64_t ndim,
@@ -981,16 +1003,17 @@ AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
-    AtenTensorHandle bias,
+    AtenTensorHandle bias, // optional argument
     int64_t out_channel,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
     at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
-    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    auto optional_bias_tensor =
+        pointer_to_optional(tensor_handle_to_tensor_pointer(bias));
 
     *out = new_tensor_handle(at::fbgemm_linear_fp16_weight_fp32_activation(
-        *input_tensor, *weight_tensor, *bias_tensor));
+        *input_tensor, *weight_tensor, optional_bias_tensor));
   });
 }
 

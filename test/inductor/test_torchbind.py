@@ -1,6 +1,5 @@
 # Owner(s): ["module: functorch"]
 import json
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -11,6 +10,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops.torchbind import CallTorchBind, enable_torchbind_tracing
 from torch._inductor import aot_compile, ir
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
@@ -280,7 +280,7 @@ class TestTorchbind(TestCase):
             )
 
         # Test that the files are packaged
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, aoti_files)
 
             with zipfile.ZipFile(package_path, "r") as zip_ref:
@@ -409,6 +409,30 @@ class TestTorchbind(TestCase):
             expected_regex="TorchBind object inputs are not supported in AOTInductor",
         ):
             aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
+
+    def test_aoti_torchbind_name_collision(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._torchbind_obj0 = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = self._torchbind_obj0.add_tensor(x)
+                torchbind = torch.classes._TorchScriptTesting._Foo(4, 5)
+                b = torchbind.add_tensor(x)
+                return a + b
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        optimized = torch._inductor.aoti_load_package(pt2_path)
+        result = optimized(*inputs)
+        self.assertEqual(result, orig_res)
 
 
 if __name__ == "__main__":

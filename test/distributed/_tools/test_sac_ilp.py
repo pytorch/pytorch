@@ -211,7 +211,7 @@ class TestSACILP(TestCase):
 
 
 class TestOptimalCheckpointingPolicy(TestCase):
-    # tests are adpated from tests in xformers
+    # tests are adapted from tests in xformers
     # https://github.com/facebookresearch/xformers/blob/c6c0ac31f1b08542a0bc27278c6ed10f825f6963/tests/test_checkpoint.py#L222
     def setUp(self):
         super().setUp()

@@ -1037,7 +1037,7 @@ def triton_kernel_wrapper_mutation_dense(
         # as we need to launch the kernel here, we "unwrap" the
         # tma_descriptor_metadata, create the TMA descriptors
         # from it, and replace the tensors in the kwargs by the
-        # correspoinding TMA descriptors before launching
+        # corresponding TMA descriptors before launching
         kwargs = kwargs.copy()
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]

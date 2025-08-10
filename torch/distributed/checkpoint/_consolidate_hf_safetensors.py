@@ -4,14 +4,18 @@ import concurrent.futures
 import json
 import logging
 import math
+import mmap
 import os
+import shutil
 import struct
+import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import fsspec  # type: ignore[import-untyped]
 from fsspec.core import url_to_fs  # type: ignore[import-untyped]
+from fsspec.implementations.local import LocalFileSystem  # type: ignore[import-untyped]
 
 import torch
 from torch.distributed.checkpoint._hf_utils import (
@@ -23,6 +27,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
+    FILE_NAME,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
     SUFFIX,
@@ -199,6 +204,41 @@ def _write_metadata(
             output_data.metadata_size = f.tell()
 
 
+def _read_tensor_data_mmap(
+    input_fs: fsspec.AbstractFileSystem,
+    file_path: str,
+    start_offset: int,
+    end_offset: int,
+    metadata_size: int,
+) -> bytes:
+    """
+    Read tensor data from a safetensors file using memory mapping for efficiency.
+
+    Args:
+        input_fs: Filesystem interface for input file operations
+        file_path: Path to the safetensors file
+        start_offset: Start offset of tensor data within the data section
+        end_offset: End offset of tensor data within the data section
+        metadata_size: Size of the metadata header
+
+    Returns:
+        Raw tensor data as bytes
+    """
+    # For local files, use mmap for efficient access
+    if isinstance(input_fs, LocalFileSystem):
+        # Local file - use mmap
+        with open(file_path, "rb") as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                absolute_start = metadata_size + start_offset
+                absolute_end = metadata_size + end_offset
+                return bytes(mm[absolute_start:absolute_end])
+    else:
+        # Remote file - fall back to regular read
+        with input_fs.open(file_path, "rb") as f:
+            f.seek(metadata_size + start_offset)
+            return f.read(end_offset - start_offset)
+
+
 def _process_output_file(
     input_fs: fsspec.AbstractFileSystem,
     output_fs: fsspec.AbstractFileSystem,
@@ -207,7 +247,7 @@ def _process_output_file(
     input_files_data: dict[str, _InputFileData],
 ) -> None:
     """
-    Process a single output file by writing tensor data from input files.
+    Process a single output file by writing tensor data from input files using memory mapping.
 
     This function is designed to be run in parallel for different output files.
 
@@ -216,47 +256,51 @@ def _process_output_file(
         output_fs: Filesystem interface for output file operations
         output_file: Path to the output file
         output_data: Metadata for the output file
-        input_safetensors_files: List of input safetensors file paths
-        input_metadatas: Dictionary mapping input file paths to their metadata
+        input_files_data: Dictionary mapping input file paths to their metadata
     """
     # Process each input safetensors file
     for safetensors_file in input_files_data.keys():
-        with input_fs.open(safetensors_file, "rb") as f:
-            file_metadata = input_files_data[safetensors_file].metadata
-            input_metadata_size = input_files_data[safetensors_file].metadata_size
-            for fqn, metadata in file_metadata.items():
-                if fqn == DEFAULT_EXTRA_METADATA_KEY:
-                    continue
+        file_metadata = input_files_data[safetensors_file].metadata
+        input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-                # Skip if this tensor doesn't belong in this output file
-                if fqn not in output_data.fqn_data:
-                    continue
+        for fqn, metadata in file_metadata.items():
+            if fqn == DEFAULT_EXTRA_METADATA_KEY:
+                continue
 
-                data_offsets = metadata[DATA_OFFSETS_KEY]
-                # Get the tensor data as bytes
-                f.seek(input_metadata_size + data_offsets[0])
-                data_to_write = f.read(data_offsets[1])
+            # Skip if this tensor doesn't belong in this output file
+            if fqn not in output_data.fqn_data:
+                continue
 
-                # Get the offsets of this tensor shard within the full tensor
-                offsets_of_tensor_being_read = _get_dcp_custom_metadata(file_metadata)[
-                    fqn
-                ][SAVED_OFFSETS_KEY]  # type: ignore[index]
+            data_offsets = metadata[DATA_OFFSETS_KEY]
 
-                # Get metadata for this tensor in the output file
-                fqn_data = output_data.fqn_data[fqn]
+            # Use memory mapping to read tensor data efficiently
+            data_to_write = _read_tensor_data_mmap(
+                input_fs,
+                safetensors_file,
+                data_offsets[0],
+                data_offsets[1],
+                input_metadata_size,
+            )
 
-                # Write this tensor shard to the appropriate position in the output file
-                _write_sub_tensor_to_file(
-                    output_fs,
-                    data_to_write,
-                    fqn_data.dtype_size,  # Size of each element in bytes
-                    fqn_data.shape_in_file,  # Full tensor shape
-                    offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
-                    metadata[SHAPE_KEY],  # Shape of this shard
-                    output_file,
-                    # Calculate the exact byte position where this tensor data should start
-                    output_data.metadata_size + fqn_data.offset_in_file,
-                )
+            # Get the offsets of this tensor shard within the full tensor
+            custom_metadata = _get_dcp_custom_metadata(file_metadata)
+            offsets_of_tensor_being_read = custom_metadata[fqn][SAVED_OFFSETS_KEY]  # type: ignore[index]
+
+            # Get metadata for this tensor in the output file
+            fqn_data = output_data.fqn_data[fqn]
+
+            # Write this tensor shard to the appropriate position in the output file
+            _write_sub_tensor_to_file_optimized(
+                output_fs,
+                data_to_write,
+                fqn_data.dtype_size,  # Size of each element in bytes
+                fqn_data.shape_in_file,  # Full tensor shape
+                offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
+                metadata[SHAPE_KEY],  # Shape of this shard
+                output_file,
+                # Calculate the exact byte position where this tensor data should start
+                output_data.metadata_size + fqn_data.offset_in_file,
+            )
 
 
 def _write_data(
@@ -267,7 +311,7 @@ def _write_data(
     num_threads: int = 1,
 ) -> None:
     """
-    Write tensor data from input files to the output files.
+    Write tensor data from input files to the output files using memory mapping.
 
     This function reads tensor data from each input file and writes it to the appropriate
     position in the output files based on the tensor's offsets. When num_threads > 1,
@@ -314,66 +358,9 @@ def _write_data(
                     raise
 
 
-def _write_row_wise_tensor(
+def _write_sub_tensor_to_file_optimized(
     fs: fsspec.AbstractFileSystem,
-    sub_tensor_bytes: bytearray,
-    element_size: int,
-    full_tensor_strides: list[int],
-    sub_tensor_strides: list[int],
-    sub_tensor_offsets: list[int],
-    sub_tensor_shape: list[int],
-    output_file_path: str,
-    output_start_byte: int,
-) -> None:
-    """
-    Writes a row-wise sharded tensor to the output file.
-
-    This is an optimized path for tensors that are sharded along the first dimension,
-    with all other dimensions being complete. This allows writing entire rows at once.
-
-    Args:
-        fs: Filesystem interface for file operations
-        sub_tensor_bytes: Byte array containing the sub-tensor data
-        element_size: The size of each element in bytes
-        full_tensor_strides: Strides of the full tensor
-        sub_tensor_strides: Strides of the sub-tensor
-        sub_tensor_offsets: The starting offsets of the sub-tensor within the full tensor
-        sub_tensor_shape: The shape of the sub-tensor
-        output_file_path: The path to the file where the full tensor is stored
-        output_start_byte: The starting byte of the full tensor in the file
-    """
-    # Open the output file in read+binary mode to allow seeking and writing
-    with fs.open(output_file_path, "r+b") as out_f:
-        # Calculate the number of elements in each row
-        elements_per_row = full_tensor_strides[
-            0
-        ]  # This is the stride of the first dimension
-
-        # For each row in the sub-tensor
-        for row_idx in range(sub_tensor_shape[0]):
-            # Calculate the row index in the full tensor
-            full_row_idx = sub_tensor_offsets[0] + row_idx
-
-            # Calculate the position in the full tensor
-            full_pos = full_row_idx * full_tensor_strides[0]
-            full_byte_offset = output_start_byte + full_pos * element_size
-
-            # Calculate the position in the sub-tensor
-            sub_pos = row_idx * sub_tensor_strides[0]
-            sub_byte_offset = sub_pos * element_size
-
-            # Extract the row data from the sub-tensor
-            row_size = elements_per_row * element_size
-            row_data = sub_tensor_bytes[sub_byte_offset : sub_byte_offset + row_size]
-
-            # Seek to the correct position in the output file and write the data
-            out_f.seek(full_byte_offset)
-            out_f.write(row_data)
-
-
-def _write_column_wise_tensor(
-    fs: fsspec.AbstractFileSystem,
-    sub_tensor_bytes: bytearray,
+    sub_tensor_bytes: bytes,
     element_size: int,
     tensor_shape: list[int],
     sub_tensor_offsets: list[int],
@@ -382,228 +369,158 @@ def _write_column_wise_tensor(
     output_start_byte: int,
 ) -> None:
     """
-    Writes a column-wise sharded 2D tensor to the output file.
+    Optimized version that writes the maximum number of contiguous bytes possible.
 
-    This is an optimized path for 2D tensors that are sharded along the second dimension,
-    with the first dimension being complete. This requires writing column by column.
-
-    Args:
-        fs: Filesystem interface for file operations
-        sub_tensor_bytes: Byte array containing the sub-tensor data
-        element_size: The size of each element in bytes
-        tensor_shape: The shape of the overall tensor
-        sub_tensor_strides: Strides of the sub-tensor
-        sub_tensor_offsets: The starting offsets of the sub-tensor within the full tensor
-        sub_tensor_shape: The shape of the sub-tensor
-        output_file_path: The path to the file where the full tensor is stored
-        output_start_byte: The starting byte of the full tensor in the file
-    """
-    # Open the output file in read+binary mode to allow seeking and writing
-    with fs.open(output_file_path, "r+b") as out_f:
-        # For each column in the sub-tensor
-        for col_idx in range(sub_tensor_shape[1]):
-            # Calculate the column index in the full tensor
-            full_col_idx = sub_tensor_offsets[1] + col_idx
-
-            # For each row in the column
-            for row_idx in range(sub_tensor_shape[0]):
-                # Calculate the position in the full tensor
-                full_pos = row_idx * tensor_shape[1] + full_col_idx
-                full_byte_offset = output_start_byte + full_pos * element_size
-
-                # Calculate the position in the sub-tensor
-                sub_pos = row_idx * sub_tensor_shape[1] + col_idx
-                sub_byte_offset = sub_pos * element_size
-
-                # Extract the element data from the sub-tensor
-                element_data = sub_tensor_bytes[
-                    sub_byte_offset : sub_byte_offset + element_size
-                ]
-
-                # Seek to the correct position in the output file and write the data
-                out_f.seek(full_byte_offset)
-                out_f.write(element_data)
-
-
-def _write_element_by_element(
-    fs: fsspec.AbstractFileSystem,
-    sub_tensor_bytes: bytearray,
-    element_size: int,
-    tensor_shape: list[int],
-    full_tensor_strides: list[int],
-    sub_tensor_strides: list[int],
-    sub_tensor_offsets: list[int],
-    sub_tensor_shape: list[int],
-    output_file_path: str,
-    output_start_byte: int,
-) -> None:
-    """
-    Writes a sub-tensor to the output file using a general element-by-element approach.
-
-    This is a general approach that works for any sharding pattern, but is less efficient
-    than the specialized approaches for row-wise or column-wise sharding.
+    Uses a unified algorithm that calculates the maximum contiguous bytes that can be
+    written in each iteration and continues until the entire subtensor is written.
+    Handles all sharding patterns efficiently:
+    - Full sub-tensor at once for row-wise sharding
+    - Row-by-row for column-wise sharding
+    - Optimized chunks for other patterns
 
     Args:
         fs: Filesystem interface for file operations
-        sub_tensor_bytes: Byte array containing the sub-tensor data
-        element_size: The size of each element in bytes
-        tensor_shape: The shape of the overall tensor
-        full_tensor_strides: Strides of the full tensor
-        sub_tensor_strides: Strides of the sub-tensor
-        sub_tensor_offsets: The starting offsets of the sub-tensor within the full tensor
-        sub_tensor_shape: The shape of the sub-tensor
-        output_file_path: The path to the file where the full tensor is stored
-        output_start_byte: The starting byte of the full tensor in the file
+        sub_tensor_bytes: Raw tensor data as bytes
+        element_size: Size of each element in bytes
+        tensor_shape: Shape of the full tensor
+        sub_tensor_offsets: Starting offsets of the sub-tensor within the full tensor
+        sub_tensor_shape: Shape of the sub-tensor
+        output_file_path: Path to the output file
+        output_start_byte: Starting byte position of the tensor in the file
     """
-    # Open the output file in read+binary mode to allow seeking and writing
-    with fs.open(output_file_path, "r+b") as out_f:
-        # Create a list to hold the current indices for each dimension
-        indices = [0] * len(tensor_shape)
-
-        # Calculate the total number of elements in the sub-tensor
-        total_elements = 1
-        for dim_size in sub_tensor_shape:
-            total_elements *= dim_size
-
-        # Process each element in the sub-tensor
-        for element_idx in range(total_elements):
-            # Calculate the indices for this element in the sub-tensor
-            sub_idx = element_idx
-            for dim in range(len(sub_tensor_shape) - 1, -1, -1):
-                indices[dim] = sub_idx % sub_tensor_shape[dim]
-                sub_idx //= sub_tensor_shape[dim]
-
-            # Calculate the position of this element in the sub-tensor's byte array
-            sub_pos = 0
-            for dim in range(len(sub_tensor_shape)):
-                sub_pos += indices[dim] * sub_tensor_strides[dim]
-            sub_byte_offset = sub_pos * element_size
-
-            # Calculate the position of this element in the full tensor
-            full_pos = 0
-            for dim in range(len(tensor_shape)):
-                # The global index is the local index plus the offset for this dimension
-                global_idx = indices[dim] + sub_tensor_offsets[dim]
-                full_pos += global_idx * full_tensor_strides[dim]
-            full_byte_offset = output_start_byte + full_pos * element_size
-
-            # Extract the element data from the sub-tensor
-            element_data = sub_tensor_bytes[
-                sub_byte_offset : sub_byte_offset + element_size
-            ]
-
-            # Seek to the correct position in the output file and write the data
-            out_f.seek(full_byte_offset)
-            out_f.write(element_data)
-
-
-def _write_sub_tensor_to_file(
-    fs: fsspec.AbstractFileSystem,
-    sub_tensor_bytes: bytearray,
-    element_size: int,
-    tensor_shape: list[int],
-    sub_tensor_offsets: list[int],
-    sub_tensor_shape: list[int],
-    output_file_path: str,
-    output_start_byte: int,
-) -> None:
-    """
-    Writes a sub-tensor from a byte array into a file representing the full tensor at specified offsets.
-
-    This function handles the complex task of placing a tensor shard (sub-tensor) at the correct
-    position within the consolidated tensor file. It works by calculating the exact byte offsets
-    for each slice of data and writing them to the appropriate positions. This implementation
-    supports tensors of any dimensionality with optimized paths for common sharding patterns:
-    - Row-wise sharding (optimized path)
-    - Column-wise sharding for 2D tensors (optimized path)
-    - Any other arbitrary sharding pattern (general element-by-element approach)
-
-    Args:
-        sub_tensor_bytes: Byte array containing the sub-tensor data
-        element_size: The size of each element in bytes
-        tensor_shape: The shape of the overall tensor (list)
-        sub_tensor_offsets: The starting offsets of the sub-tensor within the full tensor (list)
-        sub_tensor_shape: The shape of the sub-tensor (list)
-        output_file_path: The path to the file where the full tensor is stored
-        output_start_byte: The starting byte of the full tensor in the file
-    """
-    # Handle the case of empty tensors
+    # Handle empty tensors
     if not tensor_shape or not sub_tensor_shape:
         return
 
-    # Calculate strides for the full tensor (row-major order, C-style)
-    # Stride is the number of elements to skip to move to the next element in that dimension
-    full_tensor_strides = [1] * len(tensor_shape)
-    for i in range(len(tensor_shape) - 2, -1, -1):
-        full_tensor_strides[i] = full_tensor_strides[i + 1] * tensor_shape[i + 1]
+    # Calculate tensor strides for efficient indexing
+    tensor_strides = [1]
+    for i in range(len(tensor_shape) - 1, 0, -1):
+        tensor_strides.insert(0, tensor_strides[0] * tensor_shape[i])
 
-    # Calculate strides for the sub-tensor (row-major order, C-style)
-    sub_tensor_strides = [1] * len(sub_tensor_shape)
-    for i in range(len(sub_tensor_shape) - 2, -1, -1):
-        sub_tensor_strides[i] = sub_tensor_strides[i + 1] * sub_tensor_shape[i + 1]
+    sub_tensor_strides = [1]
+    for i in range(len(sub_tensor_shape) - 1, 0, -1):
+        sub_tensor_strides.insert(0, sub_tensor_strides[0] * sub_tensor_shape[i])
 
-    # Check if this is a row-wise sharded tensor
-    # Row-wise sharding is detected when the last dimension is complete
-    # and only the first dimension is partial
-    is_row_wise = False
-    if len(tensor_shape) >= 2:
-        # Check if all dimensions except the first are complete
-        all_other_dims_complete = True
-        for i in range(1, len(tensor_shape)):
-            if sub_tensor_shape[i] != tensor_shape[i]:
-                all_other_dims_complete = False
-                break
+    total_elements = math.prod(sub_tensor_shape)
 
-        # Row-wise sharding: first dimension is partial, all others are complete
-        is_row_wise = all_other_dims_complete and sub_tensor_shape[0] < tensor_shape[0]
+    with fs.open(output_file_path, "r+b") as out_f:
+        elements_written = 0
 
-    # Check if this is a column-wise sharded 2D tensor
-    # Column-wise sharding is detected when the first dimension is complete
-    # and the second dimension is partial (only for 2D tensors)
-    is_column_wise = False
-    if len(tensor_shape) == 2:
-        is_column_wise = (
-            sub_tensor_shape[0] == tensor_shape[0]
-            and sub_tensor_shape[1] < tensor_shape[1]
+        while elements_written < total_elements:
+            # Convert linear index to multi-dimensional indices
+            temp_idx = elements_written
+            indices = []
+            for dim_size in reversed(sub_tensor_shape):
+                indices.append(temp_idx % dim_size)
+                temp_idx //= dim_size
+            indices.reverse()
+
+            # Calculate maximum contiguous elements we can write from this position
+            max_contiguous = _calculate_max_contiguous_elements(
+                indices, sub_tensor_shape, tensor_shape
+            )
+
+            # Calculate source position in bytes
+            src_pos = sum(
+                idx * stride for idx, stride in zip(indices, sub_tensor_strides)
+            )
+            src_byte_offset = src_pos * element_size
+
+            # Calculate destination position in bytes
+            dest_indices = [
+                idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
+            ]
+            dest_pos = sum(
+                idx * stride for idx, stride in zip(dest_indices, tensor_strides)
+            )
+            dest_byte_offset = output_start_byte + dest_pos * element_size
+
+            # Write the contiguous chunk
+            bytes_to_write = max_contiguous * element_size
+            out_f.seek(dest_byte_offset)
+            chunk_data = sub_tensor_bytes[
+                src_byte_offset : src_byte_offset + bytes_to_write
+            ]
+            out_f.write(chunk_data)
+
+            elements_written += max_contiguous
+
+
+def _calculate_max_contiguous_elements(
+    indices: list[int],
+    sub_tensor_shape: list[int],
+    tensor_shape: list[int],
+) -> int:
+    """
+    Calculate the maximum number of contiguous elements that can be written from current position.
+
+    This determines the largest chunk by checking how elements are laid out in memory
+    and finding natural boundaries where contiguity breaks.
+
+    Args:
+        indices: Current position indices in the sub-tensor
+        sub_tensor_shape: Shape of the sub-tensor being written
+        tensor_shape: Shape of the full tensor
+
+    Raises:
+        ValueError: If input lists are empty, have mismatched lengths, or contain invalid values
+    """
+    # Validate input lists are not empty
+    if not indices or not sub_tensor_shape or not tensor_shape:
+        raise ValueError("Input lists cannot be empty")
+
+    # Validate all lists have the same length (same number of dimensions)
+    if not (len(indices) == len(sub_tensor_shape) == len(tensor_shape)):
+        raise ValueError(
+            f"All input lists must have the same length. Got indices: {len(indices)}, "
+            f"sub_tensor_shape: {len(sub_tensor_shape)}, tensor_shape: {len(tensor_shape)}"
         )
 
-    # Call the appropriate function based on the sharding pattern
-    if is_row_wise:
-        _write_row_wise_tensor(
-            fs,
-            sub_tensor_bytes,
-            element_size,
-            full_tensor_strides,
-            sub_tensor_strides,
-            sub_tensor_offsets,
-            sub_tensor_shape,
-            output_file_path,
-            output_start_byte,
-        )
-    elif is_column_wise:
-        _write_column_wise_tensor(
-            fs,
-            sub_tensor_bytes,
-            element_size,
-            tensor_shape,
-            sub_tensor_offsets,
-            sub_tensor_shape,
-            output_file_path,
-            output_start_byte,
-        )
-    else:
-        _write_element_by_element(
-            fs,
-            sub_tensor_bytes,
-            element_size,
-            tensor_shape,
-            full_tensor_strides,
-            sub_tensor_strides,
-            sub_tensor_offsets,
-            sub_tensor_shape,
-            output_file_path,
-            output_start_byte,
-        )
+    # Validate indices are within bounds of sub_tensor_shape
+    for i, (idx, sub_dim) in enumerate(zip(indices, sub_tensor_shape)):
+        if idx >= sub_dim:
+            raise ValueError(
+                f"Index {idx} at dimension {i} is out of bounds for sub-tensor shape {sub_tensor_shape}"
+            )
+
+    # Validate sub_tensor dimensions don't exceed tensor dimensions
+    for i, (sub_dim, tensor_dim) in enumerate(zip(sub_tensor_shape, tensor_shape)):
+        if sub_dim > tensor_dim:
+            raise ValueError(
+                f"Sub-tensor dimension {sub_dim} at position {i} exceeds tensor dimension {tensor_dim}"
+            )
+
+    # Start with elements remaining in the last dimension
+    max_contiguous = sub_tensor_shape[-1] - indices[-1]
+
+    # Check if we can extend across multiple dimensions
+    # We can write across dimension boundaries if we're writing complete "rows"
+    # and the layout in destination tensor maintains contiguity
+
+    # For 2D case: check if we can write multiple complete rows
+    if len(sub_tensor_shape) >= 2:
+        # If we're at the start of a row and can write complete rows
+        if indices[-1] == 0:  # At start of last dimension (column)
+            rows_remaining = sub_tensor_shape[-2] - indices[-2]  # Rows left to write
+
+            # Check if writing complete rows maintains contiguity in destination
+            # This is true for row-wise sharding or when sub-tensor spans full width
+            if sub_tensor_shape[-1] == tensor_shape[-1]:  # Full width
+                max_contiguous = rows_remaining * sub_tensor_shape[-1]
+
+            # For higher dimensions, check if we can extend further
+            if len(sub_tensor_shape) >= 3 and indices[-2] == 0:
+                # Check if we can write complete 2D slices
+                remaining_in_dim = sub_tensor_shape[-3] - indices[-3]
+                if (
+                    sub_tensor_shape[-1] == tensor_shape[-1]
+                    and sub_tensor_shape[-2] == tensor_shape[-2]
+                ):
+                    max_contiguous = (
+                        remaining_in_dim * sub_tensor_shape[-2] * sub_tensor_shape[-1]
+                    )
+
+    return max_contiguous
 
 
 def _write_overall_metadata_file(
@@ -625,6 +542,28 @@ def _write_overall_metadata_file(
     metadata_path = os.path.join(output_dir, f"{_metadata_fn}")
     with fs.open(metadata_path, "w") as metadata_file:
         json.dump(metadata_to_write, metadata_file, indent=2)
+
+
+def _upload_files_to_remote_fs(
+    local_fs: fsspec.AbstractFileSystem,
+    local_dir: str,
+    output_fs: fsspec.AbstractFileSystem,
+    output_dir: str,
+) -> None:
+    """
+    Uploads the consolidated files to the remote filesystem.
+    """
+    for path in local_fs.ls(local_dir, detail=False):
+        file = os.path.basename(path)
+        model_str = FILE_NAME.split("-")[0]
+        # Upload only the consolidated files with full tensors or the metadata file.
+        # The check for file.startwith(model_str) is to ensure that we only upload
+        # the consolidated files in the format "model-0000n-of-0000m.safetensors"
+        # and not the files with sharded tensors.
+        if file.endswith(SUFFIX) and file.startswith(model_str) or file == _metadata_fn:
+            local_path = os.path.join(local_dir, file)
+            remote_path = os.path.join(output_dir, file)
+            output_fs.put_file(local_path, remote_path)
 
 
 def consolidate_safetensors_files(
@@ -662,6 +601,14 @@ def consolidate_safetensors_files(
     input_fs, _ = url_to_fs(input_dir)
     output_fs, _ = url_to_fs(output_dir)
 
+    if not isinstance(output_fs, LocalFileSystem):
+        local_output_dir = tempfile.mkdtemp()
+        logger.info("Created temporary directory %s", local_output_dir)
+        local_output_fs, _ = url_to_fs(local_output_dir)
+    else:
+        local_output_fs = output_fs
+        local_output_dir = output_dir
+
     # Initialize the output file structure
     output_files_data: dict[str, _OutputFileData] = {}
     if fqn_to_index_mapping is not None:
@@ -669,7 +616,7 @@ def consolidate_safetensors_files(
         for fqn, index in fqn_to_index_mapping.items():
             # Generate names like "model-00001-of-00005.safetensors"
             file_name = _gen_file_name(index, max(fqn_to_index_mapping.values()))
-            output_path = f"{output_dir}/{file_name}"
+            output_path = os.path.join(local_output_dir, file_name)
 
             if output_path not in output_files_data:
                 output_files_data[output_path] = _OutputFileData(
@@ -680,7 +627,7 @@ def consolidate_safetensors_files(
     else:
         # If no mapping is provided, create a single output file
         file_name = _gen_file_name(1, 1)
-        output_path = f"{output_dir}/{file_name}"
+        output_path = os.path.join(local_output_dir, file_name)
         output_files_data[output_path] = _OutputFileData()
 
     # Find all safetensors files in the input directory
@@ -702,12 +649,22 @@ def consolidate_safetensors_files(
     _parse_input_metadata(input_files_data, output_files_data)
 
     # Step 2: Write metadata headers to output files
-    _write_metadata(output_fs, output_files_data)
+    _write_metadata(local_output_fs, output_files_data)
 
     # Step 3: Write actual tensor data from input files to output files
-    _write_data(input_fs, output_fs, input_files_data, output_files_data, num_threads)
+    _write_data(
+        input_fs, local_output_fs, input_files_data, output_files_data, num_threads
+    )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
-    _write_overall_metadata_file(output_fs, output_dir, output_files_data)
+    _write_overall_metadata_file(local_output_fs, local_output_dir, output_files_data)
 
     logger.info("Done consolidating. Took %.2f secs.", time.time() - start_time)
+
+    if local_output_dir != output_dir:
+        logger.info("Copying consolidated files to remote storage %s", output_dir)
+        _upload_files_to_remote_fs(
+            local_output_fs, local_output_dir, output_fs, output_dir
+        )
+        shutil.rmtree(local_output_dir)
+        logger.info("Deleting temporary directory %s", local_output_dir)

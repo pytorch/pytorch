@@ -484,10 +484,12 @@ def forward(self, x):
             self.assertNotIn(name, seen)
             seen.add(name)
 
-    def test_infinity_inputs(self) -> None:
+    def test_nonfinite_inputs(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, math.inf)
+                x = torch.ops.aten.add.Scalar(x, -math.inf)
+                return torch.ops.aten.add.Scalar(x, math.nan)
 
         fn = Module()
         ep = torch.export.export(
@@ -793,7 +795,7 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo")
+            @torch.library.register_fake("mylib::foo")
             def foo_impl(a, b, c):
                 res2 = None
                 if c is not None:
@@ -882,21 +884,21 @@ class TestDeserialize(TestCase):
             )
 
             @torch.library.impl("mylib::foo1", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo1")
+            @torch.library.register_fake("mylib::foo1")
             def foo1_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return n + n
 
             @torch.library.impl("mylib::foo2", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo2")
+            @torch.library.register_fake("mylib::foo2")
             def foo2_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
             @torch.library.impl("mylib::foo3", "cpu", lib=lib)
-            @torch.library.impl_abstract("mylib::foo3")
+            @torch.library.register_fake("mylib::foo3")
             def foo3_impl(x, y, z, w, n):
                 x.add_(y[0] + w)
                 z.add_(y[1] + n)
@@ -1813,6 +1815,60 @@ def forward(self, x):
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
         self.assertEqual(counter, 1)
+
+    def test_unbacked_range_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._check_is_size(n, max=y.size(0) - 1)
+                return torch.empty(n), y[n]
+
+        ep = torch.export.export(
+            Foo(),
+            (torch.tensor([5]), torch.randn(10)),
+            dynamic_shapes={
+                "x": None,
+                "y": (Dim.DYNAMIC,),
+            },
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        # pre-serialize ep
+        pre_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in ep.graph.nodes]
+        ).shape_env
+        post_shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        self.assertEqual(pre_shape_env.var_to_range, post_shape_env.var_to_range)
+
+    def test_backed_size_oblivious_serdes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z.item()
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = torch.export.export(
+                Foo(),
+                (torch.randn(1), torch.randn(1), torch.tensor([5])),
+                dynamic_shapes={
+                    "x": (Dim.DYNAMIC,),
+                    "y": (Dim.DYNAMIC,),
+                    "z": None,
+                },
+            )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        shape_env = torch._guards.detect_fake_mode(
+            [node.meta.get("val") for node in loaded_ep.graph.nodes]
+        ).shape_env
+        s0 = next(iter(ep.graph.nodes)).meta["val"].size(0)
+        self.assertEqual(shape_env.var_to_range[s0.node.expr].lower, 0)
 
 
 if __name__ == "__main__":
