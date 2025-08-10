@@ -3,9 +3,9 @@ import os
 import shlex
 import subprocess
 import sys
-from dataclasses import fields
+from dataclasses import field, fields
 from textwrap import indent
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 
 logger = logging.getLogger(__name__)
