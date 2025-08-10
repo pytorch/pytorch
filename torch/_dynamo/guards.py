@@ -475,6 +475,8 @@ class GuardManagerWrapper:
                 in (
                     types.FunctionType,
                     types.MethodType,
+                    staticmethod,
+                    classmethod,
                 )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
