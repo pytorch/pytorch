@@ -2213,9 +2213,10 @@ void ONNXSetDynamicInputShape(
   GRAPH_UPDATE("dynamic axes tensor names:", [&]() {
     std::vector<std::string> res(dynamic_axes.size());
     std::transform(
-        dynamic_axes.begin(), dynamic_axes.end(), res.begin(), [](const auto& pair) {
-          return pair.first;
-        });
+        dynamic_axes.begin(),
+        dynamic_axes.end(),
+        res.begin(),
+        [](const auto& pair) { return pair.first; });
     return res;
   }());
 
