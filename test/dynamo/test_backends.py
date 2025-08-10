@@ -16,10 +16,10 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 
 
 class Seq(torch.nn.Module):
