@@ -22,14 +22,18 @@ import torch
 import torch.distributed._distributed_c10d as _c10d
 from torch._C import _DistStoreError as DistStoreError
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
-
-# Import from centralized fallback module - no ImportError handling needed
-from torch.distributed._distributed_c10d import (
+from torch.distributed._distributed_c10d import (  # Process group implementations; Availability flags
     _DistributedBackendOptions,
+    _GLOO_AVAILABLE,
+    _MPI_AVAILABLE,
+    _NCCL_AVAILABLE,
+    _ProcessGroupWrapper,
     _register_process_group,
     _resolve_process_group,
+    _UCC_AVAILABLE,
     _unregister_all_process_groups,
     _unregister_process_group,
+    _XCCL_AVAILABLE,
     AllgatherOptions,
     AllreduceCoalescedOptions,
     AllreduceOptions,
@@ -41,6 +45,11 @@ from torch.distributed._distributed_c10d import (
     get_debug_level,
     PrefixStore,
     ProcessGroup,
+    ProcessGroupGloo,
+    ProcessGroupMPI,
+    ProcessGroupNCCL,
+    ProcessGroupUCC,
+    ProcessGroupXCCL,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
@@ -134,17 +143,11 @@ __all__ = [
     "split_group",
 ]
 
-_MPI_AVAILABLE = True
-_NCCL_AVAILABLE = True
-_GLOO_AVAILABLE = True
-_UCC_AVAILABLE = True
-_XCCL_AVAILABLE = True
-
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
 
-# Change __module__ of all imported types from torch._C._distributed_c10d that are public
+# Change __module__ of all imported types from the distributed wrapper that are public
 def _export_c_types() -> None:
     _public_types_to_change_module = [
         AllreduceCoalescedOptions,
@@ -170,45 +173,26 @@ def _export_c_types() -> None:
 
 _export_c_types()
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupMPI
-
+# Add process groups to __all__ and set their module based on availability
+if _MPI_AVAILABLE:
     ProcessGroupMPI.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupMPI"]
-except ImportError:
-    _MPI_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupNCCL
-
+if _NCCL_AVAILABLE:
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupNCCL"]
-except ImportError:
-    _NCCL_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
-
+if _GLOO_AVAILABLE:
     ProcessGroupGloo.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupGloo"]
-except ImportError:
-    _GLOO_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupUCC
-
+if _UCC_AVAILABLE:
     ProcessGroupUCC.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupUCC"]
-except ImportError:
-    _UCC_AVAILABLE = False
 
-try:
-    from torch._C._distributed_c10d import ProcessGroupXCCL
-
+if _XCCL_AVAILABLE:
     ProcessGroupXCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupXCCL"]
-except ImportError:
-    _XCCL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -1328,9 +1312,8 @@ def _get_default_store() -> Store:
 def _update_default_pg(pg) -> None:
     _world.default_pg = pg
     rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
-    from torch.distributed._distributed_c10d import _set_global_rank
 
-    _set_global_rank(rank)
+    _c10d._set_global_rank(rank)
 
 
 def get_backend_config(group: Optional[ProcessGroup] = None) -> str:

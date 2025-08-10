@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch.library
 
 from ._distributed_c10d import HAS_DISTRIBUTED
@@ -14,17 +16,17 @@ if not HAS_DISTRIBUTED:
         op_signatures = {
             "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
             "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+            "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+            "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
             "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',
+            "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',  # noqa: B950
             "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
             "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
             "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
@@ -34,8 +36,8 @@ if not HAS_DISTRIBUTED:
             lib_def.define(signature)
 
     # Register functional collective operators when not available
-    def _raise_not_implemented(op_name):
-        def _impl(*args, **kwargs):
+    def _raise_not_implemented(op_name: str) -> Callable[..., None]:
+        def _impl(*args, **kwargs) -> None:
             raise RuntimeError(
                 f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
             )
@@ -152,11 +154,15 @@ if not HAS_DISTRIBUTED:
 
     # Provide CPU and CUDA implementations for DTensor operators
     @torch.library.impl(dtensor_lib_def, "shard_dim_alltoall", "CPU")
-    def _shard_dim_alltoall_cpu_impl(input, gather_dim, shard_dim, group_name):
+    def _shard_dim_alltoall_cpu_impl(
+        input: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+    ) -> torch.Tensor:
         raise NotImplementedError("not built with distributed")
 
     @torch.library.impl(dtensor_lib_def, "shard_dim_alltoall", "CUDA")
-    def _shard_dim_alltoall_cuda_impl(input, gather_dim, shard_dim, group_name):
+    def _shard_dim_alltoall_cuda_impl(
+        input: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+    ) -> torch.Tensor:
         raise NotImplementedError("not built with distributed")
 
     # Register autograd operators when not available

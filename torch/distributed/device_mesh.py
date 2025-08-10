@@ -507,8 +507,8 @@ if True:  # just to temporarily avoid reindentation
                     )
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
-                    if HAS_DISTRIBUTED:
-                        num_devices_per_host = device_handle.device_count()
+                    num_devices_per_host = device_handle.device_count()
+                    if HAS_DISTRIBUTED and num_devices_per_host:
                         if (
                             world_size > num_devices_per_host
                             and world_size % num_devices_per_host != 0
