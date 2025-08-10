@@ -46,6 +46,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dynamic = [
     "entry-points",
@@ -67,9 +68,6 @@ opt-einsum = ["opt-einsum>=3.3"]
 pyyaml = ["pyyaml"]
 
 # Linter tools #################################################################
-
-[tool.black]
-line-length = 88
 
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]

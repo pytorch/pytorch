@@ -264,6 +264,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     return std::string(GLOO_BACKEND_NAME);
   }
 
+  bool supportsSplitting() const override {
+    return true;
+  }
+
   // Helper functions to create a new device object.
   // They are static functions on this class to keep them logically
   // separate from the rest of the code base (e.g. torch/csrc/distributed).
@@ -309,6 +313,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
   }
 
   c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<Backend::Options>& opts) override;
 
