@@ -27,7 +27,7 @@ using namespace ::c10::onnx;
 // 2. For ops with no output scale in op signature (like quantized::relu)
 // we traverse up the graph to get the scale from its input until we hit a node
 // where scale is explicitly specified.
-double getScaleFromInput(Node* input_node) {
+static double getScaleFromInput(Node* input_node) {
   std::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
   std::unordered_set<std::string> noscale_ops = {
@@ -315,7 +315,7 @@ static void unpackQuantizedWeightsHelper(
         auto config_vals = elements[1].to<std::vector<int64_t>>();
         auto tensors = elements[2].to<std::vector<std::optional<at::Tensor>>>();
 
-        std::optional<at::Tensor> weight = tensors[1];
+        const std::optional<at::Tensor>& weight = tensors[1];
         TORCH_INTERNAL_ASSERT(
             weight, "Weight should always be present in serialized qconv.");
         unpacked_weight = *weight;
@@ -373,7 +373,7 @@ static void unpackQuantizedWeightsHelper(
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
 
-        at::Tensor conv_params_packed = non_optional[0];
+        const at::Tensor& conv_params_packed = non_optional[0];
         unpacked_weight = non_optional[1];
 
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();

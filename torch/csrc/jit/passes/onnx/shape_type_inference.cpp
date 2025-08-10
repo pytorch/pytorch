@@ -191,7 +191,7 @@ void UpdateTorchValueByOnnxValueInfo(
   }
 }
 
-bool IsValidONNXControlflowNode(const Node* n) {
+static bool IsValidONNXControlflowNode(const Node* n) {
   // Skip when block size is zero. This is when the node is being created,
   // and doesn't have subblocks attached yet. Run shape inference for these
   // nodes later, when the subgraph has already completed shape inferencing.
@@ -205,7 +205,7 @@ bool IsValidONNXControlflowNode(const Node* n) {
   return true;
 }
 
-bool IsValidONNXNode(const Node* n) {
+static bool IsValidONNXNode(const Node* n) {
   auto node_kind = n->kind();
 
   if (!node_kind.is_onnx()) {
@@ -282,7 +282,7 @@ Value* CloneValueFromListConstruct(
   auto input = n_graph->addInput();
   if (scalar_type) {
     auto v_type = TensorType::create(
-        scalar_type.value(),
+        scalar_type,
         at::kCPU,
         c10::SymbolicShape(),
         c10::VaryingShape<c10::Stride>{},
@@ -1244,7 +1244,7 @@ void ProcessUnsqueezeNode(Node* n) {
 void ComputeConstant(Node* n, int opset_version) {
   if (n->kind() == ::c10::onnx::Constant) {
     if (n->kindOf(attr::value) == AttributeKind::t) {
-      at::Tensor const_val = n->t(attr::value);
+      const at::Tensor& const_val = n->t(attr::value);
       at::Tensor const_val_copy =
           at::empty(const_val.sizes(), const_val.options());
       const_val_copy.copy_(const_val);
@@ -1381,7 +1381,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             // When value of `shape` is statically known,
             // output shape can be computed.
@@ -1474,7 +1474,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           int64_t total_size = 1;
           auto is_full_static = true;
           for (const auto i : c10::irange(input0_shape_value.size())) {
@@ -1510,7 +1510,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
@@ -1659,10 +1659,10 @@ void SpecialPostProcess(Node* n) {
       };
 
       auto find_sequence_empty = [](Value* input,
-                                    TensorTypePtr t_type) -> Node* {
+                                    const TensorTypePtr& t_type) -> Node* {
         auto find_sequence_empty_impl =
             [](Value* input,
-               TensorTypePtr t_type,
+               const TensorTypePtr& t_type,
                auto& find_sequence_empty_ref) -> Node* {
           auto input_node = input->node();
           TORCH_INTERNAL_ASSERT(input_node);
@@ -1708,7 +1708,7 @@ void SpecialPostProcess(Node* n) {
           return nullptr;
         };
         return find_sequence_empty_impl(
-            input, std::move(t_type), find_sequence_empty_impl);
+            input, t_type, find_sequence_empty_impl);
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
@@ -1837,7 +1837,7 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-void RemoveProcessedInputs(const Node* n) {
+static void RemoveProcessedInputs(const Node* n) {
   // After processing a node for shape inference, remove intermediate tensors
   // that are stored in ConstantValueMap to reduce memory usage.
   // This will only remove tensors that are no longer needed by any other node.
@@ -2213,7 +2213,7 @@ void ONNXSetDynamicInputShape(
   GRAPH_UPDATE("dynamic axes tensor names:", [&]() {
     std::vector<std::string> res(dynamic_axes.size());
     std::transform(
-        dynamic_axes.begin(), dynamic_axes.end(), res.begin(), [](auto pair) {
+        dynamic_axes.begin(), dynamic_axes.end(), res.begin(), [](const auto& pair) {
           return pair.first;
         });
     return res;
