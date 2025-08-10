@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_userlist.py b/test/dynamo/cpython/3_13/test_userlist.py
-index 312702c8e39..a4532922f5d 100644
+index 312702c8e39..5ede0c3b7f1 100644
 --- a/test/dynamo/cpython/3_13/test_userlist.py
 +++ b/test/dynamo/cpython/3_13/test_userlist.py
-@@ -1,7 +1,58 @@
+@@ -1,7 +1,61 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_userlist.py
 +
 +import sys
 +import torch
@@ -62,7 +65,7 @@ index 312702c8e39..a4532922f5d 100644
  import unittest
  from test import support
  
-@@ -69,9 +120,9 @@ class UserListTest(list_tests.CommonTest):
+@@ -69,9 +123,9 @@ class UserListTest(list_tests.CommonTest):
  
      # Decorate existing test with recursion limit, because
      # the test is for C structure, but `UserList` is a Python structure.

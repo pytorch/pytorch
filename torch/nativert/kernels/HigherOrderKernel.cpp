@@ -11,28 +11,28 @@ HigherOrderKernel::HigherOrderKernel(
     std::vector<std::unique_ptr<GraphExecutorBase>> graphExecutors)
     : OpKernel(node), graphExecutors_(std::move(graphExecutors)) {
   static constexpr std::string_view prefix = "torch.ops.higher_order.";
-  CHECK(c10::starts_with(node->target(), prefix));
+  TORCH_CHECK(c10::starts_with(node->target(), prefix));
   auto opName = node->target().substr(prefix.size());
   if (opName == "cond") {
     opType_ = OpType::COND;
     // Checking torch.cond schema is as expected:
     // torch.cond(Tensor predicate, Graph graph1, Graph graph2, Tensor[] args)
     // -> Tensor[]
-    TORCH_CHECK_EQ(node_->attributes().size(), 2);
-    TORCH_CHECK_EQ(node_->inputs().size(), 2);
+    TORCH_CHECK(node_->attributes().size() == 2);
+    TORCH_CHECK(node_->inputs().size() == 2);
   } else if (opName == "while_loop") {
     opType_ = OpType::WHILE_LOOP;
     // Checking torch.while_loop schema is as expected:
     // torch.while_loop(Graph cond, Graph body, Tensor[] args, Tensor[]
-    // additonal) -> Tensor[]
-    TORCH_CHECK_EQ(node_->attributes().size(), 2);
-    TORCH_CHECK_EQ(node_->inputs().size(), 2);
+    // additional) -> Tensor[]
+    TORCH_CHECK(node_->attributes().size() == 2);
+    TORCH_CHECK(node_->inputs().size() == 2);
   } else if (opName == "run_const_graph") {
     opType_ = OpType::RUN_CONST_GRAPH;
     // Checking torch.run_const_graph schema is as expected:
     // torch.run_const_graph(Graph graph, Tensor[] args) -> Tensor[]
-    TORCH_CHECK_GE(node_->attributes().size(), 1);
-    TORCH_CHECK_EQ(node_->inputs().size(), 1);
+    TORCH_CHECK(!node_->attributes().empty());
+    TORCH_CHECK(node_->inputs().size() == 1);
   } else {
     throw std::runtime_error(
         fmt::format("Unknown higher order op: {}", opName));

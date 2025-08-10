@@ -29,7 +29,7 @@ TORCH_API std::string dumpValueSet(
     const c10::FastSet<const Value*>& value_set,
     const char* set_name = "");
 
-TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
+inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   switch (type.kind()) {
     // NOTE: NumberType may allocate because it includes complex.
     case TypeKind::NoneType:
@@ -44,11 +44,11 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   }
 }
 
-TORCH_API inline c10::Symbol getStaticRuntimeMetadataSymbol() {
+inline c10::Symbol getStaticRuntimeMetadataSymbol() {
   return Symbol::attr("static_runtime::metadata");
 }
 
-TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
+inline bool borrowsOutputs(c10::Symbol kind) {
   static const std::array<c10::Symbol, 4> symbols_with_borrowed_outputs = {
       c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
