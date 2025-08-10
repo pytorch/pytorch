@@ -15,12 +15,12 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
 fi
 # These additional packages are needed for circleci ROCm builds.
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
-    # defaults installs the most recent networkx version, so we install this lower
-    # version explicitly before scikit-image pulls it in as a dependency
-    pip install networkx==2.0
-    # click - onnx
-    pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
+  # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+  # defaults installs the most recent networkx version, so we install this lower
+  # version explicitly before scikit-image pulls it in as a dependency
+  pip install networkx==2.0
+  # click - onnx
+  pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
 fi
 
 # Find where cpp tests and Caffe2 itself are installed
@@ -47,10 +47,10 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   for test in $(find "$cpp_test_dir" -executable -type f); do
     case "$test" in
       # skip tests we know are hanging or bad
-      */mkl_utils_test|*/aten/integer_divider_test)
+      */mkl_utils_test | */aten/integer_divider_test)
         continue
         ;;
-      */scalar_tensor_test|*/basic|*/native_test)
+      */scalar_tensor_test | */basic | */native_test)
         if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
           continue
         else
@@ -72,7 +72,7 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
         # Note: in the future, if we want to use xml test reporter once we switch
         # to all gtest, one can simply do:
         LD_LIBRARY_PATH="$ld_library_path" \
-            "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
         ;;
     esac
   done
@@ -136,7 +136,7 @@ for loc in "en_US.utf8" "C.UTF-8"; do
   if locale -a | grep "$loc" >/dev/null 2>&1; then
     export LC_ALL="$loc"
     export LANG="$loc"
-    break;
+    break
   fi
 done
 

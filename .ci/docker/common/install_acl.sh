@@ -11,6 +11,6 @@ cd ${src_repo}
 git checkout $version
 
 # Build with scons
-scons -j8  Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
+scons -j8 Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
   os=linux arch=armv8a build=native multi_isa=1 \
   fixed_format_kernels=1 openmp=1 cppthreads=0
