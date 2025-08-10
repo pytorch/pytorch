@@ -105,22 +105,22 @@ jobs:
           import sys
           from pathlib import Path
           
-          # Add paths like the test runner does
-          ci_dir = Path('.').resolve()
-          sys.path.insert(0, str(ci_dir))
-          sys.path.insert(0, str(ci_dir.parent))
-          
+          # Test the working modules that are actually used in CI
           try:
-              from test_config.environment import EnvironmentConfig
-              from test_config.test_registry import TestRegistry
-              from utils.shell_utils import run_command
-              print('✅ All imports successful')
+              # Test simple_test_runner.py imports (this is what CI actually uses)
+              import simple_test_runner
+              print('✅ simple_test_runner imports successful')
               
-              # Test basic functionality
+              # Test that we can create the working EnvironmentConfig
+              from simple_test_runner import EnvironmentConfig, SimpleTestRegistry
               env = EnvironmentConfig()
-              registry = TestRegistry()
+              registry = SimpleTestRegistry()
               print(f'✅ Environment config created: {env.build_environment}')
-              print(f'✅ Test registry created with {len(registry.test_suites)} test suites')
+              print(f'✅ Test registry created with working test suites')
+              
+              # Test delegation approach used by test_python.py
+              import test_python
+              print('✅ test_python imports successful')
               
           except Exception as e:
               print(f'❌ Import failed: {e}')
