@@ -54,7 +54,7 @@ class CupyAsTensorTest(MultiProcContinousTest):
 
     def _init_device(self) -> None:
         # need to use vmm api to test it,
-        # see https://forums.developer.nvidia.com/t/inconsistent-behavior-of-cudapointergetattributes-between-cudamalloc-ipc-and-vmm-based-ipc/339025/5 # noqa: E501
+        # see https://forums.developer.nvidia.com/t/inconsistent-behavior-of-cudapointergetattributes-between-cudamalloc-ipc-and-vmm-based-ipc/339025/5 # noqa: B950
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         # init and pin the process to the device
         device_module.set_device(self.device)
