@@ -17,51 +17,6 @@
 
 namespace torch::nativert {
 
-namespace {
-
-c10::Device inferTargetDevice(
-    const Node& node,
-    const std::unordered_map<std::string, torch::nativert::TensorMeta>&
-        tensorValuesMeta,
-    const Placement& placement) {
-  if (node.target() == "prim.Input" || node.target() == "prim.Output") {
-    return c10::Device(c10::DeviceType::CPU);
-  }
-
-  std::vector<c10::Device> devices;
-  for (auto& output : node.outputs()) {
-    if (output->type() == Type::Kind::Tensor) {
-      auto it = tensorValuesMeta.find(std::string{output->name()});
-      if (it != tensorValuesMeta.end()) {
-        devices.emplace_back(it->second.device());
-      }
-    } else if (output->type() == Type::Kind::TensorList) {
-      for (const auto& el : output->getListElements()) {
-        auto it = tensorValuesMeta.find(std::string{el->name()});
-        if (it != tensorValuesMeta.end()) {
-          devices.emplace_back(it->second.device());
-        }
-      }
-    }
-  }
-
-  if (devices.empty()) {
-    return c10::Device(c10::DeviceType::CPU);
-  } else {
-    for (size_t i = 1; i < devices.size(); ++i) {
-      if (!torch::nativert::isSameDevice(devices[0], devices[i])) {
-        LOG(WARNING) << "Node " << node
-                     << " has outputs on multiple devices: " << devices[0]
-                     << " and " << devices[i];
-      }
-    }
-
-    return placement.getMappedDevice(devices[0]);
-  }
-}
-
-} // namespace
-
 inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "_operator.floordiv",
     "_operator.mod",
@@ -126,7 +81,6 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
     const std::shared_ptr<Weights>& weights,
     const torch::nativert::ExecutorConfig& executorConfig,
-    const Placement& placement,
     const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
         pytorchStreamReader) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
@@ -145,18 +99,11 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
   for (const auto& node : graph.nodes()) {
     std::string target = std::string(node.target());
 
-    c10::Device targetDevice =
-        inferTargetDevice(node, graph.tensorValuesMeta(), placement);
-
     bool matched = false;
     for (const auto& [_, handler] : handlers) {
-      if (handler.match(node, executorConfig, targetDevice)) {
-        auto [kernel, delegate] = handler(
-            node,
-            weights,
-            executorConfig,
-            pytorchStreamReader.get(),
-            targetDevice);
+      if (handler.match(node, executorConfig)) {
+        auto [kernel, delegate] =
+            handler(node, weights, executorConfig, pytorchStreamReader.get());
         if (kernel) {
           nodeKernels.push_back(std::move(kernel));
         }
@@ -212,8 +159,8 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       for (const auto& attr : node.attributes()) {
         if (std::holds_alternative<std::unique_ptr<Graph>>(attr.value)) {
           const auto& subgraph = std::get<std::unique_ptr<Graph>>(attr.value);
-          auto executionKernels = initializeNodeKernels(
-              *subgraph, weights, executorConfig, placement);
+          auto executionKernels =
+              initializeNodeKernels(*subgraph, weights, executorConfig);
           TORCH_CHECK(
               executionKernels.delegateExecutors.empty(),
               "HigherOrderKernel does not support delegates");
@@ -242,7 +189,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
     } else if (c10::starts_with(node.target(), "torch.ops")) {
-      nodeKernels.push_back(std::make_unique<C10Kernel>(&node, targetDevice));
+      nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());
       if (opsWithoutStaticDispatchCount.find(opName) ==
@@ -255,7 +202,8 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     }
   }
 
-  if (executorConfig.enableStaticCPUKernels) {
+  if (executorConfig.enableStaticCPUKernels &&
+      !opsWithoutStaticDispatchCount.empty()) {
     std::stringstream ss;
     for (const auto& [op, count] : opsWithoutStaticDispatchCount) {
       ss << op << ": " << count << ", \n";
