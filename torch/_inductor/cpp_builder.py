@@ -1305,7 +1305,7 @@ def _get_openmp_args(
             perload_icx_libomp_win(cpp_compiler)
         else:
             cflags.append("openmp")
-            # cflags.append("openmp:experimental")  # MSVC Openmp, it has some issue for inductor.
+            cflags.append("openmp:experimental")
             libs.append("libiomp5md")  # intel-openmp
             ldflags.append("nodefaultlib:vcomp")
     else:
