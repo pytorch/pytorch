@@ -9,13 +9,17 @@ from torch.distributed.collective_utils import (
     all_gather,
     broadcast,
     check_rng_sync,
+    summarize_ranks,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -166,6 +170,45 @@ class TestCollectiveUtils(MultiProcessTestCase):
         # [rank0]:E0808 ] 1        (123, 4)
         # [rank0]:E0808 ] 2-3      (123, 0)
         check_rng_sync(generator, group)
+
+
+class TestUtils(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        if not c10d.is_initialized():
+            self.rank = 0
+            self.world_size = 4096
+
+            store = FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
+
+    def tearDown(self):
+        c10d.destroy_process_group()
+
+    def test_summarize_ranks(self):
+        mesh_dim_names = ("pp", "dp", "tp")
+        mesh = init_device_mesh("cpu", (8, 64, 8), mesh_dim_names=mesh_dim_names)
+        ranks_lists = {name: mesh[name].mesh.tolist() for name in mesh_dim_names}
+        summaries = {
+            name: summarize_ranks(ranks_lists[name]) for name in mesh_dim_names
+        }
+        self.assertEqual(summaries["pp"], "0, 512, 1024, 1536, 2048, 2560, 3072, 3584")
+        # TODO: what would be the best format for abbreviating striding?
+        # self.assertEqual(summaries["pp"], "0, 512, ..., 3584")
+        # self.assertEqual(summaries["pp"], "0, (stride 512), 3584")
+        self.assertEqual(
+            summaries["dp"],
+            "0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, "
+            "184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 264, 272, 280, 288, 296, 304, 312, 320, 328, 336, "
+            "344, 352, 360, 368, 376, 384, 392, 400, 408, 416, 424, 432, 440, 448, 456, 464, 472, 480, 488, 496, 504",
+        )
+        self.assertEqual(summaries["tp"], "0-7")
 
 
 instantiate_parametrized_tests(TestCollectiveUtils)
