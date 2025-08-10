@@ -81,6 +81,42 @@ class PythonTestSuite(SimpleTestSuite):
     
     def get_test_names(self) -> List[str]:
         return ["test_python", "test_aten", "test_vec256"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run Python tests using native Python implementation."""
+        try:
+            from .utils.core_test_runners import PythonTestRunner, AtenTestRunner, Vec256TestRunner
+        except ImportError:
+            from utils.core_test_runners import PythonTestRunner, AtenTestRunner, Vec256TestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations
+        for test_func in self.get_test_names():
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "test_python":
+                test_runner = PythonTestRunner(logger=self.logger)
+                result = test_runner.run_python_tests()
+            elif test_func == "test_aten":
+                test_runner = AtenTestRunner(logger=self.logger)
+                result = test_runner.run_aten_tests()
+            elif test_func == "test_vec256":
+                test_runner = Vec256TestRunner(logger=self.logger)
+                result = test_runner.run_vec256_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
 
 
 class SmokeTestSuite(SimpleTestSuite):
@@ -96,8 +132,11 @@ class SmokeTestSuite(SimpleTestSuite):
         return ["test_smoke"]
     
     def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
-        """Run the smoke test suite by calling shell functions."""
-        from .utils.shell_utils import source_and_run, get_ci_dir
+        """Run the smoke test suite using native Python implementation."""
+        try:
+            from .utils.test_execution import SmokeTestRunner
+        except ImportError:
+            from utils.test_execution import SmokeTestRunner
         
         if dry_run:
             self.logger.info(f"DRY RUN - Would execute the following tests:")
@@ -105,24 +144,24 @@ class SmokeTestSuite(SimpleTestSuite):
                 self.logger.info(f"  - {test_name}")
             return True
         
-        success = True
-        ci_dir = get_ci_dir()
+        # Use native Python implementation instead of shell function
+        test_runner = SmokeTestRunner(logger=self.logger)
         
         for test_func in self.get_test_names():
             self.logger.info(f"Running {test_func}")
             
-            # Call the original shell function
-            result = source_and_run(
-                str(ci_dir / "test.sh"),
-                test_func,
-                cwd=str(ci_dir.parent.parent)
-            )
+            if test_func == "test_smoke":
+                # Map to Python smoke test implementation
+                result = test_runner.run_python_smoke_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
             
             if not result:
                 self.logger.error(f"Test function {test_func} failed")
-                success = False
+                return False
         
-        return success
+        return True
 
 
 class InductorTestSuite(SimpleTestSuite):
@@ -135,12 +174,71 @@ class InductorTestSuite(SimpleTestSuite):
         return "inductor" in env_config.test_config
     
     def get_test_names(self, env_config: EnvironmentConfig = None) -> List[str]:
-        base_tests = ["test_inductor"]
+        base_tests = []
         if env_config and "distributed" in env_config.test_config:
             base_tests.append("test_inductor_distributed")
+        if env_config and "shard" in env_config.test_config:
+            base_tests.append("test_inductor_shard")
+        if env_config and "aoti" in env_config.test_config:
+            base_tests.append("test_inductor_aoti")
         if env_config and "cpp_wrapper" in env_config.test_config:
-            base_tests.append("test_inductor_cpp_wrapper")
+            base_tests.append("test_inductor_cpp_wrapper_shard")
+        if env_config and "halide" in env_config.test_config:
+            base_tests.append("test_inductor_halide")
+        if env_config and "triton" in env_config.test_config:
+            base_tests.append("test_inductor_triton_cpu")
         return base_tests
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run Inductor tests using native Python implementation."""
+        try:
+            from .utils.inductor_test_runners import (
+                InductorDistributedTestRunner, InductorShardTestRunner, InductorAOTITestRunner,
+                InductorCppWrapperTestRunner, InductorHalideTestRunner, InductorTritonTestRunner
+            )
+        except ImportError:
+            from utils.inductor_test_runners import (
+                InductorDistributedTestRunner, InductorShardTestRunner, InductorAOTITestRunner,
+                InductorCppWrapperTestRunner, InductorHalideTestRunner, InductorTritonTestRunner
+            )
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names(env_config):
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations instead of shell functions
+        for test_func in self.get_test_names(env_config):
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "test_inductor_distributed":
+                test_runner = InductorDistributedTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_distributed_tests()
+            elif test_func == "test_inductor_shard":
+                test_runner = InductorShardTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_shard_tests()
+            elif test_func == "test_inductor_aoti":
+                test_runner = InductorAOTITestRunner(logger=self.logger)
+                result = test_runner.run_inductor_aoti_tests()
+            elif test_func == "test_inductor_cpp_wrapper_shard":
+                test_runner = InductorCppWrapperTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_cpp_wrapper_tests()
+            elif test_func == "test_inductor_halide":
+                test_runner = InductorHalideTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_halide_tests()
+            elif test_func == "test_inductor_triton_cpu":
+                test_runner = InductorTritonTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_triton_cpu_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
 
 
 class DocsTestSuite(SimpleTestSuite):
@@ -153,7 +251,24 @@ class DocsTestSuite(SimpleTestSuite):
         return env_config.test_config == "docs_test"
     
     def get_test_names(self) -> List[str]:
-        return ["test_docs", "test_tutorials"]
+        return ["test_docs_test"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run documentation tests using native Python implementation."""
+        try:
+            from .utils.core_test_runners import DocsTestRunner
+        except ImportError:
+            from utils.core_test_runners import DocsTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementation
+        test_runner = DocsTestRunner(logger=self.logger)
+        return test_runner.run_docs_tests()
 
 
 class DistributedTestSuite(SimpleTestSuite):
@@ -166,7 +281,46 @@ class DistributedTestSuite(SimpleTestSuite):
         return env_config.test_config == "distributed"
     
     def get_test_names(self) -> List[str]:
-        return ["test_distributed", "test_c10d_nccl", "test_c10d_gloo"]
+        return ["test_distributed", "test_rpc", "test_custom_backend", "test_custom_script_ops"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run distributed tests using native Python implementation."""
+        try:
+            from .utils.distributed_test_runners import DistributedTestRunner, RPCTestRunner, CustomBackendTestRunner, CustomScriptOpsTestRunner
+        except ImportError:
+            from utils.distributed_test_runners import DistributedTestRunner, RPCTestRunner, CustomBackendTestRunner, CustomScriptOpsTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations instead of shell functions
+        for test_func in self.get_test_names():
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "test_distributed":
+                test_runner = DistributedTestRunner(logger=self.logger)
+                result = test_runner.run_distributed_tests()
+            elif test_func == "test_rpc":
+                test_runner = RPCTestRunner(logger=self.logger)
+                result = test_runner.run_rpc_tests()
+            elif test_func == "test_custom_backend":
+                test_runner = CustomBackendTestRunner(logger=self.logger)
+                result = test_runner.run_custom_backend_tests()
+            elif test_func == "test_custom_script_ops":
+                test_runner = CustomScriptOpsTestRunner(logger=self.logger)
+                result = test_runner.run_custom_script_ops_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
 
 
 class JitTestSuite(SimpleTestSuite):
@@ -179,7 +333,45 @@ class JitTestSuite(SimpleTestSuite):
         return env_config.test_config == "jit_legacy"
     
     def get_test_names(self) -> List[str]:
-        return ["test_jit", "test_jit_legacy"]
+        return ["test_python_legacy_jit", "test_libtorch_jit", "test_jit_hooks"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run JIT tests using native Python implementation."""
+        try:
+            from .utils.core_test_runners import PythonTestRunner
+            from .utils.libtorch_test_runners import LibTorchTestRunner, JitHooksTestRunner
+        except ImportError:
+            from utils.core_test_runners import PythonTestRunner
+            from utils.libtorch_test_runners import LibTorchTestRunner, JitHooksTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations instead of shell functions
+        for test_func in self.get_test_names():
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "test_python_legacy_jit":
+                test_runner = PythonTestRunner(logger=self.logger)
+                result = test_runner.run_python_legacy_jit_tests()
+            elif test_func == "test_libtorch_jit":
+                test_runner = LibTorchTestRunner(logger=self.logger)
+                result = test_runner.run_libtorch_jit_tests()
+            elif test_func == "test_jit_hooks":
+                test_runner = JitHooksTestRunner(logger=self.logger)
+                result = test_runner.run_jit_hooks_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
 
 
 class BenchmarkTestSuite(SimpleTestSuite):
@@ -195,12 +387,164 @@ class BenchmarkTestSuite(SimpleTestSuite):
     def get_test_names(self, env_config: EnvironmentConfig = None) -> List[str]:
         tests = ["test_benchmarks"]
         if env_config and "torchbench" in env_config.test_config:
-            tests.append("test_torchbench")
-        if env_config and "huggingface" in env_config.test_config:
-            tests.append("test_huggingface")
-        if env_config and "timm" in env_config.test_config:
-            tests.append("test_timm")
+            tests.extend(["test_torchbench_gcp_smoketest", "test_inductor_torchbench_smoketest_perf"])
+        if env_config and "dynamo" in env_config.test_config:
+            tests.extend(["test_dynamo_benchmark", "test_single_dynamo_benchmark"])
+        if env_config and "inductor" in env_config.test_config:
+            tests.append("test_inductor_micro_benchmark")
+        if env_config and "operator" in env_config.test_config:
+            tests.append("test_operator_benchmark")
+        tests.append("test_torch_function_benchmark")
         return tests
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run benchmark tests using native Python implementation."""
+        try:
+            from .utils.benchmark_test_runners import (
+                BenchmarkTestRunner, InductorBenchmarkTestRunner, DynamoBenchmarkTestRunner,
+                CacheBenchTestRunner, PerfDashboardTestRunner, TorchFunctionBenchmarkTestRunner
+            )
+            from .utils.specialized_test_runners import OperatorBenchmarkTestRunner
+        except ImportError:
+            from utils.benchmark_test_runners import (
+                BenchmarkTestRunner, InductorBenchmarkTestRunner, DynamoBenchmarkTestRunner,
+                CacheBenchTestRunner, PerfDashboardTestRunner, TorchFunctionBenchmarkTestRunner
+            )
+            from utils.specialized_test_runners import OperatorBenchmarkTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names(env_config):
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations instead of shell functions
+        for test_func in self.get_test_names(env_config):
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "test_benchmarks":
+                test_runner = BenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_benchmark_tests()
+            elif test_func in ["test_torchbench_gcp_smoketest", "test_inductor_torchbench_smoketest_perf"]:
+                test_runner = InductorBenchmarkTestRunner(logger=self.logger)
+                if test_func == "test_torchbench_gcp_smoketest":
+                    result = test_runner.run_inductor_torchbench_smoketest_perf_tests()
+                else:
+                    result = test_runner.run_inductor_torchbench_smoketest_perf_tests()
+            elif test_func in ["test_dynamo_benchmark", "test_single_dynamo_benchmark"]:
+                test_runner = DynamoBenchmarkTestRunner(logger=self.logger)
+                if test_func == "test_dynamo_benchmark":
+                    result = test_runner.run_dynamo_benchmark_tests()
+                else:
+                    result = test_runner.run_single_dynamo_benchmark_tests()
+            elif test_func == "test_inductor_micro_benchmark":
+                test_runner = InductorBenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_inductor_micro_benchmark_tests()
+            elif test_func == "test_operator_benchmark":
+                test_runner = OperatorBenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_operator_benchmark_tests()
+            elif test_func == "test_torch_function_benchmark":
+                test_runner = TorchFunctionBenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_torch_function_benchmark_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
+
+
+class H100SymmMemTestSuite(SimpleTestSuite):
+    """H100 symmetric memory test suite."""
+    
+    def __init__(self):
+        super().__init__("h100_symm_mem", "H100 symmetric memory tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return "h100-symm-mem" in env_config.test_config
+    
+    def get_test_names(self) -> List[str]:
+        return ["test_h100_symm_mem"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run H100 symmetric memory tests using native Python implementation."""
+        try:
+            from .utils.test_execution import DistributedTestRunner
+        except ImportError:
+            from utils.test_execution import DistributedTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementation
+        test_runner = DistributedTestRunner(logger=self.logger)
+        return test_runner.run_h100_symm_mem_tests()
+
+
+class H100DistributedTestSuite(SimpleTestSuite):
+    """H100 distributed test suite."""
+    
+    def __init__(self):
+        super().__init__("h100_distributed", "H100 distributed tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return "h100_distributed" in env_config.test_config
+    
+    def get_test_names(self) -> List[str]:
+        return ["test_h100_distributed"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run H100 distributed tests using native Python implementation."""
+        try:
+            from .utils.test_execution import DistributedTestRunner
+        except ImportError:
+            from utils.test_execution import DistributedTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementation
+        test_runner = DistributedTestRunner(logger=self.logger)
+        return test_runner.run_h100_distributed_tests()
+
+
+class H100CutlassTestSuite(SimpleTestSuite):
+    """H100 CUTLASS backend test suite."""
+    
+    def __init__(self):
+        super().__init__("h100_cutlass_backend", "H100 CUTLASS backend tests")
+    
+    def matches(self, env_config: EnvironmentConfig) -> bool:
+        return "h100_cutlass_backend" in env_config.test_config
+    
+    def get_test_names(self) -> List[str]:
+        return ["test_h100_cutlass_backend"]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run H100 CUTLASS backend tests using native Python implementation."""
+        try:
+            from .utils.test_execution import InductorTestRunner
+        except ImportError:
+            from utils.test_execution import InductorTestRunner
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementation
+        test_runner = InductorTestRunner(logger=self.logger)
+        return test_runner.run_h100_cutlass_backend_tests()
 
 
 class DefaultTestSuite(SimpleTestSuite):
@@ -226,6 +570,76 @@ class DefaultTestSuite(SimpleTestSuite):
             "test_torch_function_benchmark",
             "test_benchmarks"
         ]
+    
+    def run(self, env_config: EnvironmentConfig, dry_run: bool = False) -> bool:
+        """Run default test suite using native Python implementation."""
+        try:
+            from .utils.core_test_runners import PythonTestRunner, AtenTestRunner, Vec256TestRunner
+            from .utils.libtorch_test_runners import LibTorchTestRunner, AOTCompilationTestRunner
+            from .utils.distributed_test_runners import CustomScriptOpsTestRunner, CustomBackendTestRunner
+            from .utils.benchmark_test_runners import TorchFunctionBenchmarkTestRunner, BenchmarkTestRunner
+            from .utils.shell_utils import run_command_with_output
+        except ImportError:
+            from utils.core_test_runners import PythonTestRunner, AtenTestRunner, Vec256TestRunner
+            from utils.libtorch_test_runners import LibTorchTestRunner, AOTCompilationTestRunner
+            from utils.distributed_test_runners import CustomScriptOpsTestRunner, CustomBackendTestRunner
+            from utils.benchmark_test_runners import TorchFunctionBenchmarkTestRunner, BenchmarkTestRunner
+            from utils.shell_utils import run_command_with_output
+        
+        if dry_run:
+            self.logger.info(f"DRY RUN - Would execute the following tests:")
+            for test_name in self.get_test_names():
+                self.logger.info(f"  - {test_name}")
+            return True
+        
+        # Use native Python implementations instead of shell functions
+        for test_func in self.get_test_names():
+            self.logger.info(f"Running {test_func}")
+            
+            if test_func == "install_torchvision":
+                # Installation commands - use shell execution for now
+                result = run_command_with_output(["pip", "install", "torchvision"])
+                result = result.returncode == 0
+            elif test_func == "install_monkeytype":
+                # Installation commands - use shell execution for now
+                result = run_command_with_output(["pip", "install", "monkeytype"])
+                result = result.returncode == 0
+            elif test_func == "test_python":
+                test_runner = PythonTestRunner(logger=self.logger)
+                result = test_runner.run_python_tests()
+            elif test_func == "test_aten":
+                test_runner = AtenTestRunner(logger=self.logger)
+                result = test_runner.run_aten_tests()
+            elif test_func == "test_vec256":
+                test_runner = Vec256TestRunner(logger=self.logger)
+                result = test_runner.run_vec256_tests()
+            elif test_func == "test_libtorch":
+                test_runner = LibTorchTestRunner(logger=self.logger)
+                result = test_runner.run_libtorch_tests()
+            elif test_func == "test_aot_compilation":
+                test_runner = AOTCompilationTestRunner(logger=self.logger)
+                result = test_runner.run_aot_compilation_tests()
+            elif test_func == "test_custom_script_ops":
+                test_runner = CustomScriptOpsTestRunner(logger=self.logger)
+                result = test_runner.run_custom_script_ops_tests()
+            elif test_func == "test_custom_backend":
+                test_runner = CustomBackendTestRunner(logger=self.logger)
+                result = test_runner.run_custom_backend_tests()
+            elif test_func == "test_torch_function_benchmark":
+                test_runner = TorchFunctionBenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_torch_function_benchmark_tests()
+            elif test_func == "test_benchmarks":
+                test_runner = BenchmarkTestRunner(logger=self.logger)
+                result = test_runner.run_benchmark_tests()
+            else:
+                self.logger.error(f"Unknown test function: {test_func}")
+                result = False
+            
+            if not result:
+                self.logger.error(f"Test function {test_func} failed")
+                return False
+        
+        return True
 
 
 class SimpleTestRegistry:
@@ -241,6 +655,9 @@ class SimpleTestRegistry:
             JitTestSuite(),
             BenchmarkTestSuite(),
             InductorTestSuite(),
+            H100SymmMemTestSuite(),
+            H100DistributedTestSuite(),
+            H100CutlassTestSuite(),
             DefaultTestSuite()  # Keep as last (fallback)
         ]
     
