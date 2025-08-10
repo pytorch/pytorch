@@ -16,7 +16,6 @@ python -m dlmc.matmul_bench --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitu
 
 python -m dlmc.matmul_bench --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@vector
 
-
 # cuda
 python -m dlmc.matmul_bench --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse --with-cuda
 python -m dlmc.matmul_bench --path $DATASET_ROOT_DIR/dlmc/rn50 --dataset magnitude_pruning --operation sparse@sparse --with-cuda --backward-test

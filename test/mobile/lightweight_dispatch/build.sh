@@ -37,7 +37,6 @@ if [ "$ret" -ne 0 ]; then
   exit "$ret"
 fi
 
-
 # run test
 if ! build/bin/test_codegen_unboxing; then
   echo "test_codegen_unboxing has failure!"

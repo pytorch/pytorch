@@ -19,7 +19,10 @@
 
 set -ex -o pipefail
 
-SRC_ROOT="$( cd "$(dirname "$0")"/../../.. ; pwd -P)"
+SRC_ROOT="$(
+  cd "$(dirname "$0")"/../../..
+  pwd -P
+)"
 TEST_SRC_ROOT="${SRC_ROOT}/test/mobile/custom_build"
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_test_custom_build}"
 mkdir -p "${BUILD_ROOT}"
@@ -72,7 +75,7 @@ build_predictor() {
 
 run_predictor() {
   cd "${PREDICTOR_BUILD_ROOT}"
-  ./Predictor "${MODEL}" > output.txt
+  ./Predictor "${MODEL}" >output.txt
 
   if cmp -s output.txt "${TEST_SRC_ROOT}/expected_output.txt"; then
     echo "Test result is the same as expected."
