@@ -3016,14 +3016,8 @@ class GuardManager {
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
     if (guard_manager) {
+      guard_manager->unwatch_dict_pointers();
       guard_manager->_disable_dict_tag_matching = true;
-      // When the entry for a given value in _dict_pointers becomes invalid, it
-      // can only be because that value itself has been garbage-collected.  At
-      // that moment every dictionary it referenced has also been reclaimed, and
-      // the dict-watch callback triggered during their finalisation has already
-      // invoked unwatch_dict_pointers.  In short, by the time we reach this
-      // code the dict pointers have been unwatched automatically, so no further
-      // action is needed.
     }
     Py_RETURN_NONE;
   }
@@ -3120,7 +3114,9 @@ class GuardManager {
               dict_to_guard_manager[dict_pointer].begin(),
               dict_to_guard_manager[dict_pointer].end(),
               this);
-          dict_to_guard_manager[dict_pointer].erase(it);
+          if (it != dict_to_guard_manager[dict_pointer].end()) {
+            dict_to_guard_manager[dict_pointer].erase(it);
+          }
         }
       }
     }
@@ -4070,8 +4066,10 @@ static int dict_recursive_tag_watch_callback(
   if (it != dict_to_guard_manager.end()) {
     auto guard_managers = it->second;
     for (auto& guard_manager : guard_managers) {
-      guard_manager->unwatch_dict_pointers();
-      guard_manager->disable_recursive_dict_tag_optimization();
+      if (guard_manager) {
+        guard_manager->unwatch_dict_pointers();
+        guard_manager->disable_recursive_dict_tag_optimization();
+      }
     }
   }
   return 0; // keep watching
