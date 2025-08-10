@@ -33,7 +33,12 @@ namespace at::native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
+#ifdef USE_ROCM
+// C10_WARP_SIZE is not constexpr for host code.
+#define kWarpSize C10_WARP_SIZE
+#else
 constexpr unsigned int kWarpSize = C10_WARP_SIZE;
+#endif
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -1836,7 +1841,13 @@ std::tuple<Tensor, Tensor> _fused_rms_norm_cuda(
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
 
-  double eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
+  auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  double eps_val;
+  if (acc_type == at::ScalarType::Float) {
+    eps_val = eps.value_or(std::numeric_limits<float>::epsilon());
+  } else {
+    eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
+  }
 
   Tensor Y = at::native::empty_like(
       *X,
@@ -1845,7 +1856,6 @@ std::tuple<Tensor, Tensor> _fused_rms_norm_cuda(
       std::nullopt /* device */,
       std::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
 
   if (M > 0) {
