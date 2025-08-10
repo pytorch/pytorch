@@ -6349,7 +6349,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             efoo = torch.export.export(
                 foo,
                 inputs,
-                dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
+                dynamic_shapes={
+                    "kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}, None, None]
+                },
             )
             self.assertEqual(
                 [out.shape for out in efoo.module()(*inputs)],
@@ -8913,7 +8915,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             self.assertExpectedInline(
                 str(ep_decompose_linear.graph_module.code).strip(),
                 """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
