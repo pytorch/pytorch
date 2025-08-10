@@ -72,7 +72,7 @@ def _check_ir_node_fsdp(ir_node: "ir.Operation") -> bool:
 
     for n in ir_node_origins:
         meta_data = n.meta.get("stack_trace", {})
-        # TODO(ruisizhang123): hack to get FSDP node (the FSDP AG/RS are created from torch_spmd)
+        # TODO(ruisizhang123): hack to get FSDP node (the SimpleFSDP AG/RS are created with parametrization)
         if "parametrization" in meta_data:
             is_fsdp = True
     return is_fsdp

@@ -18,6 +18,7 @@ from .bucket_utils import (
     bucket_reduce_scatters,
     get_fx_node,
 )
+from .reorder import _check_ir_node_fsdp
 
 
 def get_dynamic_memory_threshold(
@@ -349,9 +350,10 @@ def get_bucketing_plan(
     if has_reduce_scatter:
         peak_memory = peak_memory + config.simplefsdp.peak_memory_offset
     for idx, snode in enumerate(snodes):
+        # we only bucket on FSDP comm
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node):
             current_ag_bucket.append(snode)
             estimated_comm, comm_size_inp, comm_size_out = estimate_bucketed_node(
                 current_ag_bucket,
@@ -473,7 +475,7 @@ def get_bucketing_plan(
                 ) = 0, 0
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node):
             current_rs_bucket.append(snode)
             heuristic_info["this_step_rs_comm"], _, rs_comm_size_out = (
                 estimate_bucketed_node(
@@ -499,14 +501,27 @@ def get_bucketing_plan(
                 reduce_scatter_plan.append(current_rs_bucket)
                 current_rs_bucket = []
         else:
-            comp = estimate_comp_time(
-                sched, snode, verbose=False, comp_cache=comp_cache
-            )
+            # [TODO]ruisizhang: for now, we only consider TP and CP, whose comm are AG & RS
+            # For TP and CP, we consider the node as a "COMP" node with exposed communication as Comp time
+            # the memory is the data fetched by the communication.
+            if is_collective(snode.node):
+                comp = comm_cache.get_comm_time(
+                    bucked_node[0].layout.size,
+                    bucked_node[1].layout.size,
+                    comm_func,
+                    calibrated=True,
+                )
+                memory = bucked_node[0].layout.size
+            else:
+                comp = estimate_comp_time(
+                    sched, snode, verbose=False, comp_cache=comp_cache
+                )
+                memory = max(
+                    abs(memories_at_nodes[idx + 1] - memories_at_nodes[release_steps[-1]]),
+                    heuristic_info["next_step_memory"],
+                )
             heuristic_info["next_step_comp"] += comp
-            heuristic_info["next_step_memory"] = max(
-                abs(memories_at_nodes[idx + 1] - memories_at_nodes[release_steps[-1]]),
-                heuristic_info["next_step_memory"],
-            )
+            heuristic_info["next_step_memory"] = memory
             total_comp_time -= comp
 
     if len(current_ag_bucket) > 0 or len(all_gather_plan) == 0:
