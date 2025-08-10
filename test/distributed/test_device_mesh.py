@@ -590,7 +590,7 @@ class InitDeviceMeshTest(DTensorTestBase):
 
         mesh = init_device_mesh(
             self.device_type,
-            (2, 2, 2),
+            (2, 2, self.world_size // 4),
             mesh_dim_names=("dp", "tp", "cp"),
             backend_override={0: "fake", 2: ("fake", opts)},
         )
@@ -636,7 +636,7 @@ class InitDeviceMeshTest(DTensorTestBase):
 
         mesh = init_device_mesh(
             self.device_type,
-            (2, 2, 2),
+            (2, 2, self.world_size // 4),
             mesh_dim_names=("dp", "tp", "cp"),
             backend_override={"tp": opts},
         )
