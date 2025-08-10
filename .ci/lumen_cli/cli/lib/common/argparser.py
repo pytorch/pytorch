@@ -19,7 +19,7 @@ class BaseRunner(ABC):
         self.args = args
 
     @abstractmethod
-    def run(self, args: Any) -> None:
+    def run(self) -> None:
         """runs main logics, required"""
 
 
