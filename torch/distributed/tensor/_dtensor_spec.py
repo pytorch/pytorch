@@ -25,13 +25,18 @@ class TensorMeta(NamedTuple):
 class DTensorSpec:
     mesh: DeviceMesh
     placements: tuple[Placement, ...]
-
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
+    # device order is used to specify the order of the device mesh, range(0, mesh.ndim)
+    device_order: Optional[tuple[int, ...]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
+        if not self.device_order:
+            self.device_order = tuple(range(self.mesh.ndim))
+        if not isinstance(self.device_order, tuple):
+            self.device_order = tuple(self.device_order)
         self._hash: Optional[int] = None
 
     def __setattr__(self, attr: str, value: Any) -> None:
@@ -55,6 +60,7 @@ class DTensorSpec:
                     self.tensor_meta.shape,
                     self.tensor_meta.stride,
                     self.tensor_meta.dtype,
+                    self.device_order,
                 )
             )
         return hash((self.mesh, self.placements))
@@ -82,6 +88,7 @@ class DTensorSpec:
             self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
             and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
             and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
+            and self.device_order == other.device_order  # type: ignore[union-attr]
         )
 
     def __str__(self) -> str:

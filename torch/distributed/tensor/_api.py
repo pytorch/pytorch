@@ -487,6 +487,7 @@ class DTensor(torch.Tensor):
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        device_order: Optional[Sequence[int]] = None,
         *,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
@@ -562,7 +563,13 @@ class DTensor(torch.Tensor):
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
-            self, device_mesh, placements, async_op, forward_dtype, backward_dtype
+            self,
+            device_mesh,
+            placements,
+            device_order,
+            async_op,
+            forward_dtype,
+            backward_dtype,
         )
 
     def full_tensor(
@@ -662,6 +669,7 @@ def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
+    device_order: Optional[Sequence[int]] = None,
     *,
     src_data_rank: Optional[int] = 0,
 ) -> DTensor:
@@ -761,10 +769,10 @@ def distribute_tensor(
 
     local_tensor = tensor.detach()
 
-    # TODO(xilun): address sharding order
-    # distribute the tensor according to the placements.
     placements = list(placements)
-    for idx, placement in enumerate(placements):
+    device_order = device_order or list(range(device_mesh.ndim))
+    assert len(device_order) == device_mesh.ndim
+    for idx, placement in zip(device_order, placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
             if placement.dim < 0:
@@ -791,6 +799,7 @@ def distribute_tensor(
     spec = DTensorSpec(
         mesh=device_mesh,
         placements=placements,
+        device_order=tuple(device_order),
         tensor_meta=TensorMeta(
             shape=tensor.size(),
             stride=tensor.stride(),
