@@ -4624,6 +4624,7 @@ def all_to_all_single(
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
     group = group or _get_default_group()
+    #print("output_split_sizes", output_split_sizes, "input_split_sizes", input_split_sizes)
     work = group.alltoall_base(
         output, input, output_split_sizes, input_split_sizes, opts
     )

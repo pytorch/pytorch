@@ -2,7 +2,7 @@ import statistics
 import time
 from collections.abc import Sequence
 from functools import reduce
-from typing import Any, Callable, cast, Union
+from typing import Any, Callable, cast, Union, TYPE_CHECKING
 
 from sympy import Expr
 
@@ -12,9 +12,8 @@ import torch.utils._pytree as pytree
 from torch._inductor.codecache import PyCodeCache
 from torch.utils._mode_utils import no_dispatch
 
-from .. import ir, scheduler
+from .. import ir
 from ..utils import contains_collective, contains_wait
-
 
 kernel_name_to_comm_op: dict[str, Callable[..., Any]] = {
     "torch.ops._c10d_functional.all_gather_into_tensor.default": c10d.all_gather_into_tensor,
@@ -229,9 +228,10 @@ def estimate_comm_time(
     # Currently, it only supports all_gather and reduce_scatter
     # estimate set to True: return NCCL's estimated comm time (https://github.com/pytorch/pytorch/pull/149343)
     # estimate set to False: run the collective communication and return the actual comm time
+    from ..scheduler import BaseSchedulerNode
 
     # for node with collective kernel estimation
-    if isinstance(snode, scheduler.BaseSchedulerNode):
+    if isinstance(snode, BaseSchedulerNode):
         kernel = snode.node
         assert hasattr(kernel.inputs[0], "data")
         assert isinstance(kernel.layout, ir.Layout)
@@ -241,7 +241,7 @@ def estimate_comm_time(
         node, inputs, outputs = snode
         kernel = node.inputs[0]
 
-    if isinstance(snode, scheduler.BaseSchedulerNode):
+    if isinstance(snode, BaseSchedulerNode):
         tensor_input = _create_real_tensor(
             inputs.data.get_size(), inputs.data.get_dtype(), inputs.data.get_device()
         )
@@ -335,16 +335,17 @@ def estimate_comp_time(
     # Estimate the runtime of a compute node
     # FusedSchedulerNode & BaseSchedulerNode: get the generated triton code and use `do_bench` mode to obtain runtime
     # ExternKernelSchedulerNode: get python kernel and run the kernel to obtain runtime
+    from ..scheduler import BaseSchedulerNode, ExternKernelSchedulerNode, FusedSchedulerNode
     device = cast(torch.device, snode.get_device())
 
-    if isinstance(snode, scheduler.FusedSchedulerNode):
+    if isinstance(snode, FusedSchedulerNode):
         node_list = snode.snodes
-    elif isinstance(snode, scheduler.ExternKernelSchedulerNode):
+    elif isinstance(snode, ExternKernelSchedulerNode):
         time = benchmark_extern_node(snode.node, comp_cache)
         if verbose and time != 0:
             print("[COMP Node] EXTERN", "time", time)
         return time
-    elif isinstance(snode, scheduler.BaseSchedulerNode):
+    elif isinstance(snode, BaseSchedulerNode):
         node_list = [snode]
     else:
         raise ValueError(f"Unsupported snode type {type(snode)}")

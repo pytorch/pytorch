@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import functools
 import os
 import pickle
@@ -16,12 +17,6 @@ from .bucket_utils import (
     bucket_all_gathers,
     bucket_reduce_scatters,
     get_fx_node,
-)
-from .estimator import (
-    _create_real_tensor,
-    benchmark_comm_func,
-    estimate_comp_time,
-    get_data_size,
 )
 
 
@@ -57,6 +52,12 @@ def get_sample_list(input_size_list, cali_num_samples):
 
 
 def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatter):
+    from .estimator import (
+        _create_real_tensor,
+        benchmark_comm_func,
+        estimate_comp_time,
+        get_data_size,
+    )
     world_size = c10d.distributed_c10d.get_world_size()
 
     ag_input_size_list = []
@@ -138,6 +139,9 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
             cache = pickle.load(file)
         comm_cache.cache = cache
         comm_cache._update_max_size()
+        print(
+            "comm_cache.max numbers", comm_cache.ag_max_inp_size, comm_cache.rs_max_out_size
+        )
         return total_comp_time
 
     # benchmark only fwd ag to improve efficiency
@@ -259,11 +263,6 @@ def estimate_bucketed_node(
     return estimated_comm, comm_size_inp, comm_size_out
 
 
-def update_memories_at_nodes(memories_at_nodes, current_step, added_memory):
-    memories_at_nodes[current_step] += added_memory
-    return memories_at_nodes
-
-
 def get_bucketing_plan(
     sched: "scheduler.Scheduler",
     snodes: list["scheduler.BaseSchedulerNode"],
@@ -274,13 +273,15 @@ def get_bucketing_plan(
     comp_cache,
     verbose: bool = False,
 ) -> list[list["scheduler.BaseSchedulerNode"]]:
+    from .estimator import estimate_comp_time, get_data_size
+
     all_gather_plan = []
     reduce_scatter_plan = []
     current_ag_bucket = []
     current_rs_bucket = []
     heuristic_info = {
         "last_step_rs_comm": 0,
-        "last_step_ag_comm_size": 0,
+        "last_step_rs_comm_size": 0,
         "this_step_rs_comm_size": 0,
         "rs_comm_size_accumulated": 0,
         "this_step_rs_comm": 0,
@@ -304,6 +305,7 @@ def get_bucketing_plan(
     )
     assert len(memories_at_nodes) == len(snodes) + 1
 
+    # get basic info of ag/rs nodes
     world_size = c10d.distributed_c10d.get_world_size()
     group_size, group_name, reduce_op = None, None, None
     for idx, snode in enumerate(snodes):
@@ -326,6 +328,7 @@ def get_bucketing_plan(
             )
             _, reduce_op, group_size, group_name = example_rs_fx_node.args
             break
+
     # if there is no collective comm., return dummy plan
     if group_size is None:
         return [[]], [[]]
@@ -341,9 +344,10 @@ def get_bucketing_plan(
     )
     release_steps = [0]
 
+    # auto-bucketing plan
     st_time = time.time()
     if has_reduce_scatter:
-        peak_memory = peak_memory - config.simplefsdp.peak_memory_offset
+        peak_memory = peak_memory + config.simplefsdp.peak_memory_offset
     for idx, snode in enumerate(snodes):
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
@@ -370,22 +374,34 @@ def get_bucketing_plan(
                     comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
                     or comm_cache.rs_max_out_size < heuristic_info["this_step_rs_comm_size"]
                 )
+            if len(release_steps) > 1:
+                last_step = release_steps[-2]
+            else:
+                last_step = release_steps[-1]
             memory_threshold = get_dynamic_memory_threshold(
                 peak_memory,
                 memories_at_nodes,
                 idx + 1,
-                release_steps[-1],
+                last_step,
                 not has_reduce_scatter,
             )
-            accumulated_comm_memory = (
-                get_data_size(comm_size_out)
-                + get_data_size(comm_size_inp)
-                + heuristic_info["rs_comm_size_accumulated"]
-                + heuristic_info["last_step_ag_comm_size"]
+            accumulated_comm_memory_before = (
+                2* get_data_size(comm_size_inp) # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
+                + 2* get_data_size(comm_size_out)
+                + heuristic_info["rs_comm_size_accumulated"] # accumulated gradient from reduce scatter
+                + heuristic_info["last_step_rs_comm_size"]
+            )
+            accumulated_comm_memory_after = (
+                2* get_data_size(comm_size_inp) # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
+                + 2* get_data_size(comm_size_out)
+                + heuristic_info["rs_comm_size_accumulated"] # accumulated gradient from reduce scatter
+                + heuristic_info["this_step_rs_comm_size"] * 2 * (1+1*world_size) #+ heuristic_info["last_step_rs_comm_size"]
             )
             break_memory_criteria = (
                 memory_threshold
-                < heuristic_info["next_step_memory"] + accumulated_comm_memory
+                < heuristic_info["next_step_memory"] + accumulated_comm_memory_before or
+                memory_threshold
+                < heuristic_info["next_step_memory"] + accumulated_comm_memory_after
             )
             if has_reduce_scatter and len(all_gather_plan) == 0:
                 break_overlap_criteria = heuristic_info["next_step_comp"] < (
@@ -393,7 +409,8 @@ def get_bucketing_plan(
                     + heuristic_info["last_step_rs_comm"]
                     * (1 + config.simplefsdp.relax_ratio)
                 )
-                break_memory_criteria = True if len(current_ag_bucket) >= 3 else False
+            #if has_reduce_scatter and len(all_gather_plan) == 2:
+            #    break_memory_criteria = True if len(current_ag_bucket) >= 3 else False
             if (
                 break_overlap_criteria
                 or break_memory_criteria
@@ -419,7 +436,8 @@ def get_bucketing_plan(
                         "break_memory_criteria",
                         break_memory_criteria,
                         memory_threshold,
-                        heuristic_info["next_step_memory"],
+                        heuristic_info["next_step_memory"] + accumulated_comm_memory_before ,
+                        heuristic_info["next_step_memory"] + accumulated_comm_memory_after,
                     )
                     print("current_ag_bucket", all_gather_plan[-1])
                 release_steps.append(idx + 1)
@@ -438,12 +456,8 @@ def get_bucketing_plan(
                     )
                     heuristic_info["last_step_rs_comm"] = current_estimated_rs
                     reduce_scatter_plan.append(current_rs_bucket)
-                    heuristic_info["last_step_ag_comm_size"] = get_data_size(
-                        comm_size_out
-                    ) + get_data_size(comm_size_inp)
-                    heuristic_info["rs_comm_size_accumulated"] += get_data_size(
-                        rs_comm_size_inp
-                    ) + get_data_size(rs_comm_size_out)
+                    heuristic_info["last_step_rs_comm_size"] = 2*(get_data_size(rs_comm_size_inp) + get_data_size(rs_comm_size_out)) # rs copy-in + rs data
+                    heuristic_info["rs_comm_size_accumulated"] += get_data_size(rs_comm_size_out) + get_data_size(rs_comm_size_inp) # accumulated gradient from rs
                     current_rs_bucket = []
 
                 (
@@ -475,15 +489,9 @@ def get_bucketing_plan(
             )
             heuristic_info["this_step_rs_comm_size"] = get_data_size(rs_comm_size_out)
             break_rs_overlap_criteria = (
-                total_comp_time < heuristic_info["this_step_rs_comm"] * 2
+                total_comp_time < heuristic_info["this_step_rs_comm"] * 5
             )
             if break_rs_overlap_criteria:
-                print(
-                    "total_comp_time",
-                    total_comp_time,
-                    heuristic_info["this_step_rs_comm"] * 2,
-                    current_rs_bucket,
-                )
                 heuristic_info["last_step_rs_comm"] = heuristic_info[
                     "this_step_rs_comm"
                 ]

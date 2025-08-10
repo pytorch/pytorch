@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import math
-from typing import Any, Callable, cast, Dict, Union
+from typing import Any, Callable, cast, Dict, Union, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,12 +10,11 @@ from .. import ir, scheduler
 from ..dependencies import StarDep, WeakDep
 from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
-from .estimator import OpType
 
 
 def get_fx_node(
     snode_or_ir_node: Union["scheduler.BaseSchedulerNode", "ir.IRNode"],
-    expected_op: OpType,
+    expected_op,
 ) -> torch.fx.Node:
     origins = None
     if isinstance(snode_or_ir_node, scheduler.BaseSchedulerNode):

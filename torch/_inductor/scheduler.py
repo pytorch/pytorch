@@ -2124,11 +2124,11 @@ class Scheduler:
 
         # Must run first to correctly set dependencies, before all other passes that rely on
         # reading from .read_writes.reads or .unmet_dependencies
-        self.nodes = comms.decide_global_ordering_of_comms(
-            self.nodes,
-            self.name_to_buf,
-            self.name_to_fused_node,
-        )
+        # self.nodes = comms.decide_global_ordering_of_comms(
+        #     self.nodes,
+        #     self.name_to_buf,
+        #     self.name_to_fused_node,
+        # )
 
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2169,6 +2169,7 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
+        print("torch._inductor.config.simplefsdp.bucketing_type", torch._inductor.config.simplefsdp.bucketing_type)
         if config.simplefsdp.enable_bucket_ir:
             has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
             assert not config.allow_buffer_reuse, (
@@ -2233,7 +2234,7 @@ class Scheduler:
                 node_length = len(self.nodes)
                 self.nodes = reorder.reorder_all_gather(
                     self.nodes,
-                    all_gather_before_last_wait=True if has_reduce_scatter else False,
+                    all_gather_before_last_wait=True if has_reduce_scatter and config.simplefsdp.bucketing_type != "auto" else False,
                 )
                 assert node_length == len(self.nodes), (
                     "missed nodes in reordering all gather"
