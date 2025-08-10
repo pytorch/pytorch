@@ -267,7 +267,7 @@ class Guard:
     guard_types: Optional[list[str]] = None
     code_list: Optional[list[str]] = None
     obj_weakref: Optional[object] = None
-    guarded_class_weakref: Optional[type] = None
+    guarded_class_weakref: Optional[weakref.ReferenceType[Any]] = None
 
     stack: Optional[CapturedTraceback] = None
     user_stack: Optional[traceback.StackSummary] = None
@@ -380,7 +380,7 @@ class Guard:
     def set_export_info(
         self,
         guard_type: str,
-        guarded_class: Optional[type],
+        guarded_class: Optional[weakref.ReferenceType[Any]],
         code_list: list[str],
         obj_weakref: object,
     ) -> None:
