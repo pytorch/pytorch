@@ -268,6 +268,48 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             v = v + x * i
         return v
 
+    def test_itertools_product_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.product(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_product_various_iterators(a, b):
+        itertools.product(
+            [a, b],
+            zip([1, 2], [3, 4]),
+            map(lambda x: x, [1, 2]),
+            filter(lambda x: True, [1, 2]),
+        )
+        return a
+
+    def test_itertools_permutations_basic(self):
+        def fn():
+            return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertEqual(actual, expected)
+
+    def test_itertools_permutations_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(*args, **kwargs):
+            return torch.tensor(list(itertools.permutations(*args, **kwargs)))
+
+        self.assertRaises(Unsupported, fn)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], 1, 2)
+        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+
+    @make_test
+    def test_itertools_permutations_various_iterators(a, b):
+        itertools.permutations([a, b])
+        itertools.permutations(zip([1, 2], [3, 4]))
+        itertools.permutations(map(lambda x: x, [1, 2]))
+        itertools.permutations(filter(lambda x: True, [1, 2]))
+        return a
+
     @make_test
     def test_itertools_chain(a, b):
         v = a
@@ -5029,6 +5071,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         a = SkipFunctionVariable(value=w)
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
+
+    def test_inspect_method_source(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def check(self, x):
+                return x * 2
+
+            def forward(self, x):
+                return x * 2
+
+        mod = Mod()
+
+        def fn(x):
+            inspect.signature(mod.check).parameters.items()
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(FunctionTests)
