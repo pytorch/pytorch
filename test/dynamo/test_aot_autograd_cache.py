@@ -447,8 +447,8 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(x, y):
             return (x * 2, y @ y)
 
-        a = torch.rand(25, device="cuda")
-        b = torch.rand(5, 5, device="cuda")
+        a = torch.rand(25, device=GPU_TYPE)
+        b = torch.rand(5, 5, device=GPU_TYPE)
 
         compiled_fn = torch.compile(fn, backend="inductor")
         self.assertEqual(fn(a, b), compiled_fn(a, b))
@@ -822,7 +822,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=GPU_TYPE, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
