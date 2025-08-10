@@ -10,9 +10,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+from torch.onnx import _constants as onnx_constants
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
-    _constants,
     _core,
     _dynamic_shapes,
     _onnx_program,
@@ -50,7 +50,7 @@ def export_compat(
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    opset_version: int | None = _constants.TORCHLIB_OPSET,
+    opset_version: int | None = onnx_constants.ONNX_DEFAULT_OPSET,
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
@@ -70,7 +70,7 @@ def export_compat(
     legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        opset_version = _constants.TORCHLIB_OPSET
+        opset_version = onnx_constants.ONNX_DEFAULT_OPSET
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes

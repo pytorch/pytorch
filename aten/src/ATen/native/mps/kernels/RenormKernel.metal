@@ -23,6 +23,4 @@ kernel void renorm(
 
 REGISTER_RENORM_OP(float);
 REGISTER_RENORM_OP(half);
-#if __METAL_VERSION__ >= 310
 REGISTER_RENORM_OP(bfloat);
-#endif
