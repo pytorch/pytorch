@@ -3,7 +3,17 @@ Argparse Utility helpers for CLI tasks.
 """
 
 import argparse
-from typing import Callable, Protocol, Required, TypedDict
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Required, TypedDict
+
+
+class BaseRunner(ABC):
+    def __init__(self, args: Any) -> None:
+        self.args = args
+
+    @abstractmethod
+    def run(self) -> None:
+        """runs main logics, required"""
 
 
 # Pretty help: keep newlines + show defaults
@@ -13,13 +23,8 @@ class RichHelp(
     pass
 
 
-# Any class that can be constructed with (args) and has .run()
-class RunnerLike(Protocol):
-    def run(self) -> None: ...
-
-
 class TargetSpec(TypedDict, total=False):
-    runner: Required[type[RunnerLike]]
+    runner: Required[type[BaseRunner]]
     help: str
     description: str
     add_arguments: Callable[[argparse.ArgumentParser], None]
@@ -38,17 +43,11 @@ def register_target_commands_and_runner(
 
     for name, spec in target_specs.items():
         desc = (spec.get("description") or (spec["runner"].__doc__ or "")).strip()
-        env = spec.get("env") or {}
-        epilog = None
-        if env:
-            env_block = "\n".join(f"  {k:<22} {v}" for k, v in env.items())
-            epilog = "Environment variables:\n" + env_block
 
         p = targets.add_parser(
             name,
             help=spec.get("help", ""),
             description=desc,
-            epilog=epilog,
             formatter_class=RichHelp,
         )
         p.set_defaults(

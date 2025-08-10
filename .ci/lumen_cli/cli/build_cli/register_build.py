@@ -11,7 +11,7 @@ from cli.lib.core.vllm import VllmBuildRunner
 
 logger = logging.getLogger(__name__)
 
-# tarfets dicts that maps target name to target spec
+# dict maps target to its argparse configuration and runner
 _TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmBuildRunner,
