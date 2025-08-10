@@ -1373,6 +1373,23 @@ class TestSerialization(TestCase, SerializationMixin):
                 with self.assertRaisesRegex(UnpicklingError, ".*_unpickle.*zoneinfo.ZoneInfo.*"):
                     torch.load(f)
 
+
+    def test_weights_only_with_zoneinfo_unpickle_registration_success(self):
+        import datetime
+        import zoneinfo
+
+        data = {
+            "a": torch.tensor([1, 2, 3]),
+            "b": datetime.datetime(2025, 1, 1, 12, 0, tzinfo=zoneinfo.ZoneInfo(key="UTC")),
+        }
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(data, f)
+            f.seek(0)
+
+            with torch.serialization.safe_globals([datetime.datetime, getattr, zoneinfo.ZoneInfo, zoneinfo.ZoneInfo._unpickle]):
+                loaded_data = torch.load(f)
+                self.assertEqual(loaded_data, data)
+
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):
         t = torch.randn(1, dtype=torch.cfloat)
