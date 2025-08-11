@@ -318,7 +318,7 @@ def compute_memory_timeline(
         node: step for step, node in enumerate(nodes)
     }
 
-    # get buffers' size and liveness information
+    # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []
     buf_to_snode_last_use: dict[
         Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode

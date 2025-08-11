@@ -949,10 +949,20 @@ def _sink_waits_iterative_internal(
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
+    num_sink_waits_to_reorder_env_str = os.getenv("PYTORCH_SINK_WAITS_LIMIT", None)
+    debug_num_sink_waits_to_reorder: Optional[int] = None
+    if num_sink_waits_to_reorder_env_str is not None:
+        debug_num_sink_waits_to_reorder = int(num_sink_waits_to_reorder_env_str)
+
     iterative_recompute_error = False
 
     while _prev[curr] is not None:
         if iterative_recompute_error:
+            break
+        if (
+            debug_num_sink_waits_to_reorder is not None
+            and len(processed_waits) >= debug_num_sink_waits_to_reorder
+        ):
             break
 
         if contains_wait(curr) and curr not in processed_waits:
