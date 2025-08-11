@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     requires_gpu,
     skip_windows_ci,
@@ -1349,7 +1349,7 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 
 @unittest.skipIf(
-    not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9),
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9),
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
