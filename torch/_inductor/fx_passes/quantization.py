@@ -1089,7 +1089,7 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_concat_linear_int8_woq_optimization_pattern():
+def _is_valid_concat_linear_int8_woq_optimization_pattern() -> bool:
     def fn(match):
         if not config.cpp.enable_concat_linear:
             return False
@@ -1136,7 +1136,7 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
     return fn
 
 
-def _is_valid_woq_optimization_pattern():
+def _is_valid_woq_optimization_pattern() -> bool:
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         if not all(
@@ -3665,7 +3665,7 @@ def _register_quantization_weight_pack_pass():
         _register_qlinear_binary_fusion()
 
 
-def _is_valid_concat_linear_woq_int4_fusion(computation_nodes):
+def _is_valid_concat_linear_woq_int4_fusion(computation_nodes) -> bool:
     computation_op = torch.ops.aten._weight_int4pack_mm_for_cpu.default
     act = computation_nodes[0].args[0]
     wgt = computation_nodes[0].args[1]

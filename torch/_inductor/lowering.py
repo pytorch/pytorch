@@ -949,7 +949,7 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
+        def is_length_one(size: sympy.Expr) -> Any:
             return V.graph.sizevars.shape_env.evaluate_expr(
                 sympy.Eq(size, 1), fallback_value=False
             )
