@@ -140,8 +140,6 @@ function install_130 {
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
 
-  install_nvshmem 13 $NVSHMEM_VERSION
-
   CUDA_VERSION=13.0 bash install_nccl.sh
 
   CUDA_VERSION=13.0 bash install_cusparselt.sh
