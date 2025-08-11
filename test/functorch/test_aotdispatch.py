@@ -98,6 +98,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 USE_TORCHVISION = False
@@ -990,6 +991,110 @@ metadata incorrectly.
 """,  # noqa: F541
         ):
             new_out.sum().backward()
+
+    def test_nested_subclasses_non_homogenous(self):
+        def f(x):
+            x_elem = x.elem
+            x_metadata = x.constant_attribute
+            return x_metadata * x_elem * x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = TwoTensor(a3, a4)
+        custom_aa = ConstantExtraMetadataTensor(aa)
+        custom_aa.constant_attribute = 6
+        custom_aa2 = ConstantExtraMetadataTensor(aa2)
+        custom_aa2.constant_attribute = 6
+
+        out_eager = f(custom_aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_aa2)
+
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.b, ConstantExtraMetadataTensor))
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out_eager.sum().backward()
+        out.sum().backward()
+
+        self.assertTrue(torch.allclose(custom_aa.grad, custom_aa2.grad))
+        self.assertTrue(isinstance(custom_aa2.grad, TwoTensor))
+        self.assertTrue(isinstance(custom_aa2.grad.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(custom_aa2.grad.b, ConstantExtraMetadataTensor))
+
+    def test_subclasses_mixed(self):
+        def f(x, y):
+            x_metadata = x.constant_attribute
+            out_a = x_metadata * x * y.a
+            out_b = x * y.a * y.b
+            return TwoTensor(out_a, out_b)
+
+        a = torch.ones(4, requires_grad=False)
+        a2 = a.clone()
+        custom_a = ConstantExtraMetadataTensor(a)
+        custom_a.constant_attribute = 5
+        custom_a2 = ConstantExtraMetadataTensor(a2)
+        custom_a2.constant_attribute = 5
+
+        b = torch.ones(4, requires_grad=False)
+        b2 = b.clone()
+        b3 = b.clone()
+        b4 = b.clone()
+        bb = TwoTensor(b, b2)
+        bb2 = TwoTensor(b3, b4)
+
+        out_eager = f(custom_a, bb)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+        out = compiled_f(custom_a2, bb2)
+
+        self.assertTrue(torch.allclose(out_eager, out))
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.b, ConstantExtraMetadataTensor))
+
+    def test_subclasses_mixed_mode(self):
+        def f(x):
+            return x.sin().cos()
+
+        class AddConstantMetadataMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **(kwargs or {}))
+                if ConstantExtraMetadataTensor not in types:
+                    out = ConstantExtraMetadataTensor(out)
+                    out.constant_attribute = 5
+                return out
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.detach().clone().requires_grad_()
+        a3 = a.detach().clone().requires_grad_()
+        a4 = a.detach().clone().requires_grad_()
+        aa = TwoTensor(a, a2)
+        aa2 = TwoTensor(a3, a4)
+
+        with AddConstantMetadataMode():
+            out_eager = f(aa)
+
+        compiled_f = torch.compile(f, backend="aot_eager")
+
+        with AddConstantMetadataMode():
+            out = compiled_f(aa2)
+
+        self.assertTrue(isinstance(out, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(out.elem, TwoTensor))
+        self.assertTrue(torch.allclose(out_eager, out))
+
+        out_eager.sum().backward()
+        out.sum().backward()
+
+        self.assertTrue(torch.allclose(aa.grad, aa2.grad))
+        self.assertTrue(isinstance(aa2.grad, ConstantExtraMetadataTensor))
+        self.assertTrue(isinstance(aa2.grad.elem, TwoTensor))
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     def test_custom_tensor_metadata(self):
@@ -4732,10 +4837,14 @@ def forward(self, arg0_1):
         inps = [torch.randn(2, 2), torch.ones(2)]
         gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(
-            normalize_gm(gm.print_readable(False)),
+            normalize_gm(gm.print_readable(False, expanded_def=True)),
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+    def forward(
+        self,
+        arg0_1: "f32[2, 2]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[2]",  # PlainAOTInput(idx=1)
+    ):
         sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
 
@@ -4746,7 +4855,10 @@ class <lambda>(torch.nn.Module):
 
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 3)
         add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-        return (add, add_1)
+        return (
+            add,  # PlainAOTOutput(idx=0)
+            add_1,  # PlainAOTOutput(idx=1)
+        )
 
     class true_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
@@ -4820,10 +4932,14 @@ class <lambda>(torch.nn.Module):
         inps = [torch.randn(2, 2), torch.ones(2)]
         gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(
-            normalize_gm(gm.print_readable(False)),
+            normalize_gm(gm.print_readable(False, expanded_def=True)),
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2]"):
+    def forward(
+        self,
+        arg0_1: "f32[2, 2]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[2]",  # PlainAOTInput(idx=1)
+    ):
         cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
 
         _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
@@ -4834,7 +4950,9 @@ class <lambda>(torch.nn.Module):
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-        return (add,)
+        return (
+            add,  # PlainAOTOutput(idx=0)
+        )
 
     class body_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[2]", arg1_1: "f32[2]"):
@@ -4993,10 +5111,20 @@ def forward(self, arg0_1):
         for node in fx_g.graph.nodes:
             node.meta.pop("stack_trace", None)
         self.assertExpectedInline(
-            fx_g.print_readable(print_output=False),
+            fx_g.print_readable(print_output=False, expanded_def=True),
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
+    def forward(
+        self,
+        arg0_1: "f32[3, 1, 1, 1]",
+        arg1_1: "f32[3]",
+        arg2_1: "f32[3]",
+        arg3_1: "f32[3]",
+        arg4_1: "f32[3]",
+        arg5_1: "f32[3]",
+        arg6_1: "i64[]",
+        arg7_1: "f32[1, 1, 3, 3]",
+    ):
         # No stacktrace found for following nodes
         convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
         add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
@@ -5078,10 +5206,20 @@ class <lambda>(torch.nn.Module):
         for node in fx_g_inference.graph.nodes:
             node.meta.pop("stack_trace", None)
         self.assertExpectedInline(
-            fx_g_inference.print_readable(print_output=False),
+            fx_g_inference.print_readable(print_output=False, expanded_def=True),
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
+    def forward(
+        self,
+        arg0_1: "f32[3, 1, 1, 1]",  # PlainAOTInput(idx=0)
+        arg1_1: "f32[3]",  # PlainAOTInput(idx=1)
+        arg2_1: "f32[3]",  # PlainAOTInput(idx=2)
+        arg3_1: "f32[3]",  # PlainAOTInput(idx=3)
+        arg4_1: "f32[3]",  # PlainAOTInput(idx=4)
+        arg5_1: "f32[3]",  # PlainAOTInput(idx=5)
+        arg6_1: "i64[]",  # PlainAOTInput(idx=6)
+        arg7_1: "f32[1, 1, 3, 3]",  # PlainAOTInput(idx=7)
+    ):
         # No stacktrace found for following nodes
         convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
         add: "i64[]" = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
@@ -5094,7 +5232,13 @@ class <lambda>(torch.nn.Module):
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2)
+        return (
+            getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
+            getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
+            add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
+            sum_1,  # PlainAOTOutput(idx=0)
+            detach_2,  # PlainAOTOutput(idx=1)
+        )
         """,  # noqa: B950
         )
         # Some important characteristics of the exported graph below:
