@@ -987,7 +987,6 @@ class CUDAGraphNode:
         # we reconstruct tensors at the correct data pointers of our inputs which are
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
-
         self.reconstructed_inputs: list[InputType] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)

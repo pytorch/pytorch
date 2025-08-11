@@ -125,10 +125,6 @@ void _assert_async_msg_cuda(const Tensor& self_tensor, std::string_view assert_m
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
   auto stream = at::cuda::getCurrentCUDAStream();
-  bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() != at::cuda::CaptureStatus::None;
-  if (is_capturing) {
-    std::cout << "Adding an assertion to capturing graph" << std::endl;
-  }
   Msg msg;
   size_t copy_length = assert_msg.length();
   TORCH_CHECK(copy_length < Msg::MAX_MSG_LENGTH - 1, "Message length must be smaller than " + std::to_string(Msg::MAX_MSG_LENGTH - 1));

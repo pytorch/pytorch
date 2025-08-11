@@ -2798,7 +2798,7 @@ def remove_unaligned_input_idxs(
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
-    We require all inputs to be aligned for the sake of triton, so introduce a 
+    We require all inputs to be aligned for the sake of triton, so introduce a
     copy for any that aren't.
     """
     aligned_static_input_idxs = []

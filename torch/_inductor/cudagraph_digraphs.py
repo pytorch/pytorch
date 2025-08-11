@@ -194,7 +194,7 @@ def find_overlaps(intervals, assert_should_not_happen=False):
 
 cudagraphs_made_so_far = 0
 graph_to_number = {}
-                    
+
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],

@@ -176,7 +176,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
-  // I'm super confused...
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
@@ -193,7 +192,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
 
-  // std::cout << "GALVEZ: cudaStreamBeginCapture" << std::endl;
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
   cudaStreamCaptureStatus status{};
@@ -356,7 +354,6 @@ cudaGraph_t CUDAGraph::raw_cuda_graph() {
 }
 
 void CUDAGraph::reset() {
-  std::cout << "GALVEZ: reset()" << std::endl;
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
