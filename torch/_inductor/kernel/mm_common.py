@@ -39,6 +39,12 @@ def persistent_grouped_mm_grid(*args):
     return (meta["NUM_SMS"], 1, 1)
 
 
+def acc_type(dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        return "tl.float32"
+    return f"tl.{dtype}".replace("torch.", "")
+
+
 def mm_args(
     mat1,
     mat2,

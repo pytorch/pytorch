@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import textwrap
 import traceback
 from collections.abc import Container, Generator, Iterable, Iterator, Sequence
@@ -49,6 +50,7 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
+from torch._inductor.utils import get_free_symbols
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -62,7 +64,6 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
-    IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
@@ -155,6 +156,9 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
+autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -302,13 +306,6 @@ def fuse_reindexing(
         return reindex1(reindex2(index))
 
     return reindex
-
-
-def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
-    if unbacked_only:
-        return free_unbacked_symbols(x)
-    else:
-        return free_symbols(x)
 
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
@@ -517,6 +514,7 @@ def try_match_insignificant_strides(
         old_layout.size,
         new_stride,
         old_layout.offset,
+        old_layout.is_pinned,
     )
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
@@ -2913,6 +2911,7 @@ class ExpandView(BaseView):
                 list(new_size),
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2959,6 +2958,7 @@ class PermuteView(BaseView):
                 [old_layout.size[i] for i in dims],
                 [old_layout.stride[i] for i in dims],
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3020,6 +3020,7 @@ class SqueezeView(BaseView):
                 new_size,
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3138,6 +3139,7 @@ class View(GenericView):
                 new_size,
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3372,6 +3374,7 @@ class DtypeView(BaseView):
                 old_layout.size,
                 old_layout.stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
         return DtypeView(data=x, target_dtype=new_dtype)
@@ -3479,6 +3482,7 @@ class SliceView(View):
                 new_size,
                 new_stride,
                 old_layout.offset + old_layout.stride[dim] * start,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3575,6 +3579,13 @@ class OutputSpec:
 
 @ir_dataclass
 class Layout(OutputSpec):
+    """
+    Layout base class
+
+    Carries tensor meta-information including offset and
+    whether it is pinned.
+    """
+
     def __init__(
         self,
         device: torch.device,
@@ -3582,6 +3593,7 @@ class Layout(OutputSpec):
         size: Sequence[Expr],
         stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
+        is_pinned: bool = False,
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -3592,6 +3604,9 @@ class Layout(OutputSpec):
         self.size = size
         self.stride = stride
         self.offset = offset
+        self.is_pinned = is_pinned
+        # is_pinned implies cpu
+        assert (not self.is_pinned) or (self.device.type == "cpu")
 
     def __str__(self) -> str:
         offset = ""
@@ -3599,9 +3614,12 @@ class Layout(OutputSpec):
             offset = f", offset={self.offset}"
 
         device_index_str = "" if self.device.index is None else f":{self.device.index}"
+        is_pinned_str = ""
+        if self.is_pinned:
+            is_pinned_str = f", is_pinned={self.is_pinned}"
         return (
             f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset})"
+            f"size={self.size}, stride={self.stride}{offset}{is_pinned_str})"
         )
 
     __repr__ = __str__
@@ -3616,6 +3634,7 @@ class Layout(OutputSpec):
                 convert_shape_to_symint(self.stride),
                 dtype=self.dtype,
                 device=self.device,
+                pin_memory=self.is_pinned,
             )
 
     def is_contiguous(self) -> bool:
@@ -3767,6 +3786,7 @@ class Layout(OutputSpec):
             self.size,
             self.stride,
             self.offset,
+            self.is_pinned,
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -3783,6 +3803,7 @@ class Layout(OutputSpec):
             and self.size == other.size
             and self.stride == other.stride
             and self.offset == other.offset
+            and self.is_pinned == other.is_pinned
         )
 
     def storage_size(self) -> Expr:
@@ -3896,6 +3917,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_exact_strides(
@@ -3911,6 +3933,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_fill_order(self, order: Sequence[int]) -> FixedLayout:
@@ -3923,6 +3946,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_same_order(self, stride: Sequence[_IntLike]) -> FixedLayout:
@@ -3935,6 +3959,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def __init__(
@@ -3943,12 +3968,13 @@ class FlexibleLayout(Layout):
         dtype: torch.dtype,
         size: Sequence[Expr],
         stride_order: Optional[Sequence[Union[int, Integer]]] = None,
+        is_pinned: bool = False,
     ) -> None:
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super().__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides, is_pinned=is_pinned)
 
 
 class NonOwningLayout(Layout):
@@ -4014,6 +4040,7 @@ class CommBufferLayout(FixedLayout):
             size=fixed.size,
             stride=fixed.stride,
             offset=fixed.offset,
+            is_pinned=fixed.is_pinned,
         )
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
@@ -4187,6 +4214,9 @@ class Buffer(IRNode, CodegenSymbol):
 
     def get_storage_numel(self) -> int:
         return self.get_numel()
+
+    def get_is_pinned(self) -> bool:
+        return self.get_layout().is_pinned
 
     def freeze_layout(self) -> None:
         if isinstance(self.layout, Layout) and not isinstance(
@@ -4377,6 +4407,13 @@ class ComputedBuffer(OperationBuffer):
         return self.data.get_read_names()
 
     def get_read_writes(self) -> dependencies.ReadWrites:
+        if not isinstance(self.data, (Reduction, Scan, Sort, Pointwise)):
+            return dependencies.ReadWrites(
+                reads=OrderedSet(),
+                writes=OrderedSet(),
+                index_exprs=OrderedSet(),
+            )
+
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
                 return extract_read_writes(
@@ -4415,6 +4452,7 @@ class ComputedBuffer(OperationBuffer):
             | get_free_symbols(self.get_stride(), unbacked_only)
             | get_free_symbols(self.get_offset(), unbacked_only)
             | self.data.get_free_symbol_uses(unbacked_only)
+            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
         )
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -4876,9 +4914,13 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        benchmark_configs = {
+            "warmup": autotune_warmup,
+            "rep": autotune_rep,
+        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
-        return benchmarker.benchmark(algo, args, {"out": out})
+            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)
+        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -5147,6 +5189,9 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def create(cls, inputs: Sequence[IRNode], dim: int) -> StorageBox:
+        """
+        Create the concat kernel from inputs
+        """
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
         new_size = list(inputs[0].get_size())
@@ -5200,6 +5245,10 @@ class ConcatKernel(NopKernel):
         ):
             output_stride = make_channels_last_strides_for(new_size)
 
+        is_pinned = all(
+            is_storage_and_layout(x) and x.get_layout().is_pinned for x in inputs
+        )
+
         assert device is not None
         concat_kernel = ConcatKernel(
             name=None,
@@ -5208,6 +5257,7 @@ class ConcatKernel(NopKernel):
                 dtype=dtype,
                 size=new_size,
                 stride=output_stride,
+                is_pinned=is_pinned,
             ),
             inputs=[],
         )
@@ -5323,6 +5373,11 @@ class ConcatKernel(NopKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernel(InputsKernel):
+    """
+    A class that represents Kernels which are not directly lowered to Inductor
+    Loop Level IR, such as custom operators, or aten operators which we fallback to.
+    """
+
     constant_args: Sequence[Any] = ()
     kwargs: dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
@@ -5687,6 +5742,7 @@ class ExternKernel(InputsKernel):
                 size=x.get_size(),
                 stride=strides,
                 offset=offset,
+                is_pinned=False,
             ),
         )
 
@@ -6105,7 +6161,7 @@ class ExternKernel(InputsKernel):
                 f"assert_size_stride({self.get_name()}, {size}, {stride}, {op_name!r})"
             )
 
-    def codegen_alignment_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         if config.alignment_asserts and not V.graph.cpp_wrapper:
             name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
@@ -6118,6 +6174,17 @@ class ExternKernel(InputsKernel):
                 wrapper.writeline(
                     f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
                 )
+
+    def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
+        """
+        Track outputs of fallback operators if config.test_configs.track_memory_lifecycle
+        """
+        if not config.test_configs.track_memory_lifecycle or V.graph.cpp_wrapper:
+            return
+
+        wrapper.write_memory_track_allocation_once()
+        name = self.get_name()
+        wrapper.writeline(f"track_tensor({name}, '{name}')")
 
     def get_group_stride(self) -> tuple[list[Sequence[Expr]], list[Expr]]:
         """
@@ -6349,7 +6416,9 @@ class TMADescriptor(ExternKernel):
             cls._CACHE[key] = cls._create_impl(tensor, tma_meta)
         return cls._CACHE[key]
 
-    def __init__(self, tensor: IRNode, inputs, constant_args):  # type: ignore[no-untyped-def]
+    def __init__(
+        self, tensor: IRNode, inputs: Sequence[Any], constant_args: Sequence[Any]
+    ) -> None:
         super().__init__(
             None,
             # link back to the underlying tensor in terms of ownership
@@ -6465,14 +6534,14 @@ class SubgraphBuffer(ExternKernel):
 
         with V.set_graph_handler(self.subgraph):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(  # type: ignore[no-untyped-def]
+            with inductor_config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
                 self.subgraph.run(*self.example_inputs)
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
@@ -7002,11 +7071,27 @@ class DeviceCopy(ExternKernelOut):
 
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
+        # Device Copy should keep the same layout as input
+        x = ExternKernel.require_contiguous(x)
+        stride = None
+        if x.get_size():
+            # x.get_stride() may be unimplemented if x's size is empty
+            stride = x.get_stride()
+        is_destination_pinned = (
+            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+        )
+        is_source_pinned = (
+            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+        )
+        if is_source_pinned and is_storage_and_layout(x):
+            x.get_layout().is_pinned = True
         return DeviceCopy(
-            FlexibleLayout(
-                device=device,
-                dtype=x.get_dtype(),
-                size=x.get_size(),
+            FixedLayout(
+                device,
+                x.get_dtype(),
+                x.get_size(),
+                stride,
+                is_pinned=is_destination_pinned,
             ),
             [cls.realize_input(x)],
             constant_args,
@@ -7021,6 +7106,50 @@ class DeviceCopy(ExternKernelOut):
             )
         else:
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+
+
+class DynamicSelectStorageOffset(ExternKernel):
+    """
+    The result of computing a dynamic selection index is determined as follows: when the index in the
+    select operation is unbacked, the actual index calculation is ambiguous for negative indices
+    (index + size) versus non-negative indices (just index). To resolve this, we allocate an unbacked
+    SymInt to represent the storage offset and decompose the select operation into a call to as_strided,
+    computing the storage offset at runtime with this node.
+    """
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def __init__(
+        self,
+        unbacked_offset_symbol: sympy.Symbol,
+        index: sympy.Symbol,
+        base_offset: Union[sympy.Symbol, int],
+        base_dim_stride: Union[sympy.Symbol, int],
+        size: Union[sympy.Symbol, int],
+    ) -> None:
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        # This node codegen the following:
+        # unbacked_offset_symbol = base_offset + base_dim_stride * (index if index >=0 else index + size)
+        self.unbacked_offset_symbol = unbacked_offset_symbol
+        self.index = index
+        self.base_offset = base_offset
+        self.base_dim_stride = base_dim_stride
+        self.size = size
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet([self.unbacked_offset_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.index, unbacked_only)
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_dynamic_select_index(self)
 
 
 class DynamicScalar(ExternKernel):
@@ -7123,7 +7252,7 @@ class FallbackKernel(ExternKernelAlloc):
     inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
         layout: OutputSpec,
         kernel: _OpOverloads,
@@ -7525,16 +7654,24 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
                 self.codegen_alignment_asserts(wrapper)
+                self.codegen_memory_tracking(wrapper)
 
         self.codegen_unbacked_symbol_defs(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
+        is_pinned = False
+        try:
+            is_pinned = output.is_pinned()
+        except RuntimeError:
+            # dispatch not implemented
+            pass
         return FixedLayout(
             output.device,
             output.dtype,
             convert_shape_to_inductor(output.size()),
             convert_shape_to_inductor(output.stride()),
+            is_pinned=is_pinned,
         )
 
     @classmethod
@@ -7666,6 +7803,31 @@ class ComplexView(FallbackKernel):
         )
 
 
+class MemoryCheckKernel(FallbackKernel):
+    """
+    Custom kernel for memory checking that generates direct function calls
+
+    TODO - the custom op was erroring with str inputs. should be able to custom op directly.
+    """
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        """Override codegen to write direct function call"""
+        # Extract our arguments from nontensor_args
+        wrapper.write_memory_track_allocation_once()
+        alive_list, dead_list, is_final_step = self.constant_args
+
+        alive_repr = repr(alive_list)
+        dead_repr = repr(dead_list)
+        if is_final_step:
+            wrapper.writeline(
+                "# note: dont currently distinguish between buffers returned and dealloc'd in last step"
+            )
+            call = f"check_memory_step(allocated={alive_repr}, freed={dead_repr}, is_final_step={is_final_step})"
+        else:
+            call = f"check_memory_step(allocated={alive_repr}, freed={dead_repr})"
+        wrapper.writeline(call)
+
+
 @ir_dataclass
 class MultiOutputLayout(OutputSpec):
     device: torch.device
@@ -7675,7 +7837,7 @@ class MultiOutputLayout(OutputSpec):
 
 
 class MultiOutput(ExternKernel):
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_multi_output(self)
         if not self.skip_size_stride_alignment_checks:
             self.codegen_size_asserts(wrapper)
@@ -7910,6 +8072,7 @@ class StorageBox(MutableBox):
                 device=device,
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
+                is_pinned=False,
             ),
             data=self.data,
         )
@@ -8090,6 +8253,7 @@ class InvokeSubgraph(ExternKernel):
                         size=output.get_size(),
                         stride=output.get_stride(),
                         offset=output.get_layout().offset,
+                        is_pinned=output.get_layout().is_pinned,
                     ),
                     invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
@@ -8219,6 +8383,7 @@ class Conditional(ExternKernel):
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 conditional,
                 [(list, i)],
@@ -8446,6 +8611,7 @@ class WhileLoop(ExternKernel):
                     size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 while_loop,
                 [(list, idx)],
@@ -8752,7 +8918,7 @@ class _AllReduce_Kernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8761,16 +8927,16 @@ class _AllReduce_Kernel(_CollectiveKernel):
 
 
 class _AllReduceKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8783,7 +8949,7 @@ class _AllReduceKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 
@@ -8792,16 +8958,16 @@ class _AllReduceKernel(_CollectiveKernel):
 
 
 class _WaitKernel(_CollectiveKernel):
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        layout,
-        kernel,
-        tensor_args,
-        nontensor_args,
-        unflatten_args,
-        kwargs=None,
+        layout: OutputSpec,
+        kernel: _OpOverloads,
+        tensor_args: Sequence[IRNode],
+        nontensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: Optional[dict[str, Any]] = None,
         *,
-        unbacked_bindings=None,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
             layout,
@@ -8814,7 +8980,7 @@ class _WaitKernel(_CollectiveKernel):
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
 
-    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
         wrapper.generate_extern_kernel_alloc(self)
 

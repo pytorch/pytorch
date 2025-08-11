@@ -152,6 +152,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     """
 
     def __init__(self) -> None:
+        # Whether the heuristic is used for int8. Use this when the heuristic is int8 exclusive
+        # but prefer the preprocess_mm_configs argument when it's used for both
+        self.has_int8_tensor: bool = False
+        # Whether to scale configs at all
+        # TODO(coconutruben): remove this once mm_plus_mm and tests support scaling
+        self.should_scale_configs: bool = True
         # List of dictionaries to store the kernel configs. Configs that evaluate to true
         # will be utilised on the target platform. The configs are as follows:
         # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
@@ -478,10 +484,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Scales and filters matrix multiplication configs based on input size.
         """
+        if not self.should_scale_configs:
+            return configs
         from .runtime.runtime_utils import next_power_of_2
 
         min_block_size = 16
-        min_block_size_k = 32 if has_int8_tensor else 16
+        min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
 
         scaled_configs = []
         for hint_override in [None] + config.multi_kernel_hints:
@@ -566,6 +574,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return pruned_configs
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        Filter configs based on specific requirements.
+        Subclasses can override this to implement custom filtering logic.
+        """
+        return configs
+
     def preprocess_mm_configs(
         self,
         m: int,
@@ -580,10 +595,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         dtype_size: int = 0,
         op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
     ) -> Generator[TritonConfig, None, None]:
+        configs = self._filter_configs(configs)
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
-
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
             scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
@@ -601,21 +616,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
-
-    def get_persistent_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        # TODO(coconutruben): fold this into the normal get_mm_configs and get_exhaustive_mm_configs
-        # to just take in a filter callable
-        persistent_mm_configs = (
-            self.exhaustive_configs
-            if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-            else self.persistent_mm_configs
-        )
-
-        # num_warps=2 not safe for TMA
-        persistent_mm_configs = [
-            config for config in persistent_mm_configs if config.num_warps != 2
-        ]
-        return partial(self.preprocess_mm_configs, configs=persistent_mm_configs)
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(
@@ -735,7 +735,7 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
             [sympy.Integer, sympy.Integer, sympy.Integer], bool
         ] = lambda m, n, k: False,
         dtype_size: int = 0,
-        op_name: str = "mm",
+        op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
     ) -> Generator[TritonConfig, None, None]:
         """
         CPU-specific preprocessing that applies CPU-specific scaling (0.5) and exclusion logic.
@@ -748,8 +748,8 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
             m,
             n,
             k,
-            configs,
-            has_int8_tensor,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
             scale=0.5,
             exclude=cpu_exclude_fn,
             dtype_size=dtype_size,
@@ -1060,14 +1060,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-    def _filter_configs(
-        self, configs: list[BaseConfig], new_num_stages: int
-    ) -> list[BaseConfig]:
-        # TODO: _filter_configs can be removed once backend specific configs are added
-        # for all methods
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        ROCm specific filtering
+        """
         for c in configs:
             c.num_stages = self.default_num_stages
-        return configs
+        return super()._filter_configs(configs)
 
     def _finalize_mm_configs(
         self,
@@ -1210,6 +1209,12 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     """
 
 
+class MTIAConfigHeuristic(BaseConfigHeuristic):
+    """
+    Placeholder child class for MTIA specific overrides.
+    """
+
+
 # Template-specific mixin classes
 
 
@@ -1242,6 +1247,7 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
     get_exhaustive_mm_configs: Callable[
         [], partial[Generator[TritonConfig, None, None]]
     ]
+    _filter_configs: Callable[[list[BaseConfig]], list[BaseConfig]]
 
     def _get_config_generator(
         self,
@@ -1342,6 +1348,30 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         return f"tl.{dtype}".replace("torch.", "")
 
 
+# INT8 specific mixin to filter correctly
+class INT8MMTemplateConfigMixin(MMTemplateConfigMixin):
+    """
+    Ensure that we feed in has_int8_tensor=True
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.has_int8_tensor = True
+
+
+# MMPlusMM specific mixin to avoid running _scale_mm_configs
+class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """
+    Ensure that _should_scale_configs is False
+    """
+
+    # TODO(coconutruben): remove this once all tests work
+    # with proper scaling on mm_plus_mm
+    def __init__(self) -> None:
+        super().__init__()
+        self.should_scale_configs = False
+
+
 # TMA-specific mixin for TMA templates
 class TMAConfigMixin(MMTemplateConfigMixin):
     """
@@ -1349,20 +1379,12 @@ class TMAConfigMixin(MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
-    # Type annotations to ensure the mixin works with BaseConfigHeuristic
-    get_persistent_mm_configs: Callable[
-        [], partial[Generator[TritonConfig, None, None]]
-    ]
-
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
-        Override to use persistent MM configs for TMA templates.
-        TODO(coconutruben): Fix this once we break out the preprocessing better.
+        TMA specific filtering, as num_warps=2 not safe for TMA
         """
-        # Always use persistent configs for TMA, regardless of search space
-        return self.get_persistent_mm_configs()
+        configs = [c for c in configs if c.num_warps != 2]
+        return super()._filter_configs(configs)
 
     def get_template_configs(
         self,
@@ -1471,6 +1493,13 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
     This inherits from ScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        TMA specific filtering, as num_warps=2 not safe for TMA
+        """
+        configs = [c for c in configs if c.num_warps != 2]
+        return super()._filter_configs(configs)
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -1485,12 +1514,9 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
             kernel_inputs, layout, op_name
         ):
             # Add TMA-specific options for device TMA scaled MM
-            if template_kwargs.get("device_tma", False):
-                template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
-                template_kwargs["NUM_SMS"] = get_num_sms()
-                template_kwargs[
-                    "TMA_EXPERIMENTAL_API"
-                ] = not has_triton_stable_tma_api()
+            template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
+            template_kwargs["NUM_SMS"] = get_num_sms()
+            template_kwargs["TMA_EXPERIMENTAL_API"] = not has_triton_stable_tma_api()
 
             yield template_kwargs
 
@@ -1516,7 +1542,7 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
         super().__init__()
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.extra_mm_configs
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.extra_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
@@ -1526,9 +1552,16 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
 class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeuristic):
     """Persistent TMA template heuristic for CUDA"""
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        self.mm_configs = self.persistent_mm_configs
+
 
 # TODO(coconutruben): replace with template.name once templates are importable
-@register_template_heuristic("scaled_mm", "cuda", register=torch.version.hip is None)
+@register_template_heuristic(
+    "mm", "cuda", register=torch.version.hip is None, op_name="scaled_mm"
+)
 class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeuristic):
     """Scaled MM template heuristic for CUDA"""
 
@@ -1540,7 +1573,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.scaled_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
@@ -1558,12 +1591,14 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.scaled_persistent_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic("mm_plus_mm", "cuda", register=torch.version.hip is None)
-class CUDAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+class CUDAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CUDAConfigHeuristic
+):
     """MM Plus MM template heuristic for CUDA"""
 
     def __init__(self) -> None:
@@ -1574,12 +1609,14 @@ class CUDAMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuri
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.mm_plus_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
-@register_template_heuristic("int_mm", "cuda", register=torch.version.hip is None)
-class CUDAInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
+@register_template_heuristic(
+    "mm", "cuda", register=torch.version.hip is None, op_name="int_mm"
+)
+class CUDAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CUDAConfigHeuristic):
     """Int8 MM template heuristic for CUDA"""
 
     def __init__(self) -> None:
@@ -1590,7 +1627,7 @@ class CUDAInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.int8_mm_configs
 
 
 # ROCm template-specific classes
@@ -1619,7 +1656,7 @@ class ROCmMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic(
-    "scaled_mm", "cuda", register=torch.version.hip is not None
+    "mm", "cuda", register=torch.version.hip is not None, op_name="scaled_mm"
 )
 class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeuristic):
     """Scaled MM template heuristic for ROCm (non-TMA)"""
@@ -1632,12 +1669,14 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.scaled_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
-@register_template_heuristic("int_mm", "cuda", register=torch.version.hip is not None)
-class ROCmInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+@register_template_heuristic(
+    "mm", "cuda", register=torch.version.hip is not None, op_name="int_mm"
+)
+class ROCmInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, ROCmConfigHeuristic):
     """Int8 MM template heuristic for ROCm"""
 
     def __init__(self) -> None:
@@ -1648,25 +1687,30 @@ class ROCmInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.int8_mm_configs
 
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic(
     "mm_plus_mm", "cuda", register=torch.version.hip is not None
 )
-class ROCmMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic):
+class ROCmMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, ROCmConfigHeuristic
+):
     """MM Plus MM template heuristic for ROCm"""
 
     def __init__(self) -> None:
         super().__init__()
+        # self.default_num_stages is used to make sure all configs have that in ROCm land
+        # for mm_plus_mm, we actually just want stages = 1, as pipelining brings no benefits
+        self.default_num_stages = 1
         # Override mm_configs to use mm_plus_mm_configs
         self.mm_configs = self.mm_plus_mm_configs
         # NOTE: overriding exhaustive configs here to be the same as mm_configs
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.mm_plus_mm_configs
 
 
 # CPU template-specific classes
@@ -1678,7 +1722,7 @@ class CPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
     """Standard MM template heuristic for CPU"""
 
 
-@register_template_heuristic("scaled_mm", "cpu")
+@register_template_heuristic("mm", "cpu", op_name="scaled_mm")
 class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic):
     """Scaled MM template heuristic for CPU (non-TMA)"""
 
@@ -1690,11 +1734,11 @@ class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.scaled_mm_configs
 
 
-@register_template_heuristic("int_mm", "cpu")
-class CPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+@register_template_heuristic("mm", "cpu", op_name="int_mm")
+class CPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CPUConfigHeuristic):
     """Int8 MM template heuristic for CPU"""
 
     def __init__(self) -> None:
@@ -1705,11 +1749,13 @@ class CPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.int8_mm_configs
 
 
 @register_template_heuristic("mm_plus_mm", "cpu")
-class CPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
+class CPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, CPUConfigHeuristic
+):
     """MM Plus MM template heuristic for CPU"""
 
     def __init__(self) -> None:
@@ -1720,7 +1766,7 @@ class CPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.mm_plus_mm_configs
 
 
 # XPU template-specific classes
@@ -1732,7 +1778,7 @@ class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
 
-@register_template_heuristic("scaled_mm", "xpu")
+@register_template_heuristic("mm", "xpu", op_name="scaled_mm")
 class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic):
     """Scaled MM template heuristic for XPU (non-TMA)"""
 
@@ -1744,11 +1790,11 @@ class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.scaled_mm_configs
 
 
-@register_template_heuristic("int_mm", "xpu")
-class XPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+@register_template_heuristic("mm", "xpu", op_name="int_mm")
+class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuristic):
     """Int8 MM template heuristic for XPU"""
 
     def __init__(self) -> None:
@@ -1759,11 +1805,13 @@ class XPUInt8MMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.int8_mm_configs
 
 
 @register_template_heuristic("mm_plus_mm", "xpu")
-class XPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
+class XPUMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
+):
     """MM Plus MM template heuristic for XPU"""
 
     def __init__(self) -> None:
@@ -1774,4 +1822,60 @@ class XPUMMPlusMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeurist
         # as we haven't validated exhaustive support here yet
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
-        self.exhaustive_configs = self.mm_configs
+        self.exhaustive_configs = self.mm_plus_mm_configs
+
+
+# MTIA template-specific classes
+
+
+@register_template_heuristic("mm", "mtia")
+@register_template_heuristic("bmm", "mtia")
+class MTIAMMTemplateConfigHeuristic(MMTemplateConfigMixin, MTIAConfigHeuristic):
+    """Standard MM template heuristic for MTIA"""
+
+
+@register_template_heuristic("mm", "mtia", op_name="scaled_mm")
+class MTIAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, MTIAConfigHeuristic):
+    """Scaled MM template heuristic for MTIA (non-TMA)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_mm_configs
+        self.mm_configs = self.scaled_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.scaled_mm_configs
+
+
+@register_template_heuristic("mm", "mtia", op_name="int_mm")
+class MTIAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, MTIAConfigHeuristic):
+    """Int8 MM template heuristic for MTIA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use int8_mm_configs
+        self.mm_configs = self.int8_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.int8_mm_configs
+
+
+@register_template_heuristic("mm_plus_mm", "mtia")
+class MTIAMMPlusMMTemplateConfigHeuristic(
+    MMPlusMMTemplateConfigMixin, MTIAConfigHeuristic
+):
+    """MM Plus MM template heuristic for MTIA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use mm_plus_mm_configs
+        self.mm_configs = self.mm_plus_mm_configs
+        # NOTE: overriding exhaustive configs here to be the same as mm_configs
+        # as we haven't validated exhaustive support here yet
+        # TODO(coconutruben): remove this once we have validated exhaustive support
+        # for scaled_mm
+        self.exhaustive_configs = self.mm_plus_mm_configs
