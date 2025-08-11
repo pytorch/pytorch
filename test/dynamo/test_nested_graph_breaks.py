@@ -304,7 +304,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 7)
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
     def test_no_recompiles(self):
         global f1, f2, f3
