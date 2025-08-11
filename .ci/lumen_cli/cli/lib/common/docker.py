@@ -38,6 +38,7 @@ def local_image_exists(
         logger.info("Image %s not found locally...", image_name)
         return False
     except APIError:
-        # Surface daemon/connection problems as False or re-raise — your choice.
-        # Here we choose False to match the old "inspect fails => False" behavior.
+        logger.warning(
+            "Run into apierror when trying to check docker image using docker client."
+        )
         return False

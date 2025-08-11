@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class PrintProgress(RemoteProgress):
+    """
+    Class object passes to git package for logging progress
+    """
+
     def __init__(self, every_percent: int = 1):
         super().__init__()
         self._last = -1
@@ -33,12 +37,12 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
     """
     Clone a repo into a given directory.
     Args:
-        target: The name of the repo to clone.
-        repo: The URL of the repo to clone.
-        cwd: The directory to clone the repo into.
+        target: The name of the target to clone, for instance, vllm
+        repo: The full URL of the repo to clone.
+        dst: The directory to clone the repo into, if not provided, uses target as the directory name
+        update_submodules: bool enable/disable updated submodules if any
     Returns:
         The repo object
-
     """
     try:
         # Clone
