@@ -145,24 +145,11 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
-        mast_job_id = os.environ.get("MAST_HPC_JOB_NAME", None)
-        global_rank = os.environ.get("ROLE_RANK", "0")
-        worker_log_path = os.environ.get("TORCHINDUCTOR_WORKER_LOGPATH", config.worker_log_path)
-        stdout_pipe = None
-        stderr_pipe = None
-        self.log_file = None
-
-        if mast_job_id is not None:
-            log_loc = f"{worker_log_path}{global_rank}"
-            self.log_file = open(log_loc, "w")
-        elif config.worker_suppress_logging:
+        local = False
+        if config.worker_suppress_logging:
             log.info("Suppressing compile worker output due to config")
-            self.log_file = open(os.devnull, "w")
+            local = True
 
-        if self.log_file:
-            stdout_pipe = self.log_file
-            stderr_pipe = self.log_file
-        
         self.process = subprocess.Popen(
             cmd,
             env={
@@ -177,10 +164,9 @@ class SubprocPool:
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
-            stdout=stdout_pipe,
-            stderr=stderr_pipe,
+            stdout=subprocess.DEVNULL if local else None,
+            stderr=subprocess.DEVNULL if local else None,
         )
-
         self.write_lock = threading.Lock()
         self.read_thread = threading.Thread(
             target=self._read_thread, name="InductorSubproc", daemon=True
@@ -276,8 +262,6 @@ class SubprocPool:
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
-            if self.log_file:
-                self.log_file.close()
         except OSError as e:
             log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
