@@ -8616,6 +8616,11 @@ class TorchBindObject(NonTensorObj):
         ]
         return functools.reduce(operator.add, flat_sizes, 0)
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
 
 @ir_dataclass
 class GeneratorState(NonTensorObj):
