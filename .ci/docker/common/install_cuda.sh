@@ -131,7 +131,7 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.10.2.21
+  CUDNN_VERSION=9.12.0.46
   NVSHMEM_VERSION=3.3.20
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   # install CUDA 13.0 in the same container
@@ -160,6 +160,7 @@ do
     12.9|12.9.*) install_129;
         ;;
     13.0|13.0.*) install_130;
+        ;;
     *) echo "bad argument $1"; exit 1
         ;;
     esac
