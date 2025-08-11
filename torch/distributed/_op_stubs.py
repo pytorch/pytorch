@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Any, Callable
 
 import torch.library
 
@@ -11,7 +11,7 @@ from ._distributed_c10d import HAS_DISTRIBUTED
 
 if not HAS_DISTRIBUTED:
     # Define missing c10d operators
-    lib_def = torch.library.Library("c10d", "DEF")
+    lib_def = torch.library.Library("c10d", "DEF")  # noqa: TOR901
 
     # Define basic signatures for the operators we need
     op_signatures = {
@@ -38,7 +38,7 @@ if not HAS_DISTRIBUTED:
 
     # Register functional collective operators when not available
     def _raise_not_implemented(op_name: str) -> Callable[..., None]:
-        def _impl(*args, **kwargs) -> None:
+        def _impl(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError(
                 f"Distributed collective operation '{op_name}' is not available in non-distributed builds"
             )

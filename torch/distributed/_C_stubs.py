@@ -579,5 +579,38 @@ class ScatterOptions:
         self.timeout = _DEFAULT_PG_TIMEOUT
 
 
+def _dump_nccl_trace_json(
+    includeCollectives: Optional[bool] = None, onlyActive: Optional[bool] = None
+) -> bytes:
+    """Mock function that returns empty JSON trace in non-distributed builds.
+
+    Arguments:
+        includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+        onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+    Returns:
+        Stringified json work traces.
+        Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+    """
+    return b"{}"
+
+
+def _dump_nccl_trace(
+    includeCollectives: Optional[bool] = None,
+    includeStackTraces: Optional[bool] = None,
+    onlyActive: Optional[bool] = None,
+) -> bytes:
+    """Mock function that returns empty pickle trace in non-distributed builds.
+
+    Arguments:
+        includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+        includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+        onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+    Returns:
+        Stringified pickle work traces.
+        Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
+    """
+    return b""
+
+
 import torch
 from torch.futures import Future

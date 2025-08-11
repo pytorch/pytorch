@@ -53,7 +53,6 @@ if HAS_DISTRIBUTED or TYPE_CHECKING:
         _DEFAULT_FIRST_BUCKET_BYTES,
         _DEFAULT_PG_TIMEOUT,
         _DistributedBackendOptions,
-        _hash_tensors,
         _make_nccl_premul_sum,
         _register_builtin_comm_hook,
         _register_comm_hook,
@@ -101,11 +100,6 @@ if HAS_DISTRIBUTED or TYPE_CHECKING:
 
     # These identifiers aren't always available on all builds
     try:
-        from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
-    except ImportError:
-        from torch.distributed._C_stubs import _DEFAULT_PG_NCCL_TIMEOUT
-
-    try:
         from torch._C._distributed_c10d import HashStore
     except ImportError:
         from torch.distributed._C_stubs import HashStore
@@ -132,11 +126,21 @@ if HAS_DISTRIBUTED or TYPE_CHECKING:
         from torch.distributed._C_stubs import ProcessGroupMPI
 
     try:
-        from torch._C._distributed_c10d import ProcessGroupNCCL
+        from torch._C._distributed_c10d import (
+            _DEFAULT_PG_NCCL_TIMEOUT,
+            _dump_nccl_trace,
+            _dump_nccl_trace_json,
+            _hash_tensors,
+            ProcessGroupNCCL,
+        )
 
         _NCCL_AVAILABLE = True
     except ImportError:
-        from torch.distributed._C_stubs import ProcessGroupNCCL
+        from torch.distributed._C_stubs import (
+            _DEFAULT_PG_NCCL_TIMEOUT,
+            _hash_tensors,
+            ProcessGroupNCCL,
+        )
 
     try:
         from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
@@ -249,6 +253,8 @@ __all__ = [
     "_SymmetricMemory",
     "_hash_tensors",
     "_set_global_rank",
+    "_dump_nccl_trace",
+    "_dump_nccl_trace_json",
     "Backend",
     "BuiltinCommHookType",
     "DebugLevel",
