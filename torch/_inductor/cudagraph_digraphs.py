@@ -387,13 +387,17 @@ def cudagraphify(
         # print(f"GALVEZ: running graph: {graph_to_number[id(graph)]=}")
         assert len(static_inputs) == len(new_inputs)
 
-        new_inputs_only_tensors = [input for input in new_inputs if isinstance(input, torch.Tensor) and input.is_cuda]
-
         dynamic_tensors = []
 
         old_tensors = []
         new_tensors = []
 
+        # We need to speed this up somehow. Maybe I can keep the
+        # parameters as static inputs. I just need to make sure that
+        # tangents are not considered static, IIUC. There are way too
+        # many inputs, and this loop ends up taking >100 microseconds,
+        # which makes parameterized cuda graph launch slower than
+        # cudagraph trees in the end.
         torch.cuda.nvtx.range_push("push inputs")
         for idx in dynamic_input_idxs:
             # TODO: This isn't quite right, is it? It's possible that
@@ -436,6 +440,8 @@ def cudagraphify(
             # Copy data back. I need to do this only if the input is
             # marked as mutable or if an output aliases the input
             torch._foreach_copy_(old_tensors, new_tensors)
+
+        new_inputs_only_tensors = [input for input in new_inputs if isinstance(input, torch.Tensor) and input.is_cuda]
 
         outputs = []
 

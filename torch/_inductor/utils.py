@@ -2470,6 +2470,8 @@ def find_recursive_users_of_node(
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int) -> int:
     "Computes the number of inputs to the aot fw graph which have fixed addresses (params and buffers)"
+    # Let's think about the implication of making rng seed offsets a
+    # static input
     num_rng_seed_offset_inputs = (
         2 if torch._functorch.config.functionalize_rng_ops else 0
     )

@@ -1704,6 +1704,8 @@ def cudagraphify(
 
     compiled_fn = None
 
+    import nvtx
+    @nvtx.annotate(message="run cudagraph", color="green")
     def run(new_inputs: Sequence[InputType]) -> Any:
         nonlocal compiled_fn
         if compiled_fn is None:
