@@ -2,9 +2,11 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <deque>
 #include <set>
 
 namespace c10::CachingDeviceAllocator {
@@ -446,10 +448,7 @@ struct SegmentRange {
 // HandleT as void* as a placeholder.
 template <typename StreamT>
 struct ExpandableSegmentTraits {
-  // Force specialization - this will trigger a compile error if used directly
-  static_assert(
-      sizeof(StreamT) == 0,
-      "ExpandableSegmentTraits must be specialized for this StreamT");
+  using HandleT = void*;
 };
 
 /**
@@ -652,6 +651,7 @@ ExpandableSegmentT* make_expandable_segment(
 }
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+using CreateContextFnPtr = std::shared_ptr<GatheredContext> (*)();
 
 enum struct RecordContext {
   NEVER = 0,
@@ -680,12 +680,210 @@ struct CachingDeviceAllocatorImpl {
     context_recorder_.store(nullptr);
   }
 
-  BlockT* malloc(DeviceIndex device, size_t orig_size, c10::Stream stream) {}
+  BlockT* malloc(DeviceIndex device, size_t orig_size, c10::Stream stream) {
+    // done outside the lock because we don't know what locks the recorder needs
+    // to have...
+    auto context = maybeGatherContext(RecordContext::STATE);
+
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    if (C10_LIKELY(captures_underway.empty())) {
+      // Processes end-of-life events for outstanding allocations used on
+      // multiple streams (checks if their GPU-side uses are complete and
+      // recycles their memory if so)
+      //
+      // Q. Why skip process_events if a capture might be underway?
+      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      //    capture.
+      //    Dumb simple solution: defer reclaiming these allocations until after
+      //    capture. Cross-stream memory use is uncommon, so the deferral's
+      //    effect on memory use during capture should be small.
+      process_events(context);
+    }
+  }
 
  private:
+  /* Internal methods for processing runtime Stream/Event */
+
+  // Record an event on stream and return it. Note this function may be called
+  // under allocator lock.
+  virtual EventT record_event_for_stream(StreamT stream) = 0;
+
+  // Queries the status of an event. Returns true if the event is complete. Note
+  // this function may be called under allocator lock.
+  virtual bool query_event(const EventT& event) = 0;
+
+  // Records events for all streams that have used the given memory block.
+  // This function transfers the ownership of the block’s `stream_uses` set.
+  void insert_events(BlockT* block) {
+    c10::DeviceGuard device_guard(block->device);
+
+    ska::flat_hash_set<StreamT> streams(std::move(block->stream_uses));
+    TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
+    block->event_count += streams.size();
+    for (auto& stream : streams) {
+      EventT event = record_event_for_stream(stream);
+      outstanding_events[stream].emplace_back(std::move(event), block);
+    }
+  }
+
+  // Removes stream uses that were added to the block during graph capture. And
+  // restores the block's `stream_uses` set to its state before the capture.
+  void remove_graph_stream_uses(BlockT* block) {
+    // remove stream uses added during cudagraph capture
+    // (i.e., block->stream_uses - block->cudagraph_stream_uses)
+    if (C10_UNLIKELY(
+            block_to_graph_stream_uses.find(block) !=
+            block_to_graph_stream_uses.end())) {
+      ska::flat_hash_set<StreamT> streams(std::move(block->stream_uses));
+      TORCH_INTERNAL_ASSERT(block->stream_uses.empty());
+      for (auto& stream : streams) {
+        if (block_to_graph_stream_uses[block].find(stream) ==
+            block_to_graph_stream_uses[block].end()) {
+          block->stream_uses.insert(stream);
+        }
+      }
+      block_to_graph_stream_uses.erase(block);
+    }
+  }
+
+  void insert_events_deferred_until_no_capture(
+      const std::shared_ptr<GatheredContext>& context) {
+    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
+      for (auto* block : needs_events_deferred_until_no_capture) {
+        TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
+        // only streams recorded before cudagraph will be used to insert events
+        // since we know all streams recorded during cudagraph must have
+        // completed (refer to Section 3.2.8.7.3.1 Cross-stream Dependencies and
+        // Events in CUDA Programming Guide).
+        remove_graph_stream_uses(block);
+        insert_events(block);
+        if (block->event_count == 0) {
+          free_block(block, context);
+        }
+      }
+      needs_events_deferred_until_no_capture.clear();
+    }
+  }
+
+  // Processes all outstanding events and frees associated memory blocks when safe.
+  void process_events(const std::shared_ptr<GatheredContext>& context) {
+    insert_events_deferred_until_no_capture(context);
+
+    // Process outstanding cudaEvents. Events that are completed are
+    // removed from the queue, and the 'event_count' for the
+    // corresponding allocation is decremented. We maintain a separate
+    // list of events per stream to avoid head-of-line delays if one
+    // or more streams has long-running operations.
+
+    // Iterate over different streams.
+    for (auto it = outstanding_events.begin(); it != outstanding_events.end();) {
+      // Iterate over this stream's (event, block) pairs.
+      while (!it->second.empty()) {
+        auto& e = it->second.front();
+        EventT event = std::move(e.first);
+        BlockT* block = e.second;
+
+        if (!query_event(event)) {
+          // Return the ownership of the Event (unique ptr)
+          e.first = std::move(event);
+          break;
+        }
+
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block, context);
+        }
+        it->second.pop_front();
+      }
+
+      if (it->second.empty()) {
+        it = outstanding_events.erase(it);
+      } else {
+        it++;
+      }
+    }
+  }
+
   /* Internal methods for managing device blocks*/
 
-  BlcokPoolT& get_pool(size_t size, StreamT stream) {
+  /* Moves a block into a pool of cached free blocks */
+  void free_block(
+      BlockT* block,
+      const std::shared_ptr<GatheredContext>& context) {
+    TORCH_INTERNAL_ASSERT(
+        !block->allocated && block->event_count == 0 &&
+        block->stream_uses.empty());
+
+    record_trace(
+        TraceEntry::FREE_COMPLETED,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_allocated);
+
+    block->context_when_allocated = nullptr;
+    size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
+
+    int64_t net_change_inactive_split_blocks = 0;
+    int64_t net_change_inactive_split_size = 0;
+
+    const std::array<BlockT*, 2> merge_candidates = {block->prev, block->next};
+    for (BlockT* merge_candidate : merge_candidates) {
+      const auto subsumed_size = block->try_merge(merge_candidate);
+      if (subsumed_size > 0) {
+        net_change_inactive_split_blocks -= 1;
+        net_change_inactive_split_size -= static_cast<int64_t>(subsumed_size);
+      }
+    }
+
+    active_blocks.erase(block);
+    // Makes sure the Block* isn't already present in the pool we're freeing it
+    // back into.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    bool inserted = pool.insert_into_blocks(block).second;
+    TORCH_INTERNAL_ASSERT(inserted);
+
+    if (block->is_split()) {
+      net_change_inactive_split_blocks += 1;
+      net_change_inactive_split_size += static_cast<int64_t>(block->size);
+    }
+
+    StatTypes stat_types = block->pool->get_stat_types();
+
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      // inactive_split tries to capture the idea that blocks
+      // cannot be freed when requested, but fully free pages
+      // of expandable blocks can always be freed.
+      // The logic to track this as statistic is pretty involved,
+      // so we simply just exclude expandable segments from
+      // inactive_split
+      if (!block->expandable_segment_) {
+        if (net_change_inactive_split_blocks > 0) {
+          stats.inactive_split[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_blocks));
+        } else if (net_change_inactive_split_blocks < 0) {
+          stats.inactive_split[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_blocks));
+        }
+        if (net_change_inactive_split_size > 0) {
+          stats.inactive_split_bytes[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_size));
+        } else if (net_change_inactive_split_size < 0) {
+          stats.inactive_split_bytes[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_size));
+        }
+      }
+      stats.active[stat_type].decrease(1);
+      stats.active_bytes[stat_type].decrease(original_block_size);
+      stats.requested_bytes[stat_type].decrease(requested_size);
+    });
+  }
+
+  BlockPoolT& get_pool(size_t size, StreamT stream) {
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only non-empty if some thread has begun and not yet ended
     // a capture, so it's usually 0, and we can short-circuit
@@ -724,13 +922,20 @@ struct CachingDeviceAllocatorImpl {
   // unallocated cached blocks 1 MB or smaller
   BlockPoolT small_blocks;
 
-  std::atomic<CreateContextFn> context_recorder_;
+  // Allocated or in use by a stream. Holds all active allocations, whether they
+  // came from graph_pools or one of the BlockPools above.
+  ska::flat_hash_set<BlockT*> active_blocks;
+
+  std::atomic<CreateContextFn> context_recorder_{nullptr};
   RecordContext record_context_ = RecordContext::NEVER;
 
-  // captures_underway tracks if we are diverting some allocations to a specific
-  // pool. Most of the time it's empty, in which case malloc can avoid calling
-  // query streams' capture state API such as `cudaStreamGetCaptureInfo` in the
-  // hot path.
+  // Outstanding events that are waiting for the used streams to complete.
+  ska::flat_hash_map<StreamT, std::deque<std::pair<EventT, BlockT*>>>
+      outstanding_events;
+
+  // Tracks if we are diverting some allocations to a specific pool. Most of the
+  // time it's empty, in which case malloc can avoid calling query streams'
+  // capture state API such as `cudaStreamGetCaptureInfo` in the hot path.
   std::vector<std::pair<MempoolId_t, std::function<bool(StreamT)>>>
       captures_underway;
 
@@ -739,6 +944,14 @@ struct CachingDeviceAllocatorImpl {
   // Private pools for CUDA graphs
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePoolT>, MempoolIdHash>
       graph_pools;
-}
+
+  // Holds free blocks whose event insertion is deferred until capture finished.
+  std::vector<BlockT*> needs_events_deferred_until_no_capture;
+
+  // Mapping from block to a stream set, containing streams on which the block
+  // was used while graph feature capturing
+  std::unordered_map<BlockT*, ska::flat_hash_set<StreamT>>
+      block_to_graph_stream_uses;
+};
 
 } // namespace c10::CachingDeviceAllocator
