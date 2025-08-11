@@ -282,6 +282,16 @@ AOTITorchError aoti_torch_int64_to_ivalue(
   });
 }
 
+AOTITorchError aoti_torch_tensor_to_ivalue(
+    AtenTensorHandle tensor,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* tmp_tensor = tensor_handle_to_tensor_pointer(tensor);
+    c10::IValue* tmp_ivalue = new c10::IValue(*tmp_tensor);
+    *ivalue = reinterpret_cast<C10IValueHandle>(tmp_ivalue);
+  });
+}
+
 AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** ret_data_ptr) {

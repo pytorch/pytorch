@@ -2194,6 +2194,7 @@ end
 
             log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
             log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
+            breakpoint()
             if config.aot_inductor.package_cpp_only:
                 # Not doing the actual compilation here
                 compile_flags = str(
