@@ -86,7 +86,7 @@ def _gen_transform_infos_non_cached(
     src_tensor_dim_to_mesh_dims = _map_tensor_dim_to_mesh_dim(
         src_spec.placements, src_device_order
     )
-    dst_device_order_to_mesh_dims = _map_tensor_dim_to_mesh_dim(
+    dst_tensor_dim_to_mesh_dims = _map_tensor_dim_to_mesh_dim(
         dst_spec.placements, dst_device_order
     )
 
@@ -108,13 +108,13 @@ def _gen_transform_infos_non_cached(
     for tensor_dim in range(src_spec.ndim):
         if (
             tensor_dim in src_tensor_dim_to_mesh_dims
-            and tensor_dim in dst_device_order_to_mesh_dims
+            and tensor_dim in dst_tensor_dim_to_mesh_dims
         ):
             # The rule is to only allow push/pop the rightmost number to turn
             # src_tensor_dim_to_mesh_dims[tensor_dim] into
-            # dst_device_order_to_mesh_dims[tensor_dim]. For example, if
+            # dst_tensor_dim_to_mesh_dims[tensor_dim]. For example, if
             # src_tensor_dim_to_mesh_dims[tensor_dim] = [3, 0, 1, 2] and
-            # dst_device_order_to_mesh_dims[tensor_dim] = [3, 1, 0], we need to
+            # dst_tensor_dim_to_mesh_dims[tensor_dim] = [3, 1, 0], we need to
             # [3, 0, 1, 2] -> (allgather) [3, 0, 1] -> (allgather) [3, 0] ->
             # (allgather) [3] -> (chunk) [3, 1] -> (chunk) [3, 1, 0]
             src_mesh_dims = (
@@ -123,8 +123,8 @@ def _gen_transform_infos_non_cached(
                 else []
             )
             dst_mesh_dims = (
-                dst_device_order_to_mesh_dims[tensor_dim].copy()
-                if tensor_dim in dst_device_order_to_mesh_dims
+                dst_tensor_dim_to_mesh_dims[tensor_dim].copy()
+                if tensor_dim in dst_tensor_dim_to_mesh_dims
                 else []
             )
 
@@ -187,15 +187,17 @@ def _gen_transform_infos_non_cached(
             if len(src_tensor_dim_to_mesh_dims[tensor_dim]) == 1:
                 mesh_dim = src_tensor_dim_to_mesh_dims[tensor_dim][0]
                 # check if exist j s.t. dst_tensor_dim_to_mesh_dims[j]==[mesh_dim]
+                if not sorted_dst_placement[mesh_dim].is_shard():
+                    # sorted_dst_placement[mesh_dim] may have been handled and
+                    # replaced with Replicate(), skip
+                    continue
                 for j in range(src_spec.ndim):
-                    if (
-                        j in dst_device_order_to_mesh_dims
-                        and dst_device_order_to_mesh_dims[j] == [mesh_dim]
-                    ):
+                    if j in dst_tensor_dim_to_mesh_dims and dst_tensor_dim_to_mesh_dims[
+                        j
+                    ] == [mesh_dim]:
                         mesh_dim_size = device_mesh.size(mesh_dim=mesh_dim)
                         current_placement = sorted_dst_placement[mesh_dim]
-                        assert isinstance(current_placement, Shard)
-                        # alltoall from Shard(tensor_dim) to Shard()
+                        # alltoall from Shard(tensor_dim) to Shard(j)
                         transform_infos.append(
                             _TransformInfo(
                                 mesh_dim=mesh_dim,
@@ -203,21 +205,21 @@ def _gen_transform_infos_non_cached(
                                 logical_shape=current_logical_shape,
                             )
                         )
+                        current_logical_shape[tensor_dim] = min(
+                            current_logical_shape[tensor_dim] * mesh_dim_size,
+                            src_spec.shape[tensor_dim],
+                        )
                         local_shard_size, _ = (
                             current_placement._local_shard_size_and_offset(
-                                current_logical_shape[tensor_dim],
+                                current_logical_shape[j],
                                 mesh_dim_size,
                                 my_coordinate[mesh_dim],
                             )
                         )
-                        # TODO: confirm if this is correct
-                        current_logical_shape[tensor_dim] = local_shard_size
-                        current_logical_shape[j] = min(
-                            current_logical_shape[j] * mesh_dim_size, src_spec.shape[j]
-                        )
+                        current_logical_shape[j] = local_shard_size
                         sorted_src_placement[mesh_dim] = Shard(j)
                         # just use the first matching one, delete key j from dst_device_order_to_mesh_dims to prevent reuse
-                        del dst_device_order_to_mesh_dims[
+                        del dst_tensor_dim_to_mesh_dims[
                             j
                         ]  # may not be necessary, just to be safe
                         break
@@ -227,11 +229,27 @@ def _gen_transform_infos_non_cached(
     ):
         if src_placement == dst_placement:
             continue
-        assert not (
-            isinstance(src_placement, Shard) and isinstance(dst_placement, Shard)
-        )
         mesh_dim_size = device_mesh.size(mesh_dim=mesh_dim)
-        if isinstance(src_placement, Shard):
+        if isinstance(src_placement, Shard) and isinstance(dst_placement, Shard):
+            # alltoall
+            transform_infos.append(
+                _TransformInfo(
+                    mesh_dim=mesh_dim,
+                    src_dst_placements=(src_placement, dst_placement),
+                    logical_shape=current_logical_shape,
+                )
+            )
+            current_logical_shape[src_placement.dim] = min(
+                current_logical_shape[src_placement.dim] * mesh_dim_size,
+                src_spec.shape[src_placement.dim],
+            )
+            local_shard_size, _ = dst_placement._local_shard_size_and_offset(
+                current_logical_shape[dst_placement.dim],
+                mesh_dim_size,
+                my_coordinate[mesh_dim],
+            )
+            current_logical_shape[dst_placement.dim] = local_shard_size
+        elif isinstance(src_placement, Shard):
             # shard -> replicate/partial
             transform_infos.append(
                 _TransformInfo(
