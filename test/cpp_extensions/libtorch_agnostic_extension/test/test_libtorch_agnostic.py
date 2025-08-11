@@ -222,11 +222,15 @@ if not IS_WINDOWS:
         def test_default_constructor(self):
             import libtorch_agnostic
 
-            is_defined_defined = libtorch_agnostic.ops.test_default_constructor(True)
-            self.assertTrue(is_defined_defined)
+            defined_tensor_is_defined = libtorch_agnostic.ops.test_default_constructor(
+                True
+            )
+            self.assertTrue(defined_tensor_is_defined)
 
-            is_undefined_defined = libtorch_agnostic.ops.test_default_constructor(False)
-            self.assertFalse(is_undefined_defined)
+            undefined_tensor_is_defined = (
+                libtorch_agnostic.ops.test_default_constructor(False)
+            )
+            self.assertFalse(undefined_tensor_is_defined)
 
         def test_my_pad(self, device):
             import libtorch_agnostic
