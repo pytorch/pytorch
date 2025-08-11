@@ -68,8 +68,7 @@ def evaluate_platform_supports_flash_attention():
 
 def evaluate_platform_supports_ck_sdpa():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx950"]
-        return evaluate_gfx_arch_within(arch_list)
+        return torch.backends.cuda.is_ck_sdpa_available()
     else:
         return False
 
