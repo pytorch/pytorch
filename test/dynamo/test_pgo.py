@@ -56,6 +56,10 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         f(torch.randn(2, 6))
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(
+        force_parameter_static_shapes=False,
+        force_nn_module_property_static_shapes=False,
+    )
     def test_whitelist_suggestion(self):
         cnts = CompileCounter()
 
@@ -195,14 +199,16 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
 
         # parameter static shapes are forced static, so we recompile once
-        run()
-        self.assertEqual(cnts.frame_count, 2)
+        with torch._dynamo.config.patch(
+            force_parameter_static_shapes=False,
+            force_nn_module_property_static_shapes=False,
+        ):
+            run()
+            self.assertEqual(cnts.frame_count, 2)
 
-        # flags are flipped, PGO records dynamism, so params are dynamically compiled to start
-        torch._dynamo.config.force_parameter_static_shapes = False
-        torch._dynamo.config.force_nn_module_property_static_shapes = False
-        run()
-        self.assertEqual(cnts.frame_count, 1)
+            # because flags were flipped, params were included in PGO
+            run()
+            self.assertEqual(cnts.frame_count, 1)
 
     def test_njt(self):
         cnts = CompileCounter()
