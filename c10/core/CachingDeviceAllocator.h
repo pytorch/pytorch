@@ -158,29 +158,30 @@ union trace_time_ {
   approx_time_t approx_t_;
 };
 
-struct TraceEntry {
+// This is a generic trace entry that can be used for any device allocator
+struct GenericTraceEntry {
   enum Action {
     ALLOC, // API made to the caching allocator for new memory
     FREE_REQUESTED, // API call made to the caching allocator to free memory
     FREE_COMPLETED, // The allocator might have to delay a free because
                     // it is still in use on another stream via record_stream
                     // This event is generated when a free actually completes.
-    SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
-    SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
+    SEGMENT_ALLOC, // A call to cudaMalloc to get more memory from the OS
+    SEGMENT_FREE, // A call to cudaFree to return memory to the OS (e.g. to
                   // defragment or empty_caches)
-    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
-    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
-    SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
+    SEGMENT_MAP, // A call to cuMemMap (used with expandable_segments)
+    SEGMENT_UNMAP, // A call to unmap segment (used with expandable segments)
+    SNAPSHOT, // A call to snapshot, used to correlate memory snapshots to trace
               // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by cuda)
+    OOM // The allocator threw an OutOfMemoryError
   };
-  TraceEntry(
+
+  GenericTraceEntry(
       Action action,
       c10::DeviceIndex device,
       size_t addr,
       size_t size,
-      cudaStream_t stream,
+      c10::Stream stream,
       MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr,
@@ -195,15 +196,139 @@ struct TraceEntry {
         compile_context_(std::move(compile_context)) {
     time_.approx_t_ = time;
   }
+
   Action action_;
   c10::DeviceIndex device_;
   size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
-  cudaStream_t stream_{};
+  c10::Stream stream_;
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
   std::string compile_context_{};
+};
+
+using GenericAllocatorTraceTracker =
+    std::function<void(const GenericTraceEntry&)>;
+
+using CreateContextFnPtr = std::shared_ptr<GatheredContext> (*)();
+
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
+/**
+ * Thread-safe circular buffer for storing a fixed number of entries.
+ * Maintains the most recent N entries, automatically overwriting older entries
+ * when the buffer reaches capacity. This is particularly useful for tracking
+ * allocation traces and debugging information.
+ */
+template <class T>
+class RingBuffer {
+ public:
+  RingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace_ = new std::vector<T>();
+  }
+
+  // Sets the maximum number of entries the buffer can hold.
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    alloc_trace_max_entries_ = std::max(size_t(1), size);
+
+    // If reducing size, we may need to truncate existing entries
+    if (alloc_trace_->size() > alloc_trace_max_entries_) {
+      // Keep the most recent entries by adjusting the circular buffer state
+      if (alloc_trace_next_ < alloc_trace_max_entries_) {
+        // Simple case: just resize
+        alloc_trace_->resize(alloc_trace_max_entries_);
+      } else {
+        // Complex case: need to rotate and resize to preserve most recent
+        // entries
+        std::rotate(
+            alloc_trace_->begin(),
+            alloc_trace_->begin() +
+                static_cast<typename std::vector<T>::difference_type>(
+                    alloc_trace_next_),
+            alloc_trace_->end());
+        alloc_trace_->resize(alloc_trace_max_entries_);
+        alloc_trace_next_ = 0;
+      }
+    }
+  }
+
+  // Inserts a new entry into the buffer. If buffer is full, overwrites the
+  // oldest entry.
+  void insertEntry(const T& entry) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    if (alloc_trace_->size() < alloc_trace_max_entries_) {
+      // Buffer not yet full, simply append
+      alloc_trace_->emplace_back(entry);
+    } else {
+      // Buffer full, overwrite the oldest entry
+      (*alloc_trace_)[alloc_trace_next_] = entry;
+      alloc_trace_next_ = (alloc_trace_next_ + 1) % alloc_trace_max_entries_;
+    }
+  }
+
+  // Retrieves all entries in insertion order (oldest to newest).
+  void getEntries(std::vector<T>& result) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+
+    result.clear();
+    if (alloc_trace_->empty()) {
+      return;
+    }
+    result.reserve(alloc_trace_->size());
+    if (alloc_trac_->size() < alloc_trace_max_entries_) {
+      // Buffer not yet full, entries are in natural order
+      result.insert(result.end(), alloc_trace_->begin(), alloc_trace_->end());
+    } else {
+      // Buffer is full, need to handle wraparound to maintain chronological
+      // order Step 1: entries from alloc_trace_next_ to end (oldnest entries).
+      result.insert(
+          result.end(),
+          alloc_trace_->begin() +
+              static_cast<typename std::vector<T>::difference_type>(
+                  alloc_trace_next_),
+          alloc_trace_->end());
+      // Step 2: entries from beginning to alloc_trace_next_
+      result.insert(
+          result.end(),
+          alloc_trace_->begin(),
+          alloc_trace_->begin() +
+              static_cast<typename std::vector<T>::difference_type>(
+                  alloc_trace_next_));
+    }
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    alloc_trace_next_ = 0;
+    alloc_trace_->clear();
+  }
+
+ private:
+  // maximum capacity of the ring buffer
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace_ and alloc_trace_next_ needs to be used under
+  // alloc_trace_lock.
+  std::mutex alloc_trace_lock_;
+
+  // Index where next entry will be written (when buffer is full)
+  size_t alloc_trace_next_ = 0;
+
+  // pointer because we need to intentionally leak this on deallocation it can
+  // hold references to Python state which will already be destroyed when we
+  // are in exit handlers
+  std::vector<T>* alloc_trace_;
 };
 
 // Block/Pool management utilities
@@ -212,10 +337,10 @@ template <typename BlockT>
 struct BlockComparatorSize {
   bool operator()(const BlockT* a, const BlockT* b) const {
     // Note [Block Comparator]
-    // Assumes all compared blocks belong to the same device (guaranteed by the
-    // block pool). Without this guarantee, stream.id() could collide across
-    // devices — i.e., different streams on different devices may have the same
-    // stream id.
+    // Assumes all compared blocks belong to the same device (guaranteed by
+    // the block pool). Without this guarantee, stream.id() could collide
+    // across devices — i.e., different streams on different devices may have
+    // the same stream id.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
     if (a->size != b->size) {
       return a->size < b->size;
@@ -247,8 +372,8 @@ struct PrivatePool;
 
 /**
  * BlockPool is a memory pool that manages reusable memory blocks of a single
- * type, such as DeviceBlock. Each instance only could contain one kind of block
- * size category (small or large).
+ * type, such as DeviceBlock. Each instance only could contain one kind of
+ * block size category (small or large).
  *
  * It is templated on BlockT, representing the type of memory block being
  * managed. The pool maintains two sets: one for currently allocated and
@@ -318,9 +443,9 @@ template <typename StreamT>
 struct ExpandableSegment;
 
 /**
- * DeviceBlock is typically a fundamental unit of memory used in device caching
- * allocator. It corresponds to a memory block allocated on a specific device
- * and associated with a particular stream.
+ * DeviceBlock is typically a fundamental unit of memory used in device
+ * caching allocator. It corresponds to a memory block allocated on a specific
+ * device and associated with a particular stream.
  *
  * A DeviceBlock may also track which BlockPool it belongs to. This struct is
  * intended to serve as a base type or interface that can be extended by
@@ -360,7 +485,8 @@ struct DeviceBlock {
     return (prev != nullptr) || (next != nullptr);
   }
 
-  // Inserts this block between two existing blocks with [before, this, after] .
+  // Inserts this block between two existing blocks with [before, this, after]
+  // .
   void splice(BlockT* before, BlockT* after) {
     if (before) {
       TORCH_INTERNAL_ASSERT(before->next == after);
@@ -473,8 +599,8 @@ struct PrivatePool {
   BlockPoolT small_blocks; // Small blocks pool this PrivatePool manages
   // Number of live graphs using this pool
   int use_count{1};
-  // Number of unfreed device allocation made for this pool. When use_count and
-  // deviceMalloc_count drop to zero, we can delete this PrivatePool from
+  // Number of unfreed device allocation made for this pool. When use_count
+  // and deviceMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
   int deviceMalloc_count{0};
 
@@ -484,8 +610,8 @@ struct PrivatePool {
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critical though,
-  // I'd rather not add more logic to it.
+  // check in BlockComparator. BlockComparator is performance- critical
+  // though, I'd rather not add more logic to it.
   DeviceAllocator* allocator_;
 };
 
@@ -507,9 +633,9 @@ struct SegmentRange {
 };
 
 // ExpandableSegment traits to map StreamT to its corresponding HandleT for
-// different backends. This must be specialized for each backend's stream type.
-// If the backend does not support expandable segments feature, it should define
-// HandleT as void* as a placeholder.
+// different backends. This must be specialized for each backend's stream
+// type. If the backend does not support expandable segments feature, it
+// should define HandleT as void* as a placeholder.
 template <typename StreamT>
 struct ExpandableSegmentTraits {
   using HandleT = void*;
@@ -530,8 +656,8 @@ struct ExpandableSegmentTraits {
  * backend-specific HandleT (defined by ExpandableSegmentTraits) to represent
  * physical memory handles.
  *
- * This class is intended to be extended by backends (e.g., CUDA, XPU, etc.) to
- * implement memory mapping and access control policies. It is useful for
+ * This class is intended to be extended by backends (e.g., CUDA, XPU, etc.)
+ * to implement memory mapping and access control policies. It is useful for
  * caching allocators that want to reuse virtual address ranges efficiently,
  * grow allocations dynamically, and support multi-device access through peer
  * mappings.
@@ -625,7 +751,8 @@ struct ExpandableSegment {
   // Release the virtual memory address associated with the segment.
   virtual void releaseVirtualMemoryAddress(void* ptr) = 0;
 
-  // Maps the physical memory handles in the range [begin, end) to the segment.
+  // Maps the physical memory handles in the range [begin, end) to the
+  // segment.
   virtual void mapHandles(size_t begin, size_t end) = 0;
 
   // Unmaps the physical memory handles in the range [begin, end) from the
@@ -655,8 +782,8 @@ struct ExpandableSegment {
   // Returns the index of the segment just *past* the one containing pointer
   // `p`, relative to the base pointer `ptr_`. This is the *exclusive* upper
   // bound, useful for [begin, end) style ranges.
-  // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
-  // Otherwise, it rounds up and returns segmentLeft(p) + 1.
+  // If `p` lies exactly on a segment boundary, this is equal to
+  // segmentLeft(p). Otherwise, it rounds up and returns segmentLeft(p) + 1.
   size_t segmentRight(char* p) const {
     size_t offset = p - ptr();
     return numSegments(offset);
@@ -714,16 +841,6 @@ ExpandableSegmentT* make_expandable_segment(
   return ptr;
 }
 
-typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
-using CreateContextFnPtr = std::shared_ptr<GatheredContext> (*)();
-
-enum struct RecordContext {
-  NEVER = 0,
-  STATE = 1, // only keep stacks for active allocations
-  ALLOC = 2, // additionally keep stacks for allocations in the trace history
-  ALL = 3, // additionally record stacks for when something is freed
-};
-
 template <
     typename StreamT,
     typename EventT,
@@ -745,8 +862,8 @@ struct CachingDeviceAllocatorImpl {
   }
 
   BlockT* malloc(DeviceIndex device, size_t orig_size, c10::Stream stream) {
-    // done outside the lock because we don't know what locks the recorder needs
-    // to have...
+    // done outside the lock because we don't know what locks the recorder
+    // needs to have...
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
@@ -757,11 +874,12 @@ struct CachingDeviceAllocatorImpl {
       // recycles their memory if so)
       //
       // Q. Why skip process_events if a capture might be underway?
-      // A. process_events involves cudaEventQueries, illegal during CUDA graph
+      // A. process_events involves cudaEventQueries, illegal during CUDA
+      // graph
       //    capture.
-      //    Dumb simple solution: defer reclaiming these allocations until after
-      //    capture. Cross-stream memory use is uncommon, so the deferral's
-      //    effect on memory use during capture should be small.
+      //    Dumb simple solution: defer reclaiming these allocations until
+      //    after capture. Cross-stream memory use is uncommon, so the
+      //    deferral's effect on memory use during capture should be small.
       process_events(context);
     }
   }
@@ -773,8 +891,8 @@ struct CachingDeviceAllocatorImpl {
   // under allocator lock.
   virtual EventT record_event_for_stream(StreamT stream) = 0;
 
-  // Queries the status of an event. Returns true if the event is complete. Note
-  // this function may be called under allocator lock.
+  // Queries the status of an event. Returns true if the event is complete.
+  // Note this function may be called under allocator lock.
   virtual bool query_event(const EventT& event) = 0;
 
   // Records events for all streams that have used the given memory block.
@@ -791,8 +909,9 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
-  // Removes stream uses that were added to the block during graph capture. And
-  // restores the block's `stream_uses` set to its state before the capture.
+  // Removes stream uses that were added to the block during graph capture.
+  // And restores the block's `stream_uses` set to its state before the
+  // capture.
   void remove_graph_stream_uses(BlockT* block) {
     // remove stream uses added during cudagraph capture
     // (i.e., block->stream_uses - block->cudagraph_stream_uses)
@@ -816,10 +935,10 @@ struct CachingDeviceAllocatorImpl {
     if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
       for (auto* block : needs_events_deferred_until_no_capture) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
-        // only streams recorded before cudagraph will be used to insert events
-        // since we know all streams recorded during cudagraph must have
-        // completed (refer to Section 3.2.8.7.3.1 Cross-stream Dependencies and
-        // Events in CUDA Programming Guide).
+        // only streams recorded before cudagraph will be used to insert
+        // events since we know all streams recorded during cudagraph must
+        // have completed (refer to Section 3.2.8.7.3.1 Cross-stream
+        // Dependencies and Events in CUDA Programming Guide).
         remove_graph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {
@@ -882,7 +1001,7 @@ struct CachingDeviceAllocatorImpl {
         block->stream_uses.empty());
 
     record_trace(
-        TraceEntry::FREE_COMPLETED,
+        GenericTraceEntry::FREE_COMPLETED,
         int64_t(block->ptr),
         block->requested_size,
         block->stream,
@@ -907,9 +1026,8 @@ struct CachingDeviceAllocatorImpl {
     }
 
     active_blocks.erase(block);
-    // Makes sure the Block* isn't already present in the pool we're freeing it
-    // back into.
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    // Makes sure the Block* isn't already present in the pool we're freeing
+    // it back into. NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     bool inserted = block->pool->insert_into_blocks(block).second;
     TORCH_INTERNAL_ASSERT(inserted);
 
@@ -950,9 +1068,9 @@ struct CachingDeviceAllocatorImpl {
   }
 
   BlockPoolT& get_pool(size_t size, StreamT stream) {
-    // captures_underway is a conservative guess that the current stream may be
-    // capturing. It's only non-empty if some thread has begun and not yet ended
-    // a capture, so it's usually 0, and we can short-circuit
+    // captures_underway is a conservative guess that the current stream may
+    // be capturing. It's only non-empty if some thread has begun and not yet
+    // ended a capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
     if (C10_UNLIKELY(!captures_underway.empty())) {
       for (auto& entry : captures_underway) {
@@ -984,6 +1102,41 @@ struct CachingDeviceAllocatorImpl {
     return context_recorder_.load()();
   }
 
+  void record_trace(
+      GenericTraceEntry::Action action,
+      size_t addr,
+      size_t size,
+      c10::Stream stream,
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::shared_ptr<GatheredContext> context) {
+    if (!record_history && trace_trackers_.empty())
+      return;
+    std::string compile_string = "N/A";
+    if (!compile_context.empty()) {
+      compile_string = compile_context.top();
+    }
+    auto te = GenericTraceEntry(
+        action,
+        device,
+        addr,
+        size,
+        stream,
+        mempool_id,
+        getApproximateTime(),
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
+        compile_string);
+
+    // Callbacks should not include any Pytorch call
+    for (const auto& cb : trace_trackers_) {
+      cb(te);
+    }
+
+    if (record_history) {
+      alloc_buffer.insertEntry(te);
+    }
+  }
+
   c10::DeviceIndex device_index_;
 
   // lock around all operations
@@ -998,8 +1151,8 @@ struct CachingDeviceAllocatorImpl {
   // unallocated cached blocks 1 MB or smaller
   BlockPoolT small_blocks;
 
-  // Allocated or in use by a stream. Holds all active allocations, whether they
-  // came from graph_pools or one of the BlockPools above.
+  // Allocated or in use by a stream. Holds all active allocations, whether
+  // they came from graph_pools or one of the BlockPools above.
   ska::flat_hash_set<BlockT*> active_blocks;
 
   std::atomic<CreateContextFn> context_recorder_{nullptr};
@@ -1009,9 +1162,10 @@ struct CachingDeviceAllocatorImpl {
   ska::flat_hash_map<StreamT, std::deque<std::pair<EventT, BlockT*>>>
       outstanding_events;
 
-  // Tracks if we are diverting some allocations to a specific pool. Most of the
-  // time it's empty, in which case malloc can avoid calling query streams'
-  // capture state API such as `cudaStreamGetCaptureInfo` in the hot path.
+  // Tracks if we are diverting some allocations to a specific pool. Most of
+  // the time it's empty, in which case malloc can avoid calling query
+  // streams' capture state API such as `cudaStreamGetCaptureInfo` in the hot
+  // path.
   std::vector<std::pair<MempoolId_t, std::function<bool(StreamT)>>>
       captures_underway;
 
@@ -1021,13 +1175,27 @@ struct CachingDeviceAllocatorImpl {
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePoolT>, MempoolIdHash>
       graph_pools;
 
-  // Holds free blocks whose event insertion is deferred until capture finished.
+  // Holds free blocks whose event insertion is deferred until capture
+  // finished.
   std::vector<BlockT*> needs_events_deferred_until_no_capture;
 
   // Mapping from block to a stream set, containing streams on which the block
   // was used while graph feature capturing
   std::unordered_map<BlockT*, ska::flat_hash_set<StreamT>>
       block_to_graph_stream_uses;
+
+  // Members specific to utils: tracing, history, and stats...
+
+  bool record_history = false;
+
+  // Trace buffer for recording GenericAllocatorTraceTracker for call back.
+  std::vector<GenericAllocatorTraceTracker> trace_trackers_;
+
+  // Thread local compile context for each device
+  static thread_local std::stack<std::string> compile_context;
+
+  // Ring buffer for memory snapshot TraceEntry's
+  RingBuffer<GenericTraceEntry> alloc_buffer;
 };
 
 } // namespace c10::CachingDeviceAllocator

@@ -51,7 +51,7 @@ namespace c10::cuda::CUDACachingAllocator {
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::CachingAllocator::kLargeBuffer;
-using c10::CachingDeviceAllocator::CreateContextFn;
+using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::RecordContext;
 
@@ -85,11 +85,6 @@ struct SegmentInfo {
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
-};
-
-union trace_time_ {
-  time_t t_;
-  approx_time_t approx_t_;
 };
 
 struct TraceEntry {
