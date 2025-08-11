@@ -2180,7 +2180,7 @@ class CppKernel(Kernel):
         # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
             # return reduction_size > 128
-            return False
+            return True
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
@@ -3174,7 +3174,9 @@ class CppVecKernel(CppKernel):
                 ], "Welford reduction does not support VectorizedN (N>2)"
                 use_helper = "true" if use_acc_helper else "false"
                 next_value = f"welford_vec_reduce_all({acc_vec}, {use_helper})"
-                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec}, {use_helper})"
+                masked_next_value = (
+                    f"welford_vec_reduce_all({masked_acc_vec}, {use_helper})"
+                )
                 self.reduction_suffix.writeline(
                     f"{acc} = welford_combine({acc}, {next_value}, false, {use_helper});"
                 )

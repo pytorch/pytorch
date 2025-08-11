@@ -154,14 +154,13 @@ struct WelfordHelper {
 };
 
 template <typename T, typename S, uint64_t kChunkSize>
-std::vector<S> WelfordHelper<T, S, kChunkSize>::weight_recps =
-    []() {
-      std::vector<S> temp(kChunkSize);
-      for (const auto i : c10::irange(kChunkSize)) {
-        temp[i] = S(static_cast<double>(1) / static_cast<double>(i + 1));
-      }
-      return temp;
-    }();
+std::vector<S> WelfordHelper<T, S, kChunkSize>::weight_recps = []() {
+  std::vector<S> temp(kChunkSize);
+  for (const auto i : c10::irange(kChunkSize)) {
+    temp[i] = S(static_cast<double>(1) / static_cast<double>(i + 1));
+  }
+  return temp;
+}();
 
 template <typename T>
 Welford<T> welford_combine(
@@ -170,7 +169,7 @@ Welford<T> welford_combine(
     bool use_index = false,
     bool use_helper = true,
     bool is_final_output = false) {
-  if (!use_helper){
+  if (!use_helper) {
     Welford<T> out;
     if (a.index == 0) {
       out = b;
@@ -179,7 +178,8 @@ Welford<T> welford_combine(
     } else {
       auto a_weight = use_index ? T(a.index) : a.weight;
       auto b_weight = use_index ? T(b.index) : b.weight;
-      out = Welford<T>{a.mean + b.mean, a.m2 + b.m2, a_weight + b_weight, a.index + b.index};
+      out = Welford<T>{
+          a.mean + b.mean, a.m2 + b.m2, a_weight + b_weight, a.index + b.index};
     }
     if (!is_final_output) {
       return out;
@@ -219,7 +219,11 @@ Welford<T> welford_combine(
     T& data,
     WelfordHelper<T, S, kChunkSize>* w = nullptr) {
   if (w == nullptr) {
-    return Welford<T>{acc.mean + data, acc.m2 + data * data, acc.weight + T(1), acc.index + 1};
+    return Welford<T>{
+        acc.mean + data,
+        acc.m2 + data * data,
+        acc.weight + T(1),
+        acc.index + 1};
   }
   // Combine welford reduction with cascade summation to improve numerical
   // stability.
@@ -262,7 +266,9 @@ Welford<T> welford_combine(
 }
 
 template <typename T, typename S, uint64_t kChunkSize>
-Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, S, kChunkSize>* w) {
+Welford<T> welford_combine(
+    Welford<T>& acc,
+    WelfordHelper<T, S, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
   }
@@ -753,7 +759,8 @@ Welford<scalar_t> welford_vec_reduce_all(
       acc.mean[0], acc.m2[0], acc.weight[0], acc.index};
   auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
       acc.mean[1], acc.m2[1], acc.weight[1], acc.index};
-  return welford_vec_reduce_all(welford_combine(Welford0, Welford1, false, use_helper), use_helper);
+  return welford_vec_reduce_all(
+      welford_combine(Welford0, Welford1, false, use_helper), use_helper);
 }
 #endif
 
