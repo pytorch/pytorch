@@ -3,7 +3,6 @@
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/nativert/executor/Placement.h>
 
 #include <torch/nativert/graph/Graph.h>
 
@@ -21,11 +20,12 @@ using WeightVersion = int;
  */
 class Weights {
  public:
-  explicit Weights(
+  Weights(
       const Graph* graph,
       const std::optional<std::unordered_map<std::string, c10::IValue>>&
           stateDict = std::nullopt,
-      Placement placement = Placement());
+      const std::optional<std::unordered_map<std::string, c10::IValue>>&
+          constants = std::nullopt);
 
   // Arguments
   // - pytorchStreamReader: the reader for the model archive
@@ -36,8 +36,6 @@ class Weights {
   // - constantPaths: a map from constant name to file path in the archive
   // - constantPathPrefix: a prefix that will be prepended to paths in
   // constantPathPrefix
-  // - placement: the device placement of the weights, default to follow the
-  //   original device in the weight's metadata
   explicit Weights(
       const Graph* graph,
       std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
@@ -46,7 +44,6 @@ class Weights {
       std::string_view stateDictPathPrefix,
       const std::unordered_map<std::string, std::string>& constantPaths,
       std::string_view constantPathPrefix,
-      Placement placement = Placement(),
       std::function<bool(const std::string&)> skipSizeCheck = {},
       std::function<bool(const std::string&)> skipDtypeCheck = {});
 
@@ -107,7 +104,6 @@ class Weights {
  private:
   const Graph* graph_;
   const std::unordered_map<std::string, TensorMeta>& weightsMeta_;
-  Placement placement_;
 
   // keys are parameter/buffer/constant names, not graph input names!
   std::unordered_map<std::string, at::Tensor> allValues_;
