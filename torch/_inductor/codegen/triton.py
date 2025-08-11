@@ -1153,9 +1153,11 @@ class TritonOverrides(OpOverrides):
         #
         # This produces incorrect results because outside of r0_mask is not zero. 
         # So before calling tl.dot, apply tl.where to zero out values properly.
-        if is_where_needed(a) and is_where_needed(b) :
-            # Optimize - We don't need both operands to be zeroed
+        # TODO: Optimize - We don't need both operands to be zeroed except NaN * 0
+        if is_where_needed(a):
             a = where_cond(a)
+        if is_where_needed(b):
+            b = where_cond(b)
 
 
         # downcast if we upcasted to fp32 before
@@ -2479,7 +2481,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if need_dense and not have_dense:
             if self.inside_reduction and self.is_native_matmul:
-                # TODO : Once shape propagation PR landed, replace this with that
+                # This avoids full broadcasting (need_dense) when performing native matmul.
+                # For example, self._load_mask previously required tl.broadcast_to() in index_str.
+                # Due to the restrictions of tl.dot semantics, we only want to expand the block
+                # shape for the necessary axes.
+                #
+                # Previously:
+                #   tmp1 = tl.load(ptr + tl.broadcast_to(r0, [YBLOCK, XBLOCK, R0_BLOCK]),
+                #                  r0_mask & tmp0 & xmask)
+                #
+                # Now:
+                #   tmp1 = tl.load(ptr + tl.broadcast_to(r0, [1, 1, R0_BLOCK]),
+                #                  r0_mask & tmp0 & xmask)
+                #
+                # We achieve this by determining the required block shape through mask inspection.
+                # When a temporary variable appears in the mask (e.g., self._load_mask), we retrieve
+                # its true shape by inspecting tmp.mask_vars tracked by TritonCSEVariable.
+                #
+                # Caution: it may miss the correct block shape if the specific mask was constant
+                # and thus not tracked in TritonCSEVariable.mask_vars.
+                #
+                # TODO: Once the shape propagation PR lands, reimplement this logic:
+                #       https://github.com/pytorch/pytorch/pull/152198
                 mask_shape = mask_vars.copy()
                 if self._load_mask:
                     mask_shape.add(self._load_mask)
