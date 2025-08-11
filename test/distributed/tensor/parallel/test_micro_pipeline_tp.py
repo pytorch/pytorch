@@ -32,6 +32,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH,
     parametrize,
     run_tests,
+    TEST_XPU,
+    xfailIf,
     runOnRocmArch,
     TestCase,
 )
@@ -136,6 +138,7 @@ class MicroPipelineTPTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_find_reduce_scatter_patterns(self):
         group = dist.group.WORLD
 
@@ -175,6 +178,7 @@ class MicroPipelineTPTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_get_unexposed_collectives(self):
         group = dist.group.WORLD
 
@@ -203,6 +207,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_fuse_all_gather_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
@@ -250,6 +255,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1551
     def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
@@ -303,7 +309,7 @@ class MicroPipelineTPTest(TestCase):
             self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
             self.assertNotIn("all_gather_into_tensor", str(gm.graph))
 
-        if torch.cuda.is_available() && torch.cuda.get_device_capability() < (8, 9):
+        if torch.cuda.is_available() and torch.cuda.get_device_capability() < (8, 9):
             return
 
         with _test_mode():
@@ -323,6 +329,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_fuse_matmul_reduce_scatter(self, A_dims, scatter_dim):
         if scatter_dim >= A_dims:
             return
@@ -352,6 +359,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1551
     def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
         if scatter_dim >= A_dims:
             return
@@ -390,7 +398,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
-        if torch.cuda.is_available() && torch.cuda.get_device_capability() < (8, 9):
+        if torch.cuda.is_available() and torch.cuda.get_device_capability() < (8, 9):
             return
 
         with _test_mode():
@@ -453,7 +461,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
 
-        if torch.cuda.is_available() && torch.cuda.get_device_capability() < (8, 9):
+        if torch.cuda.is_available() and torch.cuda.get_device_capability() < (8, 9):
             return
 
         with _test_mode():
@@ -467,6 +475,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_dtensor_seq_par(self, shard_dim: int):
         model: torch.nn.Module = MLPModule(device=self.device_type, bias=False)
         device_mesh = DeviceMesh(
@@ -518,6 +527,7 @@ class MicroPipelineTP4GPUTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1848
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
             self.device_type,
