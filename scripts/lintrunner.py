@@ -173,7 +173,8 @@ def main() -> None:
         sys.exit(result)
 
     except KeyboardInterrupt:
-        sys.exit(1)
+        print("\n  Lintrunner interrupted by user (KeyboardInterrupt)", file=sys.stderr)
+        sys.exit(1)  # Tell git push to fail
 
 
 if __name__ == "__main__":
