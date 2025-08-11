@@ -30,7 +30,7 @@ EOF
 
     # we want the patch version of 6.4 instead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.1"
+        ROCM_VERSION="${ROCM_VERSION}.2"
     fi
 
     # Default url values
@@ -85,16 +85,19 @@ EOF
     # CI no longer builds for ROCm 6.3, but
     # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
-        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
-            HIP_BRANCH=release/rocm-rel-6.4
-            CLR_HASH=606bc820b4b1f315d135da02a1f0b176ca50a92c  # branch release/rocm-rel-6.4.1-statco-hotfix
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
+            HIP_TAG=rocm-6.4.2
+            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
+            HIP_TAG=rocm-6.4.1
+            CLR_HASH=efe6c35790b9206923bfeed1209902feff37f386  # branch release/rocm-rel-6.4.1-statco-hotfix
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-            HIP_BRANCH=release/rocm-rel-6.4
+            HIP_TAG=rocm-6.4.0
             CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
         fi
         # clr build needs CppHeaderParser but can only find it using conda's python
         python -m pip install CppHeaderParser
-        git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
+        git clone https://github.com/ROCm/HIP -b $HIP_TAG
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr
         pushd clr

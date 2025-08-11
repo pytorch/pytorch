@@ -206,23 +206,43 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
-bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
-  return false;
+ScalingType GetAScalingTypeFromParams(const GemmParams<T>* params) {
+  return ScalingType::TensorWise;
 }
 
 template <typename T>
-bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
-  return false;
+ScalingType GetBScalingTypeFromParams(const GemmParams<T>* params) {
+  return ScalingType::TensorWise;
 }
 
 template <typename T>
-bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
-  return false;
+ScalingType GetAScalingTypeFromParams(const GemmAndBiasParams<T>* params) {
+  return ScalingType::TensorWise;
 }
 
 template <typename T>
-bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
-  return params->use_rowwise;
+ScalingType GetBScalingTypeFromParams(const GemmAndBiasParams<T>* params) {
+  return ScalingType::TensorWise;
+}
+
+template <typename T>
+ScalingType GetAScalingTypeFromParams(const GemmStridedBatchedParams<T>* params) {
+  return ScalingType::TensorWise;
+}
+
+template <typename T>
+ScalingType GetBScalingTypeFromParams(const GemmStridedBatchedParams<T>* params) {
+  return ScalingType::TensorWise;
+}
+
+template <typename T>
+ScalingType GetAScalingTypeFromParams(const ScaledGemmParams<T>* params) {
+  return params->a_scaling_type;
+}
+
+template <typename T>
+ScalingType GetBScalingTypeFromParams(const ScaledGemmParams<T>* params) {
+  return params->b_scaling_type;
 }
 
 template <typename T>
@@ -489,23 +509,24 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-#ifdef HIPBLASLT_VEC_EXT
-        if (GetUseRowwiseFromParams<CT>(params)) {
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-        }
-        else
-#endif
-        {
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-        }
-#ifdef HIPBLASLT_OUTER_VEC
-        if (GetUseRowwiseFromParams<CT>(params)) {
+        hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
+        hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+        if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
+#if defined(HIPBLASLT_OUTER_VEC)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-        }
+#elif defined(HIPBLASLT_VEC_EXT)
+          a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
 #endif
+        }
+        if (GetBScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
+#if defined(HIPBLASLT_OUTER_VEC)
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
+#elif defined(HIPBLASLT_VEC_EXT)
+          b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
+#endif
+        }
+        matmul.setAttribute(a_scale_ptr_desc, mat1_scale_ptr);
+        matmul.setAttribute(b_scale_ptr_desc, mat2_scale_ptr);
       }
       if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
