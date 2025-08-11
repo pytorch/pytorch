@@ -61,8 +61,9 @@ class TestCppExtensionAOT(common.TestCase):
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
         # test pybind support torch.dtype cast.
-        self.assertEqual(str(torch.float32),
-                         str(cpp_extension.get_math_type(torch.half)))
+        self.assertEqual(
+            str(torch.float32), str(cpp_extension.get_math_type(torch.half))
+        )
 
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
@@ -78,12 +79,10 @@ class TestCppExtensionAOT(common.TestCase):
         result.sum().backward()
         tensor = mm.get()
 
-        expected_weights_grad = tensor.t().mm(
-            torch.ones([4, 4], dtype=torch.double))
+        expected_weights_grad = tensor.t().mm(torch.ones([4, 4], dtype=torch.double))
         self.assertEqual(weights.grad, expected_weights_grad)
 
-        expected_tensor_grad = torch.ones([4, 4],
-                                          dtype=torch.double).mm(weights.t())
+        expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
@@ -156,15 +155,10 @@ class TestCppExtensionAOT(common.TestCase):
         # `True`. This *should* mean that on Python 3, the produced shared
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test",
-                            "build")
-        matches = [
-            f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")
-        ]
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, msg=str(matches))
-        self.assertEqual(matches[0],
-                         "no_python_abi_suffix_test.so",
-                         msg=str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
