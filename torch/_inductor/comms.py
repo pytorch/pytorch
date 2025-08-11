@@ -243,28 +243,28 @@ def _debug_iterative_memory_recompute(
             f"\nPEAK_MEMORY_BEFORE:{peak_memory}"
             f"\nPEAK_MEMORY_AFTER_SWAP:{_peak_memory}"
             f"\nCANDIDATE:{candidate.debug_str()}"
-            f"\nCANDIDATE_ITER_CURR_MEMORY = {iter_cm}"
-            f"\nCANDIDATE_NEW__CURR_MEMORY = {new_cm}"
+            f"\nCANDIDATE_ITER_CURR_MEMORY:{iter_cm}"
+            f"\nCANDIDATE_NEW__CURR_MEMORY:{new_cm}"
             f"\nCANDIDATE_ITER_ALLOCFREE:{candidate_allocfree}"
             f"\nCANDIDATE_NEW_ALLOCFREE:{_snodes_allocfree[candidate]}"
         )
         peak_log = ""
+        for i, (pre, post) in enumerate(_snodes_curr_memory):
+            if _peak_memory == pre:
+                n = _snodes[i]
+                peak_log = (
+                    f"\nNEW_PEAK:{_peak_memory}(BASE:{peak_memory})"
+                    f" @ SNODE[{i}/{len(_snodes)}]:{n.get_name()} {n.debug_str()}"
+                )
+                break
         group_log = ""
-        for gn in gns:
-            for i, (pre, post) in enumerate(_snodes_curr_memory):
-                if _peak_memory == pre:
-                    n = _snodes[i]
-                    peak_log = (
-                        f"\nNEW_PEAK:{_peak_memory}(BASE:{peak_memory})"
-                        f" @ SNODE[{i}/{len(_snodes_curr_memory)}]:{n.get_name()} {n.debug_str()}"
-                    )
-                    break
+        for i, gn in enumerate(gns):
             iter_gnm = _curr_memory[gn]
             new_gnm = __curr_memory[gn]
             group_log += (
                 f"\nGROUP_NODE[{i}]:{gn.debug_str()}"
-                f"\nGROUP_NODE[{i}] ITER_GNM[{gn.get_name()}] = {iter_gnm}"
-                f"\nGROUP_NODE[{i}] ESTM_GNM[{gn.get_name()}] = {new_gnm}"
+                f"\nGROUP_NODE[{i}] ITER_GNM[{gn.get_name()}]:{iter_gnm}"
+                f"\nGROUP_NODE[{i}] ESTM_GNM[{gn.get_name()}]:{new_gnm}"
                 f"\nGROUP_NODE[{i}] ITER_allocfree:{_snodes_allocfree[gn]}"
                 f"\nGROUP_NODE[{i}] ESTM_allocfree:{_snodes_allocfree[gn]}"
             )
@@ -1207,11 +1207,8 @@ def _sink_waits_iterative_internal(
     overlap_log.info(log_str)
     new_snodes = _group_nodes(_head, None)
     assert len(new_snodes) == original_snodes_num
-    new_peak_memory, curr_memory = estimate_peak_memory(
-        new_snodes, name_to_freeable_input_buf, graph_outputs
-    )
     new_peak_memory, _, _, _ = estimate_peak_memory_allocfree(
-        snodes, name_to_freeable_input_buf, graph_outputs
+        new_snodes, name_to_freeable_input_buf, graph_outputs
     )
     log_str += f"\n sink_waits_iterative peak_memory_before:{peak_memory}"
     log_str += f"\n sink_waits_iterative peak_memory_after:{new_peak_memory}"
