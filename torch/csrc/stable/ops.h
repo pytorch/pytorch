@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include <torch/headeronly/core/ScalarType.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 using torch::stable::Tensor;
 
@@ -58,7 +58,6 @@ inline Tensor new_empty(
     const Tensor& self,
     std::vector<int64_t> size,
     std::optional<c10::ScalarType> dtype = std::nullopt) {
-  // Get device information from input tensor
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
 
@@ -74,11 +73,9 @@ inline Tensor new_empty(
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(self.get(), &target_dtype));
   }
 
-  // Get layout from input tensor
   int32_t layout;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(self.get(), &layout));
 
-  // Create new empty tensor with specified size
   AtenTensorHandle ret0 = nullptr;
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
       self.get(),

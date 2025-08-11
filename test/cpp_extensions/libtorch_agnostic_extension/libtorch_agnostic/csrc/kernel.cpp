@@ -4,7 +4,7 @@
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/util/Exception.h>
 
-#include <c10/core/ScalarType.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 #include <optional>
 
