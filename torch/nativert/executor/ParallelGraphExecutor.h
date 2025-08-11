@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/Semaphore.h>
-#include <torch/nativert/executor/GraphExecutorBase.h> // @manual
-#include <torch/nativert/executor/SessionState.h> // @manual
+#include <torch/nativert/executor/GraphExecutorBase.h>
+#include <torch/nativert/executor/SessionState.h>
 #include <thread>
 
 namespace moodycamel {
@@ -46,8 +46,8 @@ class ThreadPoolExecutor {
   void add(SessionState* session, WorkUnit* unit);
   void add(
       SessionState* session,
-      std::vector<WorkUnit*>::const_iterator&& begin,
-      const std::vector<WorkUnit*>::const_iterator&& end);
+      std::vector<WorkUnit*>::const_iterator begin,
+      const std::vector<WorkUnit*>::const_iterator& end);
 
   C10_ALWAYS_INLINE moodycamel::ProducerToken& ptok();
   C10_ALWAYS_INLINE moodycamel::ConsumerToken& ctok();
@@ -71,7 +71,7 @@ class ParallelGraphExecutor : public GraphExecutorBase {
   ParallelGraphExecutor(
       const Graph& graph,
       std::vector<std::unique_ptr<OpKernel>> nodeKernels,
-      const torch::nativert::ExecutorConfig& executorConfig);
+      const ExecutorConfig& executorConfig);
 
   std::vector<c10::IValue> execute(
       ExecutionFrame& frame,

@@ -145,7 +145,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_name,
             co.co_qualname,  # type: ignore[attr-defined]
             co.co_firstlineno,
-            co.co_lnotab,
+            co.co_linetable,
             co.co_exceptiontable,  # type: ignore[attr-defined]
             co.co_freevars,
             co.co_cellvars,
@@ -694,7 +694,7 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._codegen = _PyTreeCodeGen(
+            self.graph._codegen = _PyTreeCodeGen(  # type: ignore[has-type]
                 _PyTreeInfo(orig_args[:total_args], in_spec, None)
             )
 
@@ -702,7 +702,7 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert isinstance(self.graph._codegen, _PyTreeCodeGen)
+                assert isinstance(self.graph._codegen, _PyTreeCodeGen)  # type: ignore[has-type]
                 self.graph._codegen.pytree_info = (
                     self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 )

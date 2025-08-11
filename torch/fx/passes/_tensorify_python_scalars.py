@@ -64,8 +64,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose"
 # manage to eliminate all float compute, this ends up being equivalent, but
 # there is a critical difference when some floats cannot be eliminated: when
 # we call item() on them, what should it's SymFloat be? Ideally, it would
-# be the same backed SymFloat we had before. But without symbolic expresssion
-# propogation on tensor quantities, repropagating would instead give you an
+# be the same backed SymFloat we had before. But without symbolic expression
+# propagation on tensor quantities, repropagating would instead give you an
 # unbacked SymFloat. Maybe it is a good idea to implement symbolic propagation
 # on 0d scalar tensors, but I decided to go for something simpler to start.
 #
@@ -203,7 +203,7 @@ def tensorify_python_scalars(
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
                 dtype = node.args[0].meta["val"].dtype
-                if dtype != torch.float64:
+                if not dtype.is_floating_point:
                     continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]
@@ -211,6 +211,10 @@ def tensorify_python_scalars(
                 s = node.meta["val"].node.expr
                 expr_to_tensor_proxy[s] = MetaProxy(
                     node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                # Upcast the float tensor to torch.float64 to avoid precision problem
+                expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
+                    expr_to_tensor_proxy[s], torch.float64
                 )
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
@@ -346,7 +350,7 @@ def tensorify_python_scalars(
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
-    # symfloat and thus we need to deduce specializations have happend
+    # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
     for k, v in shape_env.var_to_val.items():

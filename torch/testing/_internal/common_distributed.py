@@ -253,9 +253,9 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert (
-        actual in logging_err
-    ), f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    assert actual in logging_err, (
+        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    )
 
 
 def with_nccl_blocking_wait(func):
@@ -294,9 +294,9 @@ def with_nccl_blocking_wait(func):
         finally:
             # restore old values.
             if cached_nccl_async_error_handling is not None:
-                os.environ[
-                    "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-                ] = cached_nccl_async_error_handling
+                os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                    cached_nccl_async_error_handling
+                )
 
             if cached_nccl_blocking_wait is not None:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
@@ -812,7 +812,7 @@ class MultiProcessTestCase(TestCase):
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
             logger.error(
-                "Caught exception: \n%s exiting " "process %s with exit code: %s",
+                "Caught exception: \n%s exiting process %s with exit code: %s",
                 traceback.format_exc(),
                 self.rank,
                 MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
@@ -1149,7 +1149,7 @@ def spawn_threads_and_init_comms(
             )
             try:
                 callback()
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 # Exceptions are handled in MultiThreadedTestCase
                 MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
                 ProcessLocalGroup.exception_handle(
@@ -1310,7 +1310,7 @@ class MultiThreadedTestCase(TestCase):
 
         try:
             getattr(self, test_name)()
-        except BaseException as ex:
+        except BaseException as ex:  # noqa: B036
             self.exception_queue.put((rank, sys.exc_info()))
             ProcessLocalGroup.exception_handle(
                 ex
@@ -1605,7 +1605,7 @@ class MultiProcContinousTest(TestCase):
     @classmethod
     def _run_test_given_id(cls, test_id: str, **kwargs) -> None:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        test_name = test_id.split(".")[-1]
+        test_name = test_id.rsplit(".", maxsplit=1)[-1]
         # Get the test function from the test class
         self = cls(test_name)
         self.rank = cls.rank
@@ -1616,6 +1616,7 @@ class MultiProcContinousTest(TestCase):
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
+        raised_exception = False
         # Sub tests are going to access these values, check first
         assert 0 <= rank < world_size
         # set class variables for the test class
@@ -1640,13 +1641,24 @@ class MultiProcContinousTest(TestCase):
             try:
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
-            except BaseException as ex:
-                # Send the exception back to the dispatcher
-                completion_queue.put(ex)
+            except BaseException as ex:  # noqa: B036
+                raised_exception = True
+                # Send the exception and stack trace back to the dispatcher
+                exc_info = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(*exc_info))
+                # Create a new exception with the original exception and traceback
+                enhanced_ex = RuntimeError(f"Exception in worker process:\n{tb_str}")
+                enhanced_ex.__cause__ = ex
+                completion_queue.put(enhanced_ex)
 
         # Termination
         logger.info("Terminating ...")
-        c10d.destroy_process_group()
+        # Calling destroy_process_group when workers have exceptions
+        # while others are doing collectives will cause a deadlock since
+        # it waits for enqueued collectives to finish.
+        # Only call this on a clean exit path
+        if not raised_exception:
+            c10d.destroy_process_group()
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:
@@ -1677,9 +1689,7 @@ class MultiProcContinousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.info(
-                "Started process %s with pid %s", rank, process.pid
-            )  # noqa: UP031
+            logger.info("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
     def setUpClass(cls):

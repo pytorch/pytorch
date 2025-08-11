@@ -9,9 +9,14 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
-#include <utility>
 
-#include <nvshmem.h>
+// Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
+// include only the nvshmem host library headers:
+// #include <nvshmem_host.h>
+// It translates into the following two lines:
+#include <host/nvshmem_api.h>
+#include <host/nvshmemx_api.h>
+// For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d {
 namespace symmetric_memory {
@@ -150,7 +155,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset) {
+      int64_t storage_offset) override {
     // TODO: deduplicate
     const size_t numel = std::accumulate(
         sizes.begin(),
@@ -264,6 +269,64 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int* rank_to_global_rank_dev_;
 };
 
+// Bootstrap based on user's setting for NCCL
+// Long term, this may be a bit unclean; short term, it improves UX
+void maybe_initialize_env_vars() {
+  auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
+  auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
+  auto nvshmem_socket_if_name =
+      c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
+  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
+
+  if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
+    c10::utils::set_env(
+        "NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME", nccl_socket_if_name->c_str());
+  }
+  if (!nvshmem_hca_list.has_value() && nccl_hca_list.has_value()) {
+    c10::utils::set_env("NVSHMEM_ENABLE_NIC_PE_MAPPING", "1");
+    c10::utils::set_env("NVSHMEM_HCA_LIST", nccl_hca_list->c_str());
+  }
+  if (!nvshmem_ib_gid_index.has_value() && nccl_ib_gid_index.has_value()) {
+    c10::utils::set_env("NVSHMEM_IB_GID_INDEX", nccl_ib_gid_index->c_str());
+  }
+}
+
+void initialize_nvshmem_with_store(
+    c10::intrusive_ptr<c10d::Store> store,
+    int rank,
+    int world_size) {
+  static bool is_initialized = false;
+  if (is_initialized) {
+    return;
+  }
+
+  maybe_initialize_env_vars();
+
+  nvshmemx_uniqueid_t unique_id;
+  NVSHMEM_CHECK(
+      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
+
+  // Using an existing store_all_gather due to laziness.
+  // TODO(yifu): should use broadcast
+  auto unique_ids = storeExchange.all_gather(store, rank, world_size, unique_id);
+
+  nvshmemx_init_attr_t attr;
+  nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
+
+  NVSHMEM_CHECK(
+      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
+      "nvshmemx_init_attr failed");
+
+  is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
+}
+
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(
@@ -280,7 +343,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
+    initialize_nvshmem_with_store(store, rank, world_size);
     auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
@@ -327,6 +390,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return false;
   };
 
+  c10::DeviceType supported_device_type() override {
+    return c10::DeviceType::CUDA;
+  }
+
+  std::string name() override {
+    return "NVSHMEM";
+  }
+
  private:
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
@@ -335,11 +406,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("NVSHMEM", allocator);
     }
   }
 };

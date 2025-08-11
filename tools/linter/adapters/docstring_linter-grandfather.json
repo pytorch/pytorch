@@ -269,14 +269,6 @@
   "torch/_inductor/kernel/conv.py": {
     "def convolution()": 231
   },
-  "torch/_inductor/kernel/flex_attention.py": {
-    "def flex_attention()": 303,
-    "def flex_attention_backward()": 323,
-    "def lower_cpu()": 273
-  },
-  "torch/_inductor/kernel/flex_decoding.py": {
-    "def create_flex_decoding_kernel()": 288
-  },
   "torch/_inductor/kernel/mm.py": {
     "def tuned_addmm()": 169,
     "def tuned_mm()": 127,

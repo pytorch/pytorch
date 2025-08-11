@@ -50,16 +50,16 @@ class Adadelta(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            rho=rho,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            capturable=capturable,
-            foreach=foreach,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "rho": rho,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "capturable": capturable,
+            "foreach": foreach,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -372,7 +372,7 @@ def _multi_tensor_adadelta(
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            # Reuse the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
