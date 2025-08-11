@@ -32,39 +32,34 @@ def run_shell(
     log_cmd: bool = True,
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
-):
+    check: bool = True,
+) -> int:
     """
-    Run a shell command using /bin/bash.
-
-    Args:
-        cmd (str): The command string to execute.
-        log_cmd (bool): Whether to log the command before execution.
-        cwd (Optional[str]): Working directory to run the command in.
-        env (Optional[dict]): Environment variables to set during execution.
-
-    Raises:
-        subprocess.CalledProcessError: If the command fails.
+    Run a shell command via /bin/bash.
+    Returns the exit code. If check=True and the exit code is non-zero,
+    raises subprocess.CalledProcessError (matching subprocess.run behavior).
     """
     if log_cmd:
         logger.info("[shell] %s", cmd)
-    try:
-        subprocess.run(
-            cmd,
-            shell=True,
-            executable="/bin/bash",
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            check=True,
-            env=env,
-            cwd=cwd,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(
-            "[shell] Command failed.\n Command: %s\n Exit code: %s\n",
-            cmd,
-            e.returncode,
-        )
-        raise
+
+    run_env = {**os.environ, **env} if env else None
+
+    proc = subprocess.run(
+        cmd,
+        shell=True,
+        executable="/bin/bash",
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        cwd=cwd,
+        env=run_env,
+        check=False,  # handle 'check' manually
+    )
+
+    if check and proc.returncode != 0:
+        logger.error("[shell] Command failed (exit %s): %s", proc.returncode, cmd)
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+    return proc.returncode
 
 
 def run_cmd(
@@ -73,42 +68,41 @@ def run_cmd(
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
     check: bool = True,
-):
+) -> int:
     """
-    Run a command using subprocess with shell=False (i.e., direct exec).
-    This only works for commands that are not shell builtins. It is recommended
-    to use this method rather than run_shell().
+    Run a command using subprocess.run with shell=False.
 
     Args:
-        cmd (str): The command string to execute (will be split using shlex).
-        log_cmd (bool): Whether to log the command before execution.
-        cwd (Optional[str]): Working directory to run the command in.
-        env (Optional[dict]): Environment variables to set during execution.
+        cmd[str]: Command string (split with shlex).
+        log_cmd [bool]: Log command before execution.
+        cwd [Optional[str]]: Working directory.
+        env [Optional[dict]]: Environment vars to overlay on current env.
+        check [bool]: If True, raise on non-zero exit; else return code.
 
-    Raises:
-        subprocess.CalledProcessError: If the command fails.
+    Returns:
+        int: The process's exit code.
     """
     args = shlex.split(cmd)
-
     if log_cmd:
         logger.info("[cmd] %s", " ".join(args))
-    try:
-        subprocess.run(
-            args,
-            shell=False,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            check=check,
-            env=env,
-            cwd=cwd,
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(
-            "[cmd] Command failed.\n Command: %s\n Exit code: %s\n",
-            cmd,
-            e.returncode,
-        )
-        raise
+
+    run_env = {**os.environ, **env} if env else None
+
+    proc = subprocess.run(
+        args,
+        shell=False,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        cwd=cwd,
+        env=run_env,
+        check=False,  # we'll handle check manually
+    )
+
+    if check and proc.returncode != 0:
+        logger.error("[cmd] Command failed (exit %s): %s", proc.returncode, cmd)
+        raise subprocess.CalledProcessError(proc.returncode, args)
+
+    return proc.returncode
 
 
 def get_env(name: str, default: str = "") -> str:
