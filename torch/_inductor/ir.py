@@ -4410,13 +4410,28 @@ class ComputedBuffer(OperationBuffer):
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
-        return (
+        result = (
             get_free_symbols(self.get_size(), unbacked_only)
             | get_free_symbols(self.get_stride(), unbacked_only)
             | get_free_symbols(self.get_offset(), unbacked_only)
             | self.data.get_free_symbol_uses(unbacked_only)
             | self.get_read_writes().get_free_symbol_uses(unbacked_only)
         )
+
+        if isinstance(self.layout, NonOwningLayout):
+            assert isinstance(self.layout.view, ReinterpretView)
+            box = self.layout.view.data
+            assert isinstance(box, StorageBox), type(box)
+            input_buffer = box.data
+            assert isinstance(input_buffer, Buffer), type(box)
+            result = (
+                result
+                | get_free_symbols(input_buffer.get_size(), unbacked_only)
+                | get_free_symbols(input_buffer.get_stride(), unbacked_only)
+                | get_free_symbols(input_buffer.get_offset(), unbacked_only)
+            )
+
+        return result
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         if (
@@ -5131,6 +5146,18 @@ class InputsKernel(OperationBuffer):
     def num_reads(self) -> int:
         return 1
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        r = OrderedSet[sympy.Symbol]()
+        for inp in self.inputs:
+            if isinstance(inp, IRNode):
+                r |= inp.get_free_symbol_uses(unbacked_only)
+            else:
+                for inner_inp in inp:
+                    r |= inner_inp.get_free_symbol_uses(unbacked_only)
+        return r
+
 
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
@@ -5138,6 +5165,11 @@ class NopKernel(InputsKernel):
 
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return InputsKernel.get_free_symbol_uses(self, unbacked_only)
 
 
 class ConcatKernel(NopKernel):
@@ -5284,6 +5316,11 @@ class ConcatKernel(NopKernel):
             and isinstance(src.data.layout, FlexibleLayout)
             and not isinstance(src.data, ExternKernelAlloc)
         )
+
+        def get_free_symbol_uses(
+            self, unbacked_only: bool = False
+        ) -> OrderedSet[sympy.Symbol]:
+            return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
@@ -8581,6 +8618,11 @@ class EffectfulKernel(FallbackKernel):
 
 class NonTensorObj(IRNode):
     pass
+  
+    def get_free_symbol_uses(
+            self, unbacked_only: bool = False
+        ) -> OrderedSet[sympy.Symbol]:
+            return OrderedSet()
 
 
 @ir_dataclass
@@ -8615,13 +8657,7 @@ class TorchBindObject(NonTensorObj):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(operator.add, flat_sizes, 0)
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
-
+   
 @ir_dataclass
 class GeneratorState(NonTensorObj):
     name: str
