@@ -13,7 +13,7 @@ using dims = logical_tensor::dims;
 using op = dnnl::graph::op;
 using partition = dnnl::graph::partition;
 
-constexpr logical_tensor::data_type sdpa_intermedia_dtype =
+constexpr logical_tensor::data_type sdpa_intermediate_dtype =
     logical_tensor::data_type::f32;
 
 inline data_type to_logical_tensor_data_type(c10::ScalarType scalar_type) {
@@ -161,7 +161,7 @@ struct SDPALogicalParams {
           " instead.");
       logsumexp = {
           static_cast<size_t>(TensorID::logsumexp),
-          sdpa_intermedia_dtype,
+          sdpa_intermediate_dtype,
           reshaped_logsumexp.sizes().vec(),
           reshaped_logsumexp.strides().vec()};
     }
@@ -202,7 +202,7 @@ partition create_sdpa_graph_partition(
   // Matrix Extensions (Intel(R) XMX) support, which means the
   // Q/K/V tensors have bf16 or f16 data type while the output of the first
   // MatMul, Scale, Mask, and the input of SoftMax are in f32 data type.
-  logical_tensor matmul_qk_out{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor matmul_qk_out{lt_id++, sdpa_intermediate_dtype};
   op matmul_qk{
       op_id++,
       op::kind::MatMul,
@@ -211,7 +211,7 @@ partition create_sdpa_graph_partition(
       "matmul_qk"};
   matmul_qk.set_attr<bool>(op::attr::transpose_b, true);
 
-  logical_tensor scaled_qk_out{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor scaled_qk_out{lt_id++, sdpa_intermediate_dtype};
   op scale_mul{
       op_id++,
       op::kind::Multiply,
@@ -236,7 +236,7 @@ partition create_sdpa_graph_partition(
   if (params.attn_mask.has_value()) {
     TORCH_INTERNAL_ASSERT(
         !is_causal, "Additive mask cannot use with is_causal.");
-    masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
+    masked_qk_out = {lt_id++, sdpa_intermediate_dtype};
     mask_add = {
         op_id++,
         op::kind::Add,
@@ -271,7 +271,7 @@ partition create_sdpa_graph_partition(
         {mask_gt_out.value()},
         "mask_gt"};
 
-    masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
+    masked_qk_out = {lt_id++, sdpa_intermediate_dtype};
     mask_select = {
         op_id++,
         op::kind::Select,
@@ -496,7 +496,7 @@ struct SDPABackwardLogicalParams {
         reshaped_out.strides().vec()};
     logsumexp = {
         static_cast<size_t>(TensorID::logsumexp),
-        sdpa_intermedia_dtype,
+        sdpa_intermediate_dtype,
         reshaped_logsumexp.sizes().vec(),
         reshaped_logsumexp.strides().vec()};
     scale = {
@@ -571,7 +571,7 @@ partition create_sdpa_backward_graph_partition(
   // Matrix Extensions (Intel(R) XMX) support, which means the
   // Q/K/V tensors have bf16 or f16 data type while the output of the first
   // MatMul, Scale, Mask, and the input of SoftMax are in f32 data type.
-  logical_tensor matmul_qk_out{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor matmul_qk_out{lt_id++, sdpa_intermediate_dtype};
   op matmul_qk{
       op_id++,
       op::kind::MatMul,
@@ -580,7 +580,7 @@ partition create_sdpa_backward_graph_partition(
       "matmul_qk"};
   matmul_qk.set_attr<bool>(op::attr::transpose_b, true);
 
-  logical_tensor scaled_qk_out{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor scaled_qk_out{lt_id++, sdpa_intermediate_dtype};
   op scale_mul{
       op_id++,
       op::kind::Multiply,
@@ -605,7 +605,7 @@ partition create_sdpa_backward_graph_partition(
   if (params.attn_mask.has_value()) {
     TORCH_INTERNAL_ASSERT(
         !is_causal, "Additive mask cannot use with is_causal.");
-    masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
+    masked_qk_out = {lt_id++, sdpa_intermediate_dtype};
     mask_add = {
         op_id++,
         op::kind::Add,
@@ -639,7 +639,7 @@ partition create_sdpa_backward_graph_partition(
         {mask_gt_out.value()},
         "mask_gt"};
 
-    masked_qk_out = {lt_id++, sdpa_intermedia_dtype};
+    masked_qk_out = {lt_id++, sdpa_intermediate_dtype};
     mask_select = {
         op_id++,
         op::kind::Select,
@@ -649,21 +649,21 @@ partition create_sdpa_backward_graph_partition(
   }
 
   // attention_probs = softmax(masked_score) = exp(masked_score - logsumexp)
-  logical_tensor sub_out{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor sub_out{lt_id++, sdpa_intermediate_dtype};
   op subtract{
       op_id++,
       op::kind::Subtract,
       {masked_qk_out.value_or(scaled_qk_out), params.logsumexp},
       {sub_out},
       "subtract"};
-  logical_tensor prob{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor prob{lt_id++, sdpa_intermediate_dtype};
   op exp{op_id++, op::kind::Exp, {sub_out}, {prob}, "exp"};
 
   // The following matmul doesn't support different input dtypes, insert a
   // typecast
   logical_tensor prob_casted = prob;
   op typecast = op(op_id++, op::kind::TypeCast, "typecast");
-  if (dtype != sdpa_intermedia_dtype) {
+  if (dtype != sdpa_intermediate_dtype) {
     prob_casted = logical_tensor(lt_id++, dtype);
     typecast.add_inputs({prob});
     typecast.add_outputs({prob_casted});
@@ -685,7 +685,7 @@ partition create_sdpa_backward_graph_partition(
   // TODO: handle GQA headnum because (batch_size, num_head_q, seq_len_q,
   // seq_len_kv) != (batch_size, num_head_q, seq_len_q, head_dim_v) *
   // (batch_size, num_head_kv, head_dim_v, seq_len_kv)
-  logical_tensor grad_prop{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor grad_prop{lt_id++, sdpa_intermediate_dtype};
   op matmul_grad_prop{
       op_id++,
       op::kind::MatMul,
@@ -695,7 +695,7 @@ partition create_sdpa_backward_graph_partition(
   matmul_grad_prop.set_attr<bool>(op::attr::transpose_b, true);
 
   // grad_masked_score = softmaxbackward(grad_prop)
-  logical_tensor grad_masked_score{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor grad_masked_score{lt_id++, sdpa_intermediate_dtype};
   op softmax_backward{
       op_id++,
       op::kind::SoftMaxBackward,
@@ -708,7 +708,7 @@ partition create_sdpa_backward_graph_partition(
   // supports output grad_attn_mask.
 
   // grad_scaled_score = grad_masked_score * scale
-  logical_tensor grad_scaled_score{lt_id++, sdpa_intermedia_dtype};
+  logical_tensor grad_scaled_score{lt_id++, sdpa_intermediate_dtype};
   op grad_scale_mul{
       op_id++,
       op::kind::Multiply,
@@ -720,7 +720,7 @@ partition create_sdpa_backward_graph_partition(
   // typecast
   logical_tensor grad_scaled_score_cast = grad_scaled_score;
   op typecast2 = op(op_id++, op::kind::TypeCast, "typecast2");
-  if (dtype != sdpa_intermedia_dtype) {
+  if (dtype != sdpa_intermediate_dtype) {
     grad_scaled_score_cast = logical_tensor(lt_id++, dtype);
     typecast2.add_inputs({grad_scaled_score});
     typecast2.add_outputs({grad_scaled_score_cast});
@@ -767,7 +767,7 @@ partition create_sdpa_backward_graph_partition(
   g.add_op(grad_scale_mul);
   g.add_op(matmul_grad_query);
   g.add_op(matmul_grad_key);
-  if (dtype != sdpa_intermedia_dtype) {
+  if (dtype != sdpa_intermediate_dtype) {
     g.add_op(typecast);
     g.add_op(typecast2);
   }
