@@ -8833,7 +8833,7 @@ class _CollectiveKernel(FallbackKernel):
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         assert type(self.op_overload) is torch._ops.OpOverload, (
-            "Setting cpp kernel needs atomvalid op_overload"
+            "Setting cpp kernel needs a valid op_overload"
         )
         kernel = self.op_overload
         if cpp_kernel_name is not None:
