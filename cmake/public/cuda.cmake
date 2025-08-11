@@ -21,19 +21,10 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 if(NOT MSVC)
   set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
 endif()
+
 # Find CUDA.
 find_package(CUDA)
-
-# Enable CUDA language support
-if(CUDA_TOOLKIT_ROOT_DIR AND NOT CUDAToolkit_ROOT)
-  set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
-endif()
-
-# CMP0074 - find_package will respect <PackageName>_ROOT variables
-cmake_policy(SET CMP0074 NEW)
-find_package(CUDAToolkit)
-
-if(NOT CUDAToolkit_FOUND)
+if(NOT CUDA_FOUND)
   message(WARNING
     "PyTorch: CUDA cannot be found. Depending on whether you are building "
     "PyTorch or a PyTorch dependent library, the next warning / error will "
@@ -42,10 +33,8 @@ if(NOT CUDAToolkit_FOUND)
   return()
 endif()
 
-if(CUDAToolkit_VERSION VERSION_LESS 11.0)
-  message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
-endif()
-
+# Enable CUDA language support
+set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
 # Pass clang as host compiler, which according to the docs
 # Must be done before CUDA language is enabled, see
 # https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
@@ -58,9 +47,11 @@ if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
 endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-message(STATUS "PyTorch: CUDA detected: " ${CUDAToolkit_VERSION})
-message(STATUS "PyTorch: CUDA nvcc is: " ${CUDAToolkit_NVCC_EXECUTABLE})
-message(STATUS "PyTorch: CUDA toolkit directory: " ${CUDAToolkit_ROOT})
+# CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
 
 find_package(CUDAToolkit REQUIRED)
 
@@ -132,6 +123,24 @@ if(CUDA_FOUND)
 endif()
 
 # ---[ CUDA libraries wrapper
+
+# find lbnvrtc.so
+set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
+if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+  find_package(Python COMPONENTS Interpreter)
+  execute_process(
+    COMMAND Python::Interpreter -c
+    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
+  if(NOT _retval EQUAL 0)
+    message(WARNING "Failed to compute shorthash for libnvrtc.so")
+    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
+  else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
+    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  endif()
+endif()
 
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
