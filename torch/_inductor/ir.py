@@ -6239,6 +6239,9 @@ class ExternKernel(InputsKernel):
             r |= maybe_get_symbols(arg)
         for arg in self.kwargs.values():
             r |= maybe_get_symbols(arg)
+        # # https://github.com/pytorch/pytorch/issues/159685
+        for inp in self.inputs:
+            r |= inp.get_free_symbol_uses(unbacked_only)  # type: ignore[union-attr]
         return r
 
     def __str__(self) -> str:
@@ -8307,6 +8310,12 @@ class Conditional(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    @staticmethod
+    def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
+        if isinstance(s, int):
+            return s
+        return s.node.expr
+
     @classmethod
     def create(
         cls,
@@ -8373,18 +8382,15 @@ class Conditional(ExternKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
-            if isinstance(s, int):
-                return s
-            return s.node.expr
-
         outputs = [
             MultiOutput(
                 FixedLayout(
                     device=device,
                     dtype=output.get_dtype(),
-                    size=[_maybe_expr(sz) for sz in merged_output.size()],
-                    stride=[_maybe_expr(sz) for sz in merged_output.stride()],
+                    size=[Conditional._maybe_expr(sz) for sz in merged_output.size()],
+                    stride=[
+                        Conditional._maybe_expr(sz) for sz in merged_output.stride()
+                    ],
                     offset=output.get_layout().offset,
                     is_pinned=output.get_layout().is_pinned,
                 ),
@@ -8434,6 +8440,8 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
+    """The IR node for while_loop and while_loop_with_checkpoint. It supports input mutation."""
+
     carried_inputs: Optional[Sequence[IRNode]] = None
     additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
@@ -8447,6 +8455,8 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+        with_checkpoint: bool,
     ) -> None:
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
@@ -8463,6 +8473,10 @@ class WhileLoop(ExternKernel):
             constant_args=sym_args,
         )
 
+        if unbacked_bindings is not None:
+            self.unbacked_bindings = unbacked_bindings
+        self.with_checkpoint = with_checkpoint
+
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -8473,7 +8487,11 @@ class WhileLoop(ExternKernel):
         body_fn: Subgraph,
         carried_inputs: Sequence[IRNode],
         additional_inputs: Sequence[IRNode],
+        with_checkpoint: bool = False,
     ) -> Union[IRNode, Sequence[IRNode]]:
+        """create the IR node. with_checkpoint controls whether we emit additional
+        input checkpoints, which is used for training.
+        """
         from torch._higher_order_ops.utils import check_input_alias_and_mutation
 
         def _require_exact_strides(
@@ -8581,6 +8599,10 @@ class WhileLoop(ExternKernel):
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
             assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env,
+            V.graph.current_node.meta.get("unbacked_bindings", None),
+        )
         assert device is not None
         while_loop = WhileLoop(
             carried_inputs=carried_inputs_,
@@ -8589,6 +8611,8 @@ class WhileLoop(ExternKernel):
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
             layout=MultiOutputLayout(device=device),
+            unbacked_bindings=unbacked_bindings,
+            with_checkpoint=with_checkpoint,
         )
 
         assert body_fn.graph is not None and isinstance(
@@ -8633,6 +8657,40 @@ class WhileLoop(ExternKernel):
                 while_loop.outputs.append(multi_out)
                 all_outputs.append(multi_out)
 
+        if with_checkpoint:
+            # Create additional outputs for checkpointing
+            # The latter half of cur_node.meta["val"] contains the checkpoint outputs
+            cur_node = V.graph.current_node
+            checkpoint_meta_vals = cur_node.meta["val"][len(body_outputs) :]
+
+            for idx, checkpoint_meta in enumerate(checkpoint_meta_vals):
+                all_outputs.append(
+                    MultiOutput(
+                        FixedLayout(
+                            size=tuple(
+                                Conditional._maybe_expr(sz)
+                                for sz in checkpoint_meta.size()
+                            ),
+                            stride=tuple(
+                                Conditional._maybe_expr(sz)
+                                for sz in checkpoint_meta.stride()
+                            ),
+                            device=checkpoint_meta.device,
+                            dtype=checkpoint_meta.dtype,
+                            offset=0,
+                        ),
+                        while_loop,
+                        [(list, len(body_outputs) + idx)],
+                    )
+                )
+
+        # Set while_loop attributes based on output types
+        while_loop.outputs = [
+            out for out in all_outputs if isinstance(out, MultiOutput)
+        ]
+        while_loop.mutation_outputs = [
+            out for out in all_outputs if isinstance(out, MutationOutput)
+        ]
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
@@ -8644,7 +8702,20 @@ class WhileLoop(ExternKernel):
         return all_outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_while_loop(self)
+        wrapper.codegen_while_loop(self, self.with_checkpoint)
+        wrapper.codegen_unbacked_symbol_defs_for_outputs(
+            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
+        )
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            return OrderedSet(resolved.keys())
+        else:
+            return OrderedSet()
 
 
 class EffectfulKernel(FallbackKernel):

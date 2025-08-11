@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 from typing import Callable, Union
 
 import torch
@@ -8,8 +9,8 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
-    autograd_not_implemented,
     check_meta_consistency,
+    materialize_as_graph,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -49,7 +50,34 @@ class WhileLoopOp(HigherOrderOperator):
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
+class WhileLoopWithCheckpointOp(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("while_loop_with_checkpoint")
+
+    def __call__(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        /,
+    ):
+        if not isinstance(carried_inputs, (tuple, list)):
+            raise RuntimeError(
+                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
+            )
+        if not isinstance(additional_inputs, (tuple, list)):
+            raise RuntimeError(
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+            )
+
+        validate_subgraph_args_types(carried_inputs)
+        validate_subgraph_args_types(additional_inputs)
+        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+
 while_loop_op = WhileLoopOp()
+while_loop_with_checkpoint_op = WhileLoopWithCheckpointOp()
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):
@@ -179,8 +207,10 @@ def while_loop(cond_fn, body_fn, carried_inputs):
                 )(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
 
-@while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
+def _while_loop_dense_impl(
+    cond_fn, body_fn, carried_inputs, additional_inputs, *, with_checkpoint=False
+):
+    """Shared implementation for while_loop_dense and while_loop_with_checkpoint_dense."""
     carried_vals = carried_inputs
 
     def _validate_cond_output(pred):
@@ -200,8 +230,19 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
+    # Initialize checkpoints if needed
+    checkpoints: list[list[torch.Tensor]] = []
+    if with_checkpoint:
+        checkpoints = [[] for _ in range(len(carried_inputs))]
+
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
+
+        # Store checkpoints before body_fn execution if needed
+        if with_checkpoint:
+            for i, carry in enumerate(carried_vals):
+                checkpoints[i].append(carry)
+
         out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(out, tuple), (
             f"body_fn should return a tuple but got {type(out)}"
@@ -210,12 +251,175 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             "body_fn should return the same number of elements as carried_inputs"
         )
         carried_vals = out
-    return carried_vals
+
+    if with_checkpoint:
+        checkpoint_tensors = tuple(torch.stack(ckp_list) for ckp_list in checkpoints)
+        return carried_vals + checkpoint_tensors
+    else:
+        return carried_vals
 
 
-while_loop_op.py_autograd_impl(
-    autograd_not_implemented(while_loop_op, deferred_error=True)
+while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
+    functools.partial(_while_loop_dense_impl, with_checkpoint=False)
 )
+
+while_loop_with_checkpoint_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
+    functools.partial(_while_loop_dense_impl, with_checkpoint=True)
+)
+
+
+class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        cond_fn,
+        body_fn,
+        num_carried_inputs,
+        num_additional_inputs,
+        *carries_and_inputs,
+    ):
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        carries, additional_inputs = split_into_chunks(
+            carries_and_inputs, [num_carried_inputs, num_additional_inputs]
+        )
+        with torch._C._AutoDispatchBelowAutograd():
+            out, checkpoints = split_into_chunks(
+                while_loop_with_checkpoint_op(
+                    cond_fn, body_fn, carries, additional_inputs
+                ),
+                [num_carried_inputs, num_carried_inputs],
+            )
+
+        assert not hasattr(ctx, "fw_cond_fn")
+        assert not hasattr(ctx, "fw_body_fn")
+        assert not hasattr(ctx, "carries")
+        assert not hasattr(ctx, "additional_inputs")
+        assert not hasattr(ctx, "checkpoints")
+        ctx.fw_cond_fn = cond_fn
+        ctx.fw_body_fn = body_fn
+        ctx.carries = carries
+        ctx.additional_inputs = additional_inputs
+        ctx.checkpoints = checkpoints
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        assert len(checkpoints) > 0, "checkpoints shouldn't be empty"
+        return tuple(out) + tuple(checkpoints)
+
+    @staticmethod
+    def backward(ctx, *grads):
+        from torch._higher_order_ops.cond import create_bw_fn
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        num_carried_inputs = len(ctx.carries)
+        grad_outs, _ = split_into_chunks(
+            grads,
+            [num_carried_inputs, num_carried_inputs],
+        )
+
+        bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
+
+        grad_additional_inputs = [
+            torch.zeros_like(a) if isinstance(a, torch.Tensor) else None
+            for a in ctx.additional_inputs
+        ]
+        init_idx = torch.zeros((), dtype=torch.int64)
+        _, spec = pytree.tree_flatten(
+            (
+                init_idx,
+                grad_outs,
+                grad_additional_inputs,
+                ctx.checkpoints,
+                ctx.additional_inputs,
+            )
+        )
+
+        def cond_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                checkpoints,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            return idx < checkpoints[0].size(0)
+
+        def body_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                checkpoints,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            reversed_idx = checkpoints[0].size(0) - idx - 1
+            selected_checkpoints = [
+                ckp.select(0, reversed_idx.item()) for ckp in checkpoints
+            ]
+            cur_grad_carries, cur_grad_additional_inputs = split_into_chunks(
+                bw_body_fn(*selected_checkpoints, *additional_inputs, *grad_carries),
+                [len(ctx.carries), len(ctx.additional_inputs)],
+            )
+            return (
+                idx + 1,
+                *cur_grad_carries,
+                *(
+                    cur_grad + grad
+                    for cur_grad, grad in zip(
+                        cur_grad_additional_inputs, grad_additional_inputs
+                    )
+                ),
+            )
+
+        args_single_step_bw = (
+            init_idx,
+            *grad_outs,
+            *grad_additional_inputs,
+            *ctx.checkpoints,
+            *ctx.additional_inputs,
+        )
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint function when torch.compile torch.autograd.grad.
+        cond_gm = materialize_as_graph(
+            cond_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+        body_gm = materialize_as_graph(
+            body_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+        outs = while_loop_op(
+            cond_gm,
+            body_gm,
+            (
+                init_idx,
+                *grad_outs,
+                *grad_additional_inputs,
+            ),
+            (*ctx.checkpoints, *ctx.additional_inputs),
+        )
+        return None, None, None, None, *outs[1:]
+
+
+@while_loop_op.py_autograd_impl
+@while_loop_with_checkpoint_op.py_autograd_impl
+def while_loop_with_checkpoint_autograd(cond_fn, body_fn, operands, additional_inputs):
+    return WhileLoopWithCheckpointAutogradOp.apply(
+        cond_fn,
+        body_fn,
+        len(operands),
+        len(additional_inputs),
+        *operands,
+        *additional_inputs,
+    )
 
 
 def _find_or_create_fake_mode() -> FakeTensorMode:
@@ -243,126 +447,129 @@ def _create_unbacked_symint(
         return fake_mode.shape_env.create_unbacked_symint()
 
 
-@while_loop_op.py_impl(ProxyTorchDispatchMode)
-def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
-    def _trace_while_loop(
-        proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
-    ):
-        # NOTE [unspecialize int carry with unbacked symints]
-        # When we support int carry, we'll also need to support int output of body_fn because.
-        # previous iteration's output is next iteration's input and they must match.
-        # For carries, when we start tracing while_loop, they can be
-        #   - constants e.g. (0, [1, 3])
-        #   - backed symints (x.shape[0], [x.shape[1] + x.stride[1], x.shape[2]])
-        #   - unbacked symints e.g. (u0, [u0 + u1, u2])
-        #   We choose the most conservative design: in all cases, we create new unbacked symints to trace the
-        #   subgraph. It's possible to do some analysis on initial carry and the output of first
-        #   iteration to determine a better range for the output unbacked symbol e.g. when input is an unbacked
-        #   symint >= 0 before the while_loop but in general this is difficult because we don't know
-        #   the number of iterations. Users would have to re-constrain the unbacked symint in subgraph if needed.
-        #
-        # For output of fake cond_fn, it could be constant bool or SymBool (e.g. return x.shape[0] < 4,
-        #   where x.shape[0] can be either static of dynamic). In the case of constant bool, we should do a
-        #   specialization (NYI).
+def _trace_while_loop(
+    proxy_mode,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    with_checkpoint=False,
+):
+    # NOTE [unspecialize int carry with unbacked symints]
+    # When we support int carry, we'll also need to support int output of body_fn because.
+    # previous iteration's output is next iteration's input and they must match.
+    # For carries, when we start tracing while_loop, they can be
+    #   - constants e.g. (0, [1, 3])
+    #   - backed symints (x.shape[0], [x.shape[1] + x.stride[1], x.shape[2]])
+    #   - unbacked symints e.g. (u0, [u0 + u1, u2])
+    #   We choose the most conservative design: in all cases, we create new unbacked symints to trace the
+    #   subgraph. It's possible to do some analysis on initial carry and the output of first
+    #   iteration to determine a better range for the output unbacked symbol e.g. when input is an unbacked
+    #   symint >= 0 before the while_loop but in general this is difficult because we don't know
+    #   the number of iterations. Users would have to re-constrain the unbacked symint in subgraph if needed.
+    #
+    # For output of fake cond_fn, it could be constant bool or SymBool (e.g. return x.shape[0] < 4,
+    #   where x.shape[0] can be either static of dynamic). In the case of constant bool, we should do a
+    #   specialization (NYI).
 
-        # For output of fake body_fn, it could be all three types though from user's point of view,
-        # they're all integers e.g.
+    # For output of fake body_fn, it could be all three types though from user's point of view,
+    # they're all integers e.g.
 
-        #   init_carry = (0, s0, u1, t)
-        #   def body_fn(u0, s0, u1, t):
-        #     ...
-        #     return (t.shape[0], t.shape[1], t.shape[2], y + 1)
-        #
-        #   It may seem that a constant output isn't possible: users shouldn't write a while_loop
-        #   that always return 0. But it could be that a shape is not set as dynamic properly (e.g.
-        #   automatic dynamic hasn't been triggered).
-        #
-        #   For this reason, we treat int, symint outputs in the same way:
-        #   - they can match against any of int, symint carry
-        #   - we unspecialize them with new unbacked symints in fake while_loop
-        #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
-        #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
-        #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
-        #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
-        #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
-        fake_mode: FakeTensorMode = _find_or_create_fake_mode()
+    #   init_carry = (0, s0, u1, t)
+    #   def body_fn(u0, s0, u1, t):
+    #     ...
+    #     return (t.shape[0], t.shape[1], t.shape[2], y + 1)
+    #
+    #   It may seem that a constant output isn't possible: users shouldn't write a while_loop
+    #   that always return 0. But it could be that a shape is not set as dynamic properly (e.g.
+    #   automatic dynamic hasn't been triggered).
+    #
+    #   For this reason, we treat int, symint outputs in the same way:
+    #   - they can match against any of int, symint carry
+    #   - we unspecialize them with new unbacked symints in fake while_loop
+    #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
+    #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
+    #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
+    #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
+    #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
+    fake_mode: FakeTensorMode = _find_or_create_fake_mode()
 
-        def _unspecialize_carried_inputs(x):
-            if isinstance(x, (int, torch.SymInt)):
-                return _create_unbacked_symint(
-                    fake_mode, ignore_fresh_unbacked_symbols=True
-                )
-            # Note: [unspecialize constant tensor carry]
-            # We need to disable constant specialization for tensor inputs that become loop carries.
-            # Here's the problem: when a user creates a constant tensor e.g. torch.tensor(0), PyTorch calls aten.lift_fresh_copy
-            # to create a safe copy (avoiding aliasing issues), which creates a FakeTensor with constant=True.
-            # But when this FakeTensor becomes a loop carry, we have a problem:
-            # - Operations like .item() will read the constant value and bake it into the traced code
-            # - This is incorrect because carry variables change between loop iterations
-            # - The traced code would use the wrong constant value for all iterations
-            # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
-            # be specialized to fixed values during tracing body_fn or cond_fn.
-            elif isinstance(x, torch.Tensor):
-                x = x.clone()
-                if hasattr(x, "constant") and x.constant is not None:
-                    x.constant = None
-            return x
-
-        with disable_proxy_modes_tracing():
-            unspecialized_carried_inputs = pytree.tree_map_only(
-                (int, torch.SymInt, torch.Tensor),
-                # For temporarily created unbacked symints, we don't need to bind them to any proxy
-                lambda x: _unspecialize_carried_inputs(x),
-                carried_inputs,
+    def _unspecialize_carried_inputs(x):
+        if isinstance(x, (int, torch.SymInt)):
+            return _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
             )
+        # Note: [unspecialize constant tensor carry]
+        # We need to disable constant specialization for tensor inputs that become loop carries.
+        # Here's the problem: when a user creates a constant tensor e.g. torch.tensor(0), PyTorch calls aten.lift_fresh_copy
+        # to create a safe copy (avoiding aliasing issues), which creates a FakeTensor with constant=True.
+        # But when this FakeTensor becomes a loop carry, we have a problem:
+        # - Operations like .item() will read the constant value and bake it into the traced code
+        # - This is incorrect because carry variables change between loop iterations
+        # - The traced code would use the wrong constant value for all iterations
+        # Solution: We clone the constant tensors and mark the cloned tensor as non-constant so they won't
+        # be specialized to fixed values during tracing body_fn or cond_fn.
+        elif isinstance(x, torch.Tensor):
+            x = x.clone()
+            if hasattr(x, "constant") and x.constant is not None:
+                x.constant = None
+        return x
 
-            def produce_graph(fn):
-                cloned_carried_inputs = pytree.tree_map_only(
-                    torch.Tensor, lambda x: x.clone(), unspecialized_carried_inputs
-                )
-                return reenter_make_fx(fn)(*cloned_carried_inputs, *additional_inputs)
-
-            cond_graph = produce_graph(cond_fn)
-            body_graph = produce_graph(body_fn)
-
-        next_name = None
-        i = 0
-        while not next_name:
-            candidate = f"while_loop_cond_graph_{i}"
-            if hasattr(proxy_mode.tracer.root, candidate):
-                i += 1
-            else:
-                next_name = candidate
-        cond_graph_name = next_name
-        body_graph_name = f"while_loop_body_graph_{i}"
-        assert not hasattr(proxy_mode.tracer.root, body_graph_name)
-
-        proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
-        proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
-
-        args = (cond_graph, body_graph, carried_inputs, additional_inputs)
-
-        proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
-
-        out_proxy = proxy_mode.tracer.create_proxy(
-            "call_function", while_loop_op, proxy_args, {}, name="while_loop"
+    with disable_proxy_modes_tracing():
+        unspecialized_carried_inputs = pytree.tree_map_only(
+            (int, torch.SymInt, torch.Tensor),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda x: _unspecialize_carried_inputs(x),
+            carried_inputs,
         )
 
-        out = while_loop_op(
-            cond_graph, body_graph, unspecialized_carried_inputs, additional_inputs
-        )
-        return track_tensor_tree(
-            out, out_proxy, constant=None, tracer=proxy_mode.tracer
-        )
+        def produce_graph(fn):
+            cloned_carried_inputs = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.clone(), unspecialized_carried_inputs
+            )
+            return reenter_make_fx(fn)(*cloned_carried_inputs, *additional_inputs)
 
-    return _trace_while_loop(
-        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+        cond_graph = produce_graph(cond_fn)
+        body_graph = produce_graph(body_fn)
+
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"while_loop_cond_graph_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+    cond_graph_name = next_name
+    body_graph_name = f"while_loop_body_graph_{i}"
+    assert not hasattr(proxy_mode.tracer.root, body_graph_name)
+
+    proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
+    proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
+
+    args = (cond_graph, body_graph, carried_inputs, additional_inputs)
+
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
+
+    op = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function", op, proxy_args, {}, name="while_loop"
     )
 
+    out = op(cond_graph, body_graph, unspecialized_carried_inputs, additional_inputs)
+    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
-@while_loop_op.py_impl(FakeTensorMode)
-def while_loop_fake_tensor_mode(
-    mode, cond_fn, body_fn, carried_inputs, additional_inputs
+
+while_loop_op.py_impl(ProxyTorchDispatchMode)(
+    functools.partial(_trace_while_loop, with_checkpoint=False)
+)
+while_loop_with_checkpoint_op.py_impl(ProxyTorchDispatchMode)(
+    functools.partial(_trace_while_loop, with_checkpoint=True)
+)
+
+
+def _while_loop_fake_tensor_mode(
+    mode, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -407,6 +614,16 @@ def while_loop_fake_tensor_mode(
                 "body_output",
                 include_contiguity=False,
             )
+        fake_checkpoints: tuple[torch.Tensor, ...] = tuple()
+        if with_checkpoint:
+            n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
+            assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
+            fake_checkpoints = tuple(
+                out.clone()
+                .unsqueeze(0)
+                .repeat((n_iter,) + tuple(1 for _ in range(out.dim())))
+                for out in body_outs
+            )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),
@@ -415,13 +632,24 @@ def while_loop_fake_tensor_mode(
             lambda _: _create_unbacked_symint(
                 mode, ignore_fresh_unbacked_symbols=False
             ),
-            body_outs,
+            body_outs + fake_checkpoints,
         )
 
 
-@while_loop_op.py_functionalize_impl
-def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
+while_loop_op.py_impl(FakeTensorMode)(
+    functools.partial(_while_loop_fake_tensor_mode, with_checkpoint=False)
+)
+while_loop_with_checkpoint_op.py_impl(FakeTensorMode)(
+    functools.partial(_while_loop_fake_tensor_mode, with_checkpoint=True)
+)
+
+
+def _while_loop_functionalize_impl(
+    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
+
+    hop = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -435,10 +663,24 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (body_fn, "body_fn"),
         ]:
             _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
-        ret = while_loop_op(
+        ret = hop(
             functional_cond_fn,
             functional_body_fn,
             unwrapped_carried_inputs,
             unwrapped_additional_inputs,
         )
         return ctx.wrap_tensors(ret)
+
+
+while_loop_op.py_functionalize_impl(
+    functools.partial(
+        _while_loop_functionalize_impl,
+        with_checkpoint=False,
+    )
+)
+while_loop_with_checkpoint_op.py_functionalize_impl(
+    functools.partial(
+        _while_loop_functionalize_impl,
+        with_checkpoint=True,
+    )
+)

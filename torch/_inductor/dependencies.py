@@ -326,6 +326,9 @@ class StarDep(Dep):
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
+        buffer = V.graph.try_get_buffer(self.name)
+        if buffer is not None:
+            return buffer.get_free_symbol_uses(unbacked_only)
         return OrderedSet()
 
     def numbytes_hint(self) -> int:
