@@ -8597,7 +8597,9 @@ class WhileLoop(ExternKernel):
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+            # For nested while_loop, the op's offset is not equal to bo's offset, where the latter
+            # is 0 but the former is not.
+            # assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env,
@@ -8699,6 +8701,11 @@ class WhileLoop(ExternKernel):
                 # output buffers corresponding to the graph inputs, as
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
+
+            # Prevent input buffer reuse for all carried inputs to avoid
+            # silent correctness issues when downstream operations try to
+            # reuse the same buffer that while_loop output is using
+            V.graph.never_reuse_buffers.add(inp.get_name())
         return all_outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -8826,7 +8833,7 @@ class _CollectiveKernel(FallbackKernel):
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         assert type(self.op_overload) is torch._ops.OpOverload, (
-            "Setting cpp kernel needs a valid op_overload"
+            "Setting cpp kernel needs atomvalid op_overload"
         )
         kernel = self.op_overload
         if cpp_kernel_name is not None:

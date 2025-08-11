@@ -3272,7 +3272,9 @@ class PythonWrapperCodegen(CodeGen):
 
         ckp_offset = len(outer_carried_inputs)
         if with_checkpoint:
-            self.writeline(f"{name}.extend([[]] * {len(outer_carried_inputs)})")
+            self.writeline(
+                f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+            )
 
         cond_outer_inputs = [
             *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
@@ -3301,6 +3303,12 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(
             f"if not {cond_outer_outputs[0]}: break"
         )  # condition doesn't hold
+
+        # Append the inp checkpoint when cond returns True
+        if with_checkpoint:
+            for i, out in enumerate(body_outer_outputs):
+                self.writeline(f"{name}[{i + ckp_offset}].append({out})")
+
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
         if V.graph.aot_mode:
@@ -3312,18 +3320,18 @@ class PythonWrapperCodegen(CodeGen):
                 while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
             )
 
-        # Append the inp checkpoint when body finishes execution
-        if with_checkpoint:
-            for i, out in enumerate(outer_carried_inputs):
-                self.writeline(f"{name}[{i + ckp_offset}].append({out})")
-
         self.writeline(ExitSubgraphLine(self))
 
         # stack the checkpoints
         if with_checkpoint:
             for i in range(len(outer_carried_inputs)):
+                self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
                 self.writeline(
-                    f"{name}[{i + ckp_offset}] = torch.stack({name}[{i + len(outer_carried_inputs)}])"
+                    f"    {name}[{i + ckp_offset}] = torch.stack({name}[{i + len(outer_carried_inputs)}])"
+                )
+                self.writeline("else:")
+                self.writeline(
+                    f"    {name}[{i + ckp_offset}] = {name}[{i}].unsqueeze(0).clone()"
                 )
 
     @staticmethod

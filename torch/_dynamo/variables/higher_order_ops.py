@@ -1418,11 +1418,13 @@ def while_loop_call_function_impl(
         [inp.as_proxy() for inp in additional_inputs_seq] + additional_lifted_inputs
     )
     p_args = (cond_node, body_node, proxy_operands, proxy_additional_inputs)
+    example_args = [
+        proxy.node.meta["example_value"]
+        for proxy in proxy_operands + proxy_additional_inputs
+    ]
 
     need_grad = any(
-        t.requires_grad
-        for t in operands_seq + additional_lifted_inputs
-        if isinstance(t, TensorVariable)
+        t.requires_grad for t in example_args if isinstance(t, (torch.Tensor,))
     )
     if with_checkpoint or not need_grad:
         return _call_function_and_unflatten_output(

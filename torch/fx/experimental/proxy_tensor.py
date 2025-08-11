@@ -405,6 +405,7 @@ def get_proxy_slot(
             value = tracer.sympy_expr_tracker[obj.node.expr]
         else:
             if isinstance(default, _NoDefault):
+                breakpoint()
                 raise RuntimeError(
                     f"{obj} ({id(obj)})is not tracked with proxy for {tracer}"
                 )

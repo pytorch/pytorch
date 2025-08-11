@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Callable, Union, Optional
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -230,15 +230,10 @@ def _while_loop_dense_impl(
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
-    # Initialize checkpoints if needed
-    checkpoints: list[list[torch.Tensor]] = []
-    if with_checkpoint:
-        checkpoints = [[] for _ in range(len(carried_inputs))]
-
+    checkpoints: list[list[torch.Tensor]] = [[] for _ in range(len(carried_inputs))]
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
 
-        # Store checkpoints before body_fn execution if needed
         if with_checkpoint:
             for i, carry in enumerate(carried_vals):
                 checkpoints[i].append(carry)
@@ -253,10 +248,16 @@ def _while_loop_dense_impl(
         carried_vals = out
 
     if with_checkpoint:
-        checkpoint_tensors = tuple(torch.stack(ckp_list) for ckp_list in checkpoints)
-        return carried_vals + checkpoint_tensors
+        checkpoint_tensors = []
+        for ckp_list, val in zip(checkpoints, carried_vals):
+            checkpoint_tensors.append(
+                val.unsqueeze(0).clone()
+                if len(ckp_list) == 0
+                else torch.stack(ckp_list)
+            )
+        return tuple(carried_vals) + tuple(checkpoint_tensors)
     else:
-        return carried_vals
+        return tuple(carried_vals)
 
 
 while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
@@ -268,12 +269,13 @@ while_loop_with_checkpoint_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
 )
 
 
-class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
+class WhileLoopAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
         cond_fn,
         body_fn,
+        with_checkpoint,
         num_carried_inputs,
         num_additional_inputs,
         *carries_and_inputs,
@@ -301,47 +303,90 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
         ctx.carries = carries
         ctx.additional_inputs = additional_inputs
         ctx.checkpoints = checkpoints
+
+        for carry, ckp in zip(carries, ctx.checkpoints):
+            ckp.requires_grad_(carry.requires_grad)
+
+        ctx.with_checkpoint = with_checkpoint
         # We snapshot the dispatch keys in forward for materializing the
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         assert len(checkpoints) > 0, "checkpoints shouldn't be empty"
-        return tuple(out) + tuple(checkpoints)
+        if with_checkpoint:
+            return tuple(out) + tuple(checkpoints)
+        return tuple(out)
 
     @staticmethod
     def backward(ctx, *grads):
         from torch._higher_order_ops.cond import create_bw_fn
         from torch._higher_order_ops.scan import split_into_chunks
+        from torch._higher_order_ops.utils import is_differentiable_dtype
 
         num_carried_inputs = len(ctx.carries)
-        grad_outs, _ = split_into_chunks(
-            grads,
-            [num_carried_inputs, num_carried_inputs],
+        grad_carries, _ = (
+            split_into_chunks(
+                grads,
+                [num_carried_inputs, num_carried_inputs],
+            )
+            if ctx.with_checkpoint
+            else grads
         )
 
         bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
 
-        tensor_masks = [
-            True if isinstance(t, torch.Tensor) else False for t in ctx.additional_inputs
+        # For input tensors that don't require gradient, we return zeros tensors.
+        # For non-tensor inputs, e.g. lifted free symbols in additional_inputs,
+        # we return None as their gradients.
+        additional_inputs_tensor_masks = [
+            True
+            if isinstance(t, torch.Tensor) and is_differentiable_dtype(t.dtype)
+            else False
+            for t in ctx.additional_inputs
         ]
-        def _filter_with_masks(maybe_tensors: tuple[Optional[torch.Tensor], ...]) -> tuple[torch.Tensor, ...]:
+        carries_tensor_masks = [
+            True
+            if isinstance(t, torch.Tensor) and is_differentiable_dtype(t.dtype)
+            else False
+            for t in ctx.carries
+        ]
+
+        def _filter_with_masks(
+            maybe_tensors: tuple[Optional[torch.Tensor], ...], tensor_masks
+        ) -> tuple[Any, ...]:
             assert len(maybe_tensors) == len(tensor_masks)
-            tensors = tuple(t for is_tensor, t in zip(tensor_masks, maybe_tensors) if is_tensor)
+            tensors = tuple(
+                t for is_tensor, t in zip(tensor_masks, maybe_tensors) if is_tensor
+            )
             assert all(isinstance(t, torch.Tensor) for t in tensors)
             return tensors
 
-        def _fill_none_with_masks(tensors: tuple[torch.Tensor, ...])  -> tuple[Optional[torch.Tensor], ...]:
-            assert len(tensors) <= len(tensor_masks) and all(isinstance(t, torch.Tensor) for t in tensors)
+        def _fill_none_with_masks(
+            tensors: tuple[torch.Tensor, ...], tensor_masks
+        ) -> tuple[Optional[torch.Tensor], ...]:
+            assert len(tensors) <= len(tensor_masks) and all(
+                isinstance(t, torch.Tensor) for t in tensors
+            )
             tensors_iter = iter(tensors)
-            maybe_tensors = tuple(next(tensors_iter) if is_tensor else None for is_tensor in tensor_masks)
+            maybe_tensors = tuple(
+                next(tensors_iter) if is_tensor else None for is_tensor in tensor_masks
+            )
             return maybe_tensors
 
-        grad_additional_inputs = tuple(torch.zeros_like(t) for t in _filter_with_masks(ctx.additional_inputs))
+        grad_additional_inputs = tuple(
+            torch.zeros_like(t)
+            for t in _filter_with_masks(
+                ctx.additional_inputs, additional_inputs_tensor_masks
+            )
+        )
+        grad_carries = tuple(
+            t for t in _filter_with_masks(grad_carries, carries_tensor_masks)
+        )
         init_idx = torch.zeros((), dtype=torch.int64)
         _, spec = pytree.tree_flatten(
             (
                 init_idx,
-                grad_outs,
+                grad_carries,
                 grad_additional_inputs,
                 ctx.checkpoints,
                 ctx.additional_inputs,
@@ -375,8 +420,9 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
                 [len(ctx.carries), len(ctx.additional_inputs)],
             )
             cur_grad_additional_inputs = _filter_with_masks(
-                cur_grad_additional_inputs
+                cur_grad_additional_inputs, additional_inputs_tensor_masks
             )
+
             def _acc_grad(grad, acc):
                 if grad is None:
                     return
@@ -384,7 +430,7 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
 
             return (
                 idx + 1,
-                *cur_grad_carries,
+                *_filter_with_masks(cur_grad_carries, carries_tensor_masks),
                 *(
                     _acc_grad(cur_grad, grad)
                     for cur_grad, grad in zip(
@@ -395,55 +441,74 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
 
         args_single_step_bw = (
             init_idx,
-            *grad_outs,
+            *grad_carries,
             *grad_additional_inputs,
             *ctx.checkpoints,
             *ctx.additional_inputs,
         )
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-        cond_gm = materialize_as_graph(
-            cond_fn,
-            args_single_step_bw,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
-        body_gm = materialize_as_graph(
-            body_fn,
-            args_single_step_bw,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
+        with disable_proxy_modes_tracing():
+            cond_gm = materialize_as_graph(
+                cond_fn,
+                args_single_step_bw,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
+            body_gm = materialize_as_graph(
+                body_fn,
+                args_single_step_bw,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
         outs = while_loop_op(
             cond_gm,
             body_gm,
             (
                 init_idx,
-                *grad_outs,
+                *grad_carries,
                 *grad_additional_inputs,
             ),
             (*ctx.checkpoints, *ctx.additional_inputs),
         )
-        _, grad_carries, final_grad_additional_inputs = split_into_chunks(
-            outs, [1, len(ctx.carries), len(grad_additional_inputs)]
+        _, final_grad_carries, final_grad_additional_inputs = split_into_chunks(
+            outs, [1, len(grad_carries), len(grad_additional_inputs)]
         )
-        breakpoint()
-        return None, None, None, None, *grad_carries, *_fill_none_with_masks(final_grad_additional_inputs)
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            *_fill_none_with_masks(final_grad_carries, carries_tensor_masks),
+            *_fill_none_with_masks(
+                final_grad_additional_inputs, additional_inputs_tensor_masks
+            ),
+        )
 
 
-@while_loop_op.py_autograd_impl
-@while_loop_with_checkpoint_op.py_autograd_impl
-def while_loop_with_checkpoint_autograd(cond_fn, body_fn, operands, additional_inputs):
-    return WhileLoopWithCheckpointAutogradOp.apply(
+def _while_loop_autograd_impl(
+    cond_fn, body_fn, operands, additional_inputs, with_checkpoint
+):
+    return WhileLoopAutogradOp.apply(
         cond_fn,
         body_fn,
+        with_checkpoint,
         len(operands),
         len(additional_inputs),
         *operands,
         *additional_inputs,
     )
+
+
+while_loop_op.py_autograd_impl(
+    functools.partial(_while_loop_autograd_impl, with_checkpoint=False)
+)
+while_loop_with_checkpoint_op.py_autograd_impl(
+    functools.partial(_while_loop_autograd_impl, with_checkpoint=True)
+)
 
 
 def _find_or_create_fake_mode() -> FakeTensorMode:

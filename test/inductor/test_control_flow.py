@@ -1026,33 +1026,28 @@ class WhileLoopModels:
 
 class WhileLoopTests(TestCase):
     def _run_test(
-        self,
-        model,
-        inputs,
-        device,
-        dynamic=False,
-        num_counters=1,
+        self, model, inputs, device, dynamic=False, num_counters=1, backward=False
     ):
         import torch.utils._pytree as pytree
 
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-        compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
+        import copy
+
+        compiled_model = copy.deepcopy(model)
+        compiled_fn = torch.compile(backend=cnt, fullgraph=True)(compiled_model)
 
         inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
         input_sets = [inputs]
+
+        def mark_first_dim_dyn(inp):
+            torch._dynamo.mark_dynamic(inp, 0)
+
         if dynamic:
-
-            def mark_first_dim_dyn(inp):
-                torch._dynamo.mark_dynamic(inp, 0)
-
-            pytree.tree_map(mark_first_dim_dyn, input_sets)
 
             def tile_fn(inp):
                 # tile every first dim 5x
                 tiling = [5] + [1] * (inp.ndim - 1)
                 t = torch.tile(inp, tiling)
-                # mark every first dim as dynamic
-                torch._dynamo.mark_dynamic(inp, 0)
                 return t
 
             larger_inputs = pytree.tree_map(tile_fn, inputs)
@@ -1072,21 +1067,75 @@ class WhileLoopTests(TestCase):
                 cloned_inputs = pytree.tree_map(
                     lambda t: t.clone(), inputs_with_counters
                 )
-                result = model(*inputs_with_counters)
-                with torch.no_grad():
-                    result_compiled = compiled_model(*inputs_with_counters)
+                cloned_inputs2 = pytree.tree_map(
+                    lambda t: t.clone(), inputs_with_counters
+                )
+                need_grad = False
+
+                def process_inputs(inp):
+                    if dynamic:
+                        mark_first_dim_dyn(inp)
+                    if backward and inp.dtype.is_floating_point:
+                        nonlocal need_grad
+                        need_grad = True
+                        inp.requires_grad_(True)
+                    return inp
+
+                pytree.tree_map(process_inputs, cloned_inputs)
+                pytree.tree_map(process_inputs, cloned_inputs2)
+                result = model(*cloned_inputs)
+                result_compiled = compiled_fn(*cloned_inputs2)
                 # inputs must not be mutated
                 torch.testing.assert_close(cloned_inputs, inputs_with_counters)
                 torch.testing.assert_close(
                     result, result_compiled, atol=1e-4, rtol=1e-4
                 )
+                if backward and need_grad:
+                    # a fake loss fn
+                    def _loss_fn(flat_results):
+                        return sum(
+                            [
+                                torch.sqrt(torch.pow(res.sum() / res.max(), 2))
+                                for res in flat_results
+                            ]
+                        )
+
+                    result_loss = _loss_fn(pytree.tree_flatten(result)[0])
+                    compiled_loss = _loss_fn(pytree.tree_flatten(result_compiled)[0])
+                    self.assertEqual(result_loss, compiled_loss)
+                    result_loss.backward()
+                    compiled_loss.backward()
+
+                    model_parameters = dict(model.named_parameters())
+                    compiled_parameters = dict(compiled_model.named_parameters())
+                    for name, param in model_parameters.items():
+                        self.assertEqual(param, compiled_parameters[name])
+                        torch.testing.assert_close(
+                            param.grad,
+                            compiled_parameters[name].grad,
+                            atol=1e-4,
+                            rtol=1e-4,
+                        )
+                    for inp1, inp2 in zip(
+                        pytree.tree_flatten(cloned_inputs)[0],
+                        pytree.tree_flatten(cloned_inputs2)[0],
+                    ):
+                        if inp1.requires_grad:
+                            torch.testing.assert_close(
+                                inp1.grad,
+                                inp2.grad,
+                                atol=1e-4,
+                                rtol=1e-4,
+                            )
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
-    def test_while_loop_simple_control_flow(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_simple_control_flow(self, device, dynamic, backward):
         # while_loop control flow without nesting
         self._run_test(
             model=WhileLoopModels.Simple(),
@@ -1096,12 +1145,15 @@ class WhileLoopTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
-    def test_while_loop_nested_control_flow(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_nested_control_flow(self, device, dynamic, backward):
         # while_loop control flow with nesting
         self._run_test(
             model=WhileLoopModels.Nested(),
@@ -1112,12 +1164,15 @@ class WhileLoopTests(TestCase):
             device=device,
             dynamic=dynamic,
             num_counters=2,
+            backward=backward,
         )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
-    def test_while_loop_with_outer_code(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_outer_code(self, device, dynamic, backward):
         # while_loop control flow with outer code
         self._run_test(
             model=WhileLoopModels.OuterCode(),
@@ -1127,18 +1182,22 @@ class WhileLoopTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
-    def test_while_loop_with_parameters(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_parameters(self, device, dynamic, backward):
         # while_loop control flow with parameters
         self._run_test(
             model=WhileLoopModels.Parameters(device),
             inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
@@ -1160,9 +1219,10 @@ class WhileLoopTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    # dynamic=True doesn't work due to we haven't handle lifted symbols
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_pytree_inputs(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_pytree_inputs(self, device, dynamic, backward):
         self._run_test(
             model=WhileLoopModels.PytreeCarry(),
             inputs=(
@@ -1173,12 +1233,15 @@ class WhileLoopTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_data_dependent_ops(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_data_dependent_ops(self, device, dynamic, backward):
         with torch._dynamo.config.patch(
             {
                 "capture_dynamic_output_shape_ops": True,
@@ -1194,12 +1257,15 @@ class WhileLoopTests(TestCase):
                 ),
                 device=device,
                 dynamic=dynamic,
+                backward=backward,
             )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_data_dependent_in_out(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_data_dependent_in_out(self, device, dynamic, backward):
         with torch._dynamo.config.patch(
             {
                 "capture_dynamic_output_shape_ops": True,
@@ -1216,10 +1282,13 @@ class WhileLoopTests(TestCase):
                 ),
                 device=device,
                 dynamic=dynamic,
+                backward=backward,
             )
 
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic, backward):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Expected body_fn_output and carried_inputs to have same metadata but found",
@@ -1239,6 +1308,7 @@ class WhileLoopTests(TestCase):
                     ),
                     device="cpu",
                     dynamic=dynamic,
+                    backward=backward,
                 )
 
     def test_while_loop_infinite_loop_error(self):
@@ -1256,7 +1326,9 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_zero_loop(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_zero_loop(self, device, dynamic, backward):
         for model in [
             WhileLoopModels.ZeroLoop(),
             WhileLoopModels.ZeroLoop2(),
@@ -1267,15 +1339,17 @@ class WhileLoopTests(TestCase):
                 inputs=(torch.tensor([1, 2, 3, 4, 5]),),
                 device=device,
                 dynamic=dynamic,
+                backward=backward,
             )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
+    @parametrize("backward", [True, False])
     @torch._dynamo.config.patch(
         {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
     )
-    def test_while_loop_with_unbacked_symint_closure(self, device, dynamic):
+    def test_while_loop_with_unbacked_symint_closure(self, device, dynamic, backward):
         self._run_test(
             model=WhileLoopModels.UnbackedSymIntClosure(),
             inputs=(
@@ -1284,6 +1358,7 @@ class WhileLoopTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
@@ -1318,10 +1393,11 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
+    @parametrize("backward", [True, False])
     @torch._dynamo.config.patch(
         {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
     )
-    def test_while_loop_with_sym_expr_cond(self, device, dynamic):
+    def test_while_loop_with_sym_expr_cond(self, device, dynamic, backward):
         self._run_test(
             model=WhileLoopModels.SymExprCond(),
             inputs=(
@@ -1330,17 +1406,21 @@ class WhileLoopTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_with_conv(self, device, dynamic):
+    @parametrize("backward", [True, False])
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_while_loop_with_conv(self, device, dynamic, backward):
         self._run_test(
             model=WhileLoopModels.Conv(device),
             inputs=(torch.randn(2, 4, 4, 4, dtype=torch.float64),),
             device=device,
             dynamic=dynamic,
+            backward=backward,
         )
 
 

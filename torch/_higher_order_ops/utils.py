@@ -493,6 +493,10 @@ def prepare_fw_with_masks(fn):
     return fw_with_masks
 
 
+def is_differentiable_dtype(dtype):
+    return dtype.is_floating_point or dtype.is_complex
+
+
 def prepare_fw_with_masks_all_requires_grad(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
@@ -504,7 +508,11 @@ def prepare_fw_with_masks_all_requires_grad(fn):
         # require_gradness reasoning much easier.
         if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
             fw_out = pytree.tree_map_only(
-                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+                torch.Tensor,
+                lambda x: x.requires_grad_(True)
+                if is_differentiable_dtype(x.dtype)
+                else x,
+                fw_out,
             )
         return fw_out, pytree.tree_map_only(
             torch.Tensor, lambda x: x.requires_grad, fw_out
