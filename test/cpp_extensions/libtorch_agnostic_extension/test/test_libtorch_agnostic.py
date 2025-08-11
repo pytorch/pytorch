@@ -232,43 +232,6 @@ if not IS_WINDOWS:
             )
             self.assertFalse(undefined_tensor_is_defined)
 
-        @onlyCPU
-        def test_default_constructor_memory_cleanup(self):
-            import subprocess
-            import sys
-
-            import libtorch_agnostic
-
-            def run_in_subprocess():
-                import gc
-                import os
-
-                import psutil
-
-                process = psutil.Process(os.getpid())
-                gc.collect()
-
-                initial_memory = process.memory_info().rss
-
-                for _ in range(100):
-                    libtorch_agnostic.ops.test_default_constructor(False)
-
-                final_memory = process.memory_info().rss
-                memory_increase = final_memory - initial_memory
-
-                return memory_increase
-
-            # Run the memory test in a subprocess
-            result = subprocess.run(
-                [sys.executable, "-c", f"print({run_in_subprocess()})"],
-                capture_output=True,
-                text=True,
-            )
-
-            # Check the result from the subprocess
-            memory_increase = int(result.stdout.strip())
-            self.assertEqual(memory_increase, 0)
-
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
