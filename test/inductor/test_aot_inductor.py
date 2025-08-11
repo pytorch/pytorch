@@ -5018,6 +5018,9 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "different kernel name when native matmul"
+    )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
