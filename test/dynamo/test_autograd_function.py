@@ -13,8 +13,9 @@ from torch.testing._internal.triton_utils import (
     requires_gpu,
     HAS_XPU_AND_TRITON
 )
-from torch.testing._internal.common_fsdp import get_devtype
-
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
     import triton
@@ -509,13 +510,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.amp.custom_fwd(device_type=get_devtype())
+            @torch.amp.custom_fwd(device_type=device_type)
             def forward(ctx, a, b):
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
-            @torch.amp.custom_bwd(device_type=get_devtype())
+            @torch.amp.custom_bwd(device_type=device_type)
             def backward(ctx, grad):
                 a, b = ctx.saved_tensors
                 return grad.mm(b.t()), a.t().mm(grad)
@@ -1502,8 +1503,8 @@ class GraphModule(torch.nn.Module):
             z = Add.apply(x, y)
             return z
 
-        x = torch.randn(10, device=get_devtype(), requires_grad=True)
-        y = torch.randn(10, device=get_devtype(), requires_grad=True)
+        x = torch.randn(10, device=device_type, requires_grad=True)
+        y = torch.randn(10, device=device_type, requires_grad=True)
         z = f(x, y)
         loss = z.sum()
         loss.backward()
@@ -1537,8 +1538,8 @@ class GraphModule(torch.nn.Module):
             z = Add.apply(x, y)
             return z
 
-        x = torch.randn(10, device=get_devtype(), requires_grad=True)
-        y = torch.randn(10, device=get_devtype(), requires_grad=True)
+        x = torch.randn(10, device=device_type, requires_grad=True)
+        y = torch.randn(10, device=device_type, requires_grad=True)
         z, _ = f(x, y)
         loss = z.sum()
         loss.backward()
