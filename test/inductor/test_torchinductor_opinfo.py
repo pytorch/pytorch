@@ -2,6 +2,7 @@
 import atexit
 import contextlib
 import functools
+import math
 import os
 import sys
 import unittest
@@ -25,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
-    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
@@ -45,11 +45,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
     has_triton,
-    HAS_XPU,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -285,8 +285,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    # Double and complex datatype matmul is not supported in oneDNN
-    "byte": {f16, f32},
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
@@ -294,9 +292,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # not implemented for 'Half'
-    "sort": {b8},
-    "argsort": {b8},
+    # [Begin] Incorrect XPU reference due to new driver.
+    "masked.prod": {b8, i32, i64},
+    "masked.amin": {i64},
+    "masked.amax": {i64},
+    "amax": {i64},
+    "amin": {i64},
+    "std": {f64},
+    "var": {f64},
+    "std_mean": {f64},
+    "var_mean": {f64},
+    # [End]
 }
 
 
@@ -964,6 +970,131 @@ inductor_one_sample["xpu"] = {
 }
 
 
+# Custom replacements for assertEquals, in cases where a difference in value
+# may not indicate correctness.
+
+
+def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
+    # Use the normal assert_equal_fn suffices for a stable sort
+    if "stable" in kwargs:
+        return True
+
+    # In other cases, we need only check that the sort/argsort outputs are
+    # compatible.
+    orig_input = args[0]
+
+    # The sort dimension is specified as a kwarg, or the last dimension.
+    if "dim" not in kwargs:
+        dim = orig_input.dim() - 1
+    else:
+        dim = kwargs["dim"]
+
+    def argsort_sort_assert_equal(
+        test_case_inst,
+        x,
+        y,
+        *,
+        atol=None,
+        rtol=None,
+        equal_nan=True,
+        exact_dtype=True,
+        exact_stride=False,
+    ):
+        if is_argsort:
+            assert isinstance(x, torch.Tensor)
+            assert isinstance(y, torch.Tensor)
+        else:
+            # The first tensor is the sorted values and can be asserted via
+            # the usual means
+            for t in (x, y):
+                assert isinstance(t, tuple)
+                assert len(t) == 2
+
+            test_case_inst.assertEqual(
+                x[0],
+                y[0],
+                atol=atol,
+                rtol=rtol,
+                equal_nan=equal_nan,
+                exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
+            )
+
+            # The second tensor is the same result as an argsort.
+            x = x[1]
+            y = y[1]
+
+        if exact_dtype and (x.dtype != y.dtype):
+            raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
+
+        assert x.shape == y.shape
+
+        if exact_stride and (x.stride() != y.stride()):
+            raise AssertionError(
+                f"The strides do not match: {x.stride()} != {y.stride()}."
+            )
+
+        def el_to_indices(el):
+            """Turn an element number into a list of indices"""
+            indices = [None] * x.dim()
+            for cur_dim in reversed(range(x.dim())):
+                indices[cur_dim] = el % x.shape[cur_dim]
+                el //= x.shape[cur_dim]
+            assert None not in indices
+            return indices
+
+        def get_val_by_ids(t, ids):
+            """Return a value from a tensor at a given list of indices"""
+            for idx in ids:
+                t = t[idx]
+            return t.item()
+
+        # Loop through every value of the tensors and check for equality or
+        # compatibility.
+        for current_el in range(x.numel()):
+            ids = el_to_indices(current_el)
+
+            # Simple case: check equality of arsort indices
+            if get_val_by_ids(x, ids) == get_val_by_ids(y, ids):
+                continue
+
+            # Complex case: check if indices refer to same value
+            x_orig_ids = ids.copy()
+            y_orig_ids = ids.copy()
+
+            x_orig_ids[dim] = get_val_by_ids(x, ids)
+            y_orig_ids[dim] = get_val_by_ids(y, ids)
+
+            x_value = get_val_by_ids(orig_input, x_orig_ids)
+            y_value = get_val_by_ids(orig_input, y_orig_ids)
+            if x_value == y_value:
+                continue
+
+            if equal_nan:
+                if math.isnan(x_value) and math.isnan(y_value):
+                    continue
+
+            raise AssertionError(
+                f"Non-stable argsort outputs are incompatible at {ids}"
+            )
+
+    return argsort_sort_assert_equal
+
+
+def get_argsort_assert_equal_fn(args, kwargs):
+    return get_sort_argsort_assert_equal_fn(True, args, kwargs)
+
+
+def get_sort_assert_equal_fn(args, kwargs):
+    return get_sort_argsort_assert_equal_fn(False, args, kwargs)
+
+
+CUSTOM_ASSERT_EQUALS_FNS = {
+    "argsort": get_argsort_assert_equal_fn,
+    "sort": get_sort_assert_equal_fn,
+}
+
+
 def collection_decorator(fn):
     @functools.wraps(fn)
     def inner(self, device, dtype, op):
@@ -994,8 +1125,10 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
+    @requires_cuda_and_triton
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
@@ -1120,7 +1253,7 @@ class TestInductorOpInfo(TestCase):
 
             return True, rng_mode.has_rng_op
 
-        def get_contexts(has_rng_op):
+        def get_contexts(has_rng_op, args, kwargs):
             if has_rng_op:
                 # TODO - enable this, running into errors
                 return (
@@ -1137,6 +1270,15 @@ class TestInductorOpInfo(TestCase):
                 )
 
             ctx = functools.partial(maybe_skip_size_asserts, op)
+            if op_name in CUSTOM_ASSERT_EQUALS_FNS:
+                assert_equal_fn = CUSTOM_ASSERT_EQUALS_FNS[op_name](args, kwargs)
+                return (
+                    (
+                        ctx,
+                        {"assert_equal": assert_equal_fn},
+                    ),
+                )
+
             return ((ctx, {}),)
 
         try:
@@ -1162,7 +1304,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
                 no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                for context_fn, kwarg_overrides in get_contexts(
+                    has_rng_op, args, kwargs
+                ):
                     with context_fn():
                         # Base kwargs
                         adjusted_kwargs = {

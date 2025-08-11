@@ -123,12 +123,13 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False):
+def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
+        kernel_options=kernel_options,
     )
 
 
@@ -671,6 +672,7 @@ class TestFlexAttention(InductorTestCase):
         dtype: torch.dtype,
         device: str,
         block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -706,6 +708,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         else:
             return_lse = False
@@ -718,6 +721,7 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
+                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -1471,9 +1475,13 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
+        kernel_options = {"USE_TMA": True}
+
         block_mask = _create_empty_block_mask(q, k)
         score_mod = _generate_alibi_bias(8)
-        sdpa_partial = create_attention(score_mod=score_mod, block_mask=block_mask)
+        sdpa_partial = create_attention(
+            score_mod=score_mod, block_mask=block_mask, kernel_options=kernel_options
+        )
         compiled_sdpa = torch.compile(sdpa_partial, fullgraph=True)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
@@ -1516,7 +1524,7 @@ class TestFlexAttention(InductorTestCase):
         # test paged attention which does not support backward
         q.requires_grad, k.requires_grad, v.requires_grad = False, False, False
         paged_compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, device=device
+            score_mod, q, k, v, dtype, device=device, kernel_options=kernel_options
         )
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
@@ -1880,6 +1888,50 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return qk + scale[b].sum(dim=-1)
 
         self.run_test(score_mod_scale, dtype, device=device)
+
+    @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @skip_on_cpu
+    def test_dynamic_divisibility_guards(self, device, dtype):
+        """Test guards for divisible/non-divisible shape transitions"""
+        if device == "cpu" and dtype is torch.float16:
+            dtype = torch.float32
+
+        def score_mod(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def test_shape(S, backend):
+            """Test a single shape configuration"""
+            block_mask = create_block_mask(noop_mask, 1, 1, S, S, device=device)
+            sdpa_partial = create_attention(score_mod, block_mask=block_mask)
+
+            tensors = [
+                torch.randn(
+                    2, 4, S, 64, dtype=dtype, device=device, requires_grad=False
+                )
+                for _ in range(3)
+            ]
+
+            compiled_sdpa = torch.compile(sdpa_partial, backend=backend)
+            out, code = run_and_get_code(compiled_sdpa, *tensors)
+
+            # Check divisibility flag
+            is_divisible = S % 128 == 0
+            expected_flag = f"IS_DIVISIBLE : tl.constexpr = {is_divisible}"
+            self.assertIn(
+                expected_flag, str(code), f"S={S} should have {expected_flag}"
+            )
+
+            self.assertEqual(out.shape, (2, 4, S, 64))
+            return out, code
+
+        torch._dynamo.reset()
+        backend = CompileCounterWithBackend("inductor")
+
+        # Test divisible and non-divisible shapes
+        test_shapes = [256, 255, 383, 384]
+        _ = [test_shape(S, backend) for S in test_shapes]
 
     @supported_platform
     def test_multiple_score_mod_calls(self, device):
