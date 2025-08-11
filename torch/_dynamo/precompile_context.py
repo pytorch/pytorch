@@ -1,4 +1,5 @@
 import copy
+import logging
 import pickle
 from abc import abstractmethod
 from collections import defaultdict
@@ -23,6 +24,7 @@ Classes and implementations related to precompile
 """
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
 class PrecompileCacheArtifact(CacheArtifact, Generic[T]):

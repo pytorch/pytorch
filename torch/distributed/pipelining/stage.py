@@ -851,6 +851,10 @@ class _PipelineStageBase(ABC):
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
+        # skip backward computation if backward is not enabled
+        if not self.has_backward:
+            return
+
         assert bwd_chunk_id in self.dw_runner, (
             f"{self.log_prefix} Attempted to run backward_weight_one_chunk for chunk {bwd_chunk_id}"
             " without first calling `backward_one_chunk(full_backward=False)`"
