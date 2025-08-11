@@ -145,12 +145,17 @@ namespace c10::CachingDeviceAllocator {
 template <typename BlockT>
 struct BlockComparatorSize {
   bool operator()(const BlockT* a, const BlockT* b) const {
+    // Note [Block Comparator]
+    // Assumes all compared blocks belong to the same device (guaranteed by the
+    // block pool). Without this guarantee, stream.id() could collide across
+    // devices — i.e., different streams on different devices may have the same
+    // stream id.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
     if (a->size != b->size) {
       return a->size < b->size;
     }
-    if (a->stream != b->stream) {
-      return reinterpret_cast<uintptr_t>(a->stream) <
-          reinterpret_cast<uintptr_t>(b->stream);
+    if (a->stream.id() != b->stream.id()) {
+      return a->stream.id() < b->stream.id();
     }
     return reinterpret_cast<uintptr_t>(a->ptr) <
         reinterpret_cast<uintptr_t>(b->ptr);
@@ -160,9 +165,10 @@ struct BlockComparatorSize {
 template <typename BlockT>
 struct BlockComparatorAddress {
   bool operator()(const BlockT* a, const BlockT* b) const {
-    if (a->stream != b->stream) {
-      return reinterpret_cast<uintptr_t>(a->stream) <
-          reinterpret_cast<uintptr_t>(b->stream);
+    // see Note [Block Comparator]
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
+    if (a->stream.id() != b->stream.id()) {
+      return a->stream.id() < b->stream.id();
     }
     return reinterpret_cast<uintptr_t>(a->ptr) <
         reinterpret_cast<uintptr_t>(b->ptr);
