@@ -31,7 +31,7 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
@@ -57,6 +57,7 @@ from torch._guards import (
 )
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
+from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -388,7 +389,7 @@ class OutputGraph(OutputGraphGuardsState):
         compiler_fn: Optional[CompilerFn],
         root_tx: "InstructionTranslatorBase",
         export: bool,
-        export_constraints: Any,
+        export_constraints: Sequence[_ConstraintTarget],
         frame_state: Any,
         local_scope: Scope,
         global_scope: Scope,
@@ -414,7 +415,7 @@ class OutputGraph(OutputGraphGuardsState):
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
         self.export = export
-        self.export_constraints = export_constraints
+        self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
         self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
