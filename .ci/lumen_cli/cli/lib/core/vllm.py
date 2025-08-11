@@ -32,7 +32,8 @@ _VLLM_TEMP_FOLDER = "tmp"
 @dataclass
 class VllmBuildParameters:
     """
-    Parameters controlling a vLLM build.
+    Parameters defining the vllm external input configurations.
+    Combine with VllmDockerBuildArgs to define the vllm build environment
     """
 
     # USE_TORCH_WHEEL: when true, use local Torch wheels; requires TORCH_WHEELS_PATH.
@@ -91,14 +92,20 @@ class VllmBuildParameters:
             value = getattr(self, attr_name)
             if flag == trigger_value:
                 if not value or not check_func(value):
-                    raise FileNotFoundError(error_msg)
+                    raise ValueError(error_msg)
             else:
                 logger.info("flag  %s is not set", flag)
+        if not self.output_dir:
+            raise ValueError("missing required output_dir")
 
 
 @dataclass
 class VllmDockerBuildArgs:
-    output_dir: Optional[Path] = env_path_field("output_dir", "shared")
+    """
+    Parameters defining the vllm main build arguments.
+    Combine with VllmBuildParameters to define the vllm build environment
+    """
+
     target: str = env_str_field("TARGET", "export-wheels")
     tag_name: str = env_str_field("TAG", "vllm-wheels")
     cuda: str = env_str_field("CUDA_VERSION", "12.8.1")
@@ -115,12 +122,22 @@ class VllmBuildRunner(BaseRunner):
 
     Environment variable options:
         "USE_TORCH_WHEEL":      "1: use local wheels; 0: pull nightly from pypi",
-        "USE_LOCAL_BASE_IMAGE": "1: use local base image; 0: default image",
-        "USE_LOCAL_DOCKERFILE": "1: use local Dockerfile; 0: vllm repo default dockerfile.torch_nightly",
         "TORCH_WHEELS_PATH":    "Path to local wheels (when USE_TORCH_WHEEL=1)",
+
+        "USE_LOCAL_BASE_IMAGE": "1: use local base image; 0: default image",
+         "BASE_IMAGE":           "name:tag to indicate base image the dockerfile depends on (when USE_LOCAL_BASE_IMAGE=1)",
+
+        "USE_LOCAL_DOCKERFILE": "1: use local Dockerfile; 0: vllm repo default dockerfile.torch_nightly",
         "DOCKERFILE_PATH":      "Path to Dockerfile (when USE_LOCAL_DOCKERFILE=1)",
-        "BASE_IMAGE":           "name:tag for local base image (when USE_LOCAL_BASE_IMAGE=1)",
+
+        "OUTPUT_DIR":           "e.g. './shared'",
+
         "TORCH_CUDA_ARCH_LIST": "e.g. '8.0' or '8.0;9.0'",
+        "CUDA_VERSION":         "e.g. '12.8.1'",
+        "PYTHON_VERSION":       "e.g. '3.12'",
+        "MAX_JOBS":             "e.g. '64'",
+        "SCCACHE_BUCKET":       "e.g. 'my-bucket'",
+        "SCCACHE_REGION":       "e.g. 'us-west-2'",
     """
 
     def __init__(self, args=None):
