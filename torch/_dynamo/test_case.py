@@ -25,6 +25,7 @@ from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
 )
@@ -41,9 +42,16 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
+    # Enable Inductor UTs on Windows for CPU.
+    # CUDA on Windows is not verified, NVDA developer can continue to enable CUDA based on CPU path.
+    if torch.cuda.is_available() and IS_WINDOWS:
+        return
+
+    # Only test Windows Inductor CPU on SLOW tests.
     if (
         not torch.xpu.is_available()
         and IS_WINDOWS
+        and TEST_WITH_SLOW
         and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
     ):
         return
