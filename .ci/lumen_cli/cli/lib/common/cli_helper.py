@@ -5,7 +5,14 @@ Cli Argparser Utility helpers for CLI tasks.
 
 import argparse
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Required, TypedDict
+
+
+try:
+    from typing import Any, Callable, Required, TypedDict  # Python 3.11+
+except ImportError:
+    from typing import Any, Callable, TypedDict
+
+    from typing_extensions import Required  # Fallback for Python <3.11
 
 
 class BaseRunner(ABC):

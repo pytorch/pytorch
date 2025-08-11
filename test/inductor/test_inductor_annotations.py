@@ -31,11 +31,10 @@ class InductorAnnotationTestCase(TestCase):
         code = self.get_code()
 
         self.assertTrue("from torch.cuda import nvtx" in code)
-        self.assertTrue(
-            code.count("training_annotation = nvtx._device_range_start('inference')")
-            >= 1
+        self.assertEqual(
+            code.count("training_annotation = nvtx._device_range_start('inference')"), 1
         )
-        self.assertTrue(code.count("nvtx._device_range_end(training_annotation)") >= 1)
+        self.assertEqual(code.count("nvtx._device_range_end(training_annotation)"), 1)
 
 
 if __name__ == "__main__":
