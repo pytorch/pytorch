@@ -8769,12 +8769,7 @@ class TorchBindObject(NonTensorObj):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(operator.add, flat_sizes, 0)
-<<<<<<< HEAD
 
-
-=======
-   
->>>>>>> e7a803008fd (Fix get_free_symbol_uses for several nodes)
 @ir_dataclass
 class GeneratorState(NonTensorObj):
     name: str
