@@ -138,7 +138,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _T = TypeVar("_T")
@@ -13155,7 +13155,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
         """
@@ -13654,6 +13654,49 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    @requires_cuda_and_triton
+    @parametrize("use_cat", [True, False])
+    def test_copy_non_blocking_is_pinned(self, use_cat):
+        def f(a_list):
+            a_cpu_list = []
+            a_to_cpu_event_list = []
+
+            for a in a_list:
+                a_cpu = a.to(device="cpu", non_blocking=True)
+                a_to_cpu_event = torch.Event()
+                a_to_cpu_event.record()
+                a_cpu_list.append(a_cpu)
+                a_to_cpu_event_list.append(a_to_cpu_event)
+
+            for e in a_to_cpu_event_list:
+                e.synchronize()
+
+            if use_cat:
+                return torch.cat(a_cpu_list)
+            else:
+                return a_cpu_list
+
+        f_compiled = torch.compile(f)
+        inputs = [
+            torch.rand(1000, dtype=torch.float16, device=GPU_TYPE) for _ in range(100)
+        ]
+        outputs = f(inputs)
+
+        with torch.profiler.profile(
+            activities=[
+                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
+            ],
+        ) as p:
+            outputs_compiled = f_compiled(inputs)
+
+        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
+        # self.assertTrue("pinned" in code)
+
+        self.assertEqual(outputs, outputs_compiled)
+        profile_output = str(p.key_averages())
+        print(profile_output)
+        self.assertFalse("Pageable" in profile_output)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -14028,7 +14071,7 @@ if RUN_GPU:
                 torch._inductor.aot_compile(traced, inputs)
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
-        @requires_cuda
+        @requires_cuda_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
         def test_grouped_mm(self):
