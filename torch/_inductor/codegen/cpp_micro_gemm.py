@@ -211,12 +211,12 @@ inline void {{kernel_name}}(
     ) -> str:
         buffer_size = " * ".join(map(str, size_args))
         return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
-            dict(
-                buffer_name=buffer_name,
-                buffer_dtype=buffer_dtype,
-                buffer_size=buffer_size,
-                is_msvc_compiler=cpp_builder.is_msvc_cl(),
-            )
+            {
+                "buffer_name": buffer_name,
+                "buffer_dtype": buffer_dtype,
+                "buffer_size": buffer_size,
+                "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            }
         )
 
     def is_woq_int4(self):

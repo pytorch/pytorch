@@ -1068,7 +1068,7 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.4 [igam1])
-   * - if x > 1.1 and x < a, using the substraction from the regularized lower
+   * - if x > 1.1 and x < a, using the subtraction from the regularized lower
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (5)
    */
@@ -1148,7 +1148,7 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.3 [igam1])
-   * - if x > 1 and x > a, using the substraction from the regularized upper
+   * - if x > 1 and x > a, using the subtraction from the regularized upper
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (4)
    */
@@ -1730,7 +1730,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
    with the usual checks for overflow etcetera.
 
    Performance-wise, it seems to be substantially faster than either
-   the SLATEC DERFC function [or an erfcx function derived therefrom]
+   the SLATEC DERFC function [or an erfcx function derived there from]
    or Cody's CALERF function (from netlib.org/specfun), while
    retaining near machine precision in accuracy.  */
 
@@ -2862,7 +2862,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2910,7 +2910,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     T q = x + x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2966,7 +2966,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3026,7 +3026,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     T q = x + x + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3150,7 +3150,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T q = T(1.0) - x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3190,7 +3190,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3733,7 +3733,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3785,7 +3785,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0));
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3841,7 +3841,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3897,7 +3897,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;

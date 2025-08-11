@@ -18,10 +18,9 @@ from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -29,6 +28,7 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_SAVE_XML,
     TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
@@ -183,13 +182,11 @@ S390X_BLOCKLIST = [
     "dynamo/test_misc",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
-    "inductor/test_aot_inductor_arrayref",
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_ao_sparsity",
-    "test_cpp_extensions_open_device_registration",
     "test_jit",
     "test_metal",
     "test_mps",
@@ -242,7 +239,6 @@ S390X_BLOCKLIST = [
     # some false errors
     "doctests",
     # new failures to investigate and fix
-    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
     "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
@@ -272,7 +268,6 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_extension_utils",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
@@ -913,8 +908,12 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
+    # TODO(FFFrog): Will remove this later when windows/macos are supported.
+    if not IS_LINUX:
+        return 0
+
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
@@ -1250,7 +1249,6 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
     "test_openreg": run_test_with_openreg,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
@@ -1293,6 +1291,16 @@ def parse_args():
             "If this flag is present, we will only run functorch tests. "
             "If this flag is not present, we will run all tests "
             "(including functorch tests)."
+        ),
+    )
+    parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
         ),
     )
     parser.add_argument(
@@ -1395,18 +1403,13 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (
-            TEST_WITH_CROSSREF
-            or TEST_CONFIG == "distributed"
-            or TEST_CONFIG == "default"
-        )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1464,6 +1467,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1546,6 +1550,15 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
         )
 
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
+                selected_tests,
+            )
+        )
+
     if options.cpp:
         selected_tests = list(
             filter(lambda test_name: test_name in CPP_TESTS, selected_tests)
@@ -1567,6 +1580,8 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
+            "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1840,6 +1855,7 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1902,8 +1918,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
@@ -1914,13 +1931,14 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
-            print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
-            )
-            sys.exit(1)
+    try:
+        for pkg in packages:
+            version(pkg)
+    except PackageNotFoundError:
+        print_to_stderr(
+            f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+        )
+        sys.exit(1)
 
 
 def main():

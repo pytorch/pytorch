@@ -330,7 +330,6 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
     allow_complex_guards_as_runtime_asserts=False,
 ):
     """
@@ -366,7 +365,8 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
+        assert fake_mode is not None
+    else:
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
@@ -389,17 +389,6 @@ def make_fake_inputs(
                 allow_non_fake_inputs=True,
                 export=True,
             )
-    else:
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(
-                    tracked_fakes=[],
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    trace_asserts=True,
-                ),
-                allow_non_fake_inputs=True,
-            )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -408,11 +397,7 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
         sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
         fake_args, fake_kwargs = tree_map_with_path(
@@ -493,7 +478,6 @@ def produce_guards_and_solve_constraints(
     dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -534,16 +518,14 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
     dim_constraints.solve()
     forced_specializations = dim_constraints.forced_specializations()
-    if not _is_torch_jit_trace:
-        msg = dim_constraints.prettify_results(
-            original_signature,
-            dynamic_shapes,  # type: ignore[arg-type]
-            constraint_violation_error,
-            forced_specializations,  # type: ignore[arg-type]
-        )
-    else:
-        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-        msg = "dummy constraint violation message"
+
+    msg = dim_constraints.prettify_results(
+        original_signature,
+        dynamic_shapes,  # type: ignore[arg-type]
+        constraint_violation_error,
+        forced_specializations,  # type: ignore[arg-type]
+    )
+
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:
@@ -871,7 +853,7 @@ def _fakify_script_objects(
     mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
@@ -1002,34 +984,65 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
+                if item is None:
+                    return dim + 1, (torch.unsqueeze, [dim])
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
+                    step = item.step or 1
+                    if item.start is None and item.stop is None and step == 1:
+                        # no-op
+                        return dim + 1, (lambda t: t, [])
                     return dim + 1, (
                         torch.ops.aten.slice,
-                        [dim, item.start, item.stop, item.step or 1],
+                        [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
 
-            items = args[1] if isinstance(args[1], tuple) else (args[1],)
-            dim = 0
-            # Sequence rewrites.
-            sequence = []
-            for item in items:
-                if (r := rewrite(dim, item)) is None:
-                    return func, args, kwargs
-                dim, call_spec = r
-                sequence.append(call_spec)
+            items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-            def run():
-                # Run sequence.
-                t = args[0]
-                for _method, _args in sequence:
-                    t = _method(t, *_args)
-                return t
+            has_symint = False
+            index_ellipsis = None
+            t = args[0]
+            n_none_slices = t.ndim + 1
+            for i, item in enumerate(items):
+                if isinstance(item, torch.SymInt) or (
+                    isinstance(item, slice)
+                    and any(
+                        isinstance(s, torch.SymInt)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                ):
+                    has_symint = True
+                if item is Ellipsis:
+                    index_ellipsis = i
+                if item is not None:
+                    n_none_slices -= 1
 
-            return run, [], {}
+            # only rewrite when there are symints
+            if has_symint:
+                if index_ellipsis is not None:
+                    none_slices = [slice(None)] * n_none_slices
+                    items[index_ellipsis : index_ellipsis + 1] = none_slices
+
+                dim = 0
+                # Sequence rewrites.
+                sequence = []
+                for item in items:
+                    if (r := rewrite(dim, item)) is None:
+                        return func, args, kwargs
+                    dim, call_spec = r
+                    sequence.append(call_spec)
+
+                def run():
+                    # Run sequence.
+                    t = args[0]
+                    for _method, _args in sequence:
+                        t = _method(t, *_args)
+                    return t
+
+                return run, [], {}
 
         return func, args, kwargs
 

@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -55,11 +56,8 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
 
 aten = torch.ops.aten
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
@@ -124,7 +122,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
         segments = torch.cuda.memory_snapshot()
@@ -332,7 +330,7 @@ if HAS_CUDA:
             ).check(".add_(2)").run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-            # mutation on inp doesnt hit cudagraphs
+            # mutation on inp doesn't hit cudagraphs
             self.assertEqual(len(self.get_manager().roots), 0)
 
             # mutation on parameters/buffers hits cudagraphs
@@ -564,8 +562,8 @@ if HAS_CUDA:
                 del out
 
                 # when I tried inducing separate recordings via graph break,
-                # the frame kept interferring by keeping outputs alive
-                # this isnt great by simulates the logic.
+                # the frame kept interfering by keeping outputs alive
+                # this isn't great by simulates the logic.
                 from torch._dynamo.mutation_guard import GenerationTracker
 
                 GenerationTracker.generation -= 1
@@ -575,7 +573,7 @@ if HAS_CUDA:
 
             foo_opt(torch.ones([4, 4], device="cuda"))
 
-            # Two separate traces - one has a child, one doesnt
+            # Two separate traces - one has a child, one doesn't
             self.assertEqual(self.get_root_children(), [1, 0])
 
         def test_execution_into_recording(self):
@@ -1325,7 +1323,7 @@ if HAS_CUDA:
                 torch._C._set_cached_tensors_enabled(False)
 
         def test_accumulate_grad(self):
-            # cudagraph trees shouldnt interfere with accumulation logic
+            # cudagraph trees shouldn't interfere with accumulation logic
 
             def compute_grad(grad_output, create_graph):
                 x = torch.randn(5, 5, requires_grad=True, device="cuda")
@@ -1366,7 +1364,7 @@ if HAS_CUDA:
             for _ in range(3):
                 out = frozen(torch.rand([10, 10], device="cuda"))
 
-            # didnt do additional recordings
+            # didn't do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
 
         def test_empty_cpu_tensor(self):
@@ -2711,6 +2709,22 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_log_message(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
+            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
+                "cudagraph partition into 2 partitions"
+            ).run(captured_output[0])
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
             def f(x, y):
                 return x + y
@@ -2832,6 +2846,28 @@ if HAS_CUDA:
                 foo(x)
 
             self.assertEqual(x, torch.tensor(1, device="cpu"))
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_multiple(self):
+            def f(x, y, z):
+                return x + y, x + z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.ones((), device="cpu"),
+                torch.ones((), device="cpu"),
+                torch.ones(2, 2, device="cuda"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_regex(r".copy_.*True").run(code[0])
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
@@ -3954,7 +3990,7 @@ if HAS_CUDA:
             a = torch.randn(4, 4, device="cuda:1", requires_grad=True)
             b = torch.randn(4, 4, device="cuda:1", requires_grad=True)
 
-            # No errors. TODO - get graphs from logging, couldnt figure out how
+            # No errors. TODO - get graphs from logging, couldn't figure out how
             multi_fn_c = torch.compile(multi_fn, backend="aot_eager_decomp_partition")
 
             out = multi_fn_c(x, y, a, b)
@@ -4019,5 +4055,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")
