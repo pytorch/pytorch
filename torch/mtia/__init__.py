@@ -204,6 +204,10 @@ def attach_out_of_memory_observer(
     torch._C._mtia_attachOutOfMemoryObserver(observer)
 
 
+def is_bf16_supported(including_emulation: bool = True):
+    return True
+
+
 def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -335,6 +339,17 @@ class StreamContext:
         torch.mtia.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
 
 
+def _set_stream_by_id(stream_id, device_index, device_type):
+    r"""set stream specified by the stream id, device index and
+        device type
+
+    Args: stream_id (int): stream id in stream pool
+          device_index (int): device index in topo
+          device_type (int): enum device type
+    """
+    torch._C._mtia_setStream(stream_id, device_index, device_type)
+
+
 def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
@@ -392,6 +407,7 @@ __all__ = [
     "default_stream",
     "memory_stats",
     "max_memory_allocated",
+    "memory_allocated",
     "reset_peak_memory_stats",
     "get_device_capability",
     "get_device_properties",
@@ -405,4 +421,5 @@ __all__ = [
     "device",
     "set_rng_state",
     "get_rng_state",
+    "is_bf16_supported",
 ]

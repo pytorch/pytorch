@@ -181,7 +181,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 torch.randn(10, 15),
             )
 
-        annotations = [e.name for e in prof.events() if "Compiled" in e.name]
+        annotations = [e.name for e in prof.events() if "Torch-Compiled" in e.name]
         self.assertEqual(
             annotations,
             [
