@@ -19,8 +19,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, HAS_GPU
-from torch.utils._triton import has_triton_tma_device
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 class UnifiedModel(nn.Module):
@@ -221,7 +221,7 @@ class BaseE2ELookupTableTest(TestCase):
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support lookup table")
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
 class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
     """Unified test class for all lookup table end-to-end scenarios"""
@@ -332,7 +332,6 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         """Test when there's a valid TMA entry for input_nodes()"""
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
-        from torch.utils._triton import has_triton_stable_tma_api
 
         self.setup_lookup_table(
             operation,
@@ -435,8 +434,6 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         test_data = self.create_test_tensors("mm")
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        from torch.utils._triton import has_triton_stable_tma_api
-
         config1 = {
             "BLOCK_M": 128,
             "BLOCK_N": 128,
@@ -531,7 +528,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "B_ROW_MAJOR": True,
             "NUM_SMS": get_num_sms(),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
-            "TMA_EXPERIMENTAL_API": True,
+            "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
 
         self.setup_lookup_table(
@@ -607,7 +604,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "B_ROW_MAJOR": True,
                 "NUM_SMS": get_num_sms(),
                 "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
-                "TMA_EXPERIMENTAL_API": True,
+                "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             }
         ]
 
