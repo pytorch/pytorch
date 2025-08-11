@@ -85,13 +85,10 @@ class GreenContext {
   GreenContext& operator=(const GreenContext&) = delete;
 
   // Implement move operations
-  GreenContext(GreenContext&& other) noexcept
-      : green_ctx_(other.green_ctx_),
-        context_(other.context_),
-        parent_stream_(other.parent_stream_) {
-    other.green_ctx_ = nullptr;
-    other.context_ = nullptr;
-    other.parent_stream_ = NULL;
+  GreenContext(GreenContext&& other) noexcept {
+    green_ctx_ = std::exchange(other.green_ctx_, nullptr);
+    context_ = std::exchange(other.context_, nullptr);
+    parent_stream_ = std::exchange(other.parent_stream_, nullptr);
   }
 
   GreenContext& operator=(GreenContext&& other) noexcept {
