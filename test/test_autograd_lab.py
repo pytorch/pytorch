@@ -30,17 +30,30 @@ class Attention(Function):
         a = torch.tanh(x)
         o = torch.matmul(a, v)
         ctx.save_for_backward(q, k, v, a)
+        ctx.set_materialize_grads(False)
         return o, a
 
     @staticmethod
     def backward(ctx, grad_o, grad_a):
+        # If both gradients are None, return early
+        if grad_o is None and grad_a is None:
+            return None, None, None
+        
         q, k, v, a = ctx.saved_tensors
-        grad_a_local = grad_o @ v.transpose(0, 1)
-        grad_v = a.transpose(0, 1) @ grad_o
         # We have to add grad_a and ga together here because grad_a contains contributions
         # from functions upstream which compute their own gradients w.r.t a, while grad_a_local
         # is the contribution from this function
-        grad_x = (grad_a + grad_a_local) * (1 - a ** 2)
+        grad_a_local = None
+        if grad_a is not None:
+            grad_a_local = grad_a
+
+        grad_v = None
+        if grad_o is not None:
+            term = grad_o @ v.transpose(0, 1)
+            grad_a_local = grad_a_local + term if grad_a_local is not None else term
+            grad_v = a.transpose(0, 1) @ grad_o
+
+        grad_x = grad_a_local * (1 - a ** 2)
         grad_q = grad_x @ k
         grad_k = grad_x.transpose(0, 1) @ q
         return grad_q, grad_k, grad_v

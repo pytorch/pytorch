@@ -21,13 +21,13 @@ namespace at::native {
                "Expected input tensors to be 2D, but got query: ", query.dim(),
                ", key: ", key.dim(),
                ", value: ", value.dim());
-    TORCH_CHECK(query.size(0) == key.size(0) && query.size(0) == value.size(0),
+    TORCH_CHECK(query.sym_size(0) == key.sym_size(0) && query.sym_size(0) == value.sym_size(0),
                "Expected input tensors to have the same first dimension, but got query: ",
-               query.size(0), ", key: ", key.size(0), ", value: ",
-               value.size(0));
-    TORCH_CHECK(query.size(1) == key.size(1),
+               query.sym_size(0), ", key: ", key.sym_size(0), ", value: ",
+               value.sym_size(0));
+    TORCH_CHECK(query.sym_size(1) == key.sym_size(1),
                "Expected query and key to have the same second dimension, but got query: ",
-                query.size(1), ", key: ", key.size(1)); 
+                query.sym_size(1), ", key: ", key.sym_size(1)); 
     auto a = at::tanh(at::matmul(query, key.transpose(-2, -1)));
     auto o = at::matmul(a, value);
     return std::make_tuple(o, a);

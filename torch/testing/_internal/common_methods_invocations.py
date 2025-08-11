@@ -18498,9 +18498,17 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_attention,
            supports_autograd=True,
            supports_out=False,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
            skips=(
                 # Seems like this is getting demoted to torch.bfloat16 for some reason, skipping for now
                 DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', dtypes=[torch.float32]),
+                # Errors with forward AD not implemented
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp', dtypes=[torch.float32]),
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp', dtypes=[torch.float32]),
+                # Errors with "hit the vmap fallback which is currently disabled"
+                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule', dtypes=[torch.float32]),
+                DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', dtypes=[torch.float32]),
            )),
     OpInfo('flatten',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
