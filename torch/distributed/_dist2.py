@@ -7,7 +7,7 @@ This is intended as a proving ground for more flexible and object oriented distr
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Protocol, Union, TYPE_CHECKING, Any
+from typing import Any, Protocol, Union
 
 import torch
 from torch.distributed._distributed_c10d import (

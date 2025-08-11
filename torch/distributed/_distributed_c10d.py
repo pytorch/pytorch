@@ -36,13 +36,66 @@ _UCC_AVAILABLE = False
 _XCCL_AVAILABLE = False
 
 if HAS_DISTRIBUTED:
-    from torch._C._distributed_c10d import *  # noqa: F403,F401
+    from torch._C._distributed_c10d import (  # Basic components; Additional distributed_c10d components
+        _allow_inflight_collective_as_graph_input,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
+        _ControlCollectives,
+        _current_process_group,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _DEFAULT_PG_TIMEOUT,
+        _DistributedBackendOptions,
+        _make_nccl_premul_sum,
+        _register_builtin_comm_hook,
+        _register_comm_hook,
+        _register_process_group,
+        _register_work,
+        _resolve_process_group,
+        _set_allow_inflight_collective_as_graph_input,
+        _set_process_group,
+        _StoreCollectives,
+        _test_python_store,
+        _unregister_all_process_groups,
+        _unregister_process_group,
+        _verify_params_across_processes,
+        _WorkerServer,
+        AllgatherOptions,
+        AllreduceCoalescedOptions,
+        AllreduceOptions,
+        AllToAllOptions,
+        Backend,
+        BarrierOptions,
+        BroadcastOptions,
+        BuiltinCommHookType,
+        DebugLevel,
+        FakeProcessGroup,
+        FakeWork,
+        FileStore,
+        GatherOptions,
+        get_debug_level,
+        GradBucket,
+        Logger,
+        PrefixStore,
+        ProcessGroup,
+        ReduceOp,
+        ReduceOptions,
+        Reducer,
+        ReduceScatterOptions,
+        ScatterOptions,
+        set_debug_level,
+        set_debug_level_from_env,
+        Store,
+        TCPStore,
+        Work,
+    )
 
     # These identifiers aren't always available on all builds
     try:
         from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
     except ImportError:
-        from torch.distributed._C_stubs import _DEFAULT_PG_NCCL_TIMEOUT  # type: ignore[assignment]
+        from torch.distributed._C_stubs import (
+            _DEFAULT_PG_NCCL_TIMEOUT,  # type: ignore[assignment]
+        )
 
     try:
         from torch._C._distributed_c10d import HashStore
@@ -68,14 +121,18 @@ if HAS_DISTRIBUTED:
 
         _MPI_AVAILABLE = True
     except ImportError:
-        from torch.distributed._C_stubs import ProcessGroupMPI  # noqa: F401  # type: ignore[assignment]
+        from torch.distributed._C_stubs import (  # noqa: F401  # type: ignore[assignment]
+            ProcessGroupMPI,
+        )
 
     try:
         from torch._C._distributed_c10d import ProcessGroupNCCL  # noqa: F401
 
         _NCCL_AVAILABLE = True
     except ImportError:
-        from torch.distributed._C_stubs import ProcessGroupNCCL  # noqa: F401  # type: ignore[assignment]
+        from torch.distributed._C_stubs import (  # noqa: F401  # type: ignore[assignment]
+            ProcessGroupNCCL,
+        )
 
     try:
         from torch._C._distributed_c10d import (  # noqa: F401
@@ -95,14 +152,18 @@ if HAS_DISTRIBUTED:
 
         _UCC_AVAILABLE = True
     except ImportError:
-        from torch.distributed._C_stubs import ProcessGroupUCC  # noqa: F401  # type: ignore[assignment]
+        from torch.distributed._C_stubs import (  # noqa: F401  # type: ignore[assignment]
+            ProcessGroupUCC,
+        )
 
     try:
         from torch._C._distributed_c10d import ProcessGroupXCCL  # noqa: F401
 
         _XCCL_AVAILABLE = True
     except ImportError:
-        from torch.distributed._C_stubs import ProcessGroupXCCL  # noqa: F401  # type: ignore[assignment]
+        from torch.distributed._C_stubs import (  # noqa: F401  # type: ignore[assignment]
+            ProcessGroupXCCL,
+        )
 
 else:
     # Now that _C_stubs has comprehensive __all__, star import should work
