@@ -1282,6 +1282,7 @@ def compute_unbacked_bindings(
         return None
 
     fs = shape_env.pending_fresh_unbacked_symbols
+
     pending = set(fs)
     if not pending:
         return None
@@ -4711,7 +4712,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[int | float | bool],
         source: Optional[Source] = None,
     ) -> FloatLikeType:
         """Create a SymFloat value from a symbolic expression"""
@@ -7870,7 +7871,9 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        fake_mode = detect_fake_mode()
+        assert fake_mode is not None
+        rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 

@@ -807,10 +807,8 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
         )
         torch._C._set_deterministic_algorithms(value)
 
