@@ -3098,7 +3098,7 @@ class CppVecKernel(CppKernel):
                 reduction_size,
                 dtype,
                 use_scalar=True,
-                )
+            )
 
             self._use_acc_helper(
                 reduction_type, acc, helper_val, helper_vec_range, dtype
