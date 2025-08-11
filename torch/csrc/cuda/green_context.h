@@ -171,7 +171,8 @@ class GreenContext {
     // see above note about stream being hardcoded to the default stream
     cudaEvent_t ev;
     C10_CUDA_CHECK(cudaEventCreate(&ev));
-    C10_CUDA_CHECK(cudaEventRecord(ev, NULL));
+    C10_CUDA_CHECK(
+        cudaEventRecord(ev, c10::cuda::getCurrentCUDAStream().stream()));
     CUcontext popped;
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuCtxPopCurrent_(&popped));
