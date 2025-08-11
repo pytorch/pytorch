@@ -1209,7 +1209,7 @@ class CrossEntropyLoss(_WeightedLoss):
       set to ``'none'``) loss for this case can be described as:
 
       .. math::
-`          \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+          \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
           l_n = - w_{y_n} \log \frac{\exp(x_{n,y_n})}{\sum_{c=1}^C \exp(x_{n,c})}
           \cdot \mathbb{1}\{y_n \not= \text{ignore\_index}\}
 
