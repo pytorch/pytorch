@@ -3116,14 +3116,9 @@ class CppVecKernel(CppKernel):
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
             helper_val_ = masked_helper_val if self.tail_size else helper_val
-            if reduction_type == "sum":
-                self.stores.writeline(
-                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
-                )
-            else:
-                self.stores.writeline(
-                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
-                )
+            self.stores.writeline(
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
+            )
         else:
             index = self.itervars[self.reduction_depth]
             for i in range(self.reduction_depth + 1, len(self.itervars)):
