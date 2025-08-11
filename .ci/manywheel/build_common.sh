@@ -139,18 +139,15 @@ fi
 echo "Calling setup.py bdist at $(date)"
 
 setup_ccache() {
-    CCACHE_DIR=/opt/ccache/bin
     echo "Installing ccache"
     retry dnf install -y ccache
 
-    mkdir -p "${CCACHE_DIR}"
-    COMPILERS=("gcc" "g++" "cc" "c++" "clang" "clang++" "nvcc" "icx" "icpx")
-    ccache_path=$(which ccache)
-    for compiler in "${COMPILERS[@]}"; do
-        ln -sf "${ccache_path}" "${CCACHE_DIR}/${compiler}"
-    done
-
-    export PATH="${CCACHE_DIR}:${PATH}"
+    # Use CMAKE compiler launchers instead of PATH manipulation
+    # This preserves compiler --version detection while enabling ccache
+    export CMAKE_CUDA_COMPILER_LAUNCHER="ccache"
+    export CMAKE_HIP_COMPILER_LAUNCHER="ccache"
+    export CMAKE_CXX_COMPILER_LAUNCHER="ccache"
+    export CMAKE_C_COMPILER_LAUNCHER="ccache"
 }
 
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
