@@ -1567,9 +1567,19 @@ class DictGuardManager;
 // -------------------
 // * CPython allows only a small, fixed number of dict-watcher IDs (≈64).
 //   All `GuardManager`s therefore share a single watcher callback.
-// * A “tag-safe root” in one compilation frame may observe the **same** object
-//   as another frame.  Consequently multiple `GuardManager`s can end up
-//   watching the exact same dictionary pointer.
+// * Different guard managers (possibly across different frames) can end up
+//   watching the same dictionary pointer. Therefore, we have a list of guard
+//   managers for each dict pointer.
+//
+// When is watch registered?
+//  * During the recording phase of recursive dict tag matching in GuardManager.
+//
+// When are they watched?
+//  * In the dict_recursive_tag_watch_callback function.
+//
+// When are the dict pointers unwatched?
+//  * If a dict is mutated or the guard manager deallocates.
+//  * Read `unwatch_all_saved_dict_pointers` docstring for more details.
 //
 // Expected size
 // -------------
@@ -1577,7 +1587,7 @@ class DictGuardManager;
 // the container can grow large over the lifetime of the process.  That’s
 // acceptable: lookup is by pointer (hash/equals = identity) and each entry
 // stores only lightweight pointers.
-std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_manager;
+std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -2647,7 +2657,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     cleanup_tag_safe_entries();
-    unwatch_dict_pointers();
+    disable_recursive_dict_tag_optimization();
   }
 
   void cleanup_tag_safe_entries() {
@@ -2751,6 +2761,7 @@ class GuardManager {
   }
 
   void disable_recursive_dict_tag_optimization() {
+    unwatch_all_saved_dict_pointers();
     _disable_dict_tag_matching = true;
   }
 
@@ -3016,8 +3027,7 @@ class GuardManager {
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
     if (guard_manager) {
-      guard_manager->unwatch_dict_pointers();
-      guard_manager->_disable_dict_tag_matching = true;
+      guard_manager->disable_recursive_dict_tag_optimization();
     }
     Py_RETURN_NONE;
   }
@@ -3095,32 +3105,52 @@ class GuardManager {
         PyErr_Clear();
         return false;
       }
-      dict_to_guard_manager[dict_pointer].push_back(this);
+      dict_to_guard_managers[dict_pointer].push_back(this);
     }
 #endif
     return true;
   }
 
-  void unwatch_dict_pointers() {
+  void unwatch_all_saved_dict_pointers() {
+    /*
+    We may have recorded hundreds/thousands of dict pointers for the recursive
+    dict-tag optimisation. If any of those dicts mutates, we want to disable the
+    optimisation and then unwatch as many dict pointers as we can.
+
+    Be careful: the same dict pointer can be recorded by multiple GuardManagers.
+    So the flow is:
+
+      1) Remove *this* GuardManager from dict_to_guard_managers[dict_pointer].
+      2) If the list for that dict becomes empty, then:
+          - PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer)
+          - erase the dict_pointer entry from dict_to_guard_managers.
+    */
 #if IS_PYTHON_3_12_PLUS
-    if (!_dict_callbacks_unwatched && !_disable_dict_tag_matching) {
+    if (!_disable_dict_tag_matching) {
       for (auto& value_stashed_pointers : _dict_pointers) {
         auto stashed_pointers = value_stashed_pointers.second;
 
         for (auto& stashed_pointer : stashed_pointers) {
           PyObject* dict_pointer = stashed_pointer.first;
-          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+
+          // Delete the guard manager from the dict_to_guard_managers
           auto it = std::find(
-              dict_to_guard_manager[dict_pointer].begin(),
-              dict_to_guard_manager[dict_pointer].end(),
+              dict_to_guard_managers[dict_pointer].begin(),
+              dict_to_guard_managers[dict_pointer].end(),
               this);
-          if (it != dict_to_guard_manager[dict_pointer].end()) {
-            dict_to_guard_manager[dict_pointer].erase(it);
+          if (it != dict_to_guard_managers[dict_pointer].end()) {
+            dict_to_guard_managers[dict_pointer].erase(it);
+          }
+
+          // Unwatch the dict pointer if this was the last guard manager
+          // watching it.
+          if (dict_to_guard_managers[dict_pointer].empty()) {
+            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+            dict_to_guard_managers.erase(dict_pointer);
           }
         }
       }
     }
-    _dict_callbacks_unwatched = true;
 #endif
   }
 
@@ -3365,9 +3395,6 @@ class GuardManager {
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
-#if IS_PYTHON_3_12_PLUS
-  bool _dict_callbacks_unwatched = false;
-#endif
 
  protected:
   // weakref to the type of guarded value
@@ -4062,12 +4089,11 @@ static int dict_recursive_tag_watch_callback(
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  auto it = dict_to_guard_manager.find(dict);
-  if (it != dict_to_guard_manager.end()) {
+  auto it = dict_to_guard_managers.find(dict);
+  if (it != dict_to_guard_managers.end()) {
     auto guard_managers = it->second;
     for (auto& guard_manager : guard_managers) {
       if (guard_manager) {
-        guard_manager->unwatch_dict_pointers();
         guard_manager->disable_recursive_dict_tag_optimization();
       }
     }
