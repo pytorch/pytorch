@@ -51,7 +51,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 // brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
 #if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
 #define ONEDNN_UKERNEL_1
-#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#elif ((IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR >= 6) || (IDEEP_VERSION_MAJOR > 3))
 #define ONEDNN_UKERNEL_2
 #endif
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
@@ -135,6 +135,7 @@ CBLAS_TRANSPOSE to_apple_accelerate_transpose(TransposeType trans) {
 }  // namespace (anonymous)
 
 DEFINE_DISPATCH(gemm_stub);
+DEFINE_DISPATCH(gemm_no_downcast_stub);
 
 void gemm(
     TransposeType transa, TransposeType transb,
@@ -201,7 +202,7 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (mkldnn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -357,18 +358,25 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * ldc_;
+      int c_size = n_ * m_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
-      std::vector<float> float_v(c, c + c_size);
+      std::vector<float> float_v(c_size, 0.0f);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+        }
+      }
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
               &alpha_,
               a, &lda_,
               b, &ldb_,
               &beta_,
-              float_v.data(), &ldc_);
-      for (auto cv: float_v) {
-        *(c++) = c10::convert<at::BFloat16>(cv);
+              float_v.data(), &m_);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          c[j * ldc_ + i] = c10::convert<at::BFloat16>(float_v[j * m_ + i]);
+        }
       }
       return;
    }
@@ -435,6 +443,13 @@ void gemm(
       return;
    }
 #endif
+#if AT_MKLDNN_ACL_ENABLED()
+// add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
+   if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif //AT_MKLDNN_ACL_ENABLED
+
 #ifdef MKL_HAS_SBGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -445,18 +460,18 @@ void gemm(
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
-  std::vector<at::BFloat16> bfloat_c(c_size, 0.f);
-  gemm_stub(
+  std::vector<float> float_c(c_size, 0.f);
+  gemm_no_downcast_stub(
       at::kCPU, at::kBFloat16,
-      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, bfloat_c.data(), m);
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float_c.data(), m);
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
       auto offset = j * ldc + i;
       // beta == 0 won't propagate NaN from C
       if (beta == 0.f) {
-        c[offset] = c10::convert<float>(bfloat_c[j * m + i]);
+        c[offset] = float_c[j * m + i];
       } else {
-        c[offset] = beta * c[offset] + c10::convert<float>(bfloat_c[j * m + i]);
+        c[offset] = beta * c[offset] + float_c[j * m + i];
       }
     }
   }
@@ -1350,6 +1365,30 @@ void brgemm(
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
     Brgemm::call<unsigned char, signed char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const signed char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
+    Brgemm::call<signed char, signed char, int32_t>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }

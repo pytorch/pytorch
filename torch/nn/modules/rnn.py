@@ -204,7 +204,7 @@ class RNNBase(Module):
 
         self.reset_parameters()
 
-    def _init_flat_weights(self):
+    def _init_flat_weights(self) -> None:
         self._flat_weights = [
             getattr(self, wn) if hasattr(self, wn) else None
             for wn in self._flat_weights_names
@@ -214,7 +214,7 @@ class RNNBase(Module):
         ]
         self.flatten_parameters()
 
-    def __setattr__(self, attr, value):
+    def __setattr__(self, attr, value) -> None:
         if hasattr(self, "_flat_weights_names") and attr in self._flat_weights_names:
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
@@ -253,7 +253,8 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr() for p in self._flat_weights  # type: ignore[union-attr]
+            p.data_ptr()  # type: ignore[union-attr]
+            for p in self._flat_weights
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
@@ -359,7 +360,7 @@ class RNNBase(Module):
 
     def check_forward_args(
         self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -386,7 +387,7 @@ class RNNBase(Module):
             s += ", bidirectional={bidirectional}"
         return s.format(**self.__dict__)
 
-    def _update_flat_weights(self):
+    def _update_flat_weights(self) -> None:
         if not torch.jit.is_scripting():
             if self._weights_have_changed():
                 self._init_flat_weights()
@@ -484,25 +485,28 @@ class RNN(RNNBase):
     .. code-block:: python
 
         # Efficient implementation equivalent to the following with bidirectional=False
-        def forward(x, hx=None):
+        rnn = nn.RNN(input_size, hidden_size, num_layers)
+        params = dict(rnn.named_parameters())
+        def forward(x, hx=None, batch_first=False):
             if batch_first:
                 x = x.transpose(0, 1)
             seq_len, batch_size, _ = x.size()
             if hx is None:
-                hx = torch.zeros(num_layers, batch_size, hidden_size)
-            h_t_minus_1 = hx
-            h_t = hx
+                hx = torch.zeros(rnn.num_layers, batch_size, rnn.hidden_size)
+            h_t_minus_1 = hx.clone()
+            h_t = hx.clone()
             output = []
             for t in range(seq_len):
-                for layer in range(num_layers):
+                for layer in range(rnn.num_layers):
+                    input_t = x[t] if layer == 0 else h_t[layer - 1]
                     h_t[layer] = torch.tanh(
-                        x[t] @ weight_ih[layer].T
-                        + bias_ih[layer]
-                        + h_t_minus_1[layer] @ weight_hh[layer].T
-                        + bias_hh[layer]
+                        input_t @ params[f"weight_ih_l{layer}"].T
+                        + h_t_minus_1[layer] @ params[f"weight_hh_l{layer}"].T
+                        + params[f"bias_hh_l{layer}"]
+                        + params[f"bias_ih_l{layer}"]
                     )
-                output.append(h_t[-1])
-                h_t_minus_1 = h_t
+                output.append(h_t[-1].clone())
+                h_t_minus_1 = h_t.clone()
             output = torch.stack(output)
             if batch_first:
                 output = output.transpose(0, 1)
@@ -608,12 +612,10 @@ class RNN(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:
@@ -650,6 +652,9 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        """
+        Runs the forward pass.
+        """
         self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
@@ -966,12 +971,10 @@ class LSTM(RNNBase):
         proj_size: int = 0,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         super().__init__("LSTM", *args, **kwargs)
@@ -998,7 +1001,7 @@ class LSTM(RNNBase):
         input: Tensor,
         hidden: tuple[Tensor, Tensor],  # type: ignore[override]
         batch_sizes: Optional[Tensor],
-    ):
+    ) -> None:
         self.check_input(input, batch_sizes)
         self.check_hidden_size(
             hidden[0],
@@ -1301,12 +1304,10 @@ class GRU(RNNBase):
         bidirectional: bool = False,
         device=None,
         dtype=None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def __init__(self, *args, **kwargs):
-        ...
+    def __init__(self, *args, **kwargs) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if "proj_size" in kwargs:

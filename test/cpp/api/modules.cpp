@@ -127,9 +127,7 @@ TEST_F(ModulesTest, Conv2dSameStrided) {
       [&] { Conv2d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv2d model_invalid(options.stride({1, 2}));
-      }(),
+      [&] { Conv2d model_invalid(options.stride({1, 2})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -181,9 +179,7 @@ TEST_F(ModulesTest, Conv3dSameStrided) {
       [&] { Conv3d model_invalid(options.stride(2)); }(),
       "padding='same' is not supported for strided convolutions");
   ASSERT_THROWS_WITH(
-      [&] {
-        Conv3d model_invalid(options.stride({1, 2, 1}));
-      }(),
+      [&] { Conv3d model_invalid(options.stride({1, 2, 1})); }(),
       "padding='same' is not supported for strided convolutions");
 }
 
@@ -2894,7 +2890,6 @@ TEST_F(ModulesTest, TanhGELU) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Mish) {
   Mish model;
   auto x = torch::randn(100) * 10;

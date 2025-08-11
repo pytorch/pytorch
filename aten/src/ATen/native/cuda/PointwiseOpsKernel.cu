@@ -17,7 +17,7 @@ void addcmul_cuda_scalar_tensor2_kernel(
   const Scalar& value
 );
 
-#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+#if AT_USE_JITERATOR()
 constexpr char addcmul_name[] = "addcmul";
 #endif
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
@@ -37,10 +37,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
-    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
-    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
-    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
-    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+    #if AT_USE_JITERATOR()
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
         auto alpha = value.to<scalar_t>();
         static const auto addcmul_string = jiterator_stringify(
@@ -93,17 +90,14 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   }
 }
 
-#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+#if AT_USE_JITERATOR()
 constexpr char addcmul_scalar_tensor2_name[] = "addcmul_scalar_tensor2";
 #endif
 void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& scalar_tensor2, const Scalar& value) {
   auto dtype = iter.common_dtype();
 
   if (at::isComplexType(dtype)) {
-    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
-    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
-    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
-    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+    #if AT_USE_JITERATOR()
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
         auto c = scalar_tensor2.to<scalar_t>();
         auto alpha = value.to<scalar_t>();
@@ -145,17 +139,14 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
   }
 }
 
-#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+#if AT_USE_JITERATOR()
 // return a + alpha * (b / static_cast<accscalar_t>(c));
 constexpr char addcdiv_name[] = "addcdiv";
 #endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
-    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
-    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
-    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
-    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+    #if AT_USE_JITERATOR()
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
         auto alpha = value.to<scalar_t>();
         static const auto addcdiv_string =
