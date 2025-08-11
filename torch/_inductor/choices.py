@@ -215,11 +215,11 @@ class InductorChoices:
         Heuristic to decide if we should drop the X dimension from a persistent reduction kernel.
         So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
         Strangely this is faster than a [1, RBLOCK] block in some cases.
+
+        ROCm branch change: Remove want_no_x_dim for persistent reduction.
+        Inductor benchmarks show no perf advantage and simplifies autotune flow.
         """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
+        return False
 
     @staticmethod
     def reduction_split_factor(

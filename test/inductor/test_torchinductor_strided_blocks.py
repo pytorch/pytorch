@@ -706,31 +706,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-    def test_2d_reduction_no_x_dim(self):
-        """
-        Tests a 2D reduction without an "x" dimension.
-        """
-        # We need a size to get no x dim.
-        view = self._discontiguous_tensor((2, 346), self.device)
-
-        # Expect 1 block pointer for the input.
-        result, (code,) = run_and_compare(
-            self,
-            torch.prod,
-            view,
-            expected_num_block_pointers=1,
-            expected_num_triton_kernels=1,
-            config_patches=tiled_reduction_config,
-        )
-
-        # Check that there's no X dimension in the signature.
-        (signature_line,) = (
-            line for line in code.splitlines() if line.startswith("def triton")
-        )
-        self.assertNotIn("BLOCK", signature_line)
-
-        # Check for 2 reduction dimensions in the body.
-        self._assert_reduction_ndims(code, 2)
 
     @parametrize(
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
