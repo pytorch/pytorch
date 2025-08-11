@@ -746,53 +746,6 @@ def log_runtime_estimates(node_runtimes: Sequence[tuple[Any, float]]) -> None:
     )
 
 
-def log_tensor_metadata(nodes: Sequence[BaseSchedulerNode]) -> None:
-    """Log per-kernel output tensor metadata (shape, stride, dtype) for TLParse."""
-
-    try:
-        to_size_hints = V.graph.sizevars.size_hints
-        ops: list[dict[str, Any]] = []
-
-        def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
-
-        for snode in nodes:
-            node = getattr(snode, "node", None)
-            name = getattr(node, "python_kernel_name", snode.get_name())
-            op_type = "collective" if utils.is_collective(node) else "compute"
-
-            outputs: list[dict[str, Any]] = []
-            for buf in snode.get_outputs():
-                irnode = buf.node
-                shape = irnode.maybe_get_size()
-                stride = (
-                    irnode.get_stride()
-                    if isinstance(irnode.layout, ir.Layout)
-                    else None
-                )
-                dtype = irnode.maybe_get_dtype()
-                outputs.append(
-                    {
-                        "shape": to_list(shape),
-                        "stride": to_list(stride),
-                        "dtype": str(dtype) if dtype is not None else None,
-                    }
-                )
-
-            ops.append({"name": name, "type": op_type, "outputs": outputs})
-
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_tlparse_tensor_meta",
-                "encoding": "json",
-            },
-            payload_fn=lambda: {"ops": ops},
-        )
-    except Exception:
-        log.debug("Failed to log inductor_tlparse_tensor_meta", exc_info=True)
-
-
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata

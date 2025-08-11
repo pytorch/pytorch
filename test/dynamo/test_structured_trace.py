@@ -1334,49 +1334,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
         finally:
             dist.destroy_process_group()
 
-    @requires_tlparse
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_tensor_metadata_logging(self):
-        """Ensure tensor metadata artifact is emitted and well-formed."""
-        # Capture only the tensor metadata payload
-        payload_buffer = io.StringIO()
-        payload_handler = logging.StreamHandler(payload_buffer)
-        payload_handler.setLevel(logging.DEBUG)
-        payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_tlparse_tensor_meta")
-        )
-        trace_log.addHandler(payload_handler)
-
-        def fn(x):
-            y = x @ x
-            return y + 1
-
-        try:
-            fn_opt = torch.compile(fn, backend="inductor")
-            fn_opt(torch.randn(8, 8))
-
-            # Artifact present in main buffer
-            self.assertIn('"inductor_tlparse_tensor_meta"', self.buffer.getvalue())
-
-            # Payload is valid and minimal schema is present
-            payload = payload_buffer.getvalue().strip()
-            if payload:
-                data = json.loads(payload)
-                self.assertIn("ops", data)
-                self.assertGreater(len(data["ops"]), 0)
-                has_outputs = any(len(op.get("outputs", [])) > 0 for op in data["ops"])
-                self.assertTrue(has_outputs)
-                for op in data["ops"]:
-                    for out in op.get("outputs", []):
-                        self.assertIn("shape", out)
-                        self.assertIn("stride", out)
-                        self.assertIn("dtype", out)
-
-            self.assertParses()
-        finally:
-            trace_log.removeHandler(payload_handler)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
