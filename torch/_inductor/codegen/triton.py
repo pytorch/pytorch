@@ -1862,6 +1862,10 @@ class TMACompatibilityChecker:
 
 
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
+    """A class to represent a triton kernel and helpers to generate
+    triton kernel programmatically
+    """
+
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
@@ -2501,6 +2505,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return self.loads
 
     def load(self, name: str, index: sympy.Expr):
+        """
+        Load from the memory location 'name', offset by some indexing expression 'index'.
+        """
         var = self.args.input(name)
         load_counts = self._load_counts
         load_counts[name] += 1
@@ -2873,7 +2880,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer,
             value: CSEVariable,
             result_type: Optional[torch.dtype],
-        ) -> Tuple[str, torch.dtype, BlockShapeType]:
+        ) -> tuple[str, Optional[torch.dtype], BlockShapeType]:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
@@ -3007,7 +3014,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 _result, _dtype, _shape = final_reduction(
                     self.compute, masked_value, masked_value.dtype
                 )
-                result_var = self.cse.generate(self.compute, _result, dtype=_dtype, shape=_shape)
+                result_var = self.cse.generate(
+                    self.compute, _result, dtype=_dtype, shape=_shape
+                )
         else:
             accumulator = self.cse.namedvar(
                 f"_{result_var}",
