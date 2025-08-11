@@ -6,11 +6,12 @@ This module provides fallback implementations for all distributed components
 that would normally be provided by the C++ extension.
 """
 
-from __future__ import annotations
-
 from datetime import timedelta
 from enum import Enum
 from typing import Optional
+
+import torch
+from torch.futures import Future
 
 
 # Constants
@@ -577,75 +578,3 @@ class ScatterOptions:
     def __init__(self):
         self.rootRank = 0
         self.timeout = _DEFAULT_PG_TIMEOUT
-
-
-# Define what should be exported with star import
-__all__ = [
-    # Basic components
-    "_broadcast_coalesced",
-    "_compute_bucket_assignment_by_size",
-    "_ControlCollectives",
-    "_DEFAULT_FIRST_BUCKET_BYTES",
-    "_DEFAULT_PG_TIMEOUT",
-    "_DEFAULT_PG_NCCL_TIMEOUT",
-    "_make_nccl_premul_sum",
-    "_register_builtin_comm_hook",
-    "_register_comm_hook",
-    "_StoreCollectives",
-    "_test_python_store",
-    "_verify_params_across_processes",
-    "_allow_inflight_collective_as_graph_input",
-    "_set_allow_inflight_collective_as_graph_input",
-    "_register_work",
-    "_set_global_rank",
-    "_hash_tensors",
-    "_is_nvshmem_available",
-    "_nvshmemx_cumodule_init",
-    "_SymmetricMemory",
-    "_register_process_group",
-    "_resolve_process_group",
-    "_unregister_all_process_groups",
-    "_unregister_process_group",
-    "_current_process_group",
-    "_set_process_group",
-    "_WorkerServer",
-    "_DistributedBackendOptions",
-    "_ProcessGroupWrapper",
-    "Backend",
-    "BuiltinCommHookType",
-    "DebugLevel",
-    "FileStore",
-    "get_debug_level",
-    "GradBucket",
-    "Logger",
-    "PrefixStore",
-    "ProcessGroup",
-    "Reducer",
-    "ReduceOp",
-    "set_debug_level",
-    "set_debug_level_from_env",
-    "Store",
-    "TCPStore",
-    "Work",
-    "FakeWork",
-    "FakeProcessGroup",
-    "HashStore",
-    "AllgatherOptions",
-    "AllreduceCoalescedOptions",
-    "AllreduceOptions",
-    "AllToAllOptions",
-    "BarrierOptions",
-    "BroadcastOptions",
-    "GatherOptions",
-    "ReduceOptions",
-    "ReduceScatterOptions",
-    "ScatterOptions",
-    "ProcessGroupMPI",
-    "ProcessGroupNCCL",
-    "ProcessGroupGloo",
-    "ProcessGroupUCC",
-    "ProcessGroupXCCL",
-]
-
-import torch
-from torch.futures import Future

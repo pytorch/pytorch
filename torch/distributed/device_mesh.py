@@ -8,7 +8,7 @@ import warnings
 from collections.abc import Iterator
 from functools import reduce
 from itertools import chain, zip_longest
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._typing_utils import not_none
@@ -773,7 +773,7 @@ if True:  # just to temporarily avoid reindentation
                     )
                 return submesh
 
-        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> Any:
+        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
             Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
             DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.

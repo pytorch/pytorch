@@ -264,7 +264,7 @@ class CollectiveOp:
         return total_memory
 
     @staticmethod
-    def get_process_group(func, args) -> Any:  # type: ignore[no-untyped-def]
+    def get_process_group(func, args) -> ProcessGroup:  # type: ignore[no-untyped-def]
         """Retrieve the process group for collective operations, except `wait_tensor`."""
         if func in CollectiveOp.PG_ARG_1:
             return ProcessGroup.unbox(args[1])
