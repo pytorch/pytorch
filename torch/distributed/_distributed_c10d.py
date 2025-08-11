@@ -1,4 +1,7 @@
-# mypy: allow-untyped-defs
+# mypy: disable-error-code="assignment"
+# noqa: F401
+# NB: Disable assignment errors as all of the stub alternative imports
+# reassign over symbols
 """
 Centralized module for importing and re-exporting torch._C._distributed_c10d components.
 This module provides fallback stubs when distributed components are not available.
@@ -20,143 +23,208 @@ IMPORTANT: This file should only have ONE try-catch block that imports torch._C.
 All other imports should be handled in the if HAS_DISTRIBUTED: ... else: ... block.
 """
 
-import sys
-from datetime import timedelta
-from typing import Optional
-
-import torch
+from typing import TYPE_CHECKING
 
 
 # Single minimal try-catch block to import the C extension
 try:
     import torch._C._distributed_c10d as _C
 except (ImportError, AttributeError):
-    _C = None  # type: ignore[assignment]
+    _C = None
 
 # Set HAS_DISTRIBUTED based on whether C extension is available
 HAS_DISTRIBUTED = _C is not None
 
-if HAS_DISTRIBUTED:
-    from torch._C._distributed_c10d import *  # noqa: F403,F401
-else:
-    from torch.distributed._C_stubs import *  # noqa: F403,F401
+_MPI_AVAILABLE = False
+_NCCL_AVAILABLE = False
+_GLOO_AVAILABLE = False
+_UCC_AVAILABLE = False
+_XCCL_AVAILABLE = False
 
-# Handle optional components that may not be available in all builds
-# Import NCCL-specific components if available
-try:
-    from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
-except ImportError:
-    _DEFAULT_PG_NCCL_TIMEOUT: Optional[timedelta] = None  # type: ignore[no-redef]
+if HAS_DISTRIBUTED or TYPE_CHECKING:
+    # NB: This list has to be spelled out because the _C module doesn't have
+    # __all__
+    from torch._C._distributed_c10d import (
+        _allow_inflight_collective_as_graph_input,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
+        _ControlCollectives,
+        _current_process_group,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _DEFAULT_PG_TIMEOUT,
+        _DistributedBackendOptions,
+        _hash_tensors,
+        _make_nccl_premul_sum,
+        _register_builtin_comm_hook,
+        _register_comm_hook,
+        _register_process_group,
+        _register_work,
+        _resolve_process_group,
+        _set_allow_inflight_collective_as_graph_input,
+        _set_global_rank,
+        _set_process_group,
+        _StoreCollectives,
+        _test_python_store,
+        _unregister_all_process_groups,
+        _unregister_process_group,
+        _verify_params_across_processes,
+        _WorkerServer,
+        AllgatherOptions,
+        AllreduceCoalescedOptions,
+        AllreduceOptions,
+        AllToAllOptions,
+        Backend,
+        BarrierOptions,
+        BroadcastOptions,
+        BuiltinCommHookType,
+        DebugLevel,
+        FakeProcessGroup,
+        FakeWork,
+        FileStore,
+        GatherOptions,
+        get_debug_level,
+        GradBucket,
+        Logger,
+        PrefixStore,
+        ProcessGroup,
+        ReduceOp,
+        ReduceOptions,
+        Reducer,
+        ReduceScatterOptions,
+        ScatterOptions,
+        set_debug_level,
+        set_debug_level_from_env,
+        Store,
+        TCPStore,
+        Work,
+    )
 
-# Import optional components that may not be available in all builds
-try:
-    from torch._C._distributed_c10d import FakeProcessGroup
-except ImportError:
-    FakeProcessGroup: Optional[type] = None  # type: ignore[misc,no-redef]
+    # These identifiers aren't always available on all builds
+    try:
+        from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
+    except ImportError:
+        from torch.distributed._C_stubs import _DEFAULT_PG_NCCL_TIMEOUT
 
-# Import platform-specific components
-if sys.platform != "win32":
     try:
         from torch._C._distributed_c10d import HashStore
     except ImportError:
-        # Use the stub version if not available
-        pass
-else:
-    # Provide HashStore stub for Windows (override the stub version)
-    class HashStore(Store):  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            super().__init__()
-
-
-# Import NVSHMEM and symmetric memory components if available
-try:
-    from torch._C._distributed_c10d import (
-        _is_nvshmem_available,
-        _nvshmemx_cumodule_init,
-        _SymmetricMemory,
-    )
-except ImportError:
-    # Provide fallback stubs if not available (override stub versions)
-    def _is_nvshmem_available() -> bool:  # type: ignore[no-redef]
-        return False
-
-    def _nvshmemx_cumodule_init(module: int) -> None:  # type: ignore[no-redef]
-        """Mock function for NVSHMEM CU module initialization - does nothing in non-distributed builds."""
-
-    class _SymmetricMemory:  # type: ignore[no-redef]
-        def __init__(self, *args, **kwargs):
-            pass
-
-        @classmethod
-        def empty_strided_p2p(cls, size, stride, dtype, device, group_name=None):
-            return torch.empty(size, dtype=dtype, device=device)
-
-        @classmethod
-        def rendezvous(cls, tensor, group_name=None):
-            return None
-
-        @classmethod
-        def set_group_info(cls, *args, **kwargs):
-            pass
-
-        @classmethod
-        def set_backend(cls, name):
-            pass
-
-        @classmethod
-        def get_backend(cls, device):
-            return None
-
-        @classmethod
-        def has_multicast_support(cls, device_type, device_index):
-            return False
-
-
-# Check availability of specific process group implementations
-# These variables track whether specific backends are available in the C extension
-_MPI_AVAILABLE = True
-_NCCL_AVAILABLE = True
-_GLOO_AVAILABLE = True
-_UCC_AVAILABLE = True
-_XCCL_AVAILABLE = True
-
-if HAS_DISTRIBUTED:
-    # Test if each process group type is actually available in the C extension
-    try:
-        from torch._C._distributed_c10d import ProcessGroupMPI  # noqa: F401
-    except ImportError:
-        _MPI_AVAILABLE = False
+        from torch.distributed._C_stubs import HashStore
 
     try:
-        from torch._C._distributed_c10d import ProcessGroupNCCL  # noqa: F401
-    except ImportError:
-        _NCCL_AVAILABLE = False
-
-    try:
-        from torch._C._distributed_c10d import (  # noqa: F401
-            _ProcessGroupWrapper,
-            ProcessGroupGloo,
+        from torch._C._distributed_c10d import (
+            _is_nvshmem_available,
+            _nvshmemx_cumodule_init,
+            _SymmetricMemory,
         )
     except ImportError:
-        _GLOO_AVAILABLE = False
+        # Fall back to stub versions if C extension doesn't have these
+        from torch.distributed._C_stubs import (
+            _is_nvshmem_available,
+            _nvshmemx_cumodule_init,
+            _SymmetricMemory,
+        )
 
     try:
-        from torch._C._distributed_c10d import ProcessGroupUCC  # noqa: F401
+        from torch._C._distributed_c10d import ProcessGroupMPI
+
+        _MPI_AVAILABLE = True
     except ImportError:
-        _UCC_AVAILABLE = False
+        from torch.distributed._C_stubs import ProcessGroupMPI
 
     try:
-        from torch._C._distributed_c10d import ProcessGroupXCCL  # noqa: F401
+        from torch._C._distributed_c10d import ProcessGroupNCCL
+
+        _NCCL_AVAILABLE = True
     except ImportError:
-        _XCCL_AVAILABLE = False
+        from torch.distributed._C_stubs import ProcessGroupNCCL
+
+    try:
+        from torch._C._distributed_c10d import _ProcessGroupWrapper, ProcessGroupGloo
+
+        _GLOO_AVAILABLE = True
+    except ImportError:
+        from torch.distributed._C_stubs import _ProcessGroupWrapper, ProcessGroupGloo
+
+    try:
+        from torch._C._distributed_c10d import ProcessGroupUCC
+
+        _UCC_AVAILABLE = True
+    except ImportError:
+        from torch.distributed._C_stubs import ProcessGroupUCC
+
+    try:
+        from torch._C._distributed_c10d import ProcessGroupXCCL
+
+        _XCCL_AVAILABLE = True
+    except ImportError:
+        from torch.distributed._C_stubs import ProcessGroupXCCL
+
 else:
-    # When distributed is not available, none of the specific backends are available
-    _MPI_AVAILABLE = False
-    _NCCL_AVAILABLE = False
-    _GLOO_AVAILABLE = False
-    _UCC_AVAILABLE = False
-    _XCCL_AVAILABLE = False
-
+    from torch.distributed._C_stubs import (
+        _allow_inflight_collective_as_graph_input,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
+        _ControlCollectives,
+        _current_process_group,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _DEFAULT_PG_NCCL_TIMEOUT,
+        _DEFAULT_PG_TIMEOUT,
+        _DistributedBackendOptions,
+        _hash_tensors,
+        _is_nvshmem_available,
+        _make_nccl_premul_sum,
+        _nvshmemx_cumodule_init,
+        _ProcessGroupWrapper,
+        _register_builtin_comm_hook,
+        _register_comm_hook,
+        _register_process_group,
+        _register_work,
+        _resolve_process_group,
+        _set_allow_inflight_collective_as_graph_input,
+        _set_global_rank,
+        _set_process_group,
+        _StoreCollectives,
+        _SymmetricMemory,
+        _test_python_store,
+        _unregister_all_process_groups,
+        _unregister_process_group,
+        _verify_params_across_processes,
+        _WorkerServer,
+        AllgatherOptions,
+        AllreduceCoalescedOptions,
+        AllreduceOptions,
+        AllToAllOptions,
+        Backend,
+        BarrierOptions,
+        BroadcastOptions,
+        BuiltinCommHookType,
+        DebugLevel,
+        FakeProcessGroup,
+        FakeWork,
+        FileStore,
+        GatherOptions,
+        get_debug_level,
+        GradBucket,
+        HashStore,
+        Logger,
+        PrefixStore,
+        ProcessGroup,
+        ProcessGroupGloo,
+        ProcessGroupMPI,
+        ProcessGroupNCCL,
+        ProcessGroupUCC,
+        ProcessGroupXCCL,
+        ReduceOp,
+        ReduceOptions,
+        Reducer,
+        ReduceScatterOptions,
+        ScatterOptions,
+        set_debug_level,
+        set_debug_level_from_env,
+        Store,
+        TCPStore,
+        Work,
+    )
 
 # Provide backwards compatibility by making all symbols available at module level
 __all__ = [
@@ -179,6 +247,8 @@ __all__ = [
     "_is_nvshmem_available",
     "_nvshmemx_cumodule_init",
     "_SymmetricMemory",
+    "_hash_tensors",
+    "_set_global_rank",
     "Backend",
     "BuiltinCommHookType",
     "DebugLevel",

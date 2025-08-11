@@ -6,12 +6,11 @@ This module provides fallback implementations for all distributed components
 that would normally be provided by the C++ extension.
 """
 
+from __future__ import annotations
+
 from datetime import timedelta
 from enum import Enum
 from typing import Optional
-
-import torch
-from torch.futures import Future
 
 
 # Constants
@@ -198,7 +197,7 @@ class FakeWork(Work):
 
 
 class FakeProcessGroup:
-    def __init__(self, rank: int = 0, world_size: int = 1):
+    def __init__(self, rank: int = 0, world_size: int = 1, backend_opts=None):
         self._rank = rank
         self._world_size = world_size
 
@@ -578,3 +577,7 @@ class ScatterOptions:
     def __init__(self):
         self.rootRank = 0
         self.timeout = _DEFAULT_PG_TIMEOUT
+
+
+import torch
+from torch.futures import Future

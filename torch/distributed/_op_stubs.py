@@ -11,29 +11,30 @@ from ._distributed_c10d import HAS_DISTRIBUTED
 
 if not HAS_DISTRIBUTED:
     # Define missing c10d operators
-    with torch.library._scoped_library("c10d", "DEF") as lib_def:
-        # Define basic signatures for the operators we need
-        op_signatures = {
-            "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
-            "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
-            "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',  # noqa: B950
-            "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
-            "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
-            "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
-        }
+    lib_def = torch.library.Library("c10d", "DEF")
 
-        for signature in op_signatures.values():
-            lib_def.define(signature)
+    # Define basic signatures for the operators we need
+    op_signatures = {
+        "broadcast_": 'broadcast_(Tensor[] tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+        "allreduce_": 'allreduce_(Tensor[] tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+        "allgather_": 'allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "_allgather_base_": '_allgather_base_(Tensor output, Tensor input, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "reduce_scatter_": 'reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "_reduce_scatter_base_": '_reduce_scatter_base_(Tensor output, Tensor input, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "reduce_": 'reduce_(Tensor[] tensors, int dst, str? op="sum", str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "gather_": 'gather_(Tensor[][] output_tensors, Tensor[] input_tensors, int dst, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "scatter_": 'scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, int src, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "alltoall_": 'alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "alltoall_base_": 'alltoall_base_(Tensor output, Tensor input, SymInt[]? output_split_sizes=None, SymInt[]? input_split_sizes=None, str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',  # noqa: B950
+        "barrier": 'barrier(str? tag="", SymInt[]? ranks=None, int group_size=0) -> ()',
+        "monitored_barrier_": 'monitored_barrier_(str? tag="", SymInt[]? ranks=None, int group_size=0, bool wait_all_ranks=False) -> ()',  # noqa: B950
+        "send": 'send(Tensor[] tensors, int dst, str? tag="") -> ()',
+        "recv_": 'recv_(Tensor[] tensors, int src, str? tag="") -> ()',
+        "recv_any_source_": 'recv_any_source_(Tensor[] tensors, str? tag="") -> ()',
+    }
+
+    for signature in op_signatures.values():
+        lib_def.define(signature)
 
     # Register functional collective operators when not available
     def _raise_not_implemented(op_name: str) -> Callable[..., None]:
