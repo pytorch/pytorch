@@ -574,7 +574,7 @@ class CachingAutotuner(KernelInterface):
                     assert hasattr(self, "_reload_kernel")
                     assert callable(self._reload_kernel)
                     self.fn = self._reload_kernel().fn
-                self.compile_results.append(self._precompile_config(new_config))
+                self.compile_results.append(self._precompile_config(new_config))  # noqa: B909
 
             self._make_launchers()
 
@@ -1061,6 +1061,7 @@ class CachingAutotuner(KernelInterface):
             "def_args": launcher.def_args,
             "call_args": launcher.call_args,
             "global_scratch": launcher.global_scratch,
+            "profile_scratch": launcher.profile_scratch,
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
@@ -1086,6 +1087,13 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
+        if (
+            self.heuristic_type == HeuristicType.TEMPLATE
+            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        ):
+            # skip triton template
+            return launcher
+
         with dynamo_timed(
             "CachingAutotuner.coordinate_descent_tuning",
             # These generate too many pt2_compile_event logs:
@@ -1100,13 +1108,6 @@ class CachingAutotuner(KernelInterface):
             return self._coordinate_descent_tuning(launcher, *args, **kwargs)
 
     def _coordinate_descent_tuning(self, launcher, *args, **kwargs):
-        if (
-            self.heuristic_type == HeuristicType.TEMPLATE
-            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
-        ):
-            # skip triton template
-            return launcher
-
         config2launcher = {launcher.config: launcher}
 
         # TODO: should we just load the kernels ahead of time if we know we're going to call this?
@@ -1754,9 +1755,23 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             launcher.def_args = def_args
             launcher.call_args = call_args
             kernel_metadata = getattr(self.kernel, "metadata", None)
-            launcher.global_scratch = getattr(
-                kernel_metadata, "global_scratch_size", None
+
+            # for the scratch arguments: None indicates that the kernel doesn't
+            # take any scratch argument; otherwise a number indicates the number
+            # of bytes of scratch that need to be provided.
+
+            # in AMD's Triton backend, the global scratch size is never provided
+            # (but for AMD it's safe to pass an extra null arg, so always include it)
+            global_scratch: Optional[int] = getattr(
+                kernel_metadata,
+                "global_scratch_size",
+                (0 if torch.version.hip else None),
             )
+            profile_scratch: Optional[int] = getattr(
+                kernel_metadata, "profile_scratch_size", None
+            )
+            launcher.global_scratch = global_scratch
+            launcher.profile_scratch = profile_scratch
         return launcher
 
 

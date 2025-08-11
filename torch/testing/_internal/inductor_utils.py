@@ -16,6 +16,7 @@ from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.custom_graph_pass import CustomGraphModulePass
 from torch._inductor.codegen.common import (
+    get_custom_backend_config_for_device,
     get_custom_backend_pass_for_device,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -27,6 +28,7 @@ from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
 from torch.utils._helion import has_helion
 from torch.utils._triton import has_triton
+from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -67,13 +69,13 @@ else:
     TRITON_HAS_CPU = False
 
 
-HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
-HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 
 GPU_TYPE = get_gpu_type()
 
@@ -161,16 +163,16 @@ skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
 IS_A100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 166912
 )
 
 IS_H100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA_AND_TRITON and is_big_gpu())
 
 def dummy_graph() -> GraphLowering:
     """
@@ -308,7 +310,8 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
 def patch_inductor_backend(
     device: str,
     python_wrapper_codegen: PythonWrapperCodegen = None,
-    custom_pass: CustomGraphModulePass = None
+    custom_pass: CustomGraphModulePass = None,
+    custom_backend_config: ConfigModule = None
 ):
     """
     Patch the inductor backend for a specific device.
@@ -321,6 +324,7 @@ def patch_inductor_backend(
     original_python_wrapper = get_wrapper_codegen_for_device(device, False)
     original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
     original_custom_pass = get_custom_backend_pass_for_device(device)
+    original_custom_backend_config = get_custom_backend_config_for_device(device)
 
     try:
         # Register modified backend for the device
@@ -329,7 +333,8 @@ def patch_inductor_backend(
             original_scheduling,
             python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
             original_cpp_wrapper,
-            custom_pass if custom_pass is not None else original_custom_pass
+            custom_pass if custom_pass is not None else original_custom_pass,
+            custom_backend_config if custom_backend_config is not None else original_custom_backend_config
         )
         yield
     finally:
@@ -339,5 +344,6 @@ def patch_inductor_backend(
             original_scheduling,
             original_python_wrapper,
             original_cpp_wrapper,
-            original_custom_pass
+            original_custom_pass,
+            original_custom_backend_config
         )
