@@ -75,7 +75,7 @@ def get_freeable_input_buf(
     Create and keep track of all input buffers that can be freed during the program
 
     Returns:
-        A dictionary containing all freeble input buffers, keyed by their names.
+        A dictionary containing all freeable input buffers, keyed by their names.
     """
 
     def _dep_size_hint(dep: Dep) -> int:
@@ -318,7 +318,7 @@ def compute_memory_timeline(
         node: step for step, node in enumerate(nodes)
     }
 
-    # get buffers' size and liveliness information
+    # get buffers' size and liveness information
     buf_info_list: list[BufferInfo] = []
     buf_to_snode_last_use: dict[
         Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode
@@ -341,7 +341,7 @@ def compute_memory_timeline(
 
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
-        end_step = len(nodes) - 1
+        end_step = -1
         if buf_name not in graph_outputs:
             end_step, end_step_snode = _get_end_step_and_snode(input_buf)
             assert end_step_snode is not None
@@ -364,11 +364,12 @@ def compute_memory_timeline(
             # to be only used by its defining op (e.g., due to fusion when all consumers of
             # the buffer are fused with its defining op). In such cases, end_step is step.
             buf_name = sched_buf.get_name()
-            end_step = len(nodes) - 1
+            end_step = -1
             if buf_name not in graph_outputs:
                 end_step, end_step_snode = _get_end_step_and_snode(sched_buf)
                 if end_step == -1:
                     end_step = step
+                    buf_to_snode_last_use[sched_buf] = node
                 else:
                     assert end_step_snode is not None
                     buf_to_snode_last_use[sched_buf] = end_step_snode
@@ -393,7 +394,7 @@ def estimate_peak_memory(
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
-    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
+    keeping track of the liveness of SchedulerBuffers and FreeableInputBuffers.
 
     Returns:
         int: peak memory
@@ -410,7 +411,8 @@ def estimate_peak_memory(
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:
         memory[buf_info.start_step] += buf_info.size_alloc
-        memory[buf_info.end_step + 1] -= buf_info.size_free
+        if buf_info.end_step != -1:
+            memory[buf_info.end_step + 1] -= buf_info.size_free
 
     # get peak memory by compute the cumulative memories
     max_memory = 0
@@ -463,7 +465,8 @@ def estimate_peak_memory_allocfree(
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:
         step_idx_allocfree[buf_info.start_step].size_alloc += buf_info.size_alloc
-        step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
+        if buf_info.end_step != -1:
+            step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
 
     snodes_allocfree = {}
     for i, node in enumerate(nodes):
@@ -503,7 +506,7 @@ def topological_sort_lpmf(
     Buffer memory optimization for video codec application modeled in Simulink
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
-    The algorithm maintain the max memory so far.
+    The algorithm maintains the max memory so far.
     At every iteration, for each scheduleable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
