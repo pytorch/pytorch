@@ -138,7 +138,7 @@ def is_forbidden_context_manager(ctx) -> bool:
     return ctx in f_ctxs
 
 
-def is_cython_function(obj):
+def is_cython_function(obj: Any) -> bool:
     return (
         callable(obj)
         and hasattr(type(obj), "__name__")
