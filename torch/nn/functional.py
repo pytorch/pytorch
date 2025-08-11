@@ -3638,7 +3638,7 @@ def linear_cross_entropy(
     torch._check_with(
         NotImplementedError,
         chunking_strategy == CrossEntropyChunkingStrategy.none,
-        lambda: "{chunking_strategy=} is not yet implemented"
+        lambda: "{chunking_strategy=} is not yet implemented",
     )
 
     return cross_entropy(
