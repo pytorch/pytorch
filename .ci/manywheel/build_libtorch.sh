@@ -92,7 +92,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
-retry pip install -q cmake
+retry pip install -qUr requirements-build.txt
 python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
@@ -120,7 +120,7 @@ fi
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
-        python -m pip install . -v --no-build-isolation
+        python -m pip install --no-build-isolation -v .
 
     mkdir -p libtorch/{lib,bin,include,share}
 

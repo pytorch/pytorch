@@ -48,7 +48,7 @@ class DTensorAPITest(DTensorTestBase):
     def test_distribute_tensor_rank(self):
         comm_mode = CommDebugMode()
 
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
@@ -134,7 +134,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_tensor_uneven_sharding(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         input_sizes_and_shard_dims = [
             ((self.world_size * 3 + 1, 3, 3), 0),
             ((self.world_size * 3 + 2, 3, 3), 0),
@@ -156,7 +156,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         # fully shard all linear modules on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
         shard_spec = [Shard(0)]
@@ -219,7 +219,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_input_fn_output_fn(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -264,7 +264,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -292,7 +292,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_casting(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # check DTensor casting
         dt = DTensor.from_local(torch.rand(10), device_mesh, [Replicate()])
@@ -335,7 +335,7 @@ class DTensorAPITest(DTensorTestBase):
     def test_distribute_module_meta(self):
         # If  the model is too big, the user may first the create entire model on the meta device and then initialize
         # it on the device in the partition function.
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully shard all parameters on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device="meta")

@@ -66,6 +66,17 @@ def change_cos_pass(graph):
             node.target = aten.sin.default
 
 
+class ChangeCosCustomPass(CustomGraphPass):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self, g: torch.fx.graph.Graph):
+        change_cos_pass(g)
+
+    def uuid(self) -> bytes:
+        return get_hash_for_files((__file__,))
+
+
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
     #  mkldnn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/mkldnn_fusion.py),
@@ -134,7 +145,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             return x1.relu()
 
     def test_custom_joint_pass_pre(self):
-        with config.patch(joint_custom_pre_pass=change_cos_pass):
+        with config.patch(joint_custom_pre_pass=ChangeCosCustomPass()):
 
             def g(x):
                 return x.sin().sin().sin()
@@ -146,7 +157,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
     def test_custom_joint_pass_post(self):
-        with config.patch(joint_custom_post_pass=change_cos_pass):
+        with config.patch(joint_custom_post_pass=ChangeCosCustomPass()):
 
             def g(x):
                 return x.sin().sin().sin()
