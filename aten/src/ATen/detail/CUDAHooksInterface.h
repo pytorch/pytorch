@@ -118,14 +118,6 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual bool hasCKSDPA() const {
-    return false;
-  }
-
-  virtual bool hasCKGEMM() const {
-    return false;
-  }
-
   virtual const at::cuda::NVRTC& nvrtc() const {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }

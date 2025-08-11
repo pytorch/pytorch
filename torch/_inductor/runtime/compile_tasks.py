@@ -10,8 +10,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, TYPE_CHECKING
 
-from torch._utils_internal import log_triton_builds
-
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
@@ -59,18 +57,11 @@ def _worker_compile_triton(
     from torch._inductor import config
 
     with config.patch(extra_config):
-        fail = None
-        try:
-            start_ns = time.time_ns()
-            kernel = load_kernel()
-            kernel.precompile(warm_cache_only=True)
-            elapsed_ns = time.time_ns() - start_ns
-            kernel.prepare_for_pickle()
-            # We can release this memory in the compile subprocesses:
-            linecache.clearcache()
-            return kernel, elapsed_ns // 1000
-        except Exception as e:
-            fail = str(e)
-            raise
-        finally:
-            log_triton_builds(fail=fail)
+        start_ns = time.time_ns()
+        kernel = load_kernel()
+        kernel.precompile(warm_cache_only=True)
+        elapsed_ns = time.time_ns() - start_ns
+        kernel.prepare_for_pickle()
+        # We can release this memory in the compile subprocesses:
+        linecache.clearcache()
+        return kernel, elapsed_ns // 1000

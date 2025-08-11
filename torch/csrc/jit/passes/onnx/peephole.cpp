@@ -35,8 +35,8 @@ static bool isRNN(const Node* node) {
 }
 
 static bool isNopTranspose(const std::vector<int64_t>& perm) {
-  for (size_t i = 0, perm_size = perm.size(); i < perm_size; i++) {
-    if (perm[i] != static_cast<int64_t>(i)) {
+  for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++) {
+    if (perm[i] != i) {
       return false;
     }
   }

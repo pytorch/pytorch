@@ -12,7 +12,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <limits>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -161,7 +160,6 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
-  _(UInt)                    \
   _(SymInt)                  \
   _(SymFloat)                \
   _(SymBool)                 \
@@ -655,29 +653,6 @@ struct TORCH_API IValue final {
     }
   }
 
-  // Unsigned
-  IValue(uint64_t u) : tag( u <= std::numeric_limits<int64_t>::max() ? Tag::Int : Tag::UInt) {
-    payload.u.as_uint = u;
-  }
-
-
-  // See Note [Meaning of HAS_u]
-  // IValue type model closely follows that of c10::Scalar
-  // Where all integers are upcast to 64-bit representation, and `as_int` is used as default
-  // representation unless value could not be represented as signed int
-  bool isUnsigned() const {
-    return Tag::UInt == tag || (Tag::Int == tag && payload.u.as_int >= 0);
-  }
-
-  uint64_t toUInt() const {
-    if (isUnsigned()) {
-      return payload.u.as_uint;
-    } else {
-      TORCH_INTERNAL_ASSERT(0, "expected unsigned int");
-    }
-  }
-
-
   // Bool
   IValue(bool b) : tag(Tag::Bool) {
 #if defined(__clang__) && defined(__x86_64__)
@@ -918,14 +893,8 @@ struct TORCH_API IValue final {
     } else {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           s.isIntegral(false), "Unknown type in Scalar");
-      if (s.isUnsigned()) {
-        const auto val = s.toUInt64();
-        payload.u.as_uint = val;
-        tag = val <= std::numeric_limits<int64_t>::max() ? Tag::Int : Tag::UInt;
-      } else {
-        payload.u.as_int = s.toLong();
-        tag = Tag::Int;
-      }
+      tag = Tag::Int;
+      payload.u.as_int = s.toLong();
     }
   }
 
@@ -949,8 +918,6 @@ struct TORCH_API IValue final {
       return toSymFloat();
     else if (isSymBool())
       return toSymBool();
-    else if (isUnsigned())
-      return toUInt();
     TORCH_CHECK(false, "IValue is not a Scalar");
   }
 
@@ -1280,8 +1247,6 @@ struct TORCH_API IValue final {
         return true;
       case Tag::Int:
         return false;
-      case Tag::UInt:
-        return false;
       case Tag::SymInt:
         return true;
       case Tag::SymFloat:
@@ -1378,8 +1343,6 @@ struct TORCH_API IValue final {
     union TriviallyCopyablePayload {
       TriviallyCopyablePayload() : as_int(0) {}
       int64_t as_int;
-      // See Note [Meaning of HAS_u]
-      uint64_t as_uint;
       double as_double;
       bool as_bool;
       // Invariant: never nullptr; null state is represented as

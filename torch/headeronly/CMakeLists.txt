@@ -20,7 +20,6 @@ configure_file(
 
 file(GLOB HEADERONLY_HEADERS
     *.h
-    core/**/*.h
     cpu/**/*.h
     macros/*.h
     util/*.h

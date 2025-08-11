@@ -1,22 +1,22 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.cond import create_bw_fn
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_meta_consistency,
-    create_bw_fn,
     first_slice_copy,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
-    split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -93,6 +93,14 @@ def first_slice_copy_with_grad(li: list[Any]) -> list[Any]:
     # because it's called in torch.autograd.Function.backward/forward.
     slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
     return slc
+
+
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    it = iter(iterable)
+    assert sum(chunk_sizes) == len(iterable), (
+        "the sum of all chunks needs to match the length of the iterable."
+    )
+    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 def call_operator(operator, *args):
