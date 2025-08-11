@@ -1,3 +1,4 @@
+#!/bin/bash
 set -ex
 
 # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
