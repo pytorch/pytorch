@@ -58,12 +58,12 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
 )
 
 
 torch.set_float32_matmul_precision("high")
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
@@ -158,8 +158,8 @@ def select_no_algorithm(*args, **kwargs):
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
-        if not HAS_CUDA:
-            self.skipTest("CUDA is not available")
+        if not HAS_CUDA_AND_TRITON:
+            self.skipTest("CUDA and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
 
@@ -199,6 +199,19 @@ class TestCutlassBackend(TestCase):
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
+
+    def test_check_paths(self):
+        cutlass_mock_imports_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
+        )
+        cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
+        cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
+        cutlass_mock_scipy_path = os.path.join(cutlass_mock_imports_path, "scipy")
+        self.assertTrue(os.path.exists(cutlass_mock_imports_path))
+        self.assertTrue(os.path.exists(cutlass_mock_cuda_path))
+        self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
+        self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1795,6 +1808,26 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_matmul_nonzero_offset(self):
+        max_autotune_gemm_backends = "CUTLASS"
+
+        M = 129
+        A = torch.randn(M, M - 1).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            compiled = torch.compile(torch.mm)
+            torch.testing.assert_close(
+                A[1:, :] @ A[1:, :].t(), compiled(A[1:, :], A[1:, :].t())
+            )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_flexible_layout(self):
         class TestModel(torch.nn.Module):
             def forward(self, B):
@@ -2293,5 +2326,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu():
+    if HAS_CUDA_AND_TRITON and HAS_CPU and is_big_gpu():
         run_tests()
