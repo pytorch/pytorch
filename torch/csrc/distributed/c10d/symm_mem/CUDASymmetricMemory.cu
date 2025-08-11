@@ -46,11 +46,13 @@ AllocationRef::AllocationRef(
     void* ptr,
     HandleType handle,
     size_t block_size,
-    int device_idx)
+    int device_idx,
+    bool is_multicast)
     : ptr(ptr),
       handle(handle),
       block_size(block_size),
-      device_idx(device_idx) {}
+      device_idx(device_idx),
+      is_multicast(is_multicast) {}
 
 AllocationRef::~AllocationRef() {
   if (is_finalizing()) {
@@ -61,9 +63,17 @@ AllocationRef::~AllocationRef() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   // Leak the cuda allocations during static deinitialization
   auto driver_api = c10::cuda::DriverAPI::get();
-  C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size));
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+  if (!is_multicast) {
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMemUnmap_(
+        reinterpret_cast<CUdeviceptr>(ptr), block_size));
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+  } else if (ptr) {
+    LOG(INFO) << "unbinding multimem\n";
+    C10_CUDA_DRIVER_CHECK(
+        driver_api->cuMulticastUnbind_(handle, device_idx, 0, block_size));
+    LOG(INFO) << "releasing multimem handle";
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+  }
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
   C10_HIP_CHECK(hipMemRelease(handle));
@@ -797,6 +807,8 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
       alloc_refs.emplace_back(block->alloc_ref);
+      alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
+          mc_addr, mc_handle, block->block_size, block->device_idx, true));
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(

@@ -15,12 +15,14 @@ struct AllocationRef : public c10::intrusive_ptr_target {
   HandleType handle;
   size_t block_size;
   int device_idx;
+  bool is_multicast;
 
   AllocationRef(
       void* ptr,
       HandleType handle,
       size_t block_size,
-      int device_idx);
+      int device_idx,
+      bool is_multicast = false);
 
   ~AllocationRef();
 };
@@ -38,7 +40,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
       int rank,
       int world_size);
 
-  ~CUDASymmetricMemory() override {};
+  ~CUDASymmetricMemory() override{};
 
   std::vector<void*> get_buffer_ptrs() override;
   std::vector<void*> get_signal_pad_ptrs() override;
