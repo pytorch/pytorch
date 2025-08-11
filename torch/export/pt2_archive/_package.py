@@ -12,6 +12,7 @@ from typing_extensions import TypeAlias
 import torch
 import torch.utils._pytree as pytree
 from torch._export.serde.serialize import deserialize, serialize, SerializedArtifact
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
@@ -75,6 +76,8 @@ class PT2ArchiveWriter:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileWriter(archive_path_or_buffer)  # type: ignore[arg-type]
         # NOTICE: version here is different from the archive_version
         # this is the version of zip file format, which is used by PyTorchFileWriter, which write to /.data/version
@@ -169,6 +172,8 @@ class PT2ArchiveReader:
     """
 
     def __init__(self, archive_path_or_buffer: FileLike):
+        if isinstance(archive_path_or_buffer, str):
+            archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
         assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
             "Invalid archive format"
@@ -214,6 +219,11 @@ class PT2ArchiveReader:
         Get the file names in the archive.
         """
         return self.archive_file.get_all_records()
+
+
+is_pt2_package.__module__ = "torch.export.pt2_archive"
+PT2ArchiveWriter.__module__ = "torch.export.pt2_archive"
+PT2ArchiveReader.__module__ = "torch.export.pt2_archive"
 
 
 def _package_aoti_files(
@@ -308,7 +318,7 @@ def _package_exported_programs(
         return
 
     if isinstance(exported_programs, ExportedProgram):
-        exported_programs = {"model", exported_programs}  # type: ignore[assignment]
+        exported_programs = {"model": exported_programs}
 
     assert isinstance(exported_programs, dict)
 
@@ -562,6 +572,8 @@ def load_pt2(
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
     """
 
+    from torch._inductor.cpp_builder import normalize_path_separator
+
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
@@ -600,6 +612,9 @@ def load_pt2(
                 file_end = file[
                     len(AOTINDUCTOR_DIR) :
                 ]  # remove data/aotinductor/ prefix
+                file_end = normalize_path_separator(
+                    file_end
+                )  # Win32 need normalize path before split.
                 model_name = file_end.split("/")[
                     0
                 ]  # split "model_name/...cpp" into "model_name"

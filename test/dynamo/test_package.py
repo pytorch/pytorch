@@ -14,13 +14,24 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._functorch import config as functorch_config
+from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
+    skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
+
+
+def compute_loss_helper(x):
+    return reduce_to_scalar_loss(x)
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -86,9 +97,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_basic_fn(self, backend, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DiskDynamoStore()
@@ -130,9 +141,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_lazy_backward(self, backend, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DiskDynamoStore()
@@ -177,9 +188,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_graph_break_bomb(self, backend, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DiskDynamoStore()
@@ -241,9 +252,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_dynamic_shape(self, backend, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DiskDynamoStore()
@@ -360,9 +371,9 @@ def add(x, y):
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_dynamo_cache_manual_load(self, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         def fn(x):
@@ -397,9 +408,9 @@ def add(x, y):
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         def fn(x):
@@ -428,12 +439,47 @@ def add(x, y):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @parametrize("device", ("cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    @skipIfXpu
+    @skipIfRocm
+    def test_automatic_dynamo_autotune_cache(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x, y):
+            return x.sin() + y
+
+        arg1 = torch.randn(3, 3, device=device)
+        arg2 = torch.randn(3, 3, device=device)
+        expected = fn(arg1, arg2).clone()
+
+        with PatchCaches():
+            compiled_fn1 = torch.compile(fn, mode="max-autotune")
+            result = compiled_fn1(arg1, arg2).clone()
+            self.assertEqual(expected, result)
+            self.assertEqual(global_stats.autotune_local, Stats(1, 0, 1))
+            DynamoCache.clear()
+
+            total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+            self._save_and_reload(
+                expected_backends=1, expected_dynamo=1, expected_autotune=1
+            )
+            compiled_fn1 = torch.compile(fn, mode="max-autotune")
+            with torch.compiler.set_stance("fail_on_recompile"):
+                result1 = compiled_fn1(arg1, arg2).clone()
+                self.assertEqual(expected, result1)
+            self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+            self.assertEqual(global_stats.autotune_local, Stats(2, 1, 1))
+
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         def fn(x):
@@ -464,9 +510,9 @@ def add(x, y):
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         def fn(x, l, r):
@@ -510,9 +556,9 @@ def add(x, y):
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
-        if device == "cuda" and not HAS_CUDA:
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        if device == "xpu" and not HAS_XPU:
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
             raise unittest.SkipTest("Requires XPU/Triton")
 
         def fn(x):
@@ -533,6 +579,34 @@ def add(x, y):
         with torch.compiler.set_stance("fail_on_recompile"):
             expected2 = compiled_fn(arg2)
             expected2.sum().backward()
+
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_call_function_from_resume(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+        mod = torch.nn.Linear(2, 3, device=device)
+
+        def foo(x, mod):
+            pred = mod(x)
+            compute_loss_helper(pred).backward()
+            return None
+
+        args = (torch.randn(3, 2, device=device), mod)
+        compiled_fn = torch.compile(foo)
+        compiled_fn(*args)
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        compiled_fn = torch.compile(foo)
+        # Run it again, no recompile needed
+        with torch.compiler.set_stance("fail_on_recompile"):
+            compiled_fn(*args)
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
