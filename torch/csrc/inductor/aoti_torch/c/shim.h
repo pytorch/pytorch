@@ -396,6 +396,8 @@ using IValueMapHandle = IValueMapOpaque*;
 AOTI_TORCH_EXPORT AOTITorchError aoti_record_function_start(
     const char* name,
     IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
     AtenRecordFunctionHandle* guard);
 
 AOTI_TORCH_EXPORT AOTITorchError

@@ -1060,6 +1060,8 @@ AOTITorchError aoti_torch_check_inf_and_nan(
 AOTITorchError aoti_record_function_start(
     const char* name,
     IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
     AtenRecordFunctionHandle* guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::RecordFunction* newGuard =
@@ -1076,7 +1078,12 @@ AOTITorchError aoti_record_function_start(
       }
     }
 
-    newGuard->before(name, c10::ArrayRef<c10::IValue>(), &recordKwargs);
+    std::vector<c10::IValue> recordInputs(n_inputs);
+    for (size_t i = 0; i < n_inputs; i++) {
+      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+    }
+
+    newGuard->before(name, &recordInputs, &recordKwargs);
     *guard = reinterpret_cast<AtenRecordFunctionHandle>(newGuard);
   });
 }
