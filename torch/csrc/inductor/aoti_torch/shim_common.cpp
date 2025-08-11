@@ -384,6 +384,15 @@ AOTITorchError aoti_torch_get_device_index(
   });
 }
 
+AOTITorchError aoti_torch_get_layout(
+    AtenTensorHandle tensor,
+    int32_t* ret_layout) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_layout = static_cast<int32_t>(t->layout());
+  });
+}
+
 AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset) {
@@ -458,6 +467,28 @@ AOTITorchError aoti_torch_empty_strided(
       *ret_new_tensor =
           new_tensor_handle(at::empty_strided(sizes, strides, options));
     }
+  });
+}
+
+AOTITorchError aoti_torch_empty_strided_pinned(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    TORCH_CHECK(
+        c10::DeviceType(device_type) == c10::DeviceType::CPU,
+        "only CPU tensors can be pinned");
+    *ret_new_tensor = new_tensor_handle(at::detail::empty_strided_cpu(
+        sizes,
+        strides,
+        static_cast<c10::ScalarType>(dtype),
+        /*is_pinned=*/true));
   });
 }
 
@@ -1383,30 +1414,6 @@ static StableIValue from_ivalue(
       StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
       return from(sivp);
     }
-    case c10::TypeKind::StringType: {
-      auto str = ivalue.toStringRef();
-      return from(str);
-    }
-    case c10::TypeKind::ListType: {
-      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
-      auto list = ivalue.toList();
-      auto vec = list.vec();
-
-      if (inner_type->kind() == c10::TypeKind::IntType) {
-        std::vector<int64_t>* int_vec = new std::vector<int64_t>();
-        int_vec->reserve(vec.size());
-        for (const auto& iv : vec) {
-          int_vec->push_back(iv.toInt());
-        }
-        return from(int_vec);
-      } else {
-        TORCH_CHECK(
-            false,
-            inner_type->str(),
-            "lists are not yet supported in conversion from IValue to StableIValue for ListType. Got: ",
-            inner_type->str());
-      }
-    }
     default: {
       TORCH_CHECK(
           false,
@@ -1469,23 +1476,6 @@ static c10::IValue to_ivalue(
       delete sivp;
       return ival;
     }
-    case c10::TypeKind::StringType: {
-      return c10::IValue(to<std::string>(stable_ivalue));
-    }
-    case c10::TypeKind::ListType: {
-      auto inner_type = type->castRaw<c10::ListType>()->getElementType();
-      if (inner_type->kind() == c10::TypeKind::IntType) {
-        auto vec = to<std::vector<int64_t>>(stable_ivalue);
-        c10::List<int64_t> list(vec);
-        return c10::IValue(list);
-      } else {
-        TORCH_CHECK(
-            false,
-            inner_type->str(),
-            " lists are not yet supported in conversion from IValue to StableIValue for ListType. Got: ",
-            inner_type->str());
-      }
-    }
     default: {
       TORCH_CHECK(
           false,
@@ -1518,8 +1508,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
-    // our schema values, and run the function and modify the StableIValue
-    // stack
+    // our schema values, and run the function and modify the StableIValue stack
     fn_(ministack.get(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into

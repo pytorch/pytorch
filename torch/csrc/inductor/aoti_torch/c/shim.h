@@ -220,6 +220,9 @@ aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_layout(AtenTensorHandle tensor, int32_t* ret_layout);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
@@ -261,6 +264,16 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__reinterpret_tensor(
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided_pinned(
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,

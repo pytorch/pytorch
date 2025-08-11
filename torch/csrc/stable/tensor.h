@@ -1,13 +1,8 @@
 #pragma once
 
-// TODO ASAP: THIS FILE SHOULD BE HEADER ONLY BUT ISN'T ENFORCED:
-// I only need it for AOTI_TORCH_ERROR_CODE_CHECK, see #154908
-#include <torch/csrc/inductor/aoti_runtime/utils.h>
-
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
-#include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeToTypeMeta.h>
+#include <torch/headeronly/util/shim_utils.h>
+#include <memory>
 
 namespace torch::stable {
 
@@ -34,11 +29,13 @@ class Tensor {
   std::shared_ptr<AtenTensorOpaque> ath_;
 
  public:
+  // Construct a stable::Tensor with an uninitialized AtenTensorHandle (ATH)
+  // Steals ownership from the ATH
   Tensor() {
     AtenTensorHandle ret;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
     ath_ = std::shared_ptr<AtenTensorOpaque>(ret, [](AtenTensorHandle ath) {
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
     });
   }
 
@@ -46,7 +43,7 @@ class Tensor {
   // Steals ownership from the ATH
   explicit Tensor(AtenTensorHandle ath)
       : ath_(ath, [](AtenTensorHandle ath) {
-          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+          TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
         }) {}
 
   // Copy and move constructors can be default cuz the underlying handle is a
@@ -74,19 +71,19 @@ class Tensor {
 
   void* data_ptr() const {
     void* data_ptr;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
   }
 
   int64_t dim() const {
     int64_t dim;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(ath_.get(), &dim));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(ath_.get(), &dim));
     return dim;
   }
 
   int64_t numel() const {
     int64_t numel;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
     return numel;
   }
 
@@ -95,55 +92,41 @@ class Tensor {
   // Here, we assume the default contiguous memory format.
   bool is_contiguous() const {
     bool is_contiguous;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         aoti_torch_is_contiguous(ath_.get(), &is_contiguous));
     return is_contiguous;
   }
 
   int64_t stride(int64_t dim) const {
     int64_t stride;
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_stride(ath_.get(), dim, &stride));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_stride(ath_.get(), dim, &stride));
     return stride;
   }
 
   DeviceIndex get_device() const {
     int32_t device_index;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
     return static_cast<DeviceIndex>(device_index);
   }
 
   bool is_cuda() const {
     int32_t device_type;
-    AOTI_TORCH_ERROR_CODE_CHECK(
+    TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cuda();
   }
 
   int64_t size(int64_t dim) const {
     int64_t size;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
     return size;
   }
 
   bool defined() const {
     bool defined;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
+    TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
     return defined;
-  }
-
-  // Temporarily add a dtype() API here for fa3, pending header only-ness
-  caffe2::TypeMeta dtype() const {
-    int32_t dtype;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
-    return c10::scalarTypeToTypeMeta(static_cast<c10::ScalarType>(dtype));
-  }
-
-  c10::ScalarType scalar_type() const {
-    int32_t dtype;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
-    return static_cast<c10::ScalarType>(dtype);
   }
 
   // =============================================================================
