@@ -262,12 +262,7 @@ def is_exception_branch(branch: str) -> bool:
     """
     Branches that get opted out of experiments by default, until they're explicitly enabled.
     """
-    return branch.split("/", maxsplit=1)[0] in {
-        "main",
-        "nightly",
-        "release",
-        "landchecks",
-    }
+    return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
 
 def load_yaml(yaml_text: str) -> Any:

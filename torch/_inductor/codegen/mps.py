@@ -1052,7 +1052,11 @@ class MetalScheduling(SIMDScheduling):
             # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
 
-            kernel_name = f"{mps_lib_name}"
+            if V.graph.cpp_wrapper:
+                kernel_name = f"{mps_lib_name}_func"
+            else:
+                kernel_name = f"{mps_lib_name}"
+
             wrapper.src_to_kernel[src_code] = kernel_name
 
             if V.graph.cpp_wrapper:
