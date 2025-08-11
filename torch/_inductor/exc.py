@@ -111,7 +111,7 @@ class CppCompileError(RuntimeError):
             .format(cmd=" ".join(cmd), output=output)
         )
 
-    def __reduce__(self):
+    def __reduce__(self) -> tuple[type, tuple[list[str], str]]:
         return (self.__class__, (self.cmd, self.output))
 
 
