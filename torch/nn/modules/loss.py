@@ -1349,7 +1349,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
 
 class LinearCrossEntropyLoss(Module):
-    __constants__ = [
+    __constants__: list[str] = [
         *Linear.__constants__,
         "chunking_strategy",
         *CrossEntropyLoss.__constants__,
