@@ -719,7 +719,9 @@ def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
         if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
     ]
 
-    _dump_collective_schedule(schedule)
+    # Only log when there is at least one collective op
+    if schedule:
+        _dump_collective_schedule(schedule)
 
 
 def log_runtime_estimates(node_runtimes: Sequence[tuple[Any, float]]) -> None:
