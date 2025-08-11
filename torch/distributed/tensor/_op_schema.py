@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 from torch._ops import OpOverload
@@ -12,9 +13,15 @@ from torch.distributed.tensor.placement_types import Placement
 
 
 try:
-    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import (
+        register_pytree_node,
+        tree_leaves,
+        tree_map_only,
+        TreeSpec,
+    )
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        register_pytree_node,
         tree_leaves,
         tree_map_only,
         TreeSpec,
@@ -27,7 +34,7 @@ KwargsType = dict[str, object]
 
 PlacementList = list[Optional[Placement]]
 
-# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
+# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
@@ -64,14 +71,45 @@ class OpSpec:
     note: when the op return value is a single DTensor object, output_specs is
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
+
+    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
+    or non-Tensor outputs.)
+
+    invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
+    # output_specs and input_specs are related: for this op, given these input_specs,
+    # this is the way the output would look
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
-    # redistribute costs to redistribute the operator input shardings to this OpSpec.
-    # Note that We need a nested list to record the cost for each operand of this
-    # operator, and for each operand of this operator it might have multiple OpSpecs.
+    """
+    redistribute_cost tells how expensive it is to redistribute a given input into the
+    placement specified in this OpSpec.
+
+    outer list: one entry (list) per (tensor) input in the op's arg schema
+    inner list: one entry (cost value) per possible sharding spec for that input
+
+    Example:
+    -------
+    another_op() -> tensor_a   # another_op produces the output that becomes our first input
+    my_op(tensor_a)
+
+    Let's assume this OpSpec's input_specs are [Replicate()],
+    but another_op() supports 2 strategies (OpSpecs) which produce outputs of
+       Replicate()
+       Shard(0)
+
+    In this example, redistribute_costs would look like this
+    [
+        # one row representing "my_op's first input" (tensor_a)
+        [
+            # two entries, one for each strategies supported by another_op
+            0.0,  # cost of redistributing tensor_a from 'Replicate()'
+            K,    # cost of redistributing tensor_a from 'Shard(0)'
+        ],
+    """
     redistribute_cost: Optional[list[list[float]]] = None
 
     @cached_property
@@ -128,6 +166,8 @@ class OpStrategy(StrategyType):
     """
     OpStrategy that consists of a list of sharding strategies associated with the op,
     where each strategy is an OpSpec that describes the acceptable input/output sharding.
+
+    invariant: the DeviceMesh on all OpSpec must be the same
     """
 
     def __init__(self, strategies: list[OpSpec]) -> None:
@@ -164,30 +204,59 @@ class OpStrategy(StrategyType):
 
 class TupleStrategy(StrategyType):
     """
-    TupleStrategy represents the output strategy of this op is a tuple of OpStrategies,
-    i.e. If the output of this op is a tuple of tensors or list of tensors with possibly
-    different OpStrategies, we should return a TupleStrategy that contains a tuple of
-    OpStrategy, where each child represents the sharding strategy of "each element" of
-    the tuple/list of tensors the op returns.
+    TupleStrategy is a special case for operators that are fundamentally compound or batched such that some subset
+    of the inputs and outputs are completely unrelated to some other subset.
 
-    NOTE: if the output of the op is a List[Tensor] and they share the same OpStrategy,
-    then we should return a single OpStrategy instead of a TupleStrategy
+    Generally, foreach_* ops are the most common use-case for TupleStrategy, because they accept lists of inputs,
+    but operate independently on each input or tuple of zipped inputs.
+
+    For example, [out_a, out_b] = torch.foreach_add([a,  b], scalar): input a's sharding only affects out_a's sharding,
+    independent of b and out_b.
+
+    An example of an operator that should NOT use TupleStrategy is torch.split.  It produces a List[Tensor]
+    as its output, but the sharding decision of one output is bound together with the decision
+    of each other output and the common input.
     """
 
-    def __init__(self, childs: Sequence[StrategyType]) -> None:
+    def __init__(
+        self,
+        children: Sequence[StrategyType],
+    ) -> None:
         super().__init__()
-        self.childs: Sequence[StrategyType] = childs
+        self.children: Sequence[StrategyType] = children
+
+    @property
+    @deprecated(
+        "TupleStrategy.childs is deprecated, use TupleStrategy.children instead.",  # codespell:ignore childs
+        category=FutureWarning,
+    )
+    def childs(self) -> Sequence[StrategyType]:  # codespell:ignore childs
+        """
+        Alias for children, to maintain backward compatibility.
+        """
+        return self.children
 
     def child_mesh(self, index: int) -> DeviceMesh:
-        op_strategy = self.childs[index]
+        op_strategy = self.children[index]
         assert isinstance(op_strategy, OpStrategy)
         return op_strategy.mesh
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
-            [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
+            [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
+
+
+try:
+    register_pytree_node(
+        TupleStrategy,
+        lambda node: (node.children, None),
+        lambda children, _: TupleStrategy(tuple(children)),
+    )
+except ValueError:
+    # already registered TupleStrategy, skip
+    pass
 
 
 @dataclass
@@ -282,7 +351,7 @@ class OpSchema:
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
-                first_op_strategy = arg.childs[0]
+                first_op_strategy = arg.children[0]
                 assert isinstance(first_op_strategy, OpStrategy)
                 mesh_shape = first_op_strategy.mesh_shape
                 args_schema.append(str(arg))
@@ -318,6 +387,13 @@ class OpSchema:
             return_types[0].type, torch.TensorType
         )
 
+    def return_type_list_tensor_like(self) -> bool:
+        # returns True if the return type is a List
+        return_types = self.op._schema.returns
+        return len(return_types) == 1 and isinstance(
+            return_types[0].type, torch.ListType
+        )
+
     def return_type_tensor(self) -> bool:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
@@ -342,7 +418,7 @@ class OpSchema:
             mesh = first_arg.mesh
         elif isinstance(first_arg, (list, tuple, TupleStrategy)):
             first_elem = (
-                first_arg.childs[0]
+                first_arg.children[0]
                 if isinstance(first_arg, TupleStrategy)
                 else first_arg[0]
             )
@@ -492,9 +568,14 @@ class OutputSharding:
     exactly the same as the operator OpSchema, except the DTensorSpecs
     """
 
+    # specifies the output sharding pattern
     output_spec: OutputSpecType
+    # schema for redistribution if needed
     redistribute_schema: Optional[OpSchema] = None
+    # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
+    # flag to use values from `redistribute_schema`
+    use_val_from_redistribute_schema: bool = False
 
     @cached_property
     def mesh(self):

@@ -51,7 +51,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 // brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
 #if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
 #define ONEDNN_UKERNEL_1
-#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#elif ((IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR >= 6) || (IDEEP_VERSION_MAJOR > 3))
 #define ONEDNN_UKERNEL_2
 #endif
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
@@ -202,7 +202,7 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (mkldnn_reduced_f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -358,18 +358,25 @@ void gemm(
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * ldc_;
+      int c_size = n_ * m_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
-      std::vector<float> float_v(c, c + c_size);
+      std::vector<float> float_v(c_size, 0.0f);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+        }
+      }
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
               &alpha_,
               a, &lda_,
               b, &ldb_,
               &beta_,
-              float_v.data(), &ldc_);
-      for (auto cv: float_v) {
-        *(c++) = c10::convert<at::BFloat16>(cv);
+              float_v.data(), &m_);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          c[j * ldc_ + i] = c10::convert<at::BFloat16>(float_v[j * m_ + i]);
+        }
       }
       return;
    }

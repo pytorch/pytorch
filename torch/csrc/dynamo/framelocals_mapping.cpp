@@ -26,9 +26,13 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
+#if IS_PYTHON_3_14_PLUS
+  TORCH_CHECK(false, "Python 3.14+ not supported");
+#else
   if (!frame->stacktop) {
     return;
   }
+#endif
 
   auto update_framelocals = [&](int i, PyObject* value) {
     _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
@@ -53,11 +57,21 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   };
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
+#if IS_PYTHON_3_14_PLUS
+  TORCH_CHECK(false, "Python 3.14+ not supported");
+#else
   for (int i = 0; i < offset; i++) {
     update_framelocals(i, frame->localsplus[i]);
   }
+#endif
+
   // Get references to closure variables
+#if IS_PYTHON_3_14_PLUS
+  PyObject* closure;
+  TORCH_CHECK(false, "Python 3.14+ not supported");
+#else
   PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
+#endif
   for (int i = 0; i < co->co_nfreevars; i++) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
   }
