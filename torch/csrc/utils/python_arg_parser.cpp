@@ -793,17 +793,29 @@ bool is_tensor_and_append_overloaded(
   return false;
 }
 
-static bool is_scalar_list(PyObject* obj) {
+static bool is_scalar_list(
+    PyObject* obj,
+    std::vector<PyObject*>* overloaded_args = nullptr) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  bool has_torch_func = false;
+
   for (const auto idx : c10::irange(size)) {
     PyObject* iobj =
         tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
-    if (!THPUtils_checkScalar(iobj)) {
+
+    // Check if this element has torch function
+    if (overloaded_args &&
+        check_has_torch_function(iobj, /*ignore_mode*/ true)) {
+      append_overloaded_arg(overloaded_args, iobj, /*obj_is_type*/ false);
+      has_torch_func = true;
+    }
+
+    if (!THPUtils_checkScalar(iobj) && !has_torch_func) {
       return false;
     }
   }
@@ -853,7 +865,9 @@ static bool is_float_or_symfloat(PyObject* obj) {
   return false;
 }
 
-static bool is_float_or_complex_list(PyObject* obj) {
+static bool is_float_or_complex_list(
+    PyObject* obj,
+    std::vector<PyObject*>* overloaded_args = nullptr) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -861,10 +875,25 @@ static bool is_float_or_complex_list(PyObject* obj) {
 
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  if (size > 0) {
-    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj)) {
-      return false;
+  bool has_torch_func = false;
+
+  for (long idx = 0; idx < size; idx++) {
+    PyObject* iobj =
+        tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+
+    // Check if this element has torch function
+    if (overloaded_args &&
+        check_has_torch_function(iobj, /*ignore_mode*/ true)) {
+      append_overloaded_arg(overloaded_args, iobj, /*obj_is_type*/ false);
+      has_torch_func = true;
+    }
+
+    // For the first element, do the original type checking
+    if (idx == 0) {
+      if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj) &&
+          !has_torch_func) {
+        return false;
+      }
     }
   }
 
@@ -905,26 +934,51 @@ static bool is_int_or_symint(PyObject* obj) {
 static bool is_int_or_symint_list(
     PyObject* obj,
     int broadcast_size,
-    int64_t* failed_idx = nullptr) {
+    int64_t* failed_idx = nullptr,
+    std::vector<PyObject*>* overloaded_args = nullptr) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
     }
-    auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
 
-    if (is_int_or_symint(item.ptr())) {
-      return true;
+    // Check all elements, not just the first one, when looking for torch
+    // functions
+    const bool is_tuple = PyTuple_Check(obj);
+    const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    bool has_torch_func = false;
+
+    for (Py_ssize_t idx = 0; idx < size; idx++) {
+      PyObject* item_ptr =
+          is_tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+
+      // Check if this element has torch function
+      if (overloaded_args &&
+          check_has_torch_function(item_ptr, /*ignore_mode*/ true)) {
+        append_overloaded_arg(overloaded_args, item_ptr, /*obj_is_type*/ false);
+        has_torch_func = true;
+      }
+
+      // For the first element, do the original type checking
+      if (idx == 0) {
+        if (is_int_or_symint(item_ptr)) {
+          continue;
+        }
+
+        // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+        // in an intlist argument. Even float or complex scalar tensors.
+        bool r =
+            (jit::tracer::isTracing() && THPVariable_Check(item_ptr) &&
+             THPVariable_Unpack(item_ptr).sizes().empty());
+        if (!r && failed_idx != nullptr) {
+          *failed_idx = 0;
+        }
+        if (!r && !has_torch_func) {
+          return false;
+        }
+      }
     }
 
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    bool r =
-        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes().empty());
-    if (!r && failed_idx != nullptr) {
-      *failed_idx = 0;
-    }
-    return r;
+    return true;
   }
 
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
@@ -1024,7 +1078,7 @@ auto FunctionParameter::_check(
           obj, &overloaded_args, argnum, true /* throw_error */);
     }
     case ParameterType::FLOAT_LIST:
-      return is_float_or_complex_list(obj);
+      return is_float_or_complex_list(obj, &overloaded_args);
     case ParameterType::GENERATOR:
       return THPGenerator_Check(obj);
     case ParameterType::BOOL:
@@ -1051,13 +1105,13 @@ auto FunctionParameter::_check(
     case ParameterType::STRING:
       return THPUtils_checkString(obj);
     case ParameterType::SCALAR_LIST:
-      return is_scalar_list(obj);
+      return is_scalar_list(obj, &overloaded_args);
     case ParameterType::SYM_INT:
       return is_int_or_symint(obj);
     // Allow SymInt where int is expected; we'll guard in this case
     case ParameterType::INT_LIST:
     case ParameterType::SYM_INT_LIST:
-      return is_int_or_symint_list(obj, size, failed_idx);
+      return is_int_or_symint_list(obj, size, failed_idx, &overloaded_args);
     case ParameterType::DISPATCH_KEY_SET:
       return py::isinstance<c10::DispatchKeySet>(py::handle(obj));
     default:
@@ -1605,7 +1659,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        (is_int_or_symint_list(args, param.size, &failed_idx))) {
+        (is_int_or_symint_list(
+            args, param.size, &failed_idx, &overloaded_args))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
