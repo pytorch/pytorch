@@ -747,7 +747,8 @@ def start_build(
         print("build pytorch with mkldnn+acl backend")
         build_vars += " USE_MKLDNN=ON USE_MKLDNN_ACL=ON"
         host.run_cmd(
-            f"cd $HOME/pytorch && export ACL_ROOT_DIR=$HOME/ComputeLibrary && {build_vars} python3 -m build --wheel --no-isolation{build_opts}"
+            f"cd $HOME/pytorch && export ACL_ROOT_DIR=$HOME/ComputeLibrary && "
+            f"{build_vars} python3 -m build --wheel --no-isolation{build_opts}"
         )
         print("Repair the wheel")
         pytorch_wheel_name = host.list_dir("pytorch/dist")[0]
