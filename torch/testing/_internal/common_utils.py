@@ -2024,6 +2024,23 @@ def skipIfRocmVersionLessThan(version=None):
         return wrap_fn
     return dec_fn
 
+def skipIfRocmVersionAndArch(version=None, arch=None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if TEST_WITH_ROCM:
+                rocm_version = str(torch.version.hip)
+                rocm_version = rocm_version.split("-")[0]    # ignore git sha
+                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
+                    prop = torch.cuda.get_device_properties(0)
+                    if prop.gcnArchName.split(":")[0] in arch:
+                        reason = f"ROCm {version} and {arch} combination not supported"
+                        raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+        return wrap_fn
+    return dec_fn
+
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
