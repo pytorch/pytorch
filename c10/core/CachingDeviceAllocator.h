@@ -440,10 +440,7 @@ struct SegmentRange {
 // HandleT as void* as a placeholder.
 template <typename StreamT>
 struct ExpandableSegmentTraits {
-  // Force specialization - this will trigger a compile error if used directly
-  static_assert(
-      sizeof(StreamT) == 0,
-      "ExpandableSegmentTraits must be specialized for this StreamT");
+  using HandleT = void*;
 };
 
 /**
