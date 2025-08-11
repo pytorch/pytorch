@@ -52,7 +52,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .simple_fsdp import bucket, estimator, reorder
+from .simple_fsdp import bucket, bucket_utils, estimator, manual_bucket_plan, reorder
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -2188,14 +2188,44 @@ class Scheduler:
             assert not config.allow_buffer_reuse, (
                 "bucketing algorithm requires torch._inductor.config.allow_buffer_reuse to be False"
             )
-            self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
-                self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
-            )
-            self.nodes, has_reduce_scatter = (
-                bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
-                    self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
+            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
+            if config.simplefsdp.bucketing_type == "manual":
+                bucketing_plan = config.simplefsdp.bucketing_plan
+                if has_reduce_scatter:
+                    bucketing_plan.reverse()
+                all_gather_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.all_gather_into_tensor.default,
+                    "nn_module_stack",
                 )
+                reduce_scatter_plan = manual_bucket_plan.get_manual_plan(
+                    self,
+                    self.nodes,
+                    bucketing_plan,
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    "fwd_nn_module_stack",
+                )
+            else:
+                all_gather_plan = [[]]
+                reduce_scatter_plan = [[]]
+
+            self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
+                self,
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+                all_gather_plan,
             )
+            if has_reduce_scatter:
+                self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
+                    self,
+                    self.nodes,
+                    self.name_to_buf,
+                    self.name_to_fused_node,
+                    reduce_scatter_plan,
+                )
             if config.simplefsdp.enable_reorder_ir:
                 node_length = len(self.nodes)
                 self.nodes = reorder.reorder_all_gather(
