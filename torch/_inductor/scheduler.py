@@ -2179,10 +2179,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
-        if (
-            torch._inductor.config.graph_partition
-            and torch._inductor.config.triton.cudagraphs
-        ):
+        if torch._inductor.config.graph_partition:
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
@@ -4314,12 +4311,6 @@ class Scheduler:
         self, node: BaseSchedulerNode, should_log: bool = False
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
-
-        # When not using cudagraphs, keep all kernels in the `call` function
-        # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
-        if not torch._inductor.config.triton.cudagraphs:
-            return True
 
         # avoid duplicating logs when should_partition is called multiple times
         # on the same node
