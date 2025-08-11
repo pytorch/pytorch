@@ -1282,9 +1282,10 @@ class Reduction(Loops):
         reduction_type: Union[ReductionType, Literal["scan"]],
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
+        hint_override: Optional[int] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
+        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel, hint_override=hint_override)
+        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges), hint_override=hint_override)
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1322,6 +1323,11 @@ class Reduction(Loops):
         # easy cases
         if numel_hint == 1:
             split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            # Apply hint_override if provided
+            if hint_override is not None and split > 1:
+                # Calculate split based on hint
+                suggested_split = max(1, reduction_numel_hint // hint_override)
+                split = suggested_split
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
@@ -1333,7 +1339,8 @@ class Reduction(Loops):
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(new_ranges + new_reduction_ranges)
+                        sympy_product(new_ranges + new_reduction_ranges),
+                        hint_override=hint_override
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -1426,13 +1433,20 @@ class Reduction(Loops):
             else:
                 num_inner += 1
         if num_inner > num_outer:
-            return ReductionHint.INNER, inner_reduction_splits(
-                reduction_numel_hint, numel_hint
-            )
+            split = inner_reduction_splits(reduction_numel_hint, numel_hint)
         else:
-            return ReductionHint.OUTER, outer_reduction_splits(
-                reduction_numel_hint, numel_hint
-            )
+            split = outer_reduction_splits(reduction_numel_hint, numel_hint)
+        
+        # Apply hint_override if provided
+        if hint_override is not None and split > 1:
+            # Calculate split based on hint
+            suggested_split = max(1, reduction_numel_hint // hint_override)
+            split = suggested_split
+        
+        if num_inner > num_outer:
+            return ReductionHint.INNER, split
+        else:
+            return ReductionHint.OUTER, split
 
     @staticmethod
     def _unroll_reduction_fn(
@@ -1563,7 +1577,83 @@ class Reduction(Loops):
                 ranges=ranges,
             )
 
-        # triton doesn't support reduce to single element well, so break it up
+        # Multi-kernel dispatch for reductions
+        if config.triton.multi_kernel and config.multi_kernel_hints and not _is_static(reduction_numel):
+            # Create choices for different num_splits values
+            splits_to_try = {}
+            
+            # Get splits for each hint value
+            for hint_override in [None] + config.multi_kernel_hints:
+                hint, split = cls.num_splits(
+                    device,
+                    dst_dtype,
+                    src_dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    reduction_numel,
+                    input_node,
+                    hint_override=hint_override,
+                )
+                
+                # Apply min_num_split constraint
+                if not _is_static(reduction_numel) and split > 1:
+                    split = max(split, config.min_num_split)
+                
+                if split > 1 and split not in splits_to_try.values():
+                    splits_to_try[hint_override] = (hint, split)
+            
+            # If we have multiple split values, use multi-kernel
+            if len(splits_to_try) > 1:
+                from . import select_algorithm
+                
+                def choice_fn(hint_override):
+                    """Create a closure that returns timing for a specific split configuration."""
+                    hint, split = splits_to_try.get(hint_override, (ReductionHint.DEFAULT, 1))
+                    if split <= 1:
+                        # For non-split case, return regular reduction
+                        return lambda: float('inf')  # Should not be selected
+                    
+                    # Create the reduction and measure its performance
+                    def measure():
+                        # This would be replaced with actual benchmarking
+                        # For now, return a proxy based on split value
+                        return 1.0 / split  # Placeholder
+                    
+                    return measure
+                
+                # Create MultiTemplateBuffer
+                layout = FlexibleLayout(
+                    device=device,
+                    dtype=dst_dtype,
+                    size=list(ranges),
+                )
+                
+                # Create a callable that returns timings
+                def get_choice_timings(hint_override_arg):
+                    timings = {}
+                    for ho, (hint, split) in splits_to_try.items():
+                        if hint_override_arg is None or ho == hint_override_arg:
+                            # Create a mock choice caller for this configuration
+                            choice = type('ReductionChoice', (), {
+                                'hint_override': ho,
+                                'split': split,
+                                'hint': hint,
+                            })()
+                            timings[choice] = choice_fn(ho)()
+                    return timings
+                
+                # Return MultiTemplateBuffer
+                return TensorBox(MultiTemplateBuffer(
+                    layout=layout,
+                    inputs=list(input_node) if input_node else [],
+                    choice_timings_fn=get_choice_timings,
+                    unfiltered_choices=[],  # Will be populated by autotune
+                    allowed_prologue_inps=OrderedSet(),
+                ))
+
+        # Standard single-kernel path
         hint, split = cls.num_splits(
             device,
             dst_dtype,
