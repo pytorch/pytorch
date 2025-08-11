@@ -4,6 +4,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/flat_hash_map.h>
 
 #include <deque>
@@ -150,15 +151,77 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
 
 namespace c10::CachingDeviceAllocator {
 
+// Tracing/Stats utilities
+
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
+struct TraceEntry {
+  enum Action {
+    ALLOC, // API made to the caching allocator for new memory
+    FREE_REQUESTED, // API call made to the caching allocator to free memory
+    FREE_COMPLETED, // The allocator might have to delay a free because
+                    // it is still in use on another stream via record_stream
+                    // This event is generated when a free actually completes.
+    SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
+    SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
+                  // defragment or empty_caches)
+    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
+    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
+    SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
+              // events
+    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
+        // bytes reported by cuda)
+  };
+  TraceEntry(
+      Action action,
+      c10::DeviceIndex device,
+      size_t addr,
+      size_t size,
+      cudaStream_t stream,
+      MempoolId_t mempool,
+      approx_time_t time,
+      std::shared_ptr<GatheredContext> context = nullptr,
+      std::string compile_context = "")
+      : action_(action),
+        device_(device),
+        addr_(addr),
+        context_(std::move(context)),
+        stream_(stream),
+        size_(size),
+        mempool_(std::move(mempool)),
+        compile_context_(std::move(compile_context)) {
+    time_.approx_t_ = time;
+  }
+  Action action_;
+  c10::DeviceIndex device_;
+  size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
+  std::shared_ptr<GatheredContext> context_;
+  cudaStream_t stream_{};
+  size_t size_;
+  MempoolId_t mempool_;
+  trace_time_ time_{};
+  std::string compile_context_{};
+};
+
+// Block/Pool management utilities
+
 template <typename BlockT>
 struct BlockComparatorSize {
   bool operator()(const BlockT* a, const BlockT* b) const {
+    // Note [Block Comparator]
+    // Assumes all compared blocks belong to the same device (guaranteed by the
+    // block pool). Without this guarantee, stream.id() could collide across
+    // devices — i.e., different streams on different devices may have the same
+    // stream id.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
     if (a->size != b->size) {
       return a->size < b->size;
     }
-    if (a->stream != b->stream) {
-      return reinterpret_cast<uintptr_t>(a->stream) <
-          reinterpret_cast<uintptr_t>(b->stream);
+    if (a->stream.id() != b->stream.id()) {
+      return a->stream.id() < b->stream.id();
     }
     return reinterpret_cast<uintptr_t>(a->ptr) <
         reinterpret_cast<uintptr_t>(b->ptr);
@@ -168,9 +231,10 @@ struct BlockComparatorSize {
 template <typename BlockT>
 struct BlockComparatorAddress {
   bool operator()(const BlockT* a, const BlockT* b) const {
-    if (a->stream != b->stream) {
-      return reinterpret_cast<uintptr_t>(a->stream) <
-          reinterpret_cast<uintptr_t>(b->stream);
+    // see Note [Block Comparator]
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
+    if (a->stream.id() != b->stream.id()) {
+      return a->stream.id() < b->stream.id();
     }
     return reinterpret_cast<uintptr_t>(a->ptr) <
         reinterpret_cast<uintptr_t>(b->ptr);
@@ -766,7 +830,8 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
-  // Processes all outstanding events and frees associated memory blocks when safe.
+  // Processes all outstanding events and frees associated memory blocks when
+  // safe.
   void process_events(const std::shared_ptr<GatheredContext>& context) {
     insert_events_deferred_until_no_capture(context);
 
@@ -777,7 +842,8 @@ struct CachingDeviceAllocatorImpl {
     // or more streams has long-running operations.
 
     // Iterate over different streams.
-    for (auto it = outstanding_events.begin(); it != outstanding_events.end();) {
+    for (auto it = outstanding_events.begin();
+         it != outstanding_events.end();) {
       // Iterate over this stream's (event, block) pairs.
       while (!it->second.empty()) {
         auto& e = it->second.front();
@@ -844,7 +910,7 @@ struct CachingDeviceAllocatorImpl {
     // Makes sure the Block* isn't already present in the pool we're freeing it
     // back into.
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    bool inserted = pool.insert_into_blocks(block).second;
+    bool inserted = block->pool->insert_into_blocks(block).second;
     TORCH_INTERNAL_ASSERT(inserted);
 
     if (block->is_split()) {
@@ -906,6 +972,16 @@ struct CachingDeviceAllocatorImpl {
     } else {
       return large_blocks;
     }
+  }
+
+  /* Internal methods for utils: tracing, stats, ... */
+
+  // Must be called outside of `mutex` or deadlocks are possible with Python
+  std::shared_ptr<GatheredContext> maybeGatherContext(RecordContext level) {
+    if (record_context_ < level) {
+      return nullptr;
+    }
+    return context_recorder_.load()();
   }
 
   c10::DeviceIndex device_index_;
