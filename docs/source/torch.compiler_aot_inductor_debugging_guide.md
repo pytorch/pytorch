@@ -19,7 +19,7 @@ TORCHINDUCTOR_NAN_ASSERTS=1
 
 These flags take effect at compilation time (more precisely, at codegen time):
 
-- [`AOTI_RUNTIME_CHECK_INPUTS=1`](./torch.compiler_aot_inductor.md#troubleshooting) checks if the inputs satisfy the same set of guards used during compilation.
+- `AOTI_RUNTIME_CHECK_INPUTS=1` checks if the inputs satisfy the same set of guards used during compilation. See {ref}`torch.compiler_troubleshooting` for more details.
 - `TORCHINDUCTOR_NAN_ASSERTS=1` adds codegen before and after each Inductor's kernel to check for NaN.
 
 ## Step 2: Pinpoint the CUDA IMA
@@ -62,8 +62,8 @@ The filtered kernels to print environment variable has the names of the kernels 
 
 ### Logging and Tracing
 
-- [**tlparse / TORCH_TRACE**](./torch.compiler_troubleshooting.md#tlparse-torch-trace): Provides complete output codes for inspection and records the set of guards used.
-- [**TORCH_LOGS**](./torch.compiler_troubleshooting.md#torch-logs): Use `TORCH_LOGS="+inductor,output_code"` to see more PT2 internal logs.
+- **tlparse / TORCH_TRACE**: Provides complete output codes for inspection and records the set of guards used. See {ref}`torch.compiler_troubleshooting` for more details.
+- **TORCH_LOGS**: Use `TORCH_LOGS="+inductor,output_code"` to see more PT2 internal logs. See {ref}`torch.compiler_troubleshooting` for more details.
 - **TORCH_SHOW_CPP_STACKTRACES**: Set `TORCH_SHOW_CPP_STACKTRACES=1` to potentially see more stack traces.
 
 ### Common Sources of Issues
