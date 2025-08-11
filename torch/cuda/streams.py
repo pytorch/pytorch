@@ -11,11 +11,6 @@ if not hasattr(torch._C, "_CudaStreamBase"):
     torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
 
 
-def _is_compiled() -> bool:
-    r"""Return true if compiled with CUDA support."""
-    return hasattr(torch._C, "_cuda_getDeviceCount")
-
-
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
@@ -37,9 +32,9 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
-        # Check CUDA availability before attempting to create stream
-        if not _is_compiled():
-            raise RuntimeError("torch.cuda.Stream() requires CUDA support")
+        # Check CUDA availability
+        if not torch.backends.cuda.is_built():
+            raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
