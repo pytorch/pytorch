@@ -2491,7 +2491,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
             )
-    
+
     def make_outer_config():
         max_x_block = 256
         load_factor = inductor_meta.get("num_load", 0)
@@ -2505,11 +2505,15 @@ def _reduction_configs(
                 x_block = 64
         if is_dynamic:
             # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            )
         else:
             # Try to do reduction in 1 pass
             outer_r_block = min(next_power_of_2(rnumel), 128)
-        
+
         if x_block * outer_r_block > 4096:
             x_block = 2048 // outer_r_block
 
@@ -2646,8 +2650,10 @@ def reduction(
 
     assert triton_meta is not None
 
-    is_dynamic = any(["ks" in k for k in triton_meta["signature"].keys()])
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta, is_dynamic=is_dynamic)
+    is_dynamic = any("ks" in k for k in triton_meta["signature"].keys())
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, is_dynamic=is_dynamic
+    )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
