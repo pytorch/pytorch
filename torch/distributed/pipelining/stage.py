@@ -935,20 +935,13 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
         )
 
-    def _init_p2p_neighbors(self, ops: list[dist.P2POp]) -> list[dist.P2POp]:
+    def _get_init_p2p_neighbors_ops(self) -> list[dist.P2POp]:
         """
-        Set up p2p communicators between previous and next stages
-        by sending a dummy tensor.
+        Get the operations to initialize the p2p communicators between previous and next stages.
+        This is done so by creating a dummy tensor and sending it to the next stage and receiving
+        from the previous stage.
         """
-
-        def to_global_rank(peer_rank: Optional[int]) -> int:
-            assert peer_rank is not None
-            return (
-                peer_rank
-                if self.group is None
-                else dist.get_global_rank(self.group, peer_rank)
-            )
-
+        ops: list[dist.P2POp] = []
         next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
         prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
 
@@ -960,8 +953,8 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.irecv,
                     recv_tensor,
-                    to_global_rank(prev_stage_peer_rank),
-                    self.group,
+                    group_peer=prev_stage_peer_rank,
+                    group=self.group,
                 )
             )
         if not self.is_last:
@@ -969,8 +962,8 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    to_global_rank(next_stage_peer_rank),
-                    self.group,
+                    group_peer=next_stage_peer_rank,
+                    group=self.group,
                 )
             )
 
@@ -980,8 +973,8 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    to_global_rank(prev_stage_peer_rank),
-                    self.group,
+                    group_peer=prev_stage_peer_rank,
+                    group=self.group,
                 )
             )
         if not self.is_last:
@@ -989,8 +982,8 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.irecv,
                     recv_tensor,
-                    to_global_rank(next_stage_peer_rank),
-                    self.group,
+                    group_peer=next_stage_peer_rank,
+                    group=self.group,
                 )
             )
 
