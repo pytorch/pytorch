@@ -32,6 +32,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH,
     parametrize,
     run_tests,
+    TEST_XPU,
+    xfailIf,
     runOnRocmArch,
     TEST_XPU,
     TestCase,
