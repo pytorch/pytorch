@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import sys
 import unittest
 from collections import namedtuple
 from typing import Callable, Optional, Union
@@ -22,15 +23,30 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Need track if it is a requirement on windows.
+    sys.stderr.write("This UT is validated on windows, a lot of crash. Skip it.\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip on Windows")
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+# In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
+# In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
+# logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
+if torch.version.hip:
+    torch.set_float32_matmul_precision("highest")
+else:
+    torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -741,6 +757,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @with_tf32_off
     def test_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
@@ -1052,6 +1069,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    @with_tf32_off
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
         self.run_test(
@@ -1206,6 +1224,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(
             _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
@@ -1814,9 +1833,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             # Ensure no more re-compilation after the second automatic dynamic shape version.
             if i == 0:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
-            else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+            else:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 4)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1869,7 +1888,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # init 4 requests with different prefill length
         prefill_length = [5, 98, 47, 194]
-        querys, keys, values = [], [], []
+        queries, keys, values = [], [], []
         for seq_len in prefill_length:
             q = torch.randn(
                 1,
@@ -1898,13 +1917,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 dtype=dtype,
                 requires_grad=False,
             )
-            querys.append(q)
+            queries.append(q)
             keys.append(k)
             values.append(v)
 
         # get ground truth output
         ref_outs, golden_outs = [], []
-        for q, k, v in zip(querys, keys, values):
+        for q, k, v in zip(queries, keys, values):
             q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
             q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
@@ -1972,7 +1991,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
         )
         paged_out = compiled_sdpa(
-            torch.cat(querys, 0), k_cache, v_cache, block_mask=new_block_mask
+            torch.cat(queries, 0), k_cache, v_cache, block_mask=new_block_mask
         )
 
         with torch.no_grad():

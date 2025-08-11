@@ -532,7 +532,7 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
 
         else:
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
-            t2_type.append(t)
+            t2_type.append(t)  # type: ignore[arg-type]
 
     t2_type = TensorType(t2_type)  # type: ignore[assignment]
 
@@ -681,7 +681,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # tensor output case
     elif isinstance(n.args[1], tuple):
         # create and store the new tensor variable
-        get_item_output, counter = gen_tvar(counter)
+        get_item_output, counter = gen_tvar(counter)  # type: ignore[arg-type,assignment]
         symbols[n] = get_item_output
 
         # retrieve arg variables
@@ -1073,7 +1073,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e1 = symbols[n.args[0]]
             return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
@@ -1095,7 +1095,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e2 = symbols[n.args[1]]
             return [BinConstraintT(my_output, e2, op_eq)], counter
         elif isinstance(symbols[n.args[1]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e2 = symbols[n.args[1]]
 

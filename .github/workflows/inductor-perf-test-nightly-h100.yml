@@ -2,7 +2,7 @@ name: inductor-perf-nightly-h100
 
 on:
   schedule:
-    - cron: 15 0,4,8,12,16,20 * * 1-6
+    - cron: 15 0,12 * * 1-6
     - cron: 0 7 * * 0
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
@@ -63,7 +63,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-label-type:
@@ -84,6 +86,11 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
+      # or newer GPUs, so it doesn't benefit much from existing compiler cache
+      # from trunk. Also use a memory-intensive runner here because memory is
+      # usually the bottleneck
+      runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '9.0'
@@ -112,13 +119,14 @@ jobs:
           { config: "inductor_torchbench_perf_cuda_h100", shard: 9, num_shards: 9, runner: "linux.aws.h100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   test-periodically:
     name: cuda12.8-py3.10-gcc9-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event.schedule == '15 0,4,8,12,16,20 * * 1-6'
+    if: github.event.schedule == '15 0,12 * * 1-6'
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true

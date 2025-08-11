@@ -86,7 +86,7 @@ namespace {
         for (const auto d : c10::irange(out_D)) {
           for (const auto h : c10::irange(out_H)) {
             for (const auto w : c10::irange(out_W)) {
-              // get the corresponding input x, y, z co-ordinates from grid
+              // get the corresponding input x, y, z coordinates from grid
               const scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
               scalar_t ix = *grid_ptr_NDHW;
               scalar_t iy = grid_ptr_NDHW[grid_sCoor];
@@ -285,7 +285,7 @@ namespace {
         for (const auto d : c10::irange(out_D)) {
           for (const auto h : c10::irange(out_H)) {
             for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NDHW += gGrid_sW /* grad_grid is contiguous */ ) {
-              // get the corresponding input x, y, z co-ordinates from grid
+              // get the corresponding input x, y, z coordinates from grid
               const scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
               scalar_t ix = *grid_ptr_NDHW;
               scalar_t iy = grid_ptr_NDHW[grid_sCoor];
@@ -496,7 +496,7 @@ static Tensor _grid_sampler_2d_cpu_quantized(
       uint8_t* inp_ptr_N = inp_ptr + n * inp_sN;
       for (const auto h : c10::irange(out_H)) {
         for (const auto w : c10::irange(out_W)) {
-          // get the corresponding input x, y, z co-ordinates from grid
+          // get the corresponding input x, y, z coordinates from grid
           float* grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           float x = *grid_ptr_NHW;
           float y = grid_ptr_NHW[grid_sCoor];
@@ -599,7 +599,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
       const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
       for (const auto h : c10::irange(out_H)) {
         for (const auto w : c10::irange(out_W)) {
-          // get the corresponding input x, y, z co-ordinates from grid
+          // get the corresponding input x, y, z coordinates from grid
           const scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           scalar_t x = *grid_ptr_NHW;
           scalar_t y = grid_ptr_NHW[grid_sCoor];
@@ -771,7 +771,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
       scalar_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
       for (const auto h : c10::irange(out_H)) {
         for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
-          // get the corresponding input x, y co-ordinates from grid
+          // get the corresponding input x, y coordinates from grid
           const scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           scalar_t x = *grid_ptr_NHW;
           scalar_t y = grid_ptr_NHW[grid_sCoor];

@@ -489,6 +489,81 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_sdpfa(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest(
+                "scaled_dot_product_flash_attention has no CPU backend"
+            )
+
+        def fn(x):
+            B, H, d_h = 2, 4, 8
+            nz = torch.nonzero(x)
+            seq_len = nz.size(0)
+
+            q = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            k = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            v = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+
+            result = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                q, k, v, dropout_p=0.0, is_causal=False, scale=None
+            )
+            return result
+
+        x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
+        torch.compile(fn, fullgraph=True)(x)
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_unbacked_linear_layer_norm_input(self, device):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(387, 128, bias=True, device=device)
+                self.layer_norm1 = torch.nn.LayerNorm(387, device=device)
+                self.layer_norm2 = torch.nn.LayerNorm(128, device=device)
+
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 387)
+
+                linear = self.linear(view)
+                layer_norm1 = self.layer_norm1(view)
+                layer_norm2 = self.layer_norm2(linear)
+                return linear, layer_norm1, layer_norm2
+
+        model = MyModel()
+        inputs = (
+            torch.randn((256, 387), dtype=torch.float, device=device),
+            torch.randint(
+                low=0, high=2, size=(256, 1), dtype=torch.bool, device=device
+            ),
+        )
+
+        actual = torch.compile(model, fullgraph=True)(*inputs)
+        expected = model(*inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_to_int_with_unbacked_size(self, device):
+        def fn(x):
+            unbacked = x.item()
+            torch._check_is_size(unbacked)
+
+            # Transpose to avoid contig short-circuit.
+            unbacked_size = torch.ones(
+                size=(unbacked // 4, 10), device=device
+            ).transpose(0, 1)
+            return unbacked_size.int()
+
+        example_inputs = (torch.tensor(16, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

@@ -156,7 +156,7 @@ class TestPythonRegistration(TestCase):
                 # New dispatcher call should hit the first callback again
                 self.assertFalse(first_called)
                 a, b = args
-                # Make a substraction here instead of add !
+                # Make a subtraction here instead of add !
                 c = a - b
                 self.assertTrue(first_called)
                 return c
@@ -741,9 +741,8 @@ $4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)""",
 $0: f32[2, 2] = input('x')
 $1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
 $2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
-$4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
-$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)""",
+$3: f32[2] = torch._ops.aten.select.int($0, 1, 1)
+$4: f32[2] = torch._ops.aten.clone.default($3, memory_format=torch.contiguous_format)""",
         )
 
     def test_optional_tensor_list(self) -> None:
@@ -2480,6 +2479,52 @@ def forward(self, x_1):
 
         self.assertEqual(res, t.a)
         self.assertIs(type(res), torch.Tensor)
+
+    def test_custom_dispatch_mode_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = True
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with Mode():
+            out = torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+        self.assertEqual(out, torch.ones(3, 3))
+
+    def test_custom_dispatch_mode_not_supports_higher_order_operators(self):
+        class Mode(TorchDispatchMode):
+            supports_higher_order_operators = False
+
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                if func is torch.ops.higher_order.cond:
+                    return torch.ones(3, 3)
+                return NotImplemented
+
+        pred = torch.tensor(True)
+        x = torch.randn(1, 1)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "There was no rule registered for HigherOrderOperator cond and mode",
+        ):
+            with Mode():
+                torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
+    def test_dispatch_uint64(self):
+        class DummyMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                self.last_args = args
+                return func(*args, **kwargs)
+
+        # Value that could not be intepreted as signed int64
+        uarg = 2**63 + 1
+        with DummyMode() as m:
+            a = torch.full((3, 3), uarg, dtype=torch.uint64)
+            self.assertEqual(m.last_args[1], uarg)
+        self.assertTrue((a == uarg).all().item())
 
 
 class TestPythonDispatcher(TestCase):
