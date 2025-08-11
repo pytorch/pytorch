@@ -35,59 +35,78 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+from ._pointwise_ops import pointwise_strategy
+
 
 aten = torch.ops.aten
 
 
-def default_strategy(op_schema: OpSchema) -> StrategyType:
-    # Default strategy by default just propagate the first input strategy
-    select_strategy = op_schema.args_schema[0]
-    assert isinstance(select_strategy, OpStrategy)
-    # we create new DTensorSpecs even for default strategy to assure that
-    # the tensor metas are distinct between the arguments and outputs
-    input_specs = []
-    redistribute_cost = []
-    for i in op_schema.args_schema:
-        input_specs.append(
-            DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=select_strategy.strategies[0].output_spec.placements,
-                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
+    # For ops with a single tensor input, we perform a 1:1 mapping such that
+    # for each strategy that the input supports, we create a corresponding strategy.
+    # Note: this may be a complete waste of work, because it should be equivalent to
+    # `return first_input_strategy` (unless creating a deep copy is important for some reason)
+    assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
+        "propagate_single_input_strategy only works for single-tensor-input ops"
+    )
+    first_input_strategy = op_schema.args_schema[0]
+    assert isinstance(first_input_strategy, OpStrategy)
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=first_input_strategy.mesh,
+                    placements=strategy.output_spec.placements,
+                    tensor_meta=strategy.output_spec.tensor_meta,
+                ),
+                input_specs=[
+                    DTensorSpec(
+                        mesh=first_input_strategy.mesh,
+                        placements=strategy.output_spec.placements,
+                        tensor_meta=strategy.output_spec.tensor_meta,
+                    )
+                ],
+                redistribute_cost=[
+                    generate_redistribute_costs(
+                        first_input_strategy, strategy.output_spec
+                    )
+                ],
             )
-        )
-        redistribute_cost.append([0.0] * len(select_strategy.strategies))
-
-    default_strategy = [
-        OpSpec(
-            output_specs=DTensorSpec(
-                mesh=select_strategy.mesh,
-                placements=strategy.output_spec.placements,
-                tensor_meta=strategy.output_spec.tensor_meta,
-            ),
-            input_specs=input_specs,
-            redistribute_cost=redistribute_cost,
-        )
-        for strategy in select_strategy.strategies
-    ]
-    return OpStrategy(default_strategy)
+            for strategy in first_input_strategy.strategies
+        ]
+    )
 
 
 register_op_strategy(
     [
         aten.clone.default,
         aten.contiguous.default,
-        aten.copy_.default,
         aten.detach.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
     ]
-)(default_strategy)
+)(propagate_single_input_strategy)
 
 
 register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
-)(default_strategy)
+)(propagate_single_input_strategy)
+
+# copy_ is actually a pointwise op with broadcasting, so reuse the pointwise strategy, which takes care of these
+# requirements.
+#
+# Following torch broadcasting semantics (https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
+# - self can not change shape as a result of broadcasting since this is an inplace op
+# - src can broadcast, but when it does it always does so from the trailing end
+# e.g. the last dim of 'src' must match up with the last dim of 'self'
+#
+# DTensor semantics for inplace ops also dictates that we may NOT redistribute our 'self' input.
+# In practice, what this means is
+# - our output strategies should map 1:1 to our 'self' input strategies
+# - our 'src' input may be redistributed to match up with the 'self' input, with the caveat of adjusting for
+#   broadcasting dim
+register_op_strategy(aten.copy_.default)(pointwise_strategy)
 
 
 @register_op_strategy(
@@ -509,7 +528,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -528,7 +547,7 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
                     input_specs=(input_spec, src_spec),
                     redistribute_cost=[
                         generate_redistribute_costs(input_strategy, input_spec),
-                        generate_redistribute_costs(input_strategy, src_spec),
+                        generate_redistribute_costs(src_strategy, src_spec),
                     ],
                 )
             )
@@ -546,7 +565,12 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    [
+        aten.scatter_.value,
+        aten.scatter.value,
+        aten.scatter_.src,
+        aten.scatter.src,
+    ],
     schema_info=RuntimeSchemaInfo(1),
 )
 def scatter_strategy(op_schema: OpSchema) -> StrategyType:
@@ -572,11 +596,44 @@ def scatter_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_op_strategy(aten.gather.default)
+@register_op_strategy(aten.scatter_add.default, schema_info=RuntimeSchemaInfo(1))
+def scatter_add_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = op_schema.args_schema[0]
+    dim = op_schema.args_schema[1]
+    index_strategy = op_schema.args_schema[2]
+
+    assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(index_strategy, OpStrategy)
+    assert isinstance(dim, int)
+    dim = normalize_dim(dim, input_strategy.ndim)
+    mesh = input_strategy.mesh
+    input_shape = input_strategy.shape
+    index_shape = index_strategy.shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    all_replicate: PlacementList = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim and input_shape[d] == index_shape[d]:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+    )
+
+
+@register_op_strategy(aten.gather.default, schema_info=RuntimeSchemaInfo(1))
 def gather_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = op_schema.get_mesh_from_args()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, input_strategy.ndim)
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
 
     input_shape = input_strategy.shape
@@ -592,7 +649,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # input sharding, input sharded, index accepts mask partial, output follows index
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
-    if index_shape[dim] == 1:
+    if dim < len(index_shape) and index_shape[dim] == 1:
         index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
@@ -605,6 +662,12 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the sharding dimension is the gather dimension
     index_sharding: PlacementList = [Shard(dim), Replicate(), Shard(dim)]
     single_mesh_dim_strategies.append(index_sharding)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=1
