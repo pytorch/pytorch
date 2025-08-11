@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import textwrap
 import traceback
 from collections.abc import Container, Generator, Iterable, Iterator, Sequence
@@ -155,6 +156,9 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
+autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -510,6 +514,7 @@ def try_match_insignificant_strides(
         old_layout.size,
         new_stride,
         old_layout.offset,
+        old_layout.is_pinned,
     )
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
@@ -2906,6 +2911,7 @@ class ExpandView(BaseView):
                 list(new_size),
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -2952,6 +2958,7 @@ class PermuteView(BaseView):
                 [old_layout.size[i] for i in dims],
                 [old_layout.stride[i] for i in dims],
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3013,6 +3020,7 @@ class SqueezeView(BaseView):
                 new_size,
                 new_stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3131,6 +3139,7 @@ class View(GenericView):
                 new_size,
                 FlexibleLayout.contiguous_strides(new_size),
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3365,6 +3374,7 @@ class DtypeView(BaseView):
                 old_layout.size,
                 old_layout.stride,
                 old_layout.offset,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
         return DtypeView(data=x, target_dtype=new_dtype)
@@ -3472,6 +3482,7 @@ class SliceView(View):
                 new_size,
                 new_stride,
                 old_layout.offset + old_layout.stride[dim] * start,
+                old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
@@ -3568,6 +3579,13 @@ class OutputSpec:
 
 @ir_dataclass
 class Layout(OutputSpec):
+    """
+    Layout base class
+
+    Carries tensor meta-information including offset and
+    whether it is pinned.
+    """
+
     def __init__(
         self,
         device: torch.device,
@@ -3575,6 +3593,7 @@ class Layout(OutputSpec):
         size: Sequence[Expr],
         stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
+        is_pinned: bool = False,
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -3585,6 +3604,9 @@ class Layout(OutputSpec):
         self.size = size
         self.stride = stride
         self.offset = offset
+        self.is_pinned = is_pinned
+        # is_pinned implies cpu
+        assert (not self.is_pinned) or (self.device.type == "cpu")
 
     def __str__(self) -> str:
         offset = ""
@@ -3592,9 +3614,12 @@ class Layout(OutputSpec):
             offset = f", offset={self.offset}"
 
         device_index_str = "" if self.device.index is None else f":{self.device.index}"
+        is_pinned_str = ""
+        if self.is_pinned:
+            is_pinned_str = f", is_pinned={self.is_pinned}"
         return (
             f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
-            f"size={self.size}, stride={self.stride}{offset})"
+            f"size={self.size}, stride={self.stride}{offset}{is_pinned_str})"
         )
 
     __repr__ = __str__
@@ -3609,6 +3634,7 @@ class Layout(OutputSpec):
                 convert_shape_to_symint(self.stride),
                 dtype=self.dtype,
                 device=self.device,
+                pin_memory=self.is_pinned,
             )
 
     def is_contiguous(self) -> bool:
@@ -3760,6 +3786,7 @@ class Layout(OutputSpec):
             self.size,
             self.stride,
             self.offset,
+            self.is_pinned,
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -3776,6 +3803,7 @@ class Layout(OutputSpec):
             and self.size == other.size
             and self.stride == other.stride
             and self.offset == other.offset
+            and self.is_pinned == other.is_pinned
         )
 
     def storage_size(self) -> Expr:
@@ -3889,6 +3917,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_exact_strides(
@@ -3904,6 +3933,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_fill_order(self, order: Sequence[int]) -> FixedLayout:
@@ -3916,6 +3946,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def as_same_order(self, stride: Sequence[_IntLike]) -> FixedLayout:
@@ -3928,6 +3959,7 @@ class FlexibleLayout(Layout):
             self.size,
             new_stride,
             self.offset,
+            self.is_pinned,
         )
 
     def __init__(
@@ -3936,12 +3968,13 @@ class FlexibleLayout(Layout):
         dtype: torch.dtype,
         size: Sequence[Expr],
         stride_order: Optional[Sequence[Union[int, Integer]]] = None,
+        is_pinned: bool = False,
     ) -> None:
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super().__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides, is_pinned=is_pinned)
 
 
 class NonOwningLayout(Layout):
@@ -4007,6 +4040,7 @@ class CommBufferLayout(FixedLayout):
             size=fixed.size,
             stride=fixed.stride,
             offset=fixed.offset,
+            is_pinned=fixed.is_pinned,
         )
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
@@ -4180,6 +4214,9 @@ class Buffer(IRNode, CodegenSymbol):
 
     def get_storage_numel(self) -> int:
         return self.get_numel()
+
+    def get_is_pinned(self) -> bool:
+        return self.get_layout().is_pinned
 
     def freeze_layout(self) -> None:
         if isinstance(self.layout, Layout) and not isinstance(
@@ -4877,9 +4914,13 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        benchmark_configs = {
+            "warmup": autotune_warmup,
+            "rep": autotune_rep,
+        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
-        return benchmarker.benchmark(algo, args, {"out": out})
+            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)
+        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -5148,6 +5189,9 @@ class ConcatKernel(NopKernel):
 
     @classmethod
     def create(cls, inputs: Sequence[IRNode], dim: int) -> StorageBox:
+        """
+        Create the concat kernel from inputs
+        """
         device = inputs[0].get_device()
         dtype = inputs[0].get_dtype()
         new_size = list(inputs[0].get_size())
@@ -5201,6 +5245,10 @@ class ConcatKernel(NopKernel):
         ):
             output_stride = make_channels_last_strides_for(new_size)
 
+        is_pinned = all(
+            is_storage_and_layout(x) and x.get_layout().is_pinned for x in inputs
+        )
+
         assert device is not None
         concat_kernel = ConcatKernel(
             name=None,
@@ -5209,6 +5257,7 @@ class ConcatKernel(NopKernel):
                 dtype=dtype,
                 size=new_size,
                 stride=output_stride,
+                is_pinned=is_pinned,
             ),
             inputs=[],
         )
@@ -5693,6 +5742,7 @@ class ExternKernel(InputsKernel):
                 size=x.get_size(),
                 stride=strides,
                 offset=offset,
+                is_pinned=False,
             ),
         )
 
@@ -6580,6 +6630,9 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            if name in constexpr_names and triton_version_uses_attrs_dict():
+                # see #160000 - we don't pass in constexpr args to speed up runtime.
+                continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
@@ -7027,12 +7080,21 @@ class DeviceCopy(ExternKernelOut):
         if x.get_size():
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
+        is_destination_pinned = (
+            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+        )
+        is_source_pinned = (
+            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+        )
+        if is_source_pinned and is_storage_and_layout(x):
+            x.get_layout().is_pinned = True
         return DeviceCopy(
             FixedLayout(
                 device,
                 x.get_dtype(),
                 x.get_size(),
                 stride,
+                is_pinned=is_destination_pinned,
             ),
             [cls.realize_input(x)],
             constant_args,
@@ -7601,11 +7663,18 @@ class FallbackKernel(ExternKernelAlloc):
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor) -> FixedLayout:
+        is_pinned = False
+        try:
+            is_pinned = output.is_pinned()
+        except RuntimeError:
+            # dispatch not implemented
+            pass
         return FixedLayout(
             output.device,
             output.dtype,
             convert_shape_to_inductor(output.size()),
             convert_shape_to_inductor(output.stride()),
+            is_pinned=is_pinned,
         )
 
     @classmethod
@@ -8006,6 +8075,7 @@ class StorageBox(MutableBox):
                 device=device,
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
+                is_pinned=False,
             ),
             data=self.data,
         )
@@ -8186,6 +8256,7 @@ class InvokeSubgraph(ExternKernel):
                         size=output.get_size(),
                         stride=output.get_stride(),
                         offset=output.get_layout().offset,
+                        is_pinned=output.get_layout().is_pinned,
                     ),
                     invoke_subgraph,  # type: ignore[has-type]
                     [(list, ind)],
@@ -8315,6 +8386,7 @@ class Conditional(ExternKernel):
                     size=[_maybe_expr(sz) for sz in merged_output.size()],
                     stride=[_maybe_expr(sz) for sz in merged_output.stride()],
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 conditional,
                 [(list, i)],
@@ -8542,6 +8614,7 @@ class WhileLoop(ExternKernel):
                     size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
                 ),
                 while_loop,
                 [(list, idx)],
