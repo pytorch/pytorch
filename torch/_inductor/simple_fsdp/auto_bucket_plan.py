@@ -28,11 +28,15 @@ def get_dynamic_memory_threshold(
     last_release_step,
     forward,
 ):
+    # this function calculates the memory gap from the current step's peak memory
+    # to the peak memory criteria
     if forward:
+        # it calculates how much memory can be filled to meet peak memory criteria
         current_peak_memory = max(memories_at_nodes[:current_step])
     else:
+        # maximum memory from last_release_step -> end in backward pass
         current_peak_memory = max(memories_at_nodes[last_release_step:])
-    return peak_memory - current_peak_memory
+    return peak_memory - current_peak_memory, current_peak_memory
 
 
 def get_sample_list(input_size_list, cali_num_samples):
@@ -304,6 +308,8 @@ def get_bucketing_plan(
     peak_memory, memories_at_nodes = memory.estimate_peak_memory(
         snodes, name_to_freeable_input_buf, graph_outputs
     )
+    # add memory offset if user wants to trade memory for more overlapping
+    peak_memory = peak_memory + config.simplefsdp.peak_memory_offset
     assert len(memories_at_nodes) == len(snodes) + 1
 
     # get basic info of ag/rs nodes
@@ -347,8 +353,6 @@ def get_bucketing_plan(
 
     # auto-bucketing plan
     st_time = time.time()
-    if has_reduce_scatter:
-        peak_memory = peak_memory + config.simplefsdp.peak_memory_offset
     for idx, snode in enumerate(snodes):
         # we only bucket on FSDP comm
         if is_collective(
@@ -376,34 +380,25 @@ def get_bucketing_plan(
                     comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
                     or comm_cache.rs_max_out_size < heuristic_info["this_step_rs_comm_size"]
                 )
-            if len(release_steps) > 1:
-                last_step = release_steps[-2]
-            else:
-                last_step = release_steps[-1]
-            memory_threshold = get_dynamic_memory_threshold(
+            memory_threshold, current_peak_dynamic = get_dynamic_memory_threshold(
                 peak_memory,
                 memories_at_nodes,
                 idx + 1,
-                last_step,
+                # we have the last two steps because ag will be reordered to the previous ag-wait
+                # TODO(ruisizhang123): this is a hacky way to ensure the memory budget is safe
+                # probably need to update here if we have a better fine-grained memory estimation
+                release_steps[-1] if len(release_steps) <=1 else release_steps[-2],
                 not has_reduce_scatter,
             )
-            accumulated_comm_memory_before = (
+            accumulated_comm_memory = (
                 2* get_data_size(comm_size_inp) # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
                 + 2* get_data_size(comm_size_out)
                 + heuristic_info["rs_comm_size_accumulated"] # accumulated gradient from reduce scatter
-                + heuristic_info["last_step_rs_comm_size"]
-            )
-            accumulated_comm_memory_after = (
-                2* get_data_size(comm_size_inp) # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
-                + 2* get_data_size(comm_size_out)
-                + heuristic_info["rs_comm_size_accumulated"] # accumulated gradient from reduce scatter
-                + heuristic_info["this_step_rs_comm_size"] * 2 * (1+1*world_size) #+ heuristic_info["last_step_rs_comm_size"]
+                + heuristic_info["this_step_rs_comm_size"] * 2 * (1+1*world_size) + heuristic_info["last_step_rs_comm_size"]
             )
             break_memory_criteria = (
                 memory_threshold
-                < heuristic_info["next_step_memory"] + accumulated_comm_memory_before or
-                memory_threshold
-                < heuristic_info["next_step_memory"] + accumulated_comm_memory_after
+                < heuristic_info["next_step_memory"] + accumulated_comm_memory
             )
             if has_reduce_scatter and len(all_gather_plan) == 0:
                 break_overlap_criteria = heuristic_info["next_step_comp"] < (
@@ -411,8 +406,6 @@ def get_bucketing_plan(
                     + heuristic_info["last_step_rs_comm"]
                     * (1 + config.simplefsdp.relax_ratio)
                 )
-            #if has_reduce_scatter and len(all_gather_plan) == 2:
-            #    break_memory_criteria = True if len(current_ag_bucket) >= 3 else False
             if (
                 break_overlap_criteria
                 or break_memory_criteria
@@ -438,10 +431,10 @@ def get_bucketing_plan(
                         "break_memory_criteria",
                         break_memory_criteria,
                         memory_threshold,
-                        heuristic_info["next_step_memory"] + accumulated_comm_memory_before ,
-                        heuristic_info["next_step_memory"] + accumulated_comm_memory_after,
+                        heuristic_info["next_step_memory"] + accumulated_comm_memory,
                     )
                     print("current_ag_bucket", all_gather_plan[-1])
+                    print("current_peak_dynamic", current_peak_dynamic, "peak_memory", peak_memory, "config.simplefsdp.peak_memory_offset", config.simplefsdp.peak_memory_offset)
                 release_steps.append(idx + 1)
                 if len(current_rs_bucket) > 0:
                     current_estimated_rs, rs_comm_size_inp, rs_comm_size_out = (
@@ -459,7 +452,6 @@ def get_bucketing_plan(
                     heuristic_info["last_step_rs_comm"] = current_estimated_rs
                     reduce_scatter_plan.append(current_rs_bucket)
                     heuristic_info["last_step_rs_comm_size"] = 2*(get_data_size(rs_comm_size_inp) + get_data_size(rs_comm_size_out)) # rs copy-in + rs data
-                    heuristic_info["rs_comm_size_accumulated"] += get_data_size(rs_comm_size_out) + get_data_size(rs_comm_size_inp) # accumulated gradient from rs
                     current_rs_bucket = []
 
                 (
@@ -490,6 +482,8 @@ def get_bucketing_plan(
                 )
             )
             heuristic_info["this_step_rs_comm_size"] = get_data_size(rs_comm_size_out)
+            # accumulated gradient from rs
+            heuristic_info["rs_comm_size_accumulated"] += get_data_size(snode.node.layout.size)
             break_rs_overlap_criteria = (
                 total_comp_time < heuristic_info["this_step_rs_comm"] * 5
             )
@@ -505,24 +499,24 @@ def get_bucketing_plan(
             # For TP and CP, we consider the node as a "COMP" node with exposed communication as Comp time
             # the memory is the data fetched by the communication.
             if is_collective(snode.node):
-                comp = comm_cache.get_comm_time(
+                current_comp = comm_cache.get_comm_time(
                     bucked_node[0].layout.size,
                     bucked_node[1].layout.size,
                     comm_func,
                     calibrated=True,
                 )
-                memory = bucked_node[0].layout.size
+                current_memory = bucked_node[0].layout.size
             else:
-                comp = estimate_comp_time(
+                current_comp = estimate_comp_time(
                     sched, snode, verbose=False, comp_cache=comp_cache
                 )
-                memory = max(
+                current_memory = max(
                     abs(memories_at_nodes[idx + 1] - memories_at_nodes[release_steps[-1]]),
                     heuristic_info["next_step_memory"],
                 )
-            heuristic_info["next_step_comp"] += comp
-            heuristic_info["next_step_memory"] = memory
-            total_comp_time -= comp
+            heuristic_info["next_step_comp"] += current_comp
+            heuristic_info["next_step_memory"] = current_memory
+            total_comp_time -= current_comp
 
     if len(current_ag_bucket) > 0 or len(all_gather_plan) == 0:
         all_gather_plan.append(current_ag_bucket)
