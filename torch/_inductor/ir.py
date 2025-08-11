@@ -4384,6 +4384,10 @@ class ShapeAsConstantBuffer(IRNode):
 
 @ir_dataclass(frozen=False)
 class ComputedBuffer(OperationBuffer):
+    """
+    Represents a buffer that is computed during kernel execution rather than being an input.
+    """
+
     data: Loops
 
     def get_computed_buffer_name(self) -> Optional[str]:
@@ -5366,10 +5370,10 @@ class ConcatKernel(NopKernel):
             and not isinstance(src.data, ExternKernelAlloc)
         )
 
-        def get_free_symbol_uses(
-            self, unbacked_only: bool = False
-        ) -> OrderedSet[sympy.Symbol]:
-            return NopKernel.get_free_symbol_uses(self, unbacked_only)
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
@@ -6271,7 +6275,7 @@ class ExternKernel(InputsKernel):
         maybe_get_symbols = (
             maybe_free_unbacked_symbols if unbacked_only else maybe_free_symbols
         )
-        r = OrderedSet[sympy.Symbol]()
+        r = InputsKernel.get_free_symbol_uses(self, unbacked_only)
         for arg in self.constant_args:
             r |= maybe_get_symbols(arg)
         for arg in self.kwargs.values():
@@ -8730,9 +8734,9 @@ class EffectfulKernel(FallbackKernel):
 
 class NonTensorObj(IRNode):
     def get_free_symbol_uses(
-            self, unbacked_only: bool = False
-        ) -> OrderedSet[sympy.Symbol]:
-            return OrderedSet()
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
 
 @ir_dataclass
@@ -8767,6 +8771,7 @@ class TorchBindObject(NonTensorObj):
             if isinstance(x, torch.Tensor)
         ]
         return functools.reduce(operator.add, flat_sizes, 0)
+
 
 @ir_dataclass
 class GeneratorState(NonTensorObj):

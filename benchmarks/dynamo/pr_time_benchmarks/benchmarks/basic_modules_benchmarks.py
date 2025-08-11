@@ -67,9 +67,9 @@ class Benchmark(BenchmarkBase):
 def main():
     result_path = sys.argv[1]
     benchmarks = [
-        Benchmark(ListOfLinears, "eager"),
-        Benchmark(ListOfLinears, "inductor"),
-        Benchmark(ListOfLinears, "inductor", is_gpu=True),
+        # Benchmark(ListOfLinears, "eager"),
+        # Benchmark(ListOfLinears, "inductor"),
+        # Benchmark(ListOfLinears, "inductor", is_gpu=True),
         Benchmark(ListOfLinears, "inductor", is_gpu=True, force_shape_pad=True),
     ]
     for b in benchmarks:
