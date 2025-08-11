@@ -1019,11 +1019,10 @@ terrible spacing
                 expert_inputs = layer_input[batch_index]
                 return expert_inputs.split(expert_size, dim=0)
 
-        with torch.device("cpu"):
-            moe = GraniteMoeMoE()
-            inp = torch.randn([32, 32])
+        moe = GraniteMoeMoE()
+        inp = torch.randn([32, 32])
 
-            expected = moe(inp)
+        expected = moe(inp)
 
         PARTITION_ID = 0
         PARTITION_OPS_CTR = 0
