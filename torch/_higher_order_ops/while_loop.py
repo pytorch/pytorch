@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Callable, Union
+from typing import Callable, Union, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -321,10 +321,22 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
 
         bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
 
-        grad_additional_inputs = [
-            torch.zeros_like(a) if isinstance(a, torch.Tensor) else None
-            for a in ctx.additional_inputs
+        tensor_masks = [
+            True if isinstance(t, torch.Tensor) else False for t in ctx.additional_inputs
         ]
+        def _filter_with_masks(maybe_tensors: tuple[Optional[torch.Tensor], ...]) -> tuple[torch.Tensor, ...]:
+            assert len(maybe_tensors) == len(tensor_masks)
+            tensors = tuple(t for is_tensor, t in zip(tensor_masks, maybe_tensors) if is_tensor)
+            assert all(isinstance(t, torch.Tensor) for t in tensors)
+            return tensors
+
+        def _fill_none_with_masks(tensors: tuple[torch.Tensor, ...])  -> tuple[Optional[torch.Tensor], ...]:
+            assert len(tensors) <= len(tensor_masks) and all(isinstance(t, torch.Tensor) for t in tensors)
+            tensors_iter = iter(tensors)
+            maybe_tensors = tuple(next(tensors_iter) if is_tensor else None for is_tensor in tensor_masks)
+            return maybe_tensors
+
+        grad_additional_inputs = tuple(torch.zeros_like(t) for t in _filter_with_masks(ctx.additional_inputs))
         init_idx = torch.zeros((), dtype=torch.int64)
         _, spec = pytree.tree_flatten(
             (
@@ -362,11 +374,19 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
                 bw_body_fn(*selected_checkpoints, *additional_inputs, *grad_carries),
                 [len(ctx.carries), len(ctx.additional_inputs)],
             )
+            cur_grad_additional_inputs = _filter_with_masks(
+                cur_grad_additional_inputs
+            )
+            def _acc_grad(grad, acc):
+                if grad is None:
+                    return
+                return acc + grad
+
             return (
                 idx + 1,
                 *cur_grad_carries,
                 *(
-                    cur_grad + grad
+                    _acc_grad(cur_grad, grad)
                     for cur_grad, grad in zip(
                         cur_grad_additional_inputs, grad_additional_inputs
                     )
@@ -406,7 +426,11 @@ class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
             ),
             (*ctx.checkpoints, *ctx.additional_inputs),
         )
-        return None, None, None, None, *outs[1:]
+        _, grad_carries, final_grad_additional_inputs = split_into_chunks(
+            outs, [1, len(ctx.carries), len(grad_additional_inputs)]
+        )
+        breakpoint()
+        return None, None, None, None, *grad_carries, *_fill_none_with_masks(final_grad_additional_inputs)
 
 
 @while_loop_op.py_autograd_impl
