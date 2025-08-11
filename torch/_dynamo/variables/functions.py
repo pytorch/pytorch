@@ -868,12 +868,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             # If reaches here, it means user code captured the exception
             return self.next_variable(tx)
-        elif name == "__contains__":
-            # The generator needs to be lazily consumed here to avoid unintended
-            # side effects
-            return variables.UserFunctionVariable(
-                polyfills.generator___contains__
-            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 

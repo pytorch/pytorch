@@ -231,13 +231,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(d, {1: t, 2: t})
 
     def test_reconstruct_generator_with_object_mutation(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Counter:
-                def __init__(self):
-                    self.x = 0
+        class Counter:
+            def __init__(self):
+                self.x = 0
 
-                def incr(self):
-                    self.x += 1
+            def incr(self):
+                self.x += 1
 
         def whoo(t, c):
             c.incr()
@@ -266,13 +265,12 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_reconstruct_generator_with_object_mutation_before(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Counter:
-                def __init__(self):
-                    self.x = 0
+        class Counter:
+            def __init__(self):
+                self.x = 0
 
-                def incr(self):
-                    self.x += 1
+            def incr(self):
+                self.x += 1
 
         def whoo(t, c):
             c.incr()
@@ -1524,7 +1522,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             except ValueError:
                 return 2  # noqa: B901
             finally:
-                return 3  # noqa: B012, SIM107
+                return 3  # noqa: B012, SIM107, B901
 
         def fn(t):
             gen = whoo()
@@ -1540,10 +1538,9 @@ class TestGeneratorThrow(GeneratorTestsBase):
         self._compile_check(fn)
 
     def test_return_value_in_except_and_finally(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Foo:
-                def __init__(self, x):
-                    self.x = x
+        class Foo:
+            def __init__(self, x):
+                self.x = x
 
         def whoo():
             try:
@@ -1551,7 +1548,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             except ValueError:
                 return Foo(2)  # noqa: B901
             finally:
-                return Foo(3)  # noqa: B012, SIM107
+                return Foo(3)  # noqa: B012, SIM107, B901
 
         def fn(t):
             gen = whoo()
