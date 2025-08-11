@@ -256,7 +256,6 @@ class HuggingFaceStorageReader(FileSystemReader):
             per_file.setdefault(file_name, []).append(read_item)
 
         if self.thread_count <= 1 or len(per_file) <= 1:
-            # Use the original sequential implementation if thread_count is 1 or there's only one file
             for file_name, reqs in per_file.items():
                 with safe_open(filename=file_name, framework="pt") as f:
                     for req in reqs:
@@ -320,8 +319,7 @@ class HuggingFaceStorageReader(FileSystemReader):
     def read_metadata(self) -> Metadata:
         from safetensors import safe_open  # type: ignore[import]
         from safetensors.torch import _getdtype  # type: ignore[import]
-        import time
-        start_time = time.time()
+
         state_dict_metadata: dict[str, TensorStorageMetadata] = {}
         storage_data: dict[MetadataIndex, _HFStorageInfo] = {}
 
@@ -395,5 +393,5 @@ class HuggingFaceStorageReader(FileSystemReader):
         if getattr(metadata, "storage_meta", None) is None:
             metadata.storage_meta = StorageMeta()
         metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
-        print("Time to read metadata ", time.time() - start_time)
+
         return metadata
