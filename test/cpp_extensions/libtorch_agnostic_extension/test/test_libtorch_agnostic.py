@@ -229,6 +229,16 @@ if not IS_WINDOWS:
             self.assertEqual(out, device_index)
 
         @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_device_guard_set_index(self, device):
+            import libtorch_agnostic
+
+            # This test creates a DeviceGuard with index 1, then sets it to index 0
+            # and returns the current device (should be 0)
+            out = libtorch_agnostic.ops.test_device_guard_set_index()
+            self.assertEqual(out, 0)
+
+        @onlyCUDA
         def test_stream(self, device):
             import libtorch_agnostic
 

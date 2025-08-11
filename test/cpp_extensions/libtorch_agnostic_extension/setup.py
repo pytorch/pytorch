@@ -39,7 +39,7 @@ def get_extension():
     extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
-        extra_compile_args["cxx"].append("-DUSE_CUDA")
+        extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
         extension = CUDAExtension
 
     sources = list(CSRC_DIR.glob("**/*.cpp"))

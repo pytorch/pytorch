@@ -14,7 +14,9 @@ inline void delete_device_guard(void* ptr) {
 
 } // namespace
 
-using DeviceIndex = int8_t; // this is from c10/core/Device.h
+// this is bigger than DeviceIndex in c10/core/Device.h but it is the type we
+// can converge on in this world as DeviceIndex in libtorch is not stable.
+using DeviceIndex = int32_t;
 using StreamId = int64_t; // this is from c10/core/Stream.h
 
 class DeviceGuard {

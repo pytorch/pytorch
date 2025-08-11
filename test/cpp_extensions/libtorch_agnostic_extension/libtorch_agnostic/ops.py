@@ -166,7 +166,7 @@ def fill_infinity(t) -> Tensor:
     return torch.ops.libtorch_agnostic.fill_infinity.default(t)
 
 
-def test_device_guard(device_index) -> Tensor:
+def test_device_guard(device_index) -> int:
     """
     Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.
 
@@ -176,6 +176,16 @@ def test_device_guard(device_index) -> Tensor:
     Returns: result of cudaGetDevice() as an integer after using the guard
     """
     return torch.ops.libtorch_agnostic.test_device_guard.default(device_index)
+
+
+def test_device_guard_set_index() -> int:
+    """
+    Tests the DeviceGuard set_index functionality by creating a device guard with index 1,
+    then setting it to index 0, and returning the current device.
+
+    Returns: result of cudaGetDevice() as an integer after using set_index
+    """
+    return torch.ops.libtorch_agnostic.test_device_guard_set_index.default()
 
 
 def test_stream(device_index) -> int:
