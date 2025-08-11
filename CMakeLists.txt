@@ -240,6 +240,8 @@ cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
+cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
+option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
 cmake_dependent_option(USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
@@ -260,8 +262,9 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
-                       "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
@@ -322,7 +325,6 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
   "USE_DISTRIBUTED" OFF)
