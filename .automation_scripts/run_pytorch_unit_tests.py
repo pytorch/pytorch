@@ -338,7 +338,7 @@ def run_test_and_summarize_results(
 
     # copy current environment variables
     _environ = dict(os.environ)
-    
+
     # modify path
     test_shell_path = pytorch_root_dir + "/.ci/pytorch/test.sh"
     test_run_test_path = pytorch_root_dir + "/test/run_test.py"
@@ -385,10 +385,6 @@ def run_test_and_summarize_results(
     global CONSOLIDATED_LOG_FILE_PATH
     CONSOLIDATED_LOG_FILE_PATH = overall_logs_path_current_run + CONSOLIDATED_LOG_FILE_NAME
 
-    # Check multi gpu availability if distributed tests are enabled
-    if ("distributed" in test_config) or len(distributed_list) != 0:
-        check_num_gpus_for_distributed()
-
     # Install test requirements
     command = "pip3 install -r requirements.txt && pip3 install -r .ci/docker/requirements-ci.txt"
     run_command_and_capture_output(command)
@@ -397,12 +393,15 @@ def run_test_and_summarize_results(
     if not priority_tests and not default_list and not distributed_list and not inductor_list:
         # run entire tests for default, distributed and inductor workflows → use test.sh
         if not test_config:
-            check_num_gpus_for_distributed()
             # default test process
             res_default_all = run_entire_tests("default", test_shell_path, overall_logs_path_current_run, test_reports_src)
             res_all_tests_dict["default"] = res_default_all
             # distributed test process
-            res_distributed_all = run_entire_tests("distributed", test_shell_path, overall_logs_path_current_run, test_reports_src)
+            res_distributed_all = {}
+            if is_multi_gpus_available_for_distributed():
+                res_distributed_all = run_entire_tests("distributed", test_shell_path, overall_logs_path_current_run, test_reports_src)
+            else:
+                print("Warning: Cannot run distributed unit tests. Number of visible GPUs should be >1 to run distributed unit tests.")
             res_all_tests_dict["distributed"] = res_distributed_all
             # inductor test process
             res_inductor_all = run_entire_tests("inductor", test_shell_path, overall_logs_path_current_run, test_reports_src)
@@ -415,7 +414,11 @@ def run_test_and_summarize_results(
                 res_default_all = run_entire_tests("default", test_shell_path, overall_logs_path_current_run, test_reports_src)
                 res_all_tests_dict["default"] = res_default_all
             if "distributed" in workflow_list:
-                res_distributed_all = run_entire_tests("distributed", test_shell_path, overall_logs_path_current_run, test_reports_src)
+                res_distributed_all = {}
+                if is_multi_gpus_available_for_distributed():
+                    res_distributed_all = run_entire_tests("distributed", test_shell_path, overall_logs_path_current_run, test_reports_src)
+                else:
+                    print("Warning: Cannot run distributed unit tests. Number of visible GPUs should be >1 to run distributed unit tests.")
                 res_all_tests_dict["distributed"] = res_distributed_all
             if "inductor" in workflow_list:
                 res_inductor_all = run_entire_tests("inductor", test_shell_path, overall_logs_path_current_run, test_reports_src)
@@ -423,12 +426,15 @@ def run_test_and_summarize_results(
     # Run priority test for each workflow
     elif priority_tests and not default_list and not distributed_list and not inductor_list:
         if not test_config:
-            check_num_gpus_for_distributed()
             # default test process
             res_default_priority = run_priority_tests("default", test_run_test_path, overall_logs_path_current_run, test_reports_src)
             res_all_tests_dict["default"] = res_default_priority
             # distributed test process
-            res_distributed_priority = run_priority_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src)
+            res_distributed_priority = {}
+            if is_multi_gpus_available_for_distributed():
+                res_distributed_priority = run_priority_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src)
+            else:
+                print("Warning: Cannot run distributed unit tests. Number of visible GPUs should be >1 to run distributed unit tests.")
             res_all_tests_dict["distributed"] = res_distributed_priority
             # will not run inductor priority tests
             print("Inductor priority tests cannot run since no core tests defined with inductor workflow.")
@@ -440,7 +446,11 @@ def run_test_and_summarize_results(
                 res_default_priority = run_priority_tests("default", test_run_test_path, overall_logs_path_current_run, test_reports_src)
                 res_all_tests_dict["default"] = res_default_priority
             if "distributed" in workflow_list:
-                res_distributed_priority = run_priority_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src)
+                res_distributed_priority = {}
+                if is_multi_gpus_available_for_distributed():
+                    res_distributed_priority = run_priority_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src)
+                else:
+                    print("Warning: Cannot run distributed unit tests. Number of visible GPUs should be >1 to run distributed unit tests.")
                 res_all_tests_dict["distributed"] = res_distributed_priority
             if "inductor" in workflow_list:
                 print("Inductor priority tests cannot run since no core tests defined with inductor workflow.")
@@ -456,7 +466,11 @@ def run_test_and_summarize_results(
             distributed_workflow_list = []
             for item in distributed_list:
                 distributed_workflow_list.append(item)
-            res_distributed_selected = run_selected_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src, distributed_workflow_list)
+            res_distributed_selected = {}
+            if is_multi_gpus_available_for_distributed():
+                res_distributed_selected = run_selected_tests("distributed", test_run_test_path, overall_logs_path_current_run, test_reports_src, distributed_workflow_list)
+            else:
+                print("Warning: Cannot run distributed unit tests. Number of visible GPUs should be >1 to run distributed unit tests.")
             res_all_tests_dict["distributed"] = res_distributed_selected
         if inductor_list:
             inductor_workflow_list = []
@@ -504,10 +518,10 @@ def parse_args():
                                                             "RUN SELECTED TESTS: python3 run_pytorch_unit_tests.py --default_list test_weak test_dlpack --inductor_list inductor/test_torchinductor")
     return parser.parse_args()
 
-def check_num_gpus_for_distributed():
-    p = subprocess.run("rocminfo | grep -cE 'Name:\s+gfx'", shell=True, capture_output=True, text=True)
+def is_multi_gpus_available_for_distributed():
+    p = subprocess.run("rocminfo | grep -cE 'Name:\\s+gfx'", shell=True, capture_output=True, text=True)
     num_gpus_visible = int(p.stdout)
-    assert num_gpus_visible > 1, "Number of visible GPUs should be >1 to run distributed unit tests"
+    return num_gpus_visible > 1
 
 def main():
     args = parse_args()
