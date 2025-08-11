@@ -833,7 +833,7 @@ class TritonCSEVariable(CSEVariable):
         name: str,
         bounds: ValueRanges[Any],
         dtype: torch.dtype,
-        shape: Optional[BlockShapeType] = None,
+        shape: BlockShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
         # We'll use this to track which masks the variable needs when used for indirect indexing
@@ -2873,7 +2873,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer,
             value: CSEVariable,
             result_type: Optional[torch.dtype],
-        ) -> CSEVariable:
+        ) -> Tuple[str, torch.dtype, BlockShapeType]:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
@@ -2895,7 +2895,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 result_type = value.dtype
 
-            return self.cse.generate(buffer, result, dtype=result_type, shape=shape)
+            return result, result_type, shape
 
         def final_reduction_define(
             buffer,
@@ -2906,7 +2906,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
             Generate a reduction and assign it to an existing variable.
             """
-            value = final_reduction(buffer, value, result_type)
+            value, _, _ = final_reduction(buffer, value, result_type)
             buffer.splice(f"{result_var} = {value}")
 
         def final_argreduce(buffer, result_var, value, index):
@@ -3004,9 +3004,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
-                result_var = final_reduction(
+                _result, _dtype, _shape = final_reduction(
                     self.compute, masked_value, masked_value.dtype
                 )
+                result_var = self.cse.generate(self.compute, _result, dtype=_dtype, shape=_shape)
         else:
             accumulator = self.cse.namedvar(
                 f"_{result_var}",
