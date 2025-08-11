@@ -2392,31 +2392,33 @@ class AlgorithmSelectorCache(PersistentCache):
 
             if best_config_future is not None:
                 best_config = await_sync(best_config_future)
-
-                important_keys = [
-                    "ACC_TYPE",
-                    "ALLOW_TF32",
-                    "BLOCK_K",
-                    "BLOCK_M",
-                    "BLOCK_N",
-                    "EVEN_K",
-                    "GROUP_M",
-                    "USE_FAST_ACCUM",
-                    "num_stages",
-                    "num_warps",
-                    "num_consumer_groups",
-                    "num_buffers_warp_spec",
-                ]
-                choices = [
-                    choice
-                    for choice in choices
-                    if all(
-                        f"{k}={best_config[k]}" in choice.description
+                if best_config:
+                    important_keys = [
+                        "ACC_TYPE",
+                        "ALLOW_TF32",
+                        "BLOCK_K",
+                        "BLOCK_M",
+                        "BLOCK_N",
+                        "EVEN_K",
+                        "GROUP_M",
+                        "USE_FAST_ACCUM",
+                        "num_stages",
+                        "num_warps",
+                        "num_consumer_groups",
+                        "num_buffers_warp_spec",
+                    ]
+                    choices = [
+                        choice
+                        for choice in choices
+                        if all(
+                            f"{k}={best_config[k]}" in choice.description
+                            for k in important_keys
+                        )
                         for k in important_keys
+                    ]
+                    log.info(
+                        "Filtered to %d choices based on best_config", len(choices)
                     )
-                    for k in important_keys
-                ]
-                log.info("Filtered to %d choices based on best_config", len(choices))
 
             timings = self.lookup(
                 choices,
