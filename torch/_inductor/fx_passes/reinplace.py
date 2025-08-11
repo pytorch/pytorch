@@ -491,7 +491,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if get_node_storage(mutated_arg) is None:
             return False
-
+        if isinstance(node.args, (list, tuple)) and len(node.args) >=2:
+            source=node.args[-1]
+            if get_node_storage(source) == get_node_storage(mutated_arg):
+                return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
 
         # Only keep tensor that might overlap with mutated_arg.

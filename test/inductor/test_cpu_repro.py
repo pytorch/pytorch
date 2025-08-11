@@ -5453,7 +5453,29 @@ class CPUReproTests(TestCase):
 
                 # Verify correctness with explicit samples (should match exactly)
                 torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+    def test_self_alias_reinplace(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=4)
 
+            def forward(self, x, indices):
+                x_embed = self.embedding(x)
+                out = torch.index_copy(x_embed, dim=0, index=indices, source=x_embed)
+                return out
+        def run_eager(model, *args):
+            return model(*args)
+
+        def run_compiled(model, *args):
+            compiled = torch.compile(model, backend="inductor")
+            return compiled(*args)
+
+        model = Model()
+        x = torch.randint(0, 10, (4,))
+        indices = torch.tensor([3, 1, 0, 2])
+        out_eager = run_eager(model, x, indices)
+        out_compiled = run_compiled(model, x, indices)
+        assert torch.allclose(out_compiled, out_eager, rtol=0, atol=0)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
