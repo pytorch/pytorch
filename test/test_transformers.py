@@ -4262,15 +4262,15 @@ class TestSDPAXpuOnly(NNTestCase):
             _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_default_priority_order(self, device):
-        # The default priority order is flash, efficient, overrideable, math, cudnn
-        # For non-cuda backend, we need to make sure that flash > overrideable > math
+        # The default priority order of xpu is overrideable, math, flash, efficient, cudnn
+        # For xpu backend, we need to make sure that overrideable > math > flash
         from torch.nn.attention import _cur_sdpa_kernel_backends
         default_priority = _cur_sdpa_kernel_backends(with_priority=True)
         flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
         overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
         math_index = default_priority.index(SDPBackend.MATH)
-        self.assertTrue(flash_index < overrideable_index < math_index,
-                        f"Expected flash < overrideable < math, got {flash_index}, {overrideable_index}, {math_index}")
+        self.assertTrue(overrideable_index < math_index < flash_index,
+                        f"Expected overrideable < math < flash, got {overrideable_index}, {math_index}, {flash_index}")
 
     def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
         dtype = torch.bfloat16

@@ -823,13 +823,6 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
-inline bool can_use_overrideable_attention(sdp_params const& params, bool debug) {
-  if (debug) {
-    TORCH_WARN("CUDA don't support SDPA overrideable attention backend.");
-  }
-  return false;
-}
-
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
@@ -869,8 +862,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
         }
         break;
       case SDPBackend::overrideable:
-        if (ctx.userEnabledOverrideableSDP() &&
-            sdp::can_use_overrideable_attention(kernel_params, print_debug)) {
+        if (ctx.userEnabledOverrideableSDP()) {
           TORCH_CHECK(false, "Invalid backend");
         }
         break;
@@ -892,8 +884,6 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   sdp::can_use_flash_attention(kernel_params, print_debug);
   TORCH_WARN("cuDNN attention kernel not used because:");
   sdp::can_use_cudnn_attention(kernel_params, print_debug);
-  TORCH_WARN("Overrideable attention kernel not used because:");
-  sdp::can_use_overrideable_attention(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return SDPBackend::error;
 }

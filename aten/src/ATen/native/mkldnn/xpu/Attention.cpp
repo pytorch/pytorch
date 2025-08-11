@@ -93,8 +93,20 @@ bool can_use_mem_efficien_attention(sdp::sdp_params const& params, bool debug) {
   return false;
 }
 
+bool priority_order_init = false;
+
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
+  if (!priority_order_init) {
+    priority_order_init = true;
+    const std::vector<int64_t> priority_order = {
+        static_cast<int64_t>(at::SDPBackend::overrideable),
+        static_cast<int64_t>(at::SDPBackend::math),
+        static_cast<int64_t>(at::SDPBackend::flash_attention),
+        static_cast<int64_t>(at::SDPBackend::efficient_attention),
+        static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
+    at::globalContext().setSDPPriorityOrder(priority_order);
+  }
   return at::globalContext().sDPPriorityOrder();
 }
 
