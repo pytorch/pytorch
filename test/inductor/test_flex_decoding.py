@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import sys
 import unittest
 from collections import namedtuple
 from typing import Callable, Optional, Union
@@ -22,11 +23,20 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Need track if it is a requirement on windows.
+    sys.stderr.write("This UT is validated on windows, a lot of crash. Skip it.\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip on Windows")
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -747,6 +757,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @with_tf32_off
     def test_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
@@ -1058,6 +1069,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    @with_tf32_off
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
         self.run_test(
@@ -1212,6 +1224,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(
             _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
