@@ -58,6 +58,33 @@ def aten_group_norm(
     )
 
 
+@onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
+def aten_rms_norm(
+    input: TFloat,
+    normalized_shape: list[int],
+    weight: Optional[TFloat] = None,
+    eps: Optional[float] = None,
+) -> TFloat:
+    """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
+
+    # Default eps value if not provided
+    if eps is None:
+        eps = torch.finfo(torch.float).eps  # Observed from decomp
+
+    # Calculate axis: the first normalization dimension
+    # For normalized_shape with D dimensions, normalize over last D dimensions
+    # Since ONNX RMSNormalization supports negative axis values, we use -len(normalized_shape)
+    # which correctly maps to the first axis of the normalized dimensions
+    normalized_dims = len(normalized_shape)
+    axis = -normalized_dims
+
+    # Create weight tensor if not provided
+    if weight is None:
+        weight = op23.Constant(value=ir.tensor(1.0, dtype=input.dtype))
+
+    return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
+
+
 @onnx_impl(
     aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
 )
@@ -77,7 +104,7 @@ def aten_scaled_dot_product_attention_23(
         1. https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         2. https://onnx.ai/onnx/operators/onnx__Attention.html
 
-    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivivalent to the following PyTorch code::
+    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivalent to the following PyTorch code::
         scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
         attn_mask = (
             torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -119,19 +146,19 @@ def aten_scaled_dot_product_attention_23(
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
 
-        # NOTE: There was extended discussion on whether the num_heads attributes (q_num_heads/kv_num_heads)
-        # should be set as ONNX attributes or inferred from the tensor shape. In ONNX, num_heads is needed
-        # for 3D attention inputs (shape: [B, S, N*H]), but not for 4D ([B, N, S, H]), which is the only
-        # input accepted by this exporter. Thus, the attribute is not strictly necessary here, but adding it
-        # may ease future optimization or conversion to 3D formats (e.g., GQA ops)
+        # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
+        # They are not populated with 4D inputs because this information directly comes from input shapes:
+        # `q_num_heads=query.shape[1]` and `kv_num_heads=key.shape[1]`.
+        # This dimension is usually static but it could not be dynamic if also given as an attribute.
+        # num_heads attributes are needed for 3D attention inputs:
+        # (shape: [B, S, N*H]), 4D shape is ([B, N, S, H]).
+
         Y, _, _, _ = op23.Attention(
             query,
             key,
             value,
             attn_mask=attn_mask,
             scale=scale,
-            q_num_heads=query.shape[-3],
-            kv_num_heads=key.shape[-3],
             is_causal=is_causal,
         )
         return Y

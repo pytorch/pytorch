@@ -8,8 +8,8 @@
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/StringUtil.h>
-#include <torch/nativert/executor/Placement.h> // @manual
-#include <torch/nativert/graph/TensorMeta.h> // @manual
+#include <torch/nativert/executor/Placement.h>
+#include <torch/nativert/graph/TensorMeta.h>
 
 namespace torch::nativert {
 
@@ -39,7 +39,7 @@ size_t expectImpl(
   TORCH_CHECK(
       expected == actual,
       fmt::format(
-          "Parser error: expected '{}' at postition {}, but found '{}'.",
+          "Parser error: expected '{}' at position {}, but found '{}'.",
           expected,
           curPos,
           actual));
@@ -54,7 +54,7 @@ size_t expectImpl(std::string_view source, char expected, size_t curPos) {
   }
   TORCH_CHECK(
       expected == source[curPos],
-      "Parser error: expected '{}' at postition {}, but found '{}'.",
+      "Parser error: expected '{}' at position {}, but found '{}'.",
       expected,
       curPos,
       source[curPos]);
@@ -281,7 +281,7 @@ void Node::applyDevicePlacement(const Placement& placement) {
       auto device = std::get<c10::Device>(attribute.value);
       auto targetDevice =
           placement.getMappedDevice(std::get<c10::Device>(attribute.value));
-      if (!torch::nativert::isSameDevice(targetDevice, device)) {
+      if (!isSameDevice(targetDevice, device)) {
         LOG(INFO) << "Overriding " << device.str() << " to "
                   << targetDevice.str() << " for node " << *this;
         attribute.value = targetDevice;
@@ -568,7 +568,7 @@ void Graph::lint() const {
     }
   }
   for (const auto& node : nodes()) {
-    TORCH_CHECK_EQ(node.owningGraph(), this);
+    TORCH_CHECK(node.owningGraph() == this);
   }
   // Check that every list type is either produced by a prim.ListPack or
   // immediately consumed by a prim.ListUnpack. We make use of this invariant
@@ -661,14 +661,30 @@ void Graph::replaceAllUsesAfterNode(
 }
 
 void Graph::applyDevicePlacement(const Placement& placement) {
-  // TODO: consolidate device info in weight loading here as well.
+  TORCH_CHECK(
+      !placementApplied_,
+      "placement has been applied to the graph! placement must be applied once and once only.");
+
+  placementApplied_ = true;
+
+  // inplace override node's device-typed attributes according to placement
   for (auto& node : nodes_) {
     node.applyDevicePlacement(placement);
+  }
+
+  // inplace override weightMeta_'s device according to placement
+  for (auto& [_, weightMeta] : weightsMeta_) {
+    weightMeta.applyDevicePlacement(placement);
+  }
+
+  // inplace override tensorValuesMeta_'s device according to placement
+  for (auto& [_, tensorMeta] : tensorValuesMeta_) {
+    tensorMeta.applyDevicePlacement(placement);
   }
 }
 
 Node* Graph::nodeAfter(Node* n) {
-  TORCH_CHECK_EQ(n->owningGraph(), this);
+  TORCH_CHECK(n->owningGraph() == this);
   if (n == outputNode_) {
     return nullptr;
   }
@@ -677,7 +693,7 @@ Node* Graph::nodeAfter(Node* n) {
 }
 
 const Node* Graph::nodeAfter(const Node* n) const {
-  TORCH_CHECK_EQ(n->owningGraph(), this);
+  TORCH_CHECK(n->owningGraph() == this);
   if (n == outputNode_) {
     return nullptr;
   }
@@ -686,7 +702,7 @@ const Node* Graph::nodeAfter(const Node* n) const {
 }
 
 Node* Graph::nodeBefore(Node* n) {
-  TORCH_CHECK_EQ(n->owningGraph(), this);
+  TORCH_CHECK(n->owningGraph() == this);
   if (n == inputNode_) {
     return nullptr;
   }
@@ -695,7 +711,7 @@ Node* Graph::nodeBefore(Node* n) {
 }
 
 const Node* Graph::nodeBefore(const Node* n) const {
-  TORCH_CHECK_EQ(n->owningGraph(), this);
+  TORCH_CHECK(n->owningGraph() == this);
   if (n == inputNode_) {
     return nullptr;
   }
@@ -704,8 +720,7 @@ const Node* Graph::nodeBefore(const Node* n) const {
 }
 
 void Graph::removeNode(Node* n) {
-  TORCH_CHECK_EQ(n->owningGraph(), this)
-      << "Node does not belong to this graph!";
+  TORCH_CHECK(n->owningGraph() == this, "Node does not belong to this graph!");
 
   for (auto* outputVal : n->outputs()) {
     TORCH_CHECK(
@@ -747,8 +762,7 @@ std::vector<Value*> Graph::insertGraph(
     const Graph& subgraph,
     std::vector<Value*> inputs,
     std::unordered_map<const Value*, Value*>& valueMap) {
-  TORCH_CHECK_EQ(subgraph.inputs().size(), inputs.size())
-      << "Input size mismatch";
+  TORCH_CHECK(subgraph.inputs().size() == inputs.size(), "Input size mismatch");
   for (auto i : c10::irange(subgraph.inputs().size())) {
     valueMap[subgraph.inputs()[i]] = inputs[i];
   }
@@ -854,7 +868,7 @@ void Node::addOutput() {
 }
 
 Value* Node::addOutput(const Type& type) {
-  TORCH_CHECK_EQ(type, Type::Kind::None);
+  TORCH_CHECK(type == Type::Kind::None);
   Value* v = owningGraph_->addValue(std::nullopt, type, this);
   outputs_.push_back(v);
   return v;
@@ -893,9 +907,9 @@ std::vector<const Value*> Value::getListElements() const {
       ret.push_back(tv.value);
     }
   } else {
-    TORCH_CHECK_EQ(users().size(), 1);
+    TORCH_CHECK(users().size() == 1);
     const auto listUnpack = users()[0];
-    TORCH_CHECK_EQ(listUnpack->target(), "prim.ListUnpack");
+    TORCH_CHECK(listUnpack->target() == "prim.ListUnpack");
     for (const auto v : listUnpack->outputs()) {
       ret.push_back(v);
     }
@@ -1070,17 +1084,17 @@ std::ostream& operator<<(std::ostream& out, const Graph& graph) {
 c10::Device convertDevice(std::string_view symbol) {
   // Symbol looks like `Device{cuda:1}`
   const auto typeStart = symbol.find('{') + 1;
-  TORCH_CHECK_LT(typeStart, symbol.size());
+  TORCH_CHECK(typeStart < symbol.size());
 
   const auto typeEnd = symbol.find(':');
-  TORCH_CHECK_NE(typeEnd, std::string_view::npos);
+  TORCH_CHECK(typeEnd != std::string_view::npos);
 
   const auto type = symbol.substr(typeStart, typeEnd - typeStart);
   const auto indexStart = typeEnd + 1;
-  TORCH_CHECK_LT(indexStart, symbol.size());
+  TORCH_CHECK(indexStart < symbol.size());
 
   const auto indexEnd = symbol.find('}');
-  TORCH_CHECK_NE(indexEnd, std::string_view::npos);
+  TORCH_CHECK(indexEnd != std::string_view::npos);
 
   const auto index = symbol.substr(indexStart, indexEnd - indexStart);
 
@@ -1099,7 +1113,7 @@ c10::Device convertDevice(std::string_view symbol) {
 Constant convertAtomicConstant(std::string_view symbol) {
   if (c10::starts_with(symbol, "\"")) {
     // chop off the outer quotes and return the string
-    TORCH_CHECK_GE(symbol.size(), 2);
+    TORCH_CHECK(symbol.size() >= 2);
     symbol.remove_prefix(1);
     symbol.remove_suffix(1);
     return std::string(symbol);
@@ -1178,8 +1192,8 @@ Constant convertListConstant(std::string_view source) {
         TORCH_CHECK(false, "constant lists only support int, float, bool");
       }
     } else {
-      TORCH_CHECK_EQ(type.index(), val.index())
-          << "lists must have all the same type";
+      TORCH_CHECK(
+          type.index() == val.index(), "lists must have all the same type");
     }
     values.push_back(std::move(val));
     if (source.at(curPos) == ']') {
@@ -1282,7 +1296,7 @@ std::unique_ptr<Graph> Parser::parse() {
   }
   // For graph textual format, it should be safe to assume all
   // inputs/outputs are from users.
-  graph_->setSignature(torch::nativert::GraphSignature{signature_});
+  graph_->setSignature(GraphSignature{signature_});
   graph_->finalize();
   graph_->lint();
   // TODO: Might have some source left over, should check it if so.
@@ -1306,7 +1320,7 @@ bool Parser::nextIf(char expected) {
 }
 
 void Parser::parseGraphInputs() {
-  TORCH_CHECK_EQ(curPos_, 0);
+  TORCH_CHECK(curPos_ == 0);
   expect("graph");
   const auto inputs = parseList<std::string_view>(
       '(', ')', [&]() { return parseAtomicSymbol(); });
@@ -1369,7 +1383,7 @@ std::string_view Parser::parseUntil(
   return source_.substr(start, curPos_ - start);
 }
 
-// Parse a strng, including the outer quotes
+// Parse a string, including the outer quotes
 std::string_view Parser::parseString() {
   size_t start = curPos_;
   expect('"');
