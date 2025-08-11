@@ -12,6 +12,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
@@ -45,6 +46,7 @@ from .cutlass_utils import (
 
 
 GemmOperation = Any
+EVTArgRenames = Any
 
 log = logging.getLogger(__name__)
 
@@ -918,6 +920,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             return None
 
+        # only use stream k for static shape
+        if op.tile_scheduler.name == "StreamK":
+            static_shape = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+                tuple(X.get_size()) + tuple(W.get_size())
+            )
+            if not static_shape:
+                return None
+
         # Update op.
         op = copy.deepcopy(op)
 
@@ -1212,7 +1222,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             assert acc_dtype, "Could not determine accumulator dtype"
 
-            evt_name, evt_args, evt_code = self._render_evt(
+            evt_name, evt_args, evt_code, evt_arg_renames = self._render_evt(
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
@@ -1228,6 +1238,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 Y,
                 *extra_inputs,
             ]
+            input_names = [evt_arg_renames.get(name) for name in input_names]
+            output_names = [evt_arg_renames.get(name) for name in output_names]
+
             names_str = ",".join(
                 ["X", "W", "Bias", *input_names, "Y", *output_names, *extra_names]
             )
@@ -1304,7 +1317,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
     def _render_evt(
         self,
@@ -1313,7 +1326,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         buffer_renames: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
+    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]  # noqa: F821
         raise NotImplementedError("_render_evt in CUTLASSGemmTemplate not implemented")
 
 
@@ -1474,7 +1487,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         var_name_to_buffer_name: dict[str, str],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str]:  # type: ignore[name-defined]  # noqa: F821
+    ) -> tuple[str, str, str, EVTArgRenames]:
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
@@ -1494,7 +1507,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             name_to_buffer,  # type: ignore[arg-type]
             V.graph.sizevars.size_hint,
         )
-        evt_name, evt_args, evt_code = trace(
+        evt_name, evt_args, evt_code, arg_renames = trace(
             evt_py_code,
             examples,
             acc_dtype,
@@ -1509,6 +1522,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             evt_name,
             evt_args,
             evt_code,
+            arg_renames,
         )
 
     def _shape_match(

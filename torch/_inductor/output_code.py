@@ -48,6 +48,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -581,7 +582,10 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
-            return self.current_callable(inputs)
+            with record_function(
+                f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+            ):
+                return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
