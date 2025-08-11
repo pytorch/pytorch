@@ -1002,7 +1002,7 @@ terrible spacing
 
         class GraniteMoeMoE(torch.nn.Module):
             def __init__(self):
-                super(GraniteMoeMoE, self).__init__()
+                super().__init__()
 
                 self.input_size = 32
                 self.num_local_experts = 4
@@ -1030,7 +1030,7 @@ terrible spacing
 
         # `callback` is called multiple times with same `node` in `split_module`.
         # Cache the result such that partition id is consistent across calls.
-        def callback(node)->int:
+        def callback(node) -> int:
             nonlocal PARTITION_ID, PARTITION_OPS_CTR, NODE_PARTITION_MAP
             if node in NODE_PARTITION_MAP:
                 return NODE_PARTITION_MAP[node]
@@ -1044,7 +1044,8 @@ terrible spacing
             return PARTITION_ID
 
         def backend(gm, inps):
-            split_gm = split_module(gm, root_m=None, split_callback=callback, keep_original_order=True, keep_original_node_name=True)
+            split_gm = split_module(gm, root_m=None, split_callback=callback,
+                                    keep_original_order=True, keep_original_node_name=True)
             return split_gm
 
         actual = torch.compile(moe, backend=backend)(inp)
