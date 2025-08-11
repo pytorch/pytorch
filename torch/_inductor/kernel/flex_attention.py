@@ -18,7 +18,6 @@ from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import config
 from ..ir import (
     Buffer,
     ComputedBuffer,
@@ -782,102 +781,6 @@ class Mode(Enum):
     bwd = auto()
 
 
-def _get_rocm_config(query, mode: Mode) -> tuple[int, int, int, int]:
-    dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    fwd_config = None
-
-    if mode == Mode.fwd:
-        if head_dim <= 256:
-            if dtype == torch.float32:
-                fwd_config = (64, 64, 4, 1)
-            else:
-                fwd_config = (128, 64, 8, 1)
-            fwd_config = _rocm_default_config.get((dtype, head_dim), fwd_config)
-        else:  # modest hardware or extremely large head_dim
-            if dtype == torch.float32:
-                fwd_config = (32, 16, 4, 1)
-            else:
-                fwd_config = (64, 32, 4, 1)
-        return fwd_config
-    else:  # bwd
-        assert mode == Mode.bwd
-        if dtype == torch.float32:
-            return (16, 16, 4, 1)
-        elif head_dim <= 256:
-            if head_dim == 64:
-                return (64, 64, 4, 1)
-            elif head_dim == 128:
-                return (64, 128, 8, 1)
-            else:
-                return (64, 64, 4, 1)
-        else:  # modest hardware or extremely large head_dim
-            return (16, 16, 4, 1)
-
-
-def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
-    dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    fwd_config = None
-    bwd_config = None
-    capability = torch.cuda.get_device_capability()
-
-    if mode == Mode.fwd:
-        if head_dim <= 256:
-            if dtype == torch.float32:
-                fwd_config = (64, 64, 4, 3)
-            else:
-                fwd_config = (128, 64, 4, 3)
-            if capability >= (9, 0):
-                fwd_config = _h100_default_config.get((dtype, head_dim), fwd_config)
-            elif capability >= (8, 0):
-                fwd_config = _a100_default_config.get((dtype, head_dim), fwd_config)
-        else:  # modest hardware or extremely large head_dim
-            if dtype == torch.float32:
-                fwd_config = (32, 16, 4, 3)
-            else:
-                fwd_config = (64, 32, 4, 3)
-        return fwd_config
-
-    else:  # bwd
-        assert mode == Mode.bwd
-        if dtype == torch.float32:
-            bwd_config = (16, 16, 4, 1)
-        elif head_dim <= 256 and capability >= (9, 0):  # H100
-            if head_dim == 64:
-                bwd_config = (64, 64, 4, 3)
-            elif head_dim == 128:
-                bwd_config = (64, 128, 8, 3)
-            else:
-                bwd_config = (64, 64, 4, 2)
-        elif capability >= (8, 0):
-            if head_dim >= 64:
-                bwd_config = (32, 128, 4, 3)
-            elif head_dim == 128:
-                # SM86/89 have smaller shared memory sizes
-                num_stages = 3 if capability[-1] == 0 else 2
-                bwd_config = (64, 64, 4, num_stages)
-            else:
-                bwd_config = (64, 64, 4, 2)
-        else:  # modest hardware or extremely large head_dim
-            bwd_config = (16, 16, 4, 1)
-        return bwd_config
-
-
-def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.fwd)
-    else:
-        return _get_rocm_config(query, mode=Mode.fwd)
-
-
-def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.bwd)
-    else:
-        return _get_rocm_config(query, mode=Mode.bwd)
-
-
 def create_num_blocks_fake_generator(sparse_indices):
     # The idea here is that we need to create a real tensor with real data
     # that's representative for benchmarking.
@@ -1462,35 +1365,28 @@ def flex_attention(
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     choices: list[Any] = []
-    configs: list[tuple[int, int, int, int]] = []
-    configs.append(_get_default_config_fwd(query))
-    if config.max_autotune:
-        configs += [
-            (128, 64, 4, 3),
-            (128, 128, 4, 3),
-            (128, 128, 8, 2),
-            (64, 128, 4, 3),
-            (64, 64, 4, 3),
-        ]
 
-        # On ROCm convert num_stages to 1 to avoid shmem issues
-        if torch.version.hip:
-            configs = [(c[0], c[1], c[2], 1) for c in configs]
+    dtype = query.get_dtype()
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
 
-    # ROCm specific considerations
-    if torch.version.hip:
-        kernel_options["kpack"] = 2
-
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
     original_kernel_options = kernel_options.copy()
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
-        if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
+    
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
+    for conf in configs:
+        if (
+            SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
+        ):
             if len(configs) == 1:
                 raise ValueError(
                     f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
@@ -1508,13 +1404,29 @@ def flex_attention(
                 cur_kernel_options[k[4:]] = v
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
-        cur_kernel_options.setdefault("num_stages", num_stages)
-        cur_kernel_options.setdefault("num_warps", num_warps)
-        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
+        # Disabling TMA by default, only explicit kernel_options supported for now
+        cur_kernel_options.setdefault("USE_TMA", False)
+
+        cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
+        
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        # ROCm specific kernargs
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
 
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -2578,13 +2490,21 @@ def flex_attention_backward(*args, **kwargs):
                 if BLOCK2 % BLOCK1 == 0
             ]
         )
+
+    dtype = query.get_dtype()
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
+
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
     original_kernel_options = kernel_options.copy()
-    for BLOCK1, BLOCK2, num_warps, num_stages in configs:
+    for conf in configs:
         if (
-            SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
-            or SPARSE_Q_BLOCK_SIZE % BLOCK1 != 0
-            or SPARSE_KV_BLOCK_SIZE % BLOCK2 != 0
-            or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
+            SPARSE_KV_BLOCK_SIZE % conf.block_m != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
+            or SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_n != 0
         ):
             continue
 
@@ -2598,16 +2518,28 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options[k[4:]] = v
             if k.startswith("fwd_"):
                 cur_kernel_options.pop(k)
-        cur_kernel_options.setdefault("num_warps", num_warps)
-        cur_kernel_options.setdefault("num_stages", num_stages)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
 
-        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
+        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n)
+        cur_kernel_options.setdefault("BLOCK_M2", conf.block_n)
+        cur_kernel_options.setdefault("BLOCK_N2", conf.block_m)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        # ROCm specific kernargs
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
