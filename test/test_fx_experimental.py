@@ -1027,14 +1027,21 @@ terrible spacing
 
         PARTITION_ID = 0
         PARTITION_OPS_CTR = 0
+        NODE_PARTITION_MAP = {}
 
-        @functools.lru_cache
+        # `callback` is called multiple times with same `node` in `split_module`.
+        # Cache the result such that partition id is consistent across calls.
         def callback(node)->int:
-            nonlocal PARTITION_ID, PARTITION_OPS_CTR
+            nonlocal PARTITION_ID, PARTITION_OPS_CTR, NODE_PARTITION_MAP
+            if node in NODE_PARTITION_MAP:
+                return NODE_PARTITION_MAP[node]
+
             if PARTITION_OPS_CTR % 5 == 0:
                 PARTITION_ID += 1
 
             PARTITION_OPS_CTR += 1
+            
+            NODE_PARTITION_MAP[node] = PARTITION_ID
             return PARTITION_ID
 
         def backend(gm, inps):
