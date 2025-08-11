@@ -6,9 +6,9 @@ import torch
 import torch.distributed as c10d
 from torch.distributed.collective_utils import (
     _check_rng_sync,
+    _check_rng_sync_internal,
     all_gather,
     broadcast,
-    check_rng_sync,
 )
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
@@ -138,21 +138,21 @@ class TestCollectiveUtils(MultiProcessTestCase):
         group = torch.distributed.distributed_c10d._get_default_group()
         generator = torch.Generator(device=device)
         generator.manual_seed(123)
-        value_ranks, _ = _check_rng_sync(generator, group)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 1, value_ranks)
         for actual, expected in zip(value_ranks.values(), [{0, 1, 2, 3}]):
             self.assertEqual(actual, expected, actual)
 
         if torch.distributed.get_rank() == 1:
             torch.randn((10,), device=device, generator=generator)
-        value_ranks, _ = _check_rng_sync(generator, group)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 2, value_ranks)
         for actual, expected in zip(value_ranks.values(), [{0, 2, 3}, {1}]):
             self.assertEqual(actual, expected, actual)
 
         if torch.distributed.get_rank() == 0:
             generator.manual_seed(456)
-        value_ranks, _ = _check_rng_sync(generator, group)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 3, value_ranks)
         for actual, expected in zip(value_ranks.values(), [{0}, {1}, {2, 3}]):
             self.assertEqual(actual, expected, actual)
@@ -165,7 +165,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         # [rank0]:E0808 ] 0        (456, 0)
         # [rank0]:E0808 ] 1        (123, 4)
         # [rank0]:E0808 ] 2-3      (123, 0)
-        check_rng_sync(generator, group)
+        _check_rng_sync(generator, group)
 
 
 instantiate_parametrized_tests(TestCollectiveUtils)
