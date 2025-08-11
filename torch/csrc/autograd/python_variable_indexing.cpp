@@ -61,6 +61,40 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
+static bool sequence_has_nested_torch_function(PyObject* seq) {
+  if (!PySequence_Check(seq)) {
+    return check_has_torch_function(seq);
+  }
+
+  auto length = PySequence_Length(seq);
+  if (length < 0) {
+    PyErr_Clear();
+    return false;
+  }
+
+  for (Py_ssize_t i = 0; i < length; i++) {
+    THPObjectPtr item(PySequence_GetItem(seq, i));
+    if (!item.get()) {
+      PyErr_Clear();
+      continue;
+    }
+
+    // Check direct torch function on item
+    if (check_has_torch_function(item.get())) {
+      return true;
+    }
+
+    // Recursively check nested sequences
+    if (PySequence_Check(item.get()) && !THPVariable_Check(item.get())) {
+      if (sequence_has_nested_torch_function(item.get())) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
@@ -70,6 +104,14 @@ static int64_t count_specified_dimensions(PyObject* index) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
     if (check_has_torch_function(obj))
       return -1;
+
+    // Check nested sequences for __torch_function__
+    if (PySequence_Check(obj) && !THPVariable_Check(obj)) {
+      if (sequence_has_nested_torch_function(obj)) {
+        return -1; // Signal torch function handling needed
+      }
+    }
+
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
@@ -398,7 +440,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, holder.get());
+    return handle_torch_function_indexing(self, index);
   }
   Variable sliced = applySlicing(
       self_,
