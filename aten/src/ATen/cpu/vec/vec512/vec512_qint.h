@@ -55,7 +55,9 @@ struct Vectorizedqi {
 #endif
 
  public:
-  Vectorizedqi() {}
+  Vectorizedqi() {
+    vals = _mm512_setzero_si512();
+  }
   Vectorizedqi(__m512i v) : vals(v) {}
   operator __m512i() const {
     return vals;
