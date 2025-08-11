@@ -1731,6 +1731,7 @@ def index_expanded_dims_and_copy_(
     src = index_expanded_dims(src, expanded_dims)
     dst.copy_(src)
 
+
 def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
@@ -1752,15 +1753,7 @@ def cudagraphify_impl(
         for idx, x in enumerate(inputs)
     ]
 
-    graph = torch.cuda.CUDAGraph(keep_graph=True)
-    dynamic_graph_arguments = (config.size_asserts and
-                               config.triton.cudagraphs_elide_input_output_copies)
-    assert dynamic_graph_arguments
-    mem_allocator = graph.get_mem_allocator()
-    pool = torch.cuda.MemPool(mem_allocator)
-
     # allocate static tensor inputs
-
     static_inputs = [
         (
             x
@@ -1789,6 +1782,7 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
+    graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
@@ -2320,7 +2314,7 @@ def compile_fx(
                 # original strides
                 _recursive_record_user_visible_output_idxs(gm)
 
-                if config.triton.cudagraphs_elide_input_output_copies:
+                if config.triton.cudagraphs_elide_input_output_copies and not config.triton.cudagraph_trees:
                     static_input_idxs = []
                 else:
                     static_input_idxs = get_static_input_idxs(fixed)
@@ -2404,7 +2398,7 @@ def compile_fx(
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
-                if config.triton.cudagraphs_elide_input_output_copies:
+                if config.triton.cudagraphs_elide_input_output_copies and not config.triton.cudagraph_trees:
                     fixed = 0
                 else:
                     fixed = count_tangents(gm)
