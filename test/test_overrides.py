@@ -904,9 +904,9 @@ def generate_tensor_like_override_tests(cls):
 
         # High priority should be called first
         self.assertEqual(call_order[0], 'high',
-                        "Higher priority torch_function should be called first")
+                         "Higher priority torch_function should be called first")
         self.assertEqual(call_order[1], 'low',
-                        "Lower priority torch_function should be called after NotImplemented")
+                         "Lower priority torch_function should be called after NotImplemented")
 
     def test_torch_function_mixed_lists(self):
         """Test lists with mix of regular values and torch function objects"""
@@ -941,7 +941,7 @@ def generate_tensor_like_override_tests(cls):
         _ = F.pad(x, [1, obj, 0, 0])
 
         self.assertEqual(CountingInt.call_count, 1,
-                        "torch_function should be called exactly once for mixed list")
+                         "torch_function should be called exactly once for mixed list")
 
     def test_torch_function_empty_lists(self):
         """Test that empty lists work correctly"""
@@ -954,7 +954,7 @@ def generate_tensor_like_override_tests(cls):
         # but empty size lists should work
         result = x.view([])  # Empty list means scalar
         self.assertEqual(result.shape, torch.Size([]),
-                        "Empty list should work for size arguments")
+                         "Empty list should work for size arguments")
 
     def test_torch_function_not_first_in_list(self):
         """Test that torch_function is called even when object is not first in list"""
@@ -978,15 +978,15 @@ def generate_tensor_like_override_tests(cls):
 
         # Test with torch_function object as second item
         obj_second = IntLikeNotFirst(2)
-        result = F.pad(x, [1, obj_second, 0, 0])
+        _ = F.pad(x, [1, obj_second, 0, 0])
         self.assertTrue(obj_second.torch_function_called,
-                       "torch_function should be called when object is second in list")
+                        "torch_function should be called when object is second in list")
 
         # Test with torch_function object as third item
         obj_third = IntLikeNotFirst(1)
-        result = F.pad(x, [1, 1, obj_third, 0])
+        _ = F.pad(x, [1, 1, obj_third, 0])
         self.assertTrue(obj_third.torch_function_called,
-                       "torch_function should be called when object is third in list")
+                        "torch_function should be called when object is third in list")
 
         # Test with torch_function object as last item
         obj_last = IntLikeNotFirst(1)
