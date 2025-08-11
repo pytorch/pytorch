@@ -15,12 +15,6 @@
 #include <cstddef>
 #include <functional>
 
-#include <dlfcn.h>
-
-#include "nv_decode.h"  // Assuming this header defines __cu_demangle.
-
-#include <GetTypeInformation.h>
-
 
 
 namespace at::cuda {
@@ -97,78 +91,6 @@ checkAllocationWithinGraph(void* ptr, const std::vector<DynamicGraphAllocation>&
   }
   return std::nullopt;
 }
-
-  std::vector<std::tuple<size_t, size_t, size_t>> gather_pointers_in_node(
-    const std::variant<BasicType, StructType, ArrayType>& type_info,
-    char *arg_buffer,
-    const std::vector<DynamicGraphAllocation>& sorted_allocations,
-    size_t global_offset_bytes) {
-  std::vector<std::tuple<size_t, size_t, size_t>> results;
-  std::visit([&results, global_offset_bytes, &sorted_allocations, &arg_buffer](auto&& arg) {
-    using T = std::decay_t<decltype(arg)>;
-    if constexpr (std::is_same_v<T, BasicType>) {
-      size_t offset = global_offset_bytes + arg.offset;
-      if (arg.is_pointer) {
-        TORCH_INTERNAL_ASSERT(offset % 8 == 0, "All pointers should be 8 byte aligned.");
-        if (auto result = checkAllocationWithinGraph(*((void**)(arg_buffer + offset)), sorted_allocations)) {
-          results.push_back({std::get<0>(*result), std::get<1>(*result), offset});
-        }
-      }
-    } else if constexpr (std::is_same_v<T, StructType>) {
-      size_t base_offset = global_offset_bytes + arg.offset;
-      for (auto&& [_, member]: arg.members) {
-        auto &&recursive_results = gather_pointers_in_node(member, arg_buffer, sorted_allocations, base_offset);
-        results.insert(results.end(), recursive_results.begin(), recursive_results.end());
-      }
-    } else if constexpr (std::is_same_v<T, ArrayType>) {
-      size_t element_size = std::visit([](auto&& element) -> size_t {
-        using ElementT = std::decay_t<decltype(element)>;
-        if constexpr (std::is_same_v<ElementT, BasicType>) {
-          return element.size;
-        } else if constexpr (std::is_same_v<ElementT, StructType>) {
-          return element.size;
-        }
-        return 0; // Should not happen
-      }, arg.element_type);
-
-      size_t base_offset = global_offset_bytes;
-
-      for (size_t i = 0; i < arg.num_elements; ++i) {
-        auto &&up_cast = std::visit(conversion_visitor, arg.element_type);
-        auto &&recursive_results = gather_pointers_in_node(up_cast, arg_buffer, sorted_allocations, base_offset);
-        results.insert(results.end(), recursive_results.begin(), recursive_results.end());
-        base_offset += element_size;
-      }
-    }
-  }, type_info);
-  return results;
-}
-
-
-
-std::string demangle(const std::string &mangled) {
-    size_t length = 0;
-    int status = 0;
-    char* output_buffer = nullptr;
-    
-    // Call the demangling function.
-    char* demangled = __cu_demangle(mangled.c_str(), output_buffer, &length, &status);
-    
-    // Check if demangling was successful.
-    if (status != 0 || demangled == nullptr) {
-        // In case of error, return the original mangled string.
-        return mangled;
-    }
-    
-    // Convert the demangled C-string into a std::string.
-    std::string result(demangled);
-    
-    // Free the memory allocated by __cu_demangle.
-    free(demangled);
-    
-    return result;
-}
-
 
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
@@ -641,8 +563,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       size_t param_offset;
       size_t param_size;
 
-      ArgumentInformation type_info = get_argument_information(func);
-      std::cout << func_name << std::endl;
       for (size_t param_index = 0;
            globalContext().getNVRTC().cuFuncGetParamInfo(func, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
 
@@ -654,36 +574,16 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
           std::cout << "GALVEZ: param_offset=" << std::hex << 352 + param_offset + address_start << std::dec << ", 8 byte value=" << arg1_value << std::endl;
         }
 
-
+        char** arg1_speculative_pointer =
+          (char**)driver_node_params.kernelParams[param_index];
         
-        if (type_info.members.empty()) {
-          if (param_index == 0) {
-            // TORCH_WARN("No type information for", func_name);
-            std::cout << "No type information for" << func_name << std::endl;
-          }
-          char** arg1_speculative_pointer =
-            (char**)driver_node_params.kernelParams[param_index];
-
-          // ABI guarantees that pointers have 8-byte alignment
-          for (size_t address_start = 0; param_size - address_start >= 8;
-               address_start += 8) {
-            char* arg1_value = arg1_speculative_pointer[address_start / 8];
-            if (auto result = checkAllocationWithinGraph(arg1_value, sorted_allocations)) {
-              add_dynamic_update({std::get<0>(*result), std::get<1>(*result), address_start},
-                                 node, param_offset);
-            }
-          }
-        } else {
-          // check using type information
-          char* arg =
-            (char*)driver_node_params.kernelParams[param_index];
-
-          // is this empty for some reason?
-          std::vector<std::tuple<size_t, size_t, size_t>> results =
-            gather_pointers_in_node(type_info.members[param_index].second, arg, sorted_allocations, 0);
-
-          for (auto&& result: results) {
-            add_dynamic_update(result, node, param_offset);
+        // ABI guarantees that pointers have 8-byte alignment
+        for (size_t address_start = 0; param_size - address_start >= 8;
+             address_start += 8) {
+          char* arg1_value = arg1_speculative_pointer[address_start / 8];
+          if (auto result = checkAllocationWithinGraph(arg1_value, sorted_allocations)) {
+            add_dynamic_update({std::get<0>(*result), std::get<1>(*result), address_start},
+                               node, param_offset);
           }
         }
       }
@@ -952,402 +852,6 @@ void check_differences(void *buf1, void *buf2, size_t n) {
     }
 }
 
-/**
- * Check equality between two cudaMemsetParams structs
- * @param a First cudaMemsetParams struct
- * @param b Second cudaMemsetParams struct
- * @return true if all members are equal, false otherwise
- */
-bool is_equal(const cudaMemsetParams& a, const cudaMemsetParams& b) {
-    return a.dst == b.dst &&
-           a.pitch == b.pitch &&
-           a.value == b.value &&
-           a.elementSize == b.elementSize &&
-           a.width == b.width &&
-           a.height == b.height;
-}
-
-/**
- * Check equality between two cudaMemcpy3DParms structs
- * @param a First cudaMemcpy3DParms struct
- * @param b Second cudaMemcpy3DParms struct
- * @return true if all members are equal, false otherwise
- */
-bool is_equal(const cudaMemcpy3DParms& a, const cudaMemcpy3DParms& b) {
-    // Compare array pointers
-    if (a.srcArray != b.srcArray || a.dstArray != b.dstArray)
-        return false;
-    
-    // Compare positions
-    if (a.srcPos.x != b.srcPos.x || a.srcPos.y != b.srcPos.y || a.srcPos.z != b.srcPos.z ||
-        a.dstPos.x != b.dstPos.x || a.dstPos.y != b.dstPos.y || a.dstPos.z != b.dstPos.z)
-        return false;
-    
-    // Compare pitched pointers
-    if (a.srcPtr.ptr != b.srcPtr.ptr || a.srcPtr.pitch != b.srcPtr.pitch ||
-        a.srcPtr.xsize != b.srcPtr.xsize || a.srcPtr.ysize != b.srcPtr.ysize ||
-        a.dstPtr.ptr != b.dstPtr.ptr || a.dstPtr.pitch != b.dstPtr.pitch ||
-        a.dstPtr.xsize != b.dstPtr.xsize || a.dstPtr.ysize != b.dstPtr.ysize)
-        return false;
-    
-    // Compare extent
-    if (a.extent.width != b.extent.width || a.extent.height != b.extent.height ||
-        a.extent.depth != b.extent.depth)
-        return false;
-    
-    // Compare kind
-    return a.kind == b.kind;
-}
-
-#include <iostream>
-#include <iomanip>   // for std::hex, std::setw, std::setfill
-#include <cstddef>   // for std::size_t
-
-// Prints the first n bytes starting at 'data' as a hex string (e.g. "0a1f2b...")
-void printHex(const void* data, std::size_t n) {
-    // Treat the data as a sequence of unsigned bytes
-    const unsigned char* bytes = static_cast<const unsigned char*>(data);
-    
-    // Set up cout for hex, two digits per byte, zero-padded
-    std::cout << std::hex << std::setfill('0');
-    
-    for (std::size_t i = 0; i < n; ++i) {
-        // Each byte is cast to an unsigned int so it's printed as a number,
-        // then setw(2) ensures two hex digits (e.g. 0a, ff, etc.)
-        std::cout << std::setw(2) << static_cast<unsigned int>(bytes[i]);
-    }
-    
-    // Go back to decimal for any further output
-    std::cout << std::dec;
-}
-
-
-bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2, bool topological_and_non_pointer_equality_only) {
-  TORCH_CHECK(graph1 != graph2);
-
-  bool is_equal_var = true;
-  
-  size_t num_nodes1;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph1, nullptr, &num_nodes1));
-
-  size_t num_nodes2;
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph2, nullptr, &num_nodes2));
-
-  if(num_nodes1 != num_nodes2) {
-    TORCH_WARN("graphs_equal: number of nodes mismatch: graph1 has ", num_nodes1,
-               " nodes, graph2 has ", num_nodes2, " nodes.");
-    return false;
-  }
-
-  std::vector<cudaGraphNode_t> nodes1(num_nodes1);
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph1, nodes1.data(), &num_nodes1));
-
-  std::vector<cudaGraphNode_t> nodes2(num_nodes2);
-  AT_CUDA_CHECK(cudaGraphGetNodes(graph2, nodes2.data(), &num_nodes2));
-
-  std::size_t num_edges1, num_edges2;
-  AT_CUDA_CHECK(cudaGraphGetEdges(graph1, nullptr, nullptr, &num_edges1));
-  AT_CUDA_CHECK(cudaGraphGetEdges(graph2, nullptr, nullptr, &num_edges2));
-
-  if (num_edges1 != num_edges2) {
-    TORCH_WARN("graphs_equal: number of edges mismatch: graph1 has ", num_edges1,
-               " edges, graph2 has ", num_edges2, " edges.");
-    return false;
-  }
-
-  for (size_t i = 0; i < num_nodes1; ++i) {
-    cudaGraphNode_t node1 = nodes1[i];
-    cudaGraphNode_t node2 = nodes2[i];
-
-    cudaGraphNodeType type1, type2;
-    AT_CUDA_CHECK(cudaGraphNodeGetType(node1, &type1));
-    AT_CUDA_CHECK(cudaGraphNodeGetType(node2, &type2));
-    if (type1 != type2) {
-      TORCH_WARN("graphs_equal: Node type mismatch at index ", i,
-                 ": graph1 type = ", type1, ", graph2 type = ", type2);
-      return false;
-    }
-
-    if (type1 == cudaGraphNodeTypeKernel) {
-      CUDA_KERNEL_NODE_PARAMS nodeParams1, nodeParams2;
-      AT_CUDA_DRIVER_CHECK(
-          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
-              node1, &nodeParams1));
-      AT_CUDA_DRIVER_CHECK(
-          globalContext().getNVRTC().cuGraphKernelNodeGetParams(
-              node2, &nodeParams2));
-
-      const char* func_name;
-      globalContext().getNVRTC().cuFuncGetName(&func_name, nodeParams1.func);
-
-      const char* func_name2;
-      globalContext().getNVRTC().cuFuncGetName(&func_name2, nodeParams2.func);
-
-      std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
-
-      if (nodeParams1.func != nodeParams2.func) {
-        TORCH_WARN("graphs_equal: Kernel function mismatch at node index ", i,
-                   ": graph1 function pointer = ", nodeParams1.func,
-                   ", graph2 function pointer = ", nodeParams2.func,
-                   " name1 = ", func_name,
-                   " name2 = ", func_name2
-                   );
-        return false;
-      }
-      cudaFunction_t func1 = nodeParams1.func;
-
-      if (nodeParams1.gridDimX != nodeParams2.gridDimX ||
-          nodeParams1.gridDimY != nodeParams2.gridDimY ||
-          nodeParams1.gridDimZ != nodeParams2.gridDimZ) {
-        TORCH_WARN("graphs_equal: Kernel gridDim mismatch at node index ", i);
-        return false;
-      }
-      if (nodeParams1.blockDimX != nodeParams2.blockDimX ||
-          nodeParams1.blockDimY != nodeParams2.blockDimY ||
-          nodeParams1.blockDimZ != nodeParams2.blockDimZ) {
-        TORCH_WARN("graphs_equal: Kernel blockDim mismatch at node index ", i);
-        return false;
-      }
-      if (nodeParams1.sharedMemBytes != nodeParams2.sharedMemBytes) {
-        TORCH_WARN("graphs_equal: Kernel shared memory bytes mismatch at node index ", i,
-                   ": graph1 sharedMemBytes = ", nodeParams1.sharedMemBytes,
-                   ", graph2 sharedMemBytes = ", nodeParams2.sharedMemBytes);
-        return false;
-      }
-
-      if (topological_and_non_pointer_equality_only) {
-        continue;
-      }
-
-      size_t param_offset;
-      size_t param_size;
-
-      ArgumentInformation type_info = get_argument_information(func1);
-      for (size_t param_index = 0;
-           globalContext().getNVRTC().cuFuncGetParamInfo(func1, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
-
-        if (type_info.members.empty()) {
-          if (param_index == 0) {
-            TORCH_WARN("No type information for", func_name);
-          }
-          if (std::memcmp(nodeParams1.kernelParams[param_index],
-                          nodeParams2.kernelParams[param_index],
-                          param_size) != 0) {
-            TORCH_WARN("graphs_equal: Kernel parameter mismatch at node index ", i,
-                       ", parameter index ", param_index, " for function ", func_name);
-            check_differences(nodeParams1.kernelParams[param_index], nodeParams2.kernelParams[param_index], param_size);
-            is_equal_var = false;
-            // return false;
-          }
-        } else {
-          // TORCH_INTERNAL_ASSERT(type_info.at(func_name).size() == 1);
-          if (!is_equal(nodeParams1.kernelParams[param_index],
-                        nodeParams2.kernelParams[param_index],
-                        type_info.members[param_index].second)) {
-
-            std::cout << "graphs_equal: Have type information, but Kernel parameter mismatch at node index " <<  i << "parameter index "<<param_index<<" for function "<<func_name << std::endl;
-
-            // TODO: Double check whether we have a void * "data" field.
-            TORCH_WARN("graphs_equal: Have type information, but Kernel parameter mismatch at node index ", i,
-                       ", parameter index ", param_index, " for function ", func_name);
-            // check_differences(nodeParams1.kernelParams[param_index], nodeParams2.kernelParams[param_index], param_size);
-            // std::vector<ArgumentInformation> type_info_dup = get_argument_information(func1);
-            TORCH_WARN("type info");
-            prettyPrintArgumentInfo(type_info);
-            TORCH_WARN("end type info");
-            is_equal_var = false;
-
-
-            std::cout << "First argument" << std::endl;
-            printHex(nodeParams1.kernelParams[param_index], param_size);
-            std::cout << std::endl;
-            std::cout << "Second argument" << std::endl;
-            printHex(nodeParams2.kernelParams[param_index], param_size);
-            std::cout << std::endl;
-            // return false;
-          }
-        }
-      }
-    } else if (type1 == cudaGraphNodeTypeMemcpy) {
-      if (topological_and_non_pointer_equality_only) {
-        continue;
-      }
-      cudaMemcpy3DParms nodeParams1, nodeParams2;
-      AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node1, &nodeParams1));
-      AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node2, &nodeParams2));
-      if (!is_equal(nodeParams1, nodeParams2)) {
-        return false;
-      }
-    } else if (type1 == cudaGraphNodeTypeMemset) {
-      if (topological_and_non_pointer_equality_only) {
-        continue;
-      }
-      cudaMemsetParams nodeParams1, nodeParams2;
-      AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node1, &nodeParams1));
-      AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node2, &nodeParams2));
-      if (!is_equal(nodeParams1, nodeParams2)) {
-        return false;
-      }
-    } else if (type1 == cudaGraphNodeTypeHost) {
-      // This one is tricky. We don't know how to interpret the void*
-      // userArgs field. We can check that the function is the
-      // same... But we won't be able to, say, mutate any fields
-      // inside of this. How can we handle this one? It is sensible to
-      // see how nccl creates its host nodes, since that is the one
-      // case that pytorch cares about right now...
-      
-      // We know for a fact that nccl always passes the type
-      // ncclKernelPlan as its single argument
-    } else if (type1 == cudaGraphNodeTypeGraph) {
-      // Do recursion, but this case does not exist in pytorch at this time.
-      TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-      // return graphs_equal();
-    } else if (type1 == cudaGraphNodeTypeWaitEvent) {
-      // External events are not used yet in pytorch. The challenge
-      // with it is that we unfortunately cannot assume that both
-      // events are the same. This is a bit funky, since presumably
-      // external events are intended to be passed to other functions,
-      // which will either record or wait on this event. I definitely
-      // need to consider this situation carefully.
-      TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-    } else {
-      TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-    }
-  }
-  // return true;
-  return is_equal_var;
-}
-
-// bool  CUDAGraph::get_differences(cudaGraph_t graph1, cudaGraph_t graph2,
-//                              const std::vector<at::Tensor>& dynamic_tensors1,
-//                              const std::vector<at::Tensor>& dynamic_tensors2) {
-//   TORCH_CHECK(dynamic_tensors1.size() == dynamic_tensors2.size());
-//   TORCH_CHECK(graph1 != graph2);
-
-//   // fill in kernel_param_updates_ and graph_node_param_updates_
-  
-//   size_t num_nodes1;
-//   AT_CUDA_CHECK(cudaGraphGetNodes(graph1, nullptr, &num_nodes1));
-
-//   size_t num_nodes2;
-//   AT_CUDA_CHECK(cudaGraphGetNodes(graph2, nullptr, &num_nodes2));
-
-//   if(num_nodes1 != num_nodes2) {
-//     return false;
-//   }
-
-//   std::vector<cudaGraphNode_t> nodes1(num_nodes1);
-//   AT_CUDA_CHECK(cudaGraphGetNodes(graph1, nodes1.data(), &num_nodes1));
-
-//   std::vector<cudaGraphNode_t> nodes2(num_nodes2);
-//   AT_CUDA_CHECK(cudaGraphGetNodes(graph2, nodes2.data(), &num_nodes2));
-
-//   std::size_t num_edges1, num_edges2;
-//   AT_CUDA_CHECK(cudaGraphGetEdges(graph1, nullptr, nullptr, &num_edges1));
-//   AT_CUDA_CHECK(cudaGraphGetEdges(graph2, nullptr, nullptr, &num_edges2));
-
-//   if (num_edges1 != num_edges2) {
-//     return false;
-//   }
-
-//   for (size_t i = 0; i < num_nodes1; ++i) {
-//     cudaGraphNode_t node1 = nodes1[i];
-//     cudaGraphNode_t node2 = nodes2[i];
-
-//     cudaGraphNodeType type1, type2;
-//     AT_CUDA_CHECK(cudaGraphNodeGetType(node1, &type1));
-//     AT_CUDA_CHECK(cudaGraphNodeGetType(node2, &type2));
-//     if (type1 != type2) {
-//       return false;
-//     }
-
-//     if (type1 == cudaGraphNodeTypeKernel) {
-//       cudaKernelNodeParams nodeParams1, nodeParams2;
-//       AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node1, &nodeParams1));
-//       AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node2, &nodeParams2));
-//       if (nodeParams1.func != nodeParams2.func) {
-//         return false;
-//       }
-//       cudaFunction_t func1;
-//       AT_CUDA_CHECK(cudaGetFuncBySymbol(&func1, nodeParams1.func));
-
-//       const char* func_name;
-//       globalContext().getNVRTC().cuFuncGetName(&func_name, func1);
-
-//       std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
-
-//       if (!dim3_equal(nodeParams1.gridDim, nodeParams2.gridDim)) {
-//         return false;
-//       }
-//       if (!dim3_equal(nodeParams1.blockDim, nodeParams2.blockDim)) {
-//         return false;
-//       }
-//       if (nodeParams1.sharedMemBytes != nodeParams2.sharedMemBytes) {
-//         return false;
-//       }
-
-//       std::cout << "GALVEZ:" << ((float*)nodeParams1.kernelParams[2]) << " " << ((float*)nodeParams1.kernelParams[2] + 1) << std::endl;
-//       std::cout << "GALVEZ:" << ((float*)nodeParams2.kernelParams[2]) << " " << ((float*)nodeParams2.kernelParams[2] + 1) << std::endl;
-
-//       size_t param_offset;
-//       size_t param_size;
-//       for (size_t param_index = 0;
-//            globalContext().getNVRTC().cuFuncGetParamInfo(func1, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
-//         std::cout << "GALVEZ:" << param_index << " " << param_offset << " " << param_size << std::endl;
-
-//         if (std::memcmp(nodeParams1.kernelParams[param_index], nodeParams2.kernelParams[param_index], param_size) != 0) {
-//           return false;
-//         }
-//       }
-//     } else if (type1 == cudaGraphNodeTypeMemcpy) {
-//       cudaMemcpyNodeParams nodeParams1, nodeParams2;
-//       // todo make an llm write the rest of these equality
-//       // comparisons. Does C++ generate == implementations? I don't
-//       // think so. Correct, it doesn't.
-//     } else if (type1 == cudaGraphNodeTypeMemset) {
-      
-//     } else if (type1 == cudaGraphNodeTypeHost) {
-//       // This one is tricky. We don't know how to interpret the void*
-//       // userArgs field. We can check that the function is the
-//       // same... But we won't be able to, say, mutate any fields
-//       // inside of this. How can we handle this one? It is sensible to
-//       // see how nccl creates its host nodes, since that is the one
-//       // case that pytorch cares about right now...
-      
-//       // We know for a fact that nccl always passes the type
-//       // ncclKernelPlan as its single argument
-//     } else if (type1 == cudaGraphNodeTypeGraph) {
-//       // Do recursion, but this case does not exist in pytorch at this time.
-//       TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-//       // return graphs_equal();
-//     } else if (type1 == cudaGraphNodeTypeWaitEvent) {
-//       // External events are not used yet in pytorch. The challenge
-//       // with it is that we unfortunately cannot assume that both
-//       // events are the same. This is a bit funky, since presumably
-//       // external events are intended to be passed to other functions,
-//       // which will either record or wait on this event. I definitely
-//       // need to consider this situation carefully.
-//       TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-//     } else {
-//       TORCH_INTERNAL_ASSERT(false, "Unexpected node type");
-//     }
-//   }
-//   return true;
-// }
-
-
-bool operator==(const CUDAGraph& left, const CUDAGraph& right) {
-    return graphs_equal(left.graph_, right.graph_, false);
-}
-
-bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
-    return !(left == right);
-  }
-
-  // my invariants:
-  
-  // 1. One memory pool per graph. No more sharing memory pools like
-  // cuda graph trees.
 class MemHandleHolder {
 public:
     ~MemHandleHolder() {
@@ -1423,6 +927,11 @@ void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
 }
 
+// these get cleaned up only at process exit, which is not good. I am
+// using these globals because, unfortunately, it is hard to guarantee
+// all tensors allocated by a cuda graph are destroyed by the time
+// that the cuda graph is destroyed. There needs to be a better
+// solution.
 std::vector<std::unique_ptr<DynamicCUDAGraphMemoryAllocator>> allocators;
 std::vector<std::shared_ptr<c10::Allocator>> pluggable_allocators;
 
@@ -1450,7 +959,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   AT_CUDA_CHECK(cudaGraphGetNodes(graph2->graph_, nullptr, &num_nodes2));
   TORCH_CHECK_EQ(num_nodes, num_nodes2);
 
-  TORCH_CHECK(graphs_equal(graph_, graph2->graph_, true), "Graphs are not topologically identical");
+  // TORCH_CHECK(graphs_equal(graph_, graph2->graph_, true), "Graphs are not topologically identical");
   
   std::vector<cudaGraphNode_t> nodes(num_nodes);
   std::vector<cudaGraphNode_t> nodes2(num_nodes2);

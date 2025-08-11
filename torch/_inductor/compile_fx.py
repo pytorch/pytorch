@@ -2320,10 +2320,15 @@ def compile_fx(
                 # original strides
                 _recursive_record_user_visible_output_idxs(gm)
 
+                if config.triton.cudagraphs_elide_input_output_copies:
+                    static_input_idxs = []
+                else:
+                    static_input_idxs = get_static_input_idxs(fixed)
+
                 return inner_compile(
                     gm,
                     example_inputs,
-                    static_input_idxs=get_static_input_idxs(fixed),
+                    static_input_idxs=static_input_idxs,
                     cudagraphs=cudagraphs,
                     graph_id=graph_id,
                     is_inference=is_inference,

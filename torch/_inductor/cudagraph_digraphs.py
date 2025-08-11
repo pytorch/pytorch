@@ -381,6 +381,8 @@ def cudagraphify(
 
     dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs and isinstance(static_inputs[idx], torch.Tensor) and static_inputs[idx].is_cuda])
 
+    segment_sizes_tuples = [(size, ) for size in segment_sizes]
+
     def run(new_inputs):
         # print(f"GALVEZ: running graph: {graph_to_number[id(graph)]=}")
         assert len(static_inputs) == len(new_inputs)
@@ -413,18 +415,20 @@ def cudagraphify(
                 old_tensors.append(new_inputs[idx])
         torch.cuda.nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push("output allocations one at a time")
-        for segment_size, segment_device in zip(segment_sizes, segment_devices):
-            storage_tensor = torch.empty(segment_size, dtype=torch.int8, device=segment_device)
-            dynamic_tensors.append(storage_tensor)
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_push("output allocations one at a time")
+        # for segment_size, segment_device in zip(segment_sizes, segment_devices):
+        #     storage_tensor = torch.empty(segment_size, dtype=torch.int8, device=segment_device)
+        #     dynamic_tensors.append(storage_tensor)
+        # torch.cuda.nvtx.range_pop()
 
-        segment_sizes_tuples = [(size, ) for size in segment_sizes]
+        # segment_sizes_tuples = [(size, ) for size in segment_sizes]
 
-        torch.cuda.nvtx.range_push("output allocations all at once")
-        abc = []
-        abc.extend(torch._C._allocate_tensors(segment_sizes_tuples, segment_devices[0]))
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_push("output allocations all at once")
+        # abc = []
+        # abc.extend(torch._C._allocate_tensors(segment_sizes_tuples, segment_devices[0]))
+        # torch.cuda.nvtx.range_pop()
+
+        dynamic_tensors.extend(torch._C._allocate_tensors(segment_sizes_tuples, torch.device("cuda")))
 
         graph.replay_dynamic(dynamic_tensors)
 
@@ -454,13 +458,13 @@ def cudagraphify(
                                         storage_offset=offset_from_input + input_offset_from_storage,
                                         stride=static_output.stride(),
                                         size=static_output.size())
-                print("GALVEZ: input=", input_idx, "output=", i, "true_output_tensor.data_ptr()=", true_output_tensor.data_ptr(), "input_tensor.data_ptr()=", input_tensor.data_ptr(), f"{static_output.size()=}", f"{input_tensor.size()=}",  f"{true_output_tensor.size()=}", f"{input_tensor.untyped_storage().data_ptr()=}")
-                try:
-                    if offset_from_input == 0:
-                        assert input_tensor.data_ptr() == true_output_tensor.data_ptr()
-                except AssertionError:
-                    import ipdb; ipdb.set_trace()
-                    pass
+                # print("GALVEZ: input=", input_idx, "output=", i, "true_output_tensor.data_ptr()=", true_output_tensor.data_ptr(), "input_tensor.data_ptr()=", input_tensor.data_ptr(), f"{static_output.size()=}", f"{input_tensor.size()=}",  f"{true_output_tensor.size()=}", f"{input_tensor.untyped_storage().data_ptr()=}")
+                # try:
+                #     if offset_from_input == 0:
+                #         assert input_tensor.data_ptr() == true_output_tensor.data_ptr()
+                # except AssertionError:
+                #     import ipdb; ipdb.set_trace()
+                #     pass
 
                 outputs.append(true_output_tensor)
                 continue

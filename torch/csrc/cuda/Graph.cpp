@@ -151,8 +151,6 @@ void THCPGraph_init(PyObject* module) {
             return reinterpret_cast<uintptr_t>(graph);
           },
           py::call_guard<py::gil_scoped_release>())
-      .def(py::self == py::self)
-      .def(py::self != py::self)
       .def(
           "get_mem_allocator",
           torch::wrap_pybind_function_no_gil(

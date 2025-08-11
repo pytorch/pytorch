@@ -415,9 +415,12 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
+// if it is not the case that all three of these hold:
+// or if !a or !b or !c
   if (!(_check_tensors_share_device_and_dtype(
             {self, src}, /* skip_dtype_check */ true) &&
         std::all_of(
+            // all tensors must share the same dtype?  Seriously?
             src.cbegin(),
             src.cend(),
             [&](const auto& t) -> bool {
