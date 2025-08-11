@@ -105,8 +105,42 @@ def run_cmd(
     return proc.returncode
 
 
-def get_env(name: str, default: str = "") -> str:
-    """
-    Get an environment variable with a default fallback.
-    """
-    return os.environ.get(name, default)
+def str2bool(value: Optional[str]) -> bool:
+    """Convert environment variables to boolean values."""
+    if not value:
+        return False
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Expected a string value for boolean conversion, got {type(value)}"
+        )
+    value = value.strip().lower()
+    if value in (
+        "1",
+        "true",
+        "t",
+        "yes",
+        "y",
+        "on",
+        "enable",
+        "enabled",
+        "found",
+    ):
+        return True
+    if value in (
+        "0",
+        "false",
+        "f",
+        "no",
+        "n",
+        "off",
+        "disable",
+        "disabled",
+        "notfound",
+        "none",
+        "null",
+        "nil",
+        "undefined",
+        "n/a",
+    ):
+        return False
+    raise ValueError(f"Invalid string value for boolean conversion: {value}")

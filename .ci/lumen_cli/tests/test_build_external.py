@@ -1,5 +1,6 @@
 import os
 import types
+from pathlib import Path
 
 import pytest
 
@@ -30,7 +31,7 @@ def test_inputs_ok_when_flags_set_and_paths_exist(monkeypatch, tmp_path, mod):
     # stubs
     monkeypatch.setattr(mod, "is_path_exist", lambda p: os.path.exists(p))
     monkeypatch.setattr(mod, "local_image_exists", lambda name: True)
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: os.path.abspath(p))
+    monkeypatch.setattr(mod, "get_path", lambda p: os.path.abspath(p))
 
     # env (your dataclass reads env via get_env default_factory)
     monkeypatch.setenv("USE_TORCH_WHEEL", "1")
@@ -42,17 +43,18 @@ def test_inputs_ok_when_flags_set_and_paths_exist(monkeypatch, tmp_path, mod):
 
     inputs = mod.VllmBuildParameters()
 
+    print("elainewy", inputs.torch_whls_path, os.path.abspath(str(torch_dir)))
     # assert: paths normalized to absolute
-    assert inputs.torch_whls_path == os.path.abspath(str(torch_dir))
-    assert inputs.dockerfile_path == os.path.abspath(str(dockerfile))
-    assert inputs.base_image == "local/image:tag"
+    assert str(inputs.torch_whls_path) == os.path.abspath(str(torch_dir))
+    assert str(inputs.dockerfile_path) == str(os.path.abspath(str(dockerfile)))
+    assert str(inputs.base_image) == "local/image:tag"
 
 
 def test_inputs_raises_when_flag_on_but_missing_path(monkeypatch, mod):
     # torch wheel path check should raise
     monkeypatch.setattr(mod, "is_path_exist", lambda p: False)
     monkeypatch.setattr(mod, "local_image_exists", lambda name: True)
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: p)
+    monkeypatch.setattr(mod, "get_path", lambda p: p)
 
     monkeypatch.setenv("USE_TORCH_WHEEL", "1")
     monkeypatch.setenv("TORCH_WHEELS_PATH", "dist-missing")
@@ -75,7 +77,7 @@ def test_inputs_skip_checks_when_flags_off(monkeypatch, mod):
         "local_image_exists",
         lambda name: called.__setitem__("img", called["img"] + 1),
     )
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: p)
+    monkeypatch.setattr(mod, "get_path", lambda p: p)
 
     monkeypatch.setenv("USE_TORCH_WHEEL", "0")
     monkeypatch.setenv("USE_LOCAL_DOCKERFILE", "0")
@@ -129,7 +131,7 @@ def test_get_base_image_args_remote(monkeypatch, mod):
 def test_get_base_image_args_flag_off(mod):
     r = mod.VllmBuildRunner()
     inputs = types.SimpleNamespace(
-        use_local_base_image="0",
+        use_local_base_image=False,
         base_image="ignored",
     )
     base_arg, final_arg, pull = r._get_base_image_args(inputs)
@@ -138,13 +140,15 @@ def test_get_base_image_args_flag_off(mod):
 
 def test_cp_torch_whls_if_exist_returns_empty_when_flag_off(mod):
     r = mod.VllmBuildRunner()
-    inputs = types.SimpleNamespace(use_torch_whl="0", torch_whls_path="x")
+    inputs = types.SimpleNamespace(use_torch_whl=False, torch_whls_path=Path("ignored"))
     assert r.cp_torch_whls_if_exist(inputs) == ""
 
 
 def test_cp_dockerfile_if_exist_skip_when_flag_off(monkeypatch, mod, capsys):
     r = mod.VllmBuildRunner()
-    inputs = types.SimpleNamespace(use_local_dockerfile="0", dockerfile_path="ignored")
+    inputs = types.SimpleNamespace(
+        use_local_dockerfile=False, dockerfile_path=Path("ignored")
+    )
     # should not raise or call run_cmd
     called = {"run": 0}
     monkeypatch.setattr(mod, "run_cmd", lambda *a, **k: called.__setitem__("run", 1))
@@ -154,7 +158,9 @@ def test_cp_dockerfile_if_exist_skip_when_flag_off(monkeypatch, mod, capsys):
 
 def test_cp_dockerfile_if_exist_raises_when_missing(monkeypatch, mod):
     r = mod.VllmBuildRunner()
-    inputs = types.SimpleNamespace(use_local_dockerfile="1", dockerfile_path="missing")
+    inputs = types.SimpleNamespace(
+        use_local_dockerfile=True, dockerfile_path=Path("missing")
+    )
     monkeypatch.setattr(mod, "is_path_exist", lambda p: False)
     with pytest.raises(FileNotFoundError):
         r.cp_dockerfile_if_exist(inputs)
@@ -170,7 +176,6 @@ def test_generate_docker_build_cmd_includes_expected_flags(monkeypatch, mod):
 
     # Freeze cfg values by overriding VllmDockerBuildArgs() instance
     class FakeCfg:
-        output_dir = "shared"
         target = "export-wheels"
         tag_name = "vllm-wheels"
         cuda = "12.8.1"
@@ -183,11 +188,13 @@ def test_generate_docker_build_cmd_includes_expected_flags(monkeypatch, mod):
     monkeypatch.setattr(mod, "VllmDockerBuildArgs", lambda: FakeCfg)
 
     inputs = types.SimpleNamespace(
-        use_local_base_image="0",
+        use_local_base_image=False,
         base_image="",
+        torch_whls_path=Path("fake"),
+        output_dir=Path("/abs/out"),
     )
 
-    cmd = r._generate_docker_build_cmd(inputs, "/abs/out", "")
+    cmd = r._generate_docker_build_cmd(inputs)
     # Assertions on key pieces
     assert "docker buildx build" in cmd
     assert "--output type=local,dest=/abs/out" in cmd
@@ -205,13 +212,14 @@ def test_generate_docker_build_cmd_includes_base_image_args(monkeypatch, mod):
     # make local_image_exists True path
     monkeypatch.setattr(mod, "local_image_exists", lambda _: True)
     inputs = types.SimpleNamespace(
-        use_local_base_image="1",
+        use_local_base_image=True,
         base_image="local/image:tag",
+        torch_whls_path=Path("fake"),
+        output_dir=Path("shared"),
     )
 
     # Freeze cfg minimal
     class FakeCfg:
-        output_dir = "shared"
         target = "export-wheels"
         tag_name = "t"
         cuda = "12.8.1"
@@ -223,7 +231,7 @@ def test_generate_docker_build_cmd_includes_base_image_args(monkeypatch, mod):
 
     monkeypatch.setattr(mod, "VllmDockerBuildArgs", lambda: FakeCfg)
 
-    cmd = r._generate_docker_build_cmd(inputs, "/abs/out", "tmp")
+    cmd = r._generate_docker_build_cmd(inputs)
     assert "--build-arg BUILD_BASE_IMAGE=local/image:tag" in cmd
     assert "--build-arg FINAL_BASE_IMAGE=local/image:tag" in cmd
     assert "--pull=false" in cmd
@@ -246,11 +254,11 @@ def test_run_smoke(monkeypatch, tmp_path, mod):
 
     monkeypatch.setattr(mod, "clone_vllm", lambda: None)
     monkeypatch.setattr(mod, "ensure_dir_exists", lambda p: None)
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: os.path.abspath(p))
+    monkeypatch.setattr(mod, "get_path", lambda p: os.path.abspath(p))
     monkeypatch.setattr(
         mod.VllmBuildRunner,
         "_generate_docker_build_cmd",
-        lambda self, i, out, w: "echo ok",
+        lambda self, i: "echo ok",
     )
     called = {"run_cmd": 0}
     monkeypatch.setattr(

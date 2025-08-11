@@ -1,28 +1,31 @@
 import logging
 import os
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 from cli.lib.common.cli_helper import BaseRunner
-from cli.lib.common.docker import local_image_exists
+from cli.lib.common.docker_helper import local_image_exists
+from cli.lib.common.envs_helper import env_bool_field, env_path_field, env_str_field
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
     force_create_dir,
-    get_abs_path,
+    get_path,
     is_path_exist,
 )
-from cli.lib.common.utils import get_env, run_cmd
+from cli.lib.common.utils import run_cmd
 
 
 logger = logging.getLogger(__name__)
 
 
-# default path for docker build artifacts
+# Default path for docker build artifacts
 _DEFAULT_RESULT_PATH = "./shared"
 
-# temp folder in vllm to cp torch whls in vllm work directory for docker build
+# Temp folder in vllm work place to cp torch whls in vllm work directory for docker build
 _VLLM_TEMP_FOLDER = "tmp"
 
 
@@ -30,102 +33,80 @@ _VLLM_TEMP_FOLDER = "tmp"
 class VllmBuildParameters:
     """
     Parameters controlling a vLLM build.
-
-    Inputs come primarily from environment variables (see each field's comment).
-    Flags are strings "0"/"1" (not bool). In __post_init__, when a flag is "1",
-    the corresponding resource is validated and (if it’s a path) normalized to
-    an absolute path via get_abs_path(). On failure, FileNotFoundError is raised.
     """
 
-    # --- Pre-build feature flags (string "0"/"1") -----------------------------
-    # USE_TORCH_WHEEL: when "1", use local Torch wheels; requires TORCH_WHEELS_PATH.
+    # USE_TORCH_WHEEL: when true, use local Torch wheels; requires TORCH_WHEELS_PATH.
     #  Otherwise docker build pull torch nightly during build
-    use_torch_whl: str = field(default_factory=lambda: get_env("USE_TORCH_WHEEL", "1"))
+    use_torch_whl: bool = env_bool_field("USE_TORCH_WHEEL", True)
 
-    # USE_LOCAL_BASE_IMAGE: when "1", use an existing local Docker base image; requires BASE_IMAGE
+    # USE_LOCAL_BASE_IMAGE: when true, use an existing local Docker base image; requires BASE_IMAGE
     # Otherwise, pull dockerfile's default image remotely
-    use_local_base_image: str = field(
-        default_factory=lambda: get_env("USE_LOCAL_BASE_IMAGE", "1")
-    )
 
-    # USE_LOCAL_DOCKERFILE: when "1", use a local Dockerfile; requires DOCKERFILE_PATH.
+    use_local_base_image: bool = env_bool_field("USE_LOCAL_BASE_IMAGE", True)
+    # USE_LOCAL_DOCKERFILE: when true("1"), use a local Dockerfile; requires DOCKERFILE_PATH.
     # otherwise, use vllm's default dockerfile.torch_nightly for build
-    use_local_dockerfile: str = field(
-        default_factory=lambda: get_env("USE_LOCAL_DOCKERFILE", "1")
-    )
+    use_local_dockerfile: bool = env_bool_field("USE_LOCAL_DOCKERFILE", True)
 
     # --- Pre-build condition inputs ------------------------------------------
-    # BASE_IMAGE: name:tag (only needed when use_local_base_image == "1")
-    base_image: str = field(default_factory=lambda: get_env("BASE_IMAGE"))
+    # BASE_IMAGE: name:tag (only needed when use_local_base_image is True)
+    base_image: str = env_str_field("BASE_IMAGE")
 
-    # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile == "1"
-    dockerfile_path: str = field(
-        default_factory=lambda: get_env(
-            "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
-        )
+    # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile is True"
+    dockerfile_path: Optional[Path] = env_path_field(
+        "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
     )
 
-    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl == "1"
-    torch_whls_path: str = field(
-        default_factory=lambda: get_env("TORCH_WHEELS_PATH", "./dist")
-    )
+    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
+    torch_whls_path: Optional[Path] = env_path_field("TORCH_WHEELS_PATH", "./dist")
 
     # --- Build output ---------------------------------------------------------
     # output_dir: where docker buildx (local exporter) will write artifacts
-    output_dir: str = field(default_factory=lambda: get_env("output_dir", "shared"))
+    output_dir: Optional[Path] = env_path_field("OUTPUT_DIR", "shared")
 
     def __post_init__(self):
-        print(get_env("TORCH_WHEELS_PATH"))
         checks = [
             (
                 self.use_torch_whl,  # flag
-                "1",  # trigger_value
+                True,  # trigger_value
                 "torch_whls_path",  # resource
                 is_path_exist,  # check_func
                 "torch_whls_path is not provided, but use_torch_whl is set to 1",
-                get_abs_path,
             ),
             (
                 self.use_local_base_image,
-                "1",
+                True,
                 "base_image",
                 local_image_exists,
                 f"base_image {self.base_image} does not found, but use_local_base_image is set to 1",
-                None,
             ),
             (
                 self.use_local_dockerfile,
-                "1",
+                True,
                 "dockerfile_path",
                 is_path_exist,
                 "dockerfile path does not found, but use_local_dockerfile is set to 1",
-                get_abs_path,
             ),
         ]
-        for flag, trigger_value, attr_name, check_func, error_msg, handler in checks:
+        for flag, trigger_value, attr_name, check_func, error_msg in checks:
             value = getattr(self, attr_name)
             if flag == trigger_value:
                 if not value or not check_func(value):
                     raise FileNotFoundError(error_msg)
-                if handler:
-                    setattr(self, attr_name, handler(value))
             else:
                 logger.info("flag  %s is not set", flag)
 
 
 @dataclass
 class VllmDockerBuildArgs:
-    output_dir: str = field(default_factory=lambda: get_env("output_dir", "shared"))
-    target: str = field(default_factory=lambda: get_env("TARGET", "export-wheels"))
-    tag_name: str = field(default_factory=lambda: get_env("TAG", "vllm-wheels"))
-    cuda: str = field(default_factory=lambda: get_env("CUDA_VERSION", "12.8.1"))
-    py: str = field(default_factory=lambda: get_env("PYTHON_VERSION", "3.12"))
-    max_jobs: str = field(default_factory=lambda: get_env("MAX_JOBS", "64"))
-    sccache_bucket: str = field(default_factory=lambda: get_env("SCCACHE_BUCKET"))
-    sccache_region: str = field(default_factory=lambda: get_env("SCCACHE_REGION"))
-    torch_cuda_arch_list: str = field(
-        default_factory=lambda: get_env("TORCH_CUDA_ARCH_LIST", "8.0")
-    )
+    output_dir: Optional[Path] = env_path_field("output_dir", "shared")
+    target: str = env_str_field("TARGET", "export-wheels")
+    tag_name: str = env_str_field("TAG", "vllm-wheels")
+    cuda: str = env_str_field("CUDA_VERSION", "12.8.1")
+    py: str = env_str_field("PYTHON_VERSION", "3.12")
+    max_jobs: str = env_str_field("MAX_JOBS", "64")
+    sccache_bucket: str = env_str_field("SCCACHE_BUCKET")
+    sccache_region: str = env_str_field("SCCACHE_REGION")
+    torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
 
 class VllmBuildRunner(BaseRunner):
@@ -158,41 +139,43 @@ class VllmBuildRunner(BaseRunner):
         self.cp_dockerfile_if_exist(inputs)
 
         # cp torch wheels from root direct to vllm workspace if exist
-        torch_whl_path = self.cp_torch_whls_if_exist(inputs)
+        self.cp_torch_whls_if_exist(inputs)
 
         ensure_dir_exists(inputs.output_dir)
-        output_path = get_abs_path(inputs.output_dir)
 
-        cmd = self._generate_docker_build_cmd(inputs, output_path, torch_whl_path)
+        cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
         run_cmd(cmd, cwd="vllm", env=os.environ.copy())
 
-    def cp_torch_whls_if_exist(self, inputs) -> str:
-        if inputs.use_torch_whl != "1":
+    def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
+        if not inputs.use_torch_whl:
             return ""
 
-        if not inputs.torch_whls_path or not is_path_exist(inputs.torch_whls_path):
+        if not inputs.torch_whls_path or not inputs.torch_whls_path.exists():
             raise FileNotFoundError(
                 "torch whl path is not provided, but use_torch_whl is set to 1"
             )
-        torch_whl_path = get_abs_path(inputs.torch_whls_path)
 
         tmp_dir = f"./{self.work_directory}/{_VLLM_TEMP_FOLDER}"
-        force_create_dir(tmp_dir)
-        copy(torch_whl_path, tmp_dir)
+        tmp_path = Path(tmp_dir)
+        force_create_dir(tmp_path)
+        copy(inputs.torch_whls_path, tmp_dir)
         return tmp_dir
 
-    def cp_dockerfile_if_exist(self, inputs):
-        if inputs.use_local_dockerfile == "0":
+    def cp_dockerfile_if_exist(self, inputs: VllmBuildParameters):
+        if not inputs.use_local_dockerfile:
             logger.info("using vllm default dockerfile.torch_nightly for build")
             return
 
-        if not inputs.dockerfile_path or not is_path_exist(inputs.dockerfile_path):
+        if not inputs.dockerfile_path or not inputs.dockerfile_path.exists():
             raise FileNotFoundError(
-                "dockerfile is not found, but use_local_dockerfile is set to 1"
+                "dockerfile is not found, but USE_LOCAL_DOCKERFILE env var is set to `true`"
             )
-        dockerfile_path = get_abs_path(inputs.dockerfile_path)
-        copy(dockerfile_path, "./vllm/docker/Dockerfile.nightly_torch")
+        dockerfile_path = get_path(inputs.dockerfile_path, full_path=True)
+        vllm_torch_dockerfile = Path(
+            f"./{self.work_directory}/docker/Dockerfile.nightly_torch"
+        )
+        copy(dockerfile_path, vllm_torch_dockerfile)
 
     def get_result_path(self, path):
         """
@@ -200,10 +183,10 @@ class VllmBuildRunner(BaseRunner):
         """
         if not path:
             path = _DEFAULT_RESULT_PATH
-        abs_path = get_abs_path(path)
+        abs_path = get_path(path, full_path=True)
         return abs_path
 
-    def _get_torch_wheel_path_arg(self, torch_whl_dir: str) -> str:
+    def _get_torch_wheel_path_arg(self, torch_whl_dir: Optional[Path]) -> str:
         if not torch_whl_dir:
             return ""
         return f"--build-arg TORCH_WHEELS_PATH={_VLLM_TEMP_FOLDER}"
@@ -215,7 +198,7 @@ class VllmBuildRunner(BaseRunner):
             - final_base_image_arg:  docker buildx arg string for vllm-base stage
             - pull_flag: --pull=true or --pull=false depending on whether the image exists locally
         """
-        if inputs.use_local_base_image == "0":
+        if not inputs.use_local_base_image:
             return "", "", ""
 
         base_image = inputs.base_image
@@ -225,7 +208,6 @@ class VllmBuildRunner(BaseRunner):
         final_base_image_arg = f"--build-arg FINAL_BASE_IMAGE={base_image}"
 
         if local_image_exists(base_image):
-            logger.info("[INFO] Found local image:%s", {base_image})
             pull_flag = "--pull=false"
             return base_image_arg, final_base_image_arg, pull_flag
         logger.info(
@@ -236,19 +218,17 @@ class VllmBuildRunner(BaseRunner):
     def _generate_docker_build_cmd(
         self,
         inputs: VllmBuildParameters,
-        output_dir: str,
-        torch_whl_path: str,
     ) -> str:
         cfg = VllmDockerBuildArgs()
         base_image_arg, final_base_image_arg, pull_flag = self._get_base_image_args(
             inputs
         )
-        torch_arg = self._get_torch_wheel_path_arg(torch_whl_path)
+        torch_arg = self._get_torch_wheel_path_arg(inputs.torch_whls_path)
 
         return textwrap.dedent(
             f"""
             docker buildx build \
-                --output type=local,dest={output_dir} \
+                --output type=local,dest={inputs.output_dir} \
                 -f docker/Dockerfile.nightly_torch \
                 {pull_flag} \
                 {torch_arg} \
