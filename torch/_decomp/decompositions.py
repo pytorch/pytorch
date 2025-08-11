@@ -721,10 +721,7 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     ndim = self.dim()
     if ndim == 0:
@@ -739,22 +736,22 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if guard_size_oblivious(start_val < 0):
+    if start_val < 0:
         start_val += sizes[dim]
 
-    if guard_size_oblivious(end_val < 0):
+    if end_val < 0:
         end_val += sizes[dim]
 
-    if guard_size_oblivious(start_val < 0):
+    if start_val < 0:
         start_val = 0
-    elif guard_size_oblivious(start_val > sizes[dim]):
+    elif start_val > sizes[dim]:
         start_val = sizes[dim]
 
     if statically_known_true(end_val == sys.maxsize):
         end_val = sizes[dim]
-    elif guard_size_oblivious(end_val < start_val):
+    elif end_val < start_val:
         end_val = start_val
-    elif guard_size_oblivious(end_val > sizes[dim]):
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
