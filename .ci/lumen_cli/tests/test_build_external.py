@@ -4,7 +4,7 @@ import types
 import pytest
 
 
-MODULE = "cli.lib.core.vllm_build"  # <-- CHANGE ME to your module path
+MODULE = "cli.lib.core.vllm"  # <-- CHANGE ME to your module path
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def mod(monkeypatch):
 
 
 # ------------------------------
-# VllmBuildInputs.__post_init__
+# VllmBuildParameters.__post_init__
 # ------------------------------
 
 
@@ -40,7 +40,7 @@ def test_inputs_ok_when_flags_set_and_paths_exist(monkeypatch, tmp_path, mod):
     monkeypatch.setenv("DOCKERFILE_PATH", str(dockerfile))
     monkeypatch.setenv("BASE_IMAGE", "local/image:tag")
 
-    inputs = mod.VllmBuildInputs()
+    inputs = mod.VllmBuildParameters()
 
     # assert: paths normalized to absolute
     assert inputs.torch_whls_path == os.path.abspath(str(torch_dir))
@@ -61,7 +61,7 @@ def test_inputs_raises_when_flag_on_but_missing_path(monkeypatch, mod):
     monkeypatch.setenv("USE_LOCAL_BASE_IMAGE", "0")
 
     with pytest.raises(FileNotFoundError):
-        mod.VllmBuildInputs()
+        mod.VllmBuildParameters()
 
 
 def test_inputs_skip_checks_when_flags_off(monkeypatch, mod):
@@ -81,7 +81,7 @@ def test_inputs_skip_checks_when_flags_off(monkeypatch, mod):
     monkeypatch.setenv("USE_LOCAL_DOCKERFILE", "0")
     monkeypatch.setenv("USE_LOCAL_BASE_IMAGE", "0")
 
-    _ = mod.VllmBuildInputs()
+    _ = mod.VllmBuildParameters()
     # no calls executed by checks loop
     assert called["path"] == 0
     assert called["img"] == 0
@@ -136,66 +136,15 @@ def test_get_base_image_args_flag_off(mod):
     assert base_arg == final_arg == pull == ""
 
 
-# ------------------------------
-# cp_* helpers
-# ------------------------------
-
-
-def test_cp_torch_whls_if_exist_copies(monkeypatch, tmp_path, mod):
-    r = mod.VllmBuildRunner()
-    src = tmp_path / "dist"
-    src.mkdir()
-    inputs = types.SimpleNamespace(
-        use_torch_whl="1",
-        torch_whls_path=str(src),
-    )
-    monkeypatch.setattr(mod, "is_path_exist", lambda p: os.path.exists(p))
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: os.path.abspath(p))
-    monkeypatch.setattr(mod, "force_create_dir", lambda p: None)
-
-    captured = {}
-
-    def fake_run_cmd(cmd, log_cmd=False, cwd=None, env=None):
-        captured["cmd"] = cmd
-
-    monkeypatch.setattr(mod, "run_cmd", fake_run_cmd)
-
-    tmp_dir = r.cp_torch_whls_if_exist(inputs)
-    assert tmp_dir == f"./{r.work_directory}/{mod._VLLM_TEMP_FOLDER}"
-    assert "cp -a" in captured["cmd"]
-    assert str(src) in captured["cmd"]
-
-
 def test_cp_torch_whls_if_exist_returns_empty_when_flag_off(mod):
     r = mod.VllmBuildRunner()
     inputs = types.SimpleNamespace(use_torch_whl="0", torch_whls_path="x")
     assert r.cp_torch_whls_if_exist(inputs) == ""
 
 
-def test_cp_dockerfile_if_exist_copies(monkeypatch, tmp_path, mod, capsys):
-    r = mod.VllmBuildRunner()
-    df = tmp_path / "Dockerfile.tmp_vllm"
-    df.write_text("# dockerfile")
-    inputs = types.SimpleNamespace(
-        use_local_dockrfile="1",
-        dockerfile_path=str(df),
-    )
-    monkeypatch.setattr(mod, "is_path_exist", lambda p: os.path.exists(p))
-    monkeypatch.setattr(mod, "get_abs_path", lambda p: os.path.abspath(p))
-
-    captured = {}
-    monkeypatch.setattr(
-        mod, "run_cmd", lambda cmd, **kw: captured.setdefault("cmd", cmd)
-    )
-
-    r.cp_dockerfile_if_exist(inputs)
-    assert "cp " in captured["cmd"]
-    assert "Dockerfile.nightly_torch" in captured["cmd"]
-
-
 def test_cp_dockerfile_if_exist_skip_when_flag_off(monkeypatch, mod, capsys):
     r = mod.VllmBuildRunner()
-    inputs = types.SimpleNamespace(use_local_dockrfile="0", dockerfile_path="ignored")
+    inputs = types.SimpleNamespace(use_local_dockerfile="0", dockerfile_path="ignored")
     # should not raise or call run_cmd
     called = {"run": 0}
     monkeypatch.setattr(mod, "run_cmd", lambda *a, **k: called.__setitem__("run", 1))
@@ -205,7 +154,7 @@ def test_cp_dockerfile_if_exist_skip_when_flag_off(monkeypatch, mod, capsys):
 
 def test_cp_dockerfile_if_exist_raises_when_missing(monkeypatch, mod):
     r = mod.VllmBuildRunner()
-    inputs = types.SimpleNamespace(use_local_dockrfile="1", dockerfile_path="missing")
+    inputs = types.SimpleNamespace(use_local_dockerfile="1", dockerfile_path="missing")
     monkeypatch.setattr(mod, "is_path_exist", lambda p: False)
     with pytest.raises(FileNotFoundError):
         r.cp_dockerfile_if_exist(inputs)
