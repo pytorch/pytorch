@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <string>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -30,9 +31,7 @@ namespace pybind11::detail {
     }                                                                     \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(torch::Tensor, Tensor);
-// NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
 ITEM_TYPE_CASTER(std::shared_ptr<torch::nn::Module>, Module);
 } // namespace pybind11::detail
 
@@ -42,7 +41,7 @@ template <typename T>
 void bind_ordered_dict(py::module module, const char* dict_name) {
   using ODict = OrderedDict<std::string, T>;
   // clang-format off
-  py::class_<ODict>(module, dict_name)
+  py::class_<ODict>(std::move(module), dict_name)
       .def("items", &ODict::items)
       .def("keys", &ODict::keys)
       .def("values", &ODict::values)
