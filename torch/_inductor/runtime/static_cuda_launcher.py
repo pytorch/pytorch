@@ -3,7 +3,7 @@ import os
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel, knobs
+from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -47,12 +47,12 @@ class StaticallyLaunchedCudaKernel:
 
         self.hash = kernel.hash
 
-        if knobs is None:
+        if triton_knobs is None:
             launch_enter = kernel.__class__.launch_enter_hook
             launch_exit = kernel.__class__.launch_exit_hook
         else:
-            launch_enter = knobs.runtime.launch_enter_hook
-            launch_exit = knobs.runtime.launch_exit_hook
+            launch_enter = triton_knobs.runtime.launch_enter_hook
+            launch_exit = triton_knobs.runtime.launch_exit_hook
 
         if launch_enter is not None or launch_exit is not None:
             raise NotImplementedError(
@@ -63,16 +63,21 @@ class StaticallyLaunchedCudaKernel:
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
 
+        def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
+            if hasattr(kernel.metadata, param_name):
+                if getattr(kernel.metadata, param_name) > 0:
+                    raise NotImplementedError(
+                        f"{scratch_name} scratch not yet supported"
+                    )
+                return True
+            return False
+
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
         # Inductor never uses this field or enables it, but we still have to pass
         # an extra None into the set of params if its enabled
-        if hasattr(kernel.metadata, "global_scratch_size"):
-            if kernel.metadata.global_scratch_size > 0:
-                raise NotImplementedError("Global scratch not yet supported")
-            else:
-                self.has_global_scratch = True
-        else:
-            self.has_global_scratch = False
+        self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
+        # same situation for profile scratch - triton-lang/triton#7258
+        self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
@@ -214,12 +219,12 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # Add a None if triton wants an extra parameter to the cubin
-        if self.has_global_scratch:
-            arg_tys = self.arg_tys + "O"
-            args = (*args, None)
-        else:
-            arg_tys = self.arg_tys
+        # Add a None if triton wants extra parameters for scratch spaces
+        arg_tys = self.arg_tys
+        for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
+            if has_scratch:
+                arg_tys = arg_tys + "O"
+                args = (*args, None)
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so

@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from typing_extensions import Protocol, runtime_checkable
 
 import onnx
 

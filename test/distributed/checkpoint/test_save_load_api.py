@@ -5,7 +5,7 @@ from unittest.mock import patch
 import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (

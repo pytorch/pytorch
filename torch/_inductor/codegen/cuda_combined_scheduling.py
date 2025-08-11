@@ -60,6 +60,10 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> bool:
         if self._cuda_cpp_scheduling.can_fuse_vertical(node1, node2):
             return True
+        elif self._cuda_cpp_scheduling.is_cuda_cpp_template(
+            node1
+        ) or self._cuda_cpp_scheduling.is_cuda_cpp_template(node2):
+            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -120,10 +124,13 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.benchmark_codegened_module(module)
 
     def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[Any], benchmark_kernel: bool = False
+        self,
+        nodes: Sequence[Any],
+        benchmark_kernel: bool = False,
+        hint_override: Optional[int] = None,
     ) -> str:
         return self._triton_scheduling.generate_kernel_code_from_nodes(
-            nodes, benchmark_kernel
+            nodes, benchmark_kernel, hint_override=hint_override
         )
 
     def benchmark_combo_kernel(

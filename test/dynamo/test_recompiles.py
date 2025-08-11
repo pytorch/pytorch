@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
@@ -394,7 +393,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @expectedFailure  # TODO(laithsakka, pianpwk): handle guard_or_false before oblivious hint fallback
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
         counter = torch._dynamo.testing.CompileCounter()
@@ -500,6 +498,29 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         Foo.__call__ = lambda self, x: x + 2
         f(x, foo1)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_no_recompile_over_unused_objects(self):
+        # This is a regression test case that imitates
+        # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x, key, patches):
+            return x * x + 1
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def apply_patches(f, x, keys):
+            patches = []
+            for key, patch in keys:  # noqa: F402
+                patches.append(patch)
+            x = f(x, key, patches)
+            return x
+
+        # no recompilation
+        x = torch.rand(10)
+        apply_patches(f, x, [("a", 1), ("b", 2)])
+        self.assertEqual(counter.frame_count, 1)
+        apply_patches(f, x, [("c", 3), ("d", 4)])
+        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

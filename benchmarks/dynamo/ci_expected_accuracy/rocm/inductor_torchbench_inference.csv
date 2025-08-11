@@ -174,7 +174,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,pass,5
+hf_T5_generate,pass,3
 
 
 
@@ -370,7 +370,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,pass,20
 
 
 
