@@ -2191,7 +2191,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or dense_indexing
             or self._load_mask is not None
         ) and index != 0
-
+        
         have_dense = True
         have_loop_vars = False
         dense_mask_vars: OrderedSet[str] = OrderedSet()
@@ -2423,10 +2423,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         expand_shape: BlockShapeType = None
         index_str = self.index_to_str(index)
         if isinstance(index, sympy.Integer):
-            if (
-                self.inside_reduction
-                and self.is_native_matmul
-            ):
+            if self.inside_reduction and self.is_native_matmul:
                 # Consider the following code:
                 #
                 # tmp0 = tl.load(in_ptr0 + y0)
@@ -2434,17 +2431,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # tmp2 = tmp0 + tmp1
                 # tmp3 = tmp0 < 0
                 # tmp4 = tl.where(tmp3, tmp2, tmp0)
-                # x1 = xindex
-                # acc = tl.full([YBLOCK, XBLOCK], 0, tl.float32)
-                #
-                # for r_offset in range(0, r0_numel, R0_BLOCK):
-                #     r = r_offset + r0_base
-                #     a = tl.load(in_ptr2 + (x1 + 128 * r))
-                #     b = tl.load(in_ptr1 + (r + 128 * tmp4))
-                #     dot = tl.dot(
-                #         tl.reshape(b, [YBLOCK, R0_BLOCK]),
-                #         tl.trans(tl.reshape(a, [XBLOCK, R0_BLOCK]))
-                #     )
+                # a = tl.load(in_ptr1 + (r + 128 * tmp4))
+                # b = tl.load(in_ptr2 + (x + 128 * r))
+                # tmp5 = tl.dot(
+                #     tl.reshape(a, [YBLOCK, R0_BLOCK]),
+                #     tl.trans(tl.reshape(b, [XBLOCK, R0_BLOCK]))
+                # )
                 #
                 # This handles an indirect matmul: A[y, :] @ B
                 # To deal with negative indices in the indirection,
@@ -2478,10 +2470,37 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         if need_dense and not have_dense:
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            expand_shape = None if copy_shape else tuple(self.dense_size_list())
-            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
-            mask_vars = dense_mask_vars
+            if self.inside_reduction and self.is_native_matmul:
+                # TODO : Once shape propagation PR landed, replace this with that
+                mask_shape = mask_vars.copy()
+                if self._load_mask:
+                    mask_shape.add(self._load_mask)
+                
+                xyzr = OrderedSet(["xmask", "ymask", "zmask", "r0_mask"])
+                while not mask_shape.issubset(xyzr):
+                    tmp_masks = mask_shape.difference(xyzr)
+                    tmp = tmp_masks.pop()
+                    assert isinstance(tmp, TritonCSEVariable)
+                    mask_shape.discard(tmp)
+                    mask_shape.update(tmp.mask_vars)
+                
+                # e.g., expand_list becomes ['ZBLOCK', 1, 1, 'R0_BLOCK']
+                expand_list = [1] * len(self.dense_size_list())
+                for mask in mask_shape:
+                    assert isinstance(mask, str)
+                    for tree in self.active_range_trees():
+                        if mask.startswith(tree.prefix):
+                            dim = tree.tensor_dim
+                            expand_list[dim] = self.dense_size_list()[dim]
+
+                expand_str = "[" + ",".join(map(str, expand_list)) + "]"
+                expand_shape = tuple(map(str, expand_list))
+                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+            else:
+                expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+                expand_shape = None if copy_shape else tuple(self.dense_size_list())
+                index_str = f"tl.broadcast_to({index_str}, {expand_str})"
+                mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
             index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
             mask_vars = dense_mask_vars
