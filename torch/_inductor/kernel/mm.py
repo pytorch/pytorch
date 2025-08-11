@@ -17,7 +17,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import V
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config
@@ -730,10 +729,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            from torch._dispatch.python import enable_python_dispatcher
-
-            from ..decomposition import select_decomp_table
-
             k_splits = get_k_splits(m, n, k)
             for k_split in k_splits:
                 if not V.graph.sizevars.statically_known_true(
@@ -741,21 +736,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 ):
                     continue
 
-                with enable_python_dispatcher():
-                    decompositions = select_decomp_table()
-
-                    decompose_k_subgraph_template = SubgraphTemplate(
-                        name=f"decompose_k_mm_{k_split}_split",
-                        make_fx_graph=make_fx(
-                            functools.partial(decomposeK, k_splits=k_split),
-                            decompositions,
-                        ),
-                    )
+                decompose_k_subgraph_template = SubgraphTemplate(
+                    name=f"decompose_k_mm_{k_split}_split",
+                    func=decomposeK,
+                )
 
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
+                    k_splits=k_split,
                 )
 
     if (

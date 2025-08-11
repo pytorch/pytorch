@@ -1,11 +1,14 @@
+import functools
 import itertools
 import logging
 from typing import Any, Callable, Union
 
 import torch
 import torch._inductor.config as config
+from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.ir import (
     Buffer,
     get_free_symbols,
@@ -17,6 +20,7 @@ from torch._inductor.ir import (
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 log = logging.getLogger(__name__)
@@ -168,7 +172,7 @@ class SubgraphTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        make_fx_graph: Callable[..., Any],
+        func: Callable[..., Any],
     ):
         """
         Initialize a subgraph template.
@@ -178,7 +182,7 @@ class SubgraphTemplate(KernelTemplate):
             graph: The FX graph
         """
         self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
-        self.make_fx_graph = make_fx_graph
+        self.func = func
 
     def generate(  # type: ignore[override]
         self,
@@ -199,10 +203,17 @@ class SubgraphTemplate(KernelTemplate):
             SubgraphChoiceCaller: A callable object that can be used for autotuning
         """
 
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            make_fx_graph = make_fx(
+                functools.partial(self.func, **kwargs),
+                decompositions,
+            )
+
         return SubgraphChoiceCaller(
             name=self.name,
             input_nodes=input_nodes,
             layout=layout,
             description="",
-            make_fx_graph=self.make_fx_graph,
+            make_fx_graph=make_fx_graph,
         )
