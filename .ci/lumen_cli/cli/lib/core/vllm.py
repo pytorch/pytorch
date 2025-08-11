@@ -7,6 +7,7 @@ from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker import local_image_exists
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.path_helper import (
+    copy,
     ensure_dir_exists,
     force_create_dir,
     get_abs_path,
@@ -66,7 +67,7 @@ class VllmBuildParameters:
 
     # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl == "1"
     torch_whls_path: str = field(
-        default_factory=lambda: get_env("TORCH_WHEELS_PATH", "dist")
+        default_factory=lambda: get_env("TORCH_WHEELS_PATH", "./dist")
     )
 
     # --- Build output ---------------------------------------------------------
@@ -74,13 +75,14 @@ class VllmBuildParameters:
     output_dir: str = field(default_factory=lambda: get_env("output_dir", "shared"))
 
     def __post_init__(self):
+        print(get_env("TORCH_WHEELS_PATH"))
         checks = [
             (
                 self.use_torch_whl,  # flag
                 "1",  # trigger_value
                 "torch_whls_path",  # resource
                 is_path_exist,  # check_func
-                "torch whl path is not provided, but use_torch_whl is set to 1",
+                "torch_whls_path is not provided, but use_torch_whl is set to 1",
                 get_abs_path,
             ),
             (
@@ -177,7 +179,7 @@ class VllmBuildRunner(BaseRunner):
 
         tmp_dir = f"./{self.work_directory}/{_VLLM_TEMP_FOLDER}"
         force_create_dir(tmp_dir)
-        run_cmd(f"cp -a {torch_whl_path}/. {tmp_dir}", log_cmd=True)
+        copy(torch_whl_path, tmp_dir)
         return tmp_dir
 
     def cp_dockerfile_if_exist(self, inputs):
@@ -190,9 +192,7 @@ class VllmBuildRunner(BaseRunner):
                 "dockerfile is not found, but use_local_dockerfile is set to 1"
             )
         dockerfile_path = get_abs_path(inputs.dockerfile_path)
-        run_cmd(
-            f"cp {dockerfile_path} ./vllm/docker/Dockerfile.nightly_torch",
-        )
+        copy(dockerfile_path, "./vllm/docker/Dockerfile.nightly_torch")
 
     def get_result_path(self, path):
         """

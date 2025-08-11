@@ -2,9 +2,10 @@
 name = "torch-ci"
 version = "0.1.0"
 dependencies = [
-    "pyyaml>=6.0",
-    "GitPython>=3.1.45",
-    "docker"
+    "pyyaml==6.0.2",
+    "GitPython==3.1.45",
+    "docker==7.1.0",
+    "pytest==8.3.5",
 ]
 
 [tool.setuptools]
