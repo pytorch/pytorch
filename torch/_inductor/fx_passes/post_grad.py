@@ -575,10 +575,41 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             ]
 
             while_loop_operands = (loop_idx, ys_outs, init, xs)
-            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+
             _, operands_and_additional_inputs_spec = pytree.tree_flatten(
                 (*while_loop_operands, additional_inputs)
             )
+            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+
+            # Step 1.1: handle tensor aliasing issues caused by CSE (Common Subexpression Elimination) pass:
+            #
+            # Problem scenario:
+            # 1. During scan's backward pass, zero tensors are allocated to store gradients for init values
+            # 2. CSE pass deduplicates identical aten.full calls (same shape/dtype), causing multiple
+            #    variables to reference the same tensor storage
+            # 3. This creates aliasing between scan inputs that should be independent
+            # 4. When lowered to while_loop, the same buffer gets reused for both inputs and outputs,
+            #    leading to silent correctness issues
+            #
+            # We lone any tensor that shares storage with a previously seen tensor.
+
+            from torch.multiprocessing.reductions import StorageWeakRef
+
+            flat_operands_no_aliasing = []
+            seen_storage_ids: OrderedSet[StorageWeakRef] = OrderedSet()
+
+            for operand in flat_operands:
+                if isinstance(operand, torch.Tensor):
+                    storage_id = StorageWeakRef(operand._typed_storage())
+
+                    if storage_id in seen_storage_ids:
+                        flat_operands_no_aliasing.append(operand.clone())
+                    else:
+                        # First time seeing this storage - track it and use original tensor
+                        seen_storage_ids.add(storage_id)
+                        flat_operands_no_aliasing.append(operand)
+                else:
+                    flat_operands_no_aliasing.append(operand)
 
             # Step 2: create the cond_fn and body_fn for while_loop
             def cond_fn(*flat_args):
@@ -611,7 +642,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 torch.ops.higher_order.while_loop(
                     cond_fn,
                     body_fn,
-                    tuple(flat_operands),
+                    tuple(flat_operands_no_aliasing),
                     tuple(additional_inputs),
                 ),
                 operands_spec,
