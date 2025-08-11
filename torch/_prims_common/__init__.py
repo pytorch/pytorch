@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from collections.abc import Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
@@ -276,19 +276,25 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         return True
 
     expected_stride = 1
+    expected_stride_max = 1
+
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
 
-        if maybe_guard_or_true(y != expected_stride):
+        if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
+            y != expected_stride_max
+        ):
             return False
 
-        # if x is 0 then a is contiguous anyway. So in the check above for non-contiguity condition we can
-        # can assume x is not 0 in expected_stride equation. This make the check consistent with
-        # make_contiguous_strides_for. If we make a tensor and used strides from make_contiguous_strides_for
-        # and then called definitely_contiguous we should get True.
-        expected_stride *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
+        #  We symbolically check both paths to maximize the cases where this function
+        #  returns true. This is because make_contiguous_strides_for adds the max
+        #  symbolically, and in some other situations the max might not be there.
+        #  And we want to ensure we return true in both cases.
+        expected_stride_max *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
+
+        expected_stride *= x
 
     return True
 
@@ -385,22 +391,22 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     )
 
 
-def definitely_contiguous(a: TensorLikeType) -> bool:
+def is_contiguous_or_false(a: TensorLikeType) -> bool:
     return is_contiguous(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_2d but return false on data dependency.
-def definitely_channels_last_contiguous_2d(a: Tensor) -> bool:
+def is_channels_last_contiguous_or_false_2d(a: Tensor) -> bool:
     return is_channels_last_contiguous_2d(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_3d but return false on data dependency.
-def definitely_channels_last_contiguous_3d(a: Tensor) -> bool:
+def is_channels_last_contiguous_or_false_3d(a: Tensor) -> bool:
     return is_channels_last_contiguous_3d(a, false_if_dde=True)
 
 
 # similar to is_contiguous_for_memory_format but return false on data dependency.
-def definitely_contiguous_for_memory_format(  # type: ignore[return]
+def contiguous_for_memory_format_or_false(  # type: ignore[return]
     a: Tensor, *, memory_format: torch.memory_format
 ) -> bool:
     return is_contiguous_for_memory_format(
@@ -426,10 +432,10 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
 
 
 # similar to is_channels_last_contiguous but return false on data dependency.
-def definitely_channels_last_contiguous(a: Tensor) -> bool:
-    return definitely_channels_last_contiguous_2d(
+def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
+    return is_channels_last_contiguous_or_false_2d(
         a
-    ) or definitely_channels_last_contiguous_3d(a)
+    ) or is_channels_last_contiguous_or_false_3d(a)
 
 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:
@@ -440,13 +446,16 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_size_oblivious,
+    )
 
     if a.is_sparse:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if definitely_contiguous(a) or definitely_channels_last_contiguous(a):
+    if is_contiguous_or_false(a) or is_channels_last_contiguous_or_false(a):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
@@ -485,7 +494,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if guard_size_oblivious(length == 1):
+        if guard_or_false(length == 1):
             continue
 
         if guard_size_oblivious(stride != expected_stride):
@@ -541,10 +550,10 @@ def compute_elementwise_output_logical_to_physical_perm(
     is_contiguous = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and definitely_contiguous_for_memory_format(
+        is_contiguous = is_contiguous and contiguous_for_memory_format_or_false(
             t, memory_format=torch.contiguous_format
         )
-        is_channels_last = is_channels_last and definitely_contiguous_for_memory_format(
+        is_channels_last = is_channels_last and contiguous_for_memory_format_or_false(
             t, memory_format=torch.channels_last
         )
 
@@ -2081,7 +2090,9 @@ def alert_not_deterministic(caller: str):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+    def get_torch_state_as_tuple(
+        fake_mode: AbstractContextManager[Any] = nullcontext(),
+    ):
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA not available")
 

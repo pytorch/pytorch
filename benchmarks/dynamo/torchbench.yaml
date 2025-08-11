@@ -55,6 +55,10 @@ tolerance:
     - drq
     - hf_Whisper
 
+  # These models need higher tolerance for xpu devices with bf16
+  higher_bf16_xpu:
+    - squeezenet1_1
+
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
     # the conv-batchnorm fusion used under freezing may cause relatively
@@ -208,6 +212,12 @@ skip:
       - stable_diffusion_text_encoder
       - llava
       - moco
+
+    # Skip these additional models when running on aarch64
+    cpu_aarch64:
+      # timeout on aarch64
+      - timm_regnet
+      - timm_nfnet
 
     cuda: []
 

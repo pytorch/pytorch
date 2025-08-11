@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/nativert/executor/memory/Bump.h>
+#include <torch/nativert/executor/memory/DisjointStorageGroups.h>
 #include <torch/nativert/executor/memory/GreedyBySize.h>
 
 using namespace ::testing;
@@ -60,4 +61,26 @@ TEST(LayoutPlannerAlgorithmTests, TestBump) {
   }
 
   EXPECT_EQ(result.total_size, offset);
+}
+
+TEST(LayoutPlannerAlgorithmTests, TestStorageGroup) {
+  auto specs = create_test_allocation_specs();
+  auto result = DisjointStorageGroupsPlanner(create_test_allocation_specs());
+
+  auto& allocations = result.allocations;
+
+  EXPECT_EQ(allocations[0].offset, 0);
+  EXPECT_EQ(allocations[1].offset, 36);
+  EXPECT_EQ(allocations[2].offset, 0);
+  EXPECT_EQ(allocations[3].offset, 100);
+  EXPECT_EQ(allocations[4].offset, 140);
+  EXPECT_EQ(allocations[5].offset, 36);
+  EXPECT_EQ(allocations[6].offset, 140);
+  EXPECT_EQ(allocations[7].offset, 100);
+
+  for (auto&& [i, spec] : c10::enumerate(specs)) {
+    EXPECT_EQ(allocations[i].size, spec.size);
+  }
+
+  EXPECT_EQ(result.total_size, 150);
 }

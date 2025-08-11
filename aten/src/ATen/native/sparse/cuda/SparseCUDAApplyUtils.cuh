@@ -242,7 +242,11 @@ __global__ void coalesceValuesKernel(
 // `if constexpr` when CUDA codes will be compiled under C++-17, see
 // gh-56055 for blockers.
 template<typename Dtype>
+#ifdef USE_ROCM
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE_STATIC*4)
+#else
 C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+#endif
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   bool *values, bool *newValues,

@@ -3,6 +3,7 @@
 import unittest.mock as mock
 
 from torch.distributed.checkpoint._experimental.barriers import TCPStoreBarrier
+from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -13,38 +14,36 @@ class TestBarriers(TestCase):
         """Test that TCPStoreBarrier initializes correctly."""
         # Setup
         timeout_barrier_init_secs = 60
-        barrier_prefix_list = ["test_barrier", "another_barrier"]
+        barrier_prefix = "test_barrier"
         world_size = 4
         use_checkpoint_barrier_tcpstore_libuv = True
         tcpstore_port = 12345
         master_address = "localhost"
         rank = 0
-        local_world_size = 1
+        timeout_secs = 30
 
-        # Create the barrier
-        barrier = TCPStoreBarrier(
+        # Create rank_info
+        rank_info = RankInfo(global_rank=rank, global_world_size=world_size)
+
+        # Create the barrier (used for verification)
+        _ = TCPStoreBarrier(
+            global_rank=rank_info.global_rank,
+            global_world_size=rank_info.global_world_size,
+            barrier_prefix=barrier_prefix,
             timeout_barrier_init_secs=timeout_barrier_init_secs,
-            barrier_prefix_list=barrier_prefix_list,
-            world_size=world_size,
             use_checkpoint_barrier_tcpstore_libuv=use_checkpoint_barrier_tcpstore_libuv,
             tcpstore_port=tcpstore_port,
             master_address=master_address,
-            rank=rank,
-            local_world_size=local_world_size,
+            timeout_secs=timeout_secs,
         )
 
-        # Verify that TCPStore was initialized correctly for each barrier prefix
-        self.assertEqual(len(barrier._tcp_store_dict), len(barrier_prefix_list))
-        for prefix in barrier_prefix_list:
-            self.assertIn(prefix, barrier._tcp_store_dict)
-
         # Verify that TCPStore was initialized with the correct parameters
-        mock_tcpstore.assert_any_call(
+        mock_tcpstore.assert_called_once_with(
             master_address,
             tcpstore_port,
-            world_size=world_size,
+            world_size=rank_info.global_world_size,
             timeout=mock.ANY,  # timedelta is hard to compare directly
-            use_libuv=use_checkpoint_barrier_tcpstore_libuv,
+            is_master=(rank_info.global_rank == 0),
         )
 
     @mock.patch("torch.distributed.TCPStore")
@@ -54,14 +53,15 @@ class TestBarriers(TestCase):
         # Setup
         barrier_prefix = "test_barrier"
         timeout_barrier_init_secs = 60
-        barrier_prefix_list = ["test_barrier"]
         world_size = 4
         use_checkpoint_barrier_tcpstore_libuv = True
         tcpstore_port = 12345
         master_address = "localhost"
         rank = 0
-        local_world_size = 1
         timeout_secs = 30
+
+        # Create rank_info
+        rank_info = RankInfo(global_rank=rank, global_world_size=world_size)
 
         # Mock the TCPStore instance
         mock_tcpstore_instance = mock.MagicMock()
@@ -69,18 +69,18 @@ class TestBarriers(TestCase):
 
         # Create the barrier
         barrier = TCPStoreBarrier(
+            global_rank=rank_info.global_rank,
+            global_world_size=rank_info.global_world_size,
+            barrier_prefix=barrier_prefix,
             timeout_barrier_init_secs=timeout_barrier_init_secs,
-            barrier_prefix_list=barrier_prefix_list,
-            world_size=world_size,
             use_checkpoint_barrier_tcpstore_libuv=use_checkpoint_barrier_tcpstore_libuv,
             tcpstore_port=tcpstore_port,
             master_address=master_address,
-            rank=rank,
-            local_world_size=local_world_size,
+            timeout_secs=timeout_secs,
         )
 
         # Execute the barrier
-        barrier.execute_barrier(barrier_prefix, timeout_secs)
+        barrier.execute_barrier()
 
         # Verify that the TCPStore's set method was called with the correct parameters
         mock_tcpstore_instance.set.assert_called_once_with("rank0", "0")
@@ -88,12 +88,12 @@ class TestBarriers(TestCase):
         # Verify that the barrier function was called with the correct parameters
         mock_barrier.assert_called_once_with(
             store=mock_tcpstore_instance,
-            world_size=world_size,
+            world_size=rank_info.global_world_size,
             key_prefix=barrier_prefix + "0",
         )
 
         # Execute the barrier again to test sequence number increment
-        barrier.execute_barrier(barrier_prefix, timeout_secs)
+        barrier.execute_barrier()
 
         # Verify that the TCPStore's set method was called with the incremented sequence number
         mock_tcpstore_instance.set.assert_called_with("rank0", "1")
@@ -101,7 +101,7 @@ class TestBarriers(TestCase):
         # Verify that the barrier function was called with the incremented sequence number
         mock_barrier.assert_called_with(
             store=mock_tcpstore_instance,
-            world_size=world_size,
+            world_size=rank_info.global_world_size,
             key_prefix=barrier_prefix + "1",
         )
 
