@@ -2,7 +2,8 @@
 from typing import Callable, Optional, Union
 from typing_extensions import deprecated
 
-from torch import Device, DType, Tensor
+import torch
+from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
 
 from .distance import PairwiseDistance
@@ -1364,13 +1365,13 @@ class LinearCrossEntropyLoss(Module):
         #
         # Optional arguments for Linear
         #
-        bias: Optional[Tensor] = None,
-        device: Optional[Device] = None,
-        dtype: Optional[DType] = None,
+        bias: bool = True,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
         #
         # Argument for LinearCrossEntropyLoss
-        #
-        chunking_strategy: str = F.CrossEntropyChunkingStrategy.none,
+        # 2
+        chunking_strategy: str = "none",  # F.CrossEntropyChunkingStrategy.none,
         #
         # Arguments for CrossEntropyLoss
         #
