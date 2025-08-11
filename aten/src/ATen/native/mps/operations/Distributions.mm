@@ -343,6 +343,14 @@ Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> 
   return mps::bernoulli_mps_impl(self, p_, gen, __func__);
 }
 
+Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  // generate normal samples then exponentiate
+  mps::normal_mps_impl(self, mean, std, std::nullopt, std::nullopt, gen, "normal");
+  self.exp_();
+  return self;
+}
+
 // random_.from
 Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> gen) {
   auto input_dtype = self.scalar_type();
