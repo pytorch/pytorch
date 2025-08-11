@@ -226,7 +226,7 @@ def all_gather_object_enforce_type(
             )
 
 
-def summarize_ranks(numbers: Iterable[int]) -> str:
+def _summarize_ranks(numbers: Iterable[int]) -> str:
     numbers = sorted(numbers)
     result = []
     current_range_start = numbers[0]
@@ -278,7 +278,7 @@ def _check_cpu_rng_sync(
     return state_ranks, "Generator state hash"
 
 
-def _check_rng_sync(
+def _check_rng_sync_internal(
     generator: torch.Generator, group: dist.ProcessGroup
 ) -> tuple[dict[Any, set], str]:
     if generator.device.type == "cuda":
@@ -294,15 +294,16 @@ def _check_rng_sync(
 def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
     headers = ["Ranks", f"{tag} values"]
     rank_values = [
-        [summarize_ranks(ranks), str(value)] for value, ranks in value_ranks.items()
+        [_summarize_ranks(ranks), str(value)] for value, ranks in value_ranks.items()
     ]
     from tabulate import tabulate
 
+    # todo do the try import tabulate thing
     return tabulate(rank_values, headers=headers)
 
 
-def check_rng_sync(generator: torch.Generator, group: dist.ProcessGroup) -> None:
-    value_ranks, value_header = _check_rng_sync(generator, group)
+def _check_rng_sync(generator: torch.Generator, group: dist.ProcessGroup) -> None:
+    value_ranks, value_header = _check_rng_sync_internal(generator, group)
     if len(value_ranks) > 1:
         logger.error(
             "Generator desync detected:\n%s",
