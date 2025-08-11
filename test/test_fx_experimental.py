@@ -1040,7 +1040,7 @@ terrible spacing
                 PARTITION_ID += 1
 
             PARTITION_OPS_CTR += 1
-            
+
             NODE_PARTITION_MAP[node] = PARTITION_ID
             return PARTITION_ID
 
