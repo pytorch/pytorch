@@ -5,6 +5,8 @@ File And Path Utility helpers for CLI tasks.
 import logging
 import os
 import shutil
+from pathlib import Path
+from typing import Any
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,32 @@ def get_abs_path(path: str):
     if not path:
         return ""
     return os.path.abspath(path)
+
+
+def copy(src: Any, dst: Any, overwrite=True):
+    """
+    Copy a file or directory from src to dst.
+    Creates parent directories for dst if needed.
+    If src is a directory and dst exists:
+        - overwrite=True will merge/overwrite
+        - overwrite=False will raise FileExistsError
+    """
+    src_path = Path(src).resolve()
+    dst_path = Path(dst).resolve()
+    if not src_path.exists():
+        raise FileNotFoundError(f"Source path does not exist: {src_path}")
+
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if src_path.is_file():
+        logger.info("try to copy file %s to dst %s", src, dst)
+        shutil.copy2(src_path, dst_path)
+
+    elif src_path.is_dir():
+        logger.info("try to copy folder %s to dst %s", src, dst)
+        shutil.copytree(src_path, dst_path, dirs_exist_ok=overwrite)
+    else:
+        raise ValueError(f"Unsupported file type: {src_path}")
 
 
 def get_existing_abs_path(path: str) -> str:
