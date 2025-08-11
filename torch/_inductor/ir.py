@@ -3576,6 +3576,11 @@ class OutputSpec:
     def storage_size(self) -> int:
         raise NotImplementedError(type(self).__name__)
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        raise NotImplementedError(type(self).__name__)
+
 
 @ir_dataclass
 class Layout(OutputSpec):
@@ -3809,6 +3814,15 @@ class Layout(OutputSpec):
     def storage_size(self) -> Expr:
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return (
+            get_free_symbols(self.size, unbacked_only)
+            | get_free_symbols(self.stride, unbacked_only)
+            | get_free_symbols(self.offset, unbacked_only)
+        )
+
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
@@ -4000,6 +4014,16 @@ class NonOwningLayout(Layout):
         from .utils import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        assert isinstance(self.view, ReinterpretView)
+        box = self.view.data
+        assert isinstance(box, StorageBox), type(box)
+        input_buffer = box.data
+        assert isinstance(input_buffer, Buffer), type(box)
+        return input_buffer.layout.get_free_symbol_uses(unbacked_only)
 
 
 class CommBufferType(Enum):
@@ -4443,35 +4467,16 @@ class ComputedBuffer(OperationBuffer):
         # those symbols that establishes a dependency).  However, we haven't
         # started codegen yet so we can't directly reuse that logic.
         #
-        # For now, I'm just yoloing with the size of the buffer.  Not sure if
-        # it is enough.
-        #
         # One thing you might wonder is if this is enough for a ComputedBuffer
         # denoting a reduction over i0.  Empirically, it is enough, but for an
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
         result = (
-            get_free_symbols(self.get_size(), unbacked_only)
-            | get_free_symbols(self.get_stride(), unbacked_only)
-            | get_free_symbols(self.get_offset(), unbacked_only)
+            self.layout.get_free_symbol_uses(unbacked_only)
             | self.data.get_free_symbol_uses(unbacked_only)
             | self.get_read_writes().get_free_symbol_uses(unbacked_only)
         )
-
-        if isinstance(self.layout, NonOwningLayout):
-            assert isinstance(self.layout.view, ReinterpretView)
-            box = self.layout.view.data
-            assert isinstance(box, StorageBox), type(box)
-            input_buffer = box.data
-            assert isinstance(input_buffer, Buffer), type(box)
-            result = (
-                result
-                | get_free_symbols(input_buffer.get_size(), unbacked_only)
-                | get_free_symbols(input_buffer.get_stride(), unbacked_only)
-                | get_free_symbols(input_buffer.get_offset(), unbacked_only)
-            )
-
         return result
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
