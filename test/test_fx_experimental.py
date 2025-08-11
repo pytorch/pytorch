@@ -53,7 +53,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -963,6 +963,7 @@ terrible spacing
         # `keep_original_order=True`
         _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=True))
 
+    @unittest.skipIf(TEST_WITH_CROSSREF, "See https://github.com/pytorch/pytorch/issues/160077")
     def test_split_module_symint_dependency_handling(self):
         # Based on the code from - transformers/models/granitemoe/modeling_granitemoe.py
         class GraniteMoeTopKGating(torch.nn.Module):
