@@ -1,5 +1,8 @@
 import logging
 import os
+import re
+import subprocess
+import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,8 +18,15 @@ from cli.lib.common.path_helper import (
     force_create_dir,
     get_path,
     is_path_exist,
+    remove_dir,
 )
-from cli.lib.common.utils import run_cmd
+from cli.lib.common.pip_helper import (
+    pip_install,
+    pip_install_first_match,
+    pip_install_packages,
+    run_python,
+)
+from cli.lib.common.utils import run_cmd, working_directory
 
 
 logger = logging.getLogger(__name__)
@@ -265,6 +275,97 @@ class VllmBuildRunner(BaseRunner):
         ).strip()
 
 
+@dataclass
+class VllmTestParameters:
+    """
+    Parameters defining the vllm external test input configurations.
+    Combine with VllmDockerBuildArgs to define the vllm build environment
+    """
+
+    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
+    _torch_whls_path: Optional[Path] = env_path_field("TORCH_WHEELS_PATH", "./dist")
+    _vllm_whls_path: Optional[Path] = env_path_field("VLLM_WHEELS_PATH", "./shared")
+
+    def __post_init__(self):
+        if not self.torch_whls_path or not self.torch_whls_path.exists():
+            raise ValueError("missing torch_whls_path")
+        if not self.vllm_whls_path or not self.vllm_whls_path.exists():
+            raise ValueError("missing vllm_whls_path")
+    @property
+    def torch_whls_path(self) -> Path:
+        return self._torch_whls_path  # type: ignore
+
+    @property
+    def vllm_whls_path(self) -> Path:
+        return self._vllm_whls_path  # type: ignore
+
+
+class VllmTestRunner(BaseRunner):
+    def __init__(self, args=None):
+        self.work_directory = "vllm"
+        self.test_name = args.test_name
+        self.torch_whl_relatvie_path = [
+            "vision/torchvision*.whl",
+            "audio/torchaudio*.whl",
+        ]
+        self.vllm_whl_relatvie_path = [
+            "wheels/xformers/xformers*.whl",
+            "wheels/vllm/vllm*.whl",
+            "wheels/flashinfer-python/flashinfer*.whl",
+        ]
+
+    def run(self):
+        """
+        main function to run vllm test
+        """
+        inputs = VllmTestParameters()
+        clone_vllm()
+        with working_directory(self.work_directory):
+            remove_dir(Path("vllm"))
+            torch_whls_path = [
+                f"{str(inputs.torch_whls_path)}/{whl_path}"
+                for whl_path in self.torch_whl_relatvie_path
+            ]
+
+            vllm_whls_path = [
+                f"{str(inputs.vllm_whls_path)}/{whl_path}"
+                for whl_path in self.vllm_whl_relatvie_path
+            ]
+            for torch_whl in torch_whls_path:
+                pip_install_first_match(torch_whl)
+            for vllm_whl in vllm_whls_path:
+                pip_install_first_match(vllm_whl)
+            run_python("use_existing_torch.py")
+
+            for requirements in ["requirements/common.txt", "requirements/build.txt"]:
+                pip_install_packages(
+                    requirements=requirements,
+                    prefer_uv=True,
+                )
+            preprocess_test_in()
+
+            copy("requirements/test.in", "snapshot_constraint.txt", full_path=False)
+            run_cmd(
+                f"{sys.executable} -m uv pip compile requirements/test.in "
+                "-o test.txt "
+                "--index-strategy unsafe-best-match "
+                "--constraint snapshot_constraint.txt "
+                "--torch-backend cu128"
+            )
+            pip_install_packages(requirements="test.txt", prefer_uv=True)
+            pip_install_packages(
+                "--no-build-isolation", "git+https://github.com/state-spaces/mamba@v2.2.4"
+                prefer_uv=True,
+            )
+            patterns = ["torch", "xformers", "torchvision", "torchaudio"]
+            for pkg in patterns:
+                try:
+                    module = __import__(pkg)
+                    version = getattr(module, "__version__", None)
+                    print(f"{pkg}: {version or 'Unknown version'}")
+                except ImportError:
+                    print(f"{pkg}: Not installed")
+
 def clone_vllm():
     clone_external_repo(
         target="vllm",
@@ -272,3 +373,36 @@ def clone_vllm():
         dst="vllm",
         update_submodules=True,
     )
+
+
+def preprocess_test_in(
+    target_file: str = "requirements/test.in",
+    pkgs_to_remove=["torch", "torchvision", "torchaudio", "xformers", "mamba_ssm"],
+):
+    """
+    remove packges in target_file and replace with local torch whls
+    """
+    # Read current requirements
+    target_path = Path(target_file)
+    lines = target_path.read_text().splitlines()
+
+    # Remove lines starting with the package names (==, @, >=) — case-insensitive
+    pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
+    kept_lines = [line for line in lines if not pattern.match(line)]
+
+    # Get local torch/vision/audio installs from pip freeze
+    # this is hacky, but it works
+    pip_freeze = subprocess.check_output(["pip", "freeze"], text=True)
+    header_lines = [
+        line
+        for line in pip_freeze.splitlines()
+        if re.match(
+            r"^(torch|torchvision|torchaudio)\s*@\s*file://", line, re.IGNORECASE
+        )
+    ]
+
+    # Write back: header_lines + blank + kept_lines
+    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    target_path.write_text(out)
+
+    print(f"[INFO] Updated {target_file}")

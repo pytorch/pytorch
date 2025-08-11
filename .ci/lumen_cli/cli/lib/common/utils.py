@@ -7,9 +7,10 @@ import os
 import shlex
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import fields
 from textwrap import indent
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -144,3 +145,50 @@ def str2bool(value: Optional[str]) -> bool:
     ):
         return False
     raise ValueError(f"Invalid string value for boolean conversion: {value}")
+
+
+@contextmanager
+def temp_environ(updates: Dict[str, str]):
+    """
+    Temporarily set environment variables and restore them after the block.
+    Args:
+        updates: Dict of environment variables to set.
+    """
+    missing = object()
+    old: Dict[str, str | object] = {k: os.environ.get(k, missing) for k in updates}
+    try:
+        os.environ.update(updates)
+        yield
+    finally:
+        for k, v in old.items():
+            if v is missing:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v  # type: ignore[arg-type]
+
+
+def list_to_env_dict(env_list: List[str]) -> Dict[str, str]:
+    env_dict: Dict[str, str] = {}
+    for item in env_list:
+        if "=" not in item:
+            raise ValueError(f"Invalid env var format: {item!r}, expected KEY=VALUE")
+        key, value = item.split("=", 1)
+        env_dict[key.strip()] = value.strip()
+    return env_dict
+
+
+@contextmanager
+def working_directory(path: str):
+    """
+    Temporarily change the working directory inside a context.
+    """
+    if not path:
+        # No-op context
+        yield
+        return
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(prev_cwd)
