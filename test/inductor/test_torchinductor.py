@@ -9889,7 +9889,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # so we get only 1 kernel.
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        count = 5 if config.triton.enable_native_matmul else 4
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, count)
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
