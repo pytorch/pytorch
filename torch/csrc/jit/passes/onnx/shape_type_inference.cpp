@@ -191,7 +191,7 @@ void UpdateTorchValueByOnnxValueInfo(
   }
 }
 
-static bool IsValidONNXControlflowNode(const Node* n) {
+bool IsValidONNXControlflowNode(const Node* n) {
   // Skip when block size is zero. This is when the node is being created,
   // and doesn't have subblocks attached yet. Run shape inference for these
   // nodes later, when the subgraph has already completed shape inferencing.
@@ -205,7 +205,7 @@ static bool IsValidONNXControlflowNode(const Node* n) {
   return true;
 }
 
-static bool IsValidONNXNode(const Node* n) {
+bool IsValidONNXNode(const Node* n) {
   auto node_kind = n->kind();
 
   if (!node_kind.is_onnx()) {
@@ -411,7 +411,9 @@ void ConvertGraphToONNXProto(
   }
 }
 
-std::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
+std::optional<at::Tensor> ComputeConstantFolding(
+    const Node* n,
+    int opset_version) {
   if (n->inputs().empty()) {
     return std::nullopt;
   }
@@ -463,7 +465,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  int minus_one_pos = -1;
+  int64_t minus_one_pos = -1;
   for (auto i : c10::irange(shape_vector.size())) {
     if (shape_vector[i].value() == -1) {
       minus_one_pos = i;
@@ -773,7 +775,7 @@ void ProcessBroadcastNode(Node* n) {
 }
 
 void ProcessShapeForConcatNode(Node* n) {
-  int axis = n->i(attr::axis);
+  auto axis = n->i(attr::axis);
   if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
     auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
     size_t axis_adjust = 0;
@@ -1837,7 +1839,7 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-static void RemoveProcessedInputs(const Node* n) {
+void RemoveProcessedInputs(const Node* n) {
   // After processing a node for shape inference, remove intermediate tensors
   // that are stored in ConstantValueMap to reduce memory usage.
   // This will only remove tensors that are no longer needed by any other node.
@@ -2213,10 +2215,9 @@ void ONNXSetDynamicInputShape(
   GRAPH_UPDATE("dynamic axes tensor names:", [&]() {
     std::vector<std::string> res(dynamic_axes.size());
     std::transform(
-        dynamic_axes.begin(),
-        dynamic_axes.end(),
-        res.begin(),
-        [](const auto& pair) { return pair.first; });
+        dynamic_axes.begin(), dynamic_axes.end(), res.begin(), [](auto pair) {
+          return pair.first;
+        });
     return res;
   }());
 
@@ -2256,7 +2257,7 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-static bool HasSequenceTypeOutput(Node* node) {
+static bool HasSequenceTypeOutput(const Node* node) {
   if (node->kind() == ::c10::onnx::SplitToSequence ||
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
