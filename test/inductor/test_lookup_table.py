@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 class MockDevice:
@@ -310,7 +310,7 @@ class BaseLookupTableTest(TestCase):
                 self.assert_configs_equal_without_template_id(result, expected_result)
 
 
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
 class TestLookupTableCore(BaseLookupTableTest):
     """Consolidated tests for core lookup table functionality"""
@@ -513,7 +513,7 @@ class TestLookupTableCore(BaseLookupTableTest):
             self.assertIsNone(result)
 
 
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 class TestTemplateLookupTableConfig(BaseLookupTableTest):
     """Test class for new template lookup table configuration"""
 
@@ -580,7 +580,7 @@ class TestTemplateLookupTableConfig(BaseLookupTableTest):
         self.assertEqual(result, test_table)
 
 
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
 class TestLookupConfigsForTemplateId(BaseLookupTableTest):
     """Test class for lookup_configs_for_template_id function with TF32 filtering"""
@@ -762,5 +762,5 @@ class TestLookupConfigsForTemplateId(BaseLookupTableTest):
 
 if __name__ == "__main__":
     # Set env to make it work in CI.
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         run_tests()

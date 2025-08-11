@@ -15,6 +15,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     mm_operations,
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
+from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.torch_version import TorchVersion
@@ -259,11 +260,11 @@ persistent_tma_mm_template = TritonTemplate(
     rk_for_mask = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -282,8 +283,6 @@ persistent_tma_mm_template = TritonTemplate(
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
-    a_desc = a_desc_ptr
-    b_desc = b_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
@@ -321,13 +320,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc,
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc,
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -439,11 +438,11 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
+    {%- if TMA_EXPERIMENTAL_API %}
     workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
-    {%- if TMA_EXPERIMENTAL_API %}
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
         global_address=A,
@@ -462,8 +461,6 @@ device_tma = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
-    a_desc = a_desc_ptr
-    b_desc = a_desc_ptr
     {%- else %}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
@@ -877,8 +874,19 @@ def tuned_mm(mat1, mat2, *, layout=None):
         choices,
         lambda: [aten_mm.bind(kernel_inputs.nodes(), _flexible_layout(aten_layout))],
     )
+    best_config_future = None
+    # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
+    # The future will be awaited at scheduling time in select_algorithm.py
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config(mat1, mat2)
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return autotune_select_algorithm(
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -1342,9 +1350,7 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(
-        "scaled_mm", choices, kernel_inputs.nodes(), layout
-    )
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
 
 
 @functools.cache
