@@ -8729,8 +8729,6 @@ class EffectfulKernel(FallbackKernel):
 
 
 class NonTensorObj(IRNode):
-    pass
-  
     def get_free_symbol_uses(
             self, unbacked_only: bool = False
         ) -> OrderedSet[sympy.Symbol]:
