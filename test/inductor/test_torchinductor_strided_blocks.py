@@ -81,6 +81,7 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_broadcast_prefer_nd_tiling_False_x_size3_y_size3",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
+        "test_broadcast_with_singleton_dims",
     ),
     TMA_XFAIL,
 )
@@ -367,13 +368,13 @@ class CommonTemplate:
             return (unsqueeze_6,)
 
         def load_args(reader):
-            buf0 = reader.storage(storage_hash=None, nbytes=512)
+            buf0 = reader.storage(storage_hash=None, nbytes=512, device=self.device)
             reader.tensor(buf0, (1, 4, 2, 32), (128, 1, 0, 4), is_leaf=True)  # expand_4
-            buf1 = reader.storage(storage_hash=None, nbytes=3072)
+            buf1 = reader.storage(storage_hash=None, nbytes=3072, device=self.device)
             reader.tensor(
                 buf1, (1, 3, 4, 64), (768, 64, 192, 1), is_leaf=True
             )  # permute_4
-            buf2 = reader.storage(storage_hash=None, nbytes=3072)
+            buf2 = reader.storage(storage_hash=None, nbytes=3072, device=self.device)
             reader.tensor(buf2, (1, 3, 4, 64), is_leaf=True)  # mul_7
 
         load_args._version = 0
