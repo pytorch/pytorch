@@ -1088,7 +1088,11 @@ class RingBuffer {
 } // anonymous namespace
 } // namespace Native
 
-ska::flat_hash_map<MempoolId_t, CUDACachingAllocator::CUDAAllocator*, Native::MempoolIdHash> allocator_for_mempool;
+ska::flat_hash_map<
+    MempoolId_t,
+    CUDACachingAllocator::CUDAAllocator*,
+    Native::MempoolIdHash>
+    allocator_for_mempool;
 std::mutex allocator_for_mempool_mutex;
 
 static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
@@ -4229,7 +4233,7 @@ MemPool::~MemPool() {
   // is around and hasn't been deleted/reset. We need to figure out a
   // solution here. We want to call emptyCache() only if use_count()
   // == 1...
-  // to be fair, we don't *need* to call emptyCache() at this time. 
+  // to be fair, we don't *need* to call emptyCache() at this time.
   // But I suppose it is reasonable to do that.
   // TORCH_INTERNAL_ASSERT(use_count() == 1);
   CUDACachingAllocator::releasePool(device_, id_);

@@ -73,7 +73,9 @@ class CUDAGraph(torch._C._CUDAGraph):
     def __new__(cls, keep_graph=False):
         return super().__new__(cls, keep_graph)
 
-    def capture_begin(self, pool=None, capture_error_mode="global", dynamic_graph=False):
+    def capture_begin(
+        self, pool=None, capture_error_mode="global", dynamic_graph=False
+    ):
         r"""Begin capturing CUDA work on the current stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
@@ -90,7 +92,11 @@ class CUDAGraph(torch._C._CUDAGraph):
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
                 unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
         """  # noqa: B950
-        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode, dynamic_graph=dynamic_graph)
+        super().capture_begin(
+            pool=pool,
+            capture_error_mode=capture_error_mode,
+            dynamic_graph=dynamic_graph,
+        )
 
     def capture_end(self):
         r"""End CUDA graph capture on the current stream.
@@ -197,7 +203,7 @@ class graph:
         pool=None,
         stream=None,
         capture_error_mode: str = "global",
-        dynamic_graph=False
+        dynamic_graph=False,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -226,7 +232,9 @@ class graph:
         self.stream_ctx.__enter__()
 
         self.cuda_graph.capture_begin(
-            *self.pool, capture_error_mode=self.capture_error_mode, dynamic_graph=self.dynamic_graph
+            *self.pool,
+            capture_error_mode=self.capture_error_mode,
+            dynamic_graph=self.dynamic_graph,
         )
 
     def __exit__(self, exc_type, exc_value, traceback):

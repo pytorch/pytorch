@@ -514,7 +514,8 @@ static PyObject* THPModule_allocateTensors(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
 
-  THPObjectPtr sizes_seq(PySequence_Fast(sizes_obj, "sizes must be a sequence"));
+  THPObjectPtr sizes_seq(
+      PySequence_Fast(sizes_obj, "sizes must be a sequence"));
   if (!sizes_seq) {
     return nullptr;
   }

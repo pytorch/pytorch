@@ -1687,7 +1687,10 @@ def cudagraphify(
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     elif config.triton.cudagraphs_elide_input_output_copies:
-        from torch._inductor.cudagraph_digraphs import cudagraphify_impl as params_cudagraphify_impl
+        from torch._inductor.cudagraph_digraphs import (
+            cudagraphify_impl as params_cudagraphify_impl,
+        )
+
         cudagraphify_fn = functools.partial(
             params_cudagraphify_impl,
             device_index=device_index,
@@ -1705,6 +1708,7 @@ def cudagraphify(
     compiled_fn = None
 
     import nvtx
+
     @nvtx.annotate(message="run cudagraph", color="green")
     def run(new_inputs: Sequence[InputType]) -> Any:
         nonlocal compiled_fn
@@ -2316,7 +2320,10 @@ def compile_fx(
                 # original strides
                 _recursive_record_user_visible_output_idxs(gm)
 
-                if config.triton.cudagraphs_elide_input_output_copies and not config.triton.cudagraph_trees:
+                if (
+                    config.triton.cudagraphs_elide_input_output_copies
+                    and not config.triton.cudagraph_trees
+                ):
                     static_input_idxs = []
                 else:
                     static_input_idxs = get_static_input_idxs(fixed)
@@ -2400,7 +2407,10 @@ def compile_fx(
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
-                if config.triton.cudagraphs_elide_input_output_copies and not config.triton.cudagraph_trees:
+                if (
+                    config.triton.cudagraphs_elide_input_output_copies
+                    and not config.triton.cudagraph_trees
+                ):
                     fixed = 0
                 else:
                     fixed = count_tangents(gm)

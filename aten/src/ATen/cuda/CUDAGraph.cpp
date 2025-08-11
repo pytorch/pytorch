@@ -497,7 +497,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   auto sorted_allocations = create_and_sort_allocations(dynamic_tensors);
 
   for (auto &&[ptr, size]: unbacked_memory_) {
-    // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary. 
+    // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary.
     CUmemAccessDesc desc{};
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -573,7 +573,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
 
         char** arg1_speculative_pointer =
           (char**)driver_node_params.kernelParams[param_index];
-        
+
         // ABI guarantees that pointers have 8-byte alignment
         for (size_t address_start = 0; param_size - address_start >= 8;
              address_start += 8) {
@@ -604,7 +604,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
           cudaPointerAttributes attributes;
           AT_CUDA_CHECK(cudaPointerGetAttributes(&attributes, srcPtr.ptr));
           std::cout << "GALVEZ: cudaPointerGetAttributes original device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << " memory type " << attributes.type << " device " << attributes.device << std::endl;
-          
+
           if (srcPtrResult) {
             auto [alloc_idx, offset] = *srcPtrResult;
             srcPtr.ptr = (char*)actualDataPtrs[alloc_idx] + offset;
@@ -798,7 +798,7 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   for (auto& update : graph_node_param_updates_) {
     // run the updates that can't be done device-side
     // note that this is quite rare - it only applies to a few misc memsets/memcpys
-    
+
     cudaGraphNodeParams newParams = update.compute_new_params(actualDataPtrs);
     AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
   }
@@ -816,7 +816,7 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   } else {
     launch_dynamic_updaters<false>(actualDataPtrs);
   }
- 
+
  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
 }
 
@@ -857,7 +857,7 @@ public:
             c10::cuda::DriverAPI::get()->cuMemRelease_(handle);
         }
     }
-    
+
     CUmemGenericAllocationHandle handle{0};
 };
 
@@ -869,8 +869,8 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
 
     static MemHandleHolder handleHolder;
     static std::once_flag initFlag;
-    
-    std::call_once(initFlag, [&]() {
+
+    c10::call_once(initFlag, [&]() {
       CUmemAllocationProp prop{};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -902,7 +902,7 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
 
 
     graph_->unbacked_memory_.emplace_back(std::make_pair(ptr, size));
-    
+
     return ptr;
   }
 
@@ -915,7 +915,7 @@ void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int
   CaptureId_t capture_id{};
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id));
   TORCH_INTERNAL_ASSERT(status != cudaStreamCaptureStatus::cudaStreamCaptureStatusActive, "I'm not sure why a block would ever be freed during stream capture...");
-  
+
   size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
   CUmemGenericAllocationHandle handle{};
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr));
@@ -957,7 +957,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   TORCH_CHECK_EQ(num_nodes, num_nodes2);
 
   // TORCH_CHECK(graphs_equal(graph_, graph2->graph_, true), "Graphs are not topologically identical");
-  
+
   std::vector<cudaGraphNode_t> nodes(num_nodes);
   std::vector<cudaGraphNode_t> nodes2(num_nodes2);
   if (num_nodes != 0) {
@@ -967,7 +967,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
 
   auto sorted_allocations = create_and_sort_allocations(dynamic_tensors);
   auto sorted_allocations2 = graph2->create_and_sort_allocations(graph2_dynamic_tensors);
-  
+
   for (size_t i = 0; i < num_nodes; ++i) {
     cudaGraphNode_t node = nodes[i];
     cudaGraphNode_t node2 = nodes2[i];
@@ -987,7 +987,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       AT_CUDA_DRIVER_CHECK(
           globalContext().getNVRTC().cuGraphKernelNodeGetParams(
               node2, &driver_node_params2));
-      
+
       const char* func_name;
       AT_CUDA_DRIVER_CHECK(
           globalContext().getNVRTC().cuFuncGetName(&func_name, func));
