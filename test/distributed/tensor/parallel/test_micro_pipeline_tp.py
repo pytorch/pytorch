@@ -413,6 +413,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
+    @xfailIf(TEST_XPU) #https://github.com/intel/torch-xpu-ops/issues/1551
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
     ):
