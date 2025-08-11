@@ -1,4 +1,4 @@
-# 🔧 Lumos_cli
+# 🔧 Lumen_cli
 A Python CLI tool for building and testing PyTorch-based components, using a YAML configuration file for structured, repeatable workflows.
 
 

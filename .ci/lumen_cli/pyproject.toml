@@ -5,7 +5,7 @@ dependencies = [
     "pyyaml==6.0.2",
     "GitPython==3.1.45",
     "docker==7.1.0",
-    "pytest==8.3.5",
+    "pytest==7.3.2",
 ]
 
 [tool.setuptools]
