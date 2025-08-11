@@ -176,9 +176,9 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
-// c10::IValue object conversions
+// c10::IValue <int64_t> object conversion
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_int32_to_ivalue(int32_t val, C10IValueHandle* ivalue);
+aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
 
 // Free the c10::IValue object
 AOTI_TORCH_EXPORT AOTITorchError
@@ -404,6 +404,8 @@ using IValueMapHandle = IValueMapOpaque*;
 AOTI_TORCH_EXPORT AOTITorchError aoti_record_function_start(
     const char* name,
     IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
     AtenRecordFunctionHandle* guard);
 
 AOTI_TORCH_EXPORT AOTITorchError

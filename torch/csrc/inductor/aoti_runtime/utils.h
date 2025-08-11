@@ -73,11 +73,23 @@ class RAIIAtenRecordFunctionHandle {
   RAIIAtenRecordFunctionHandle& operator=(
       const RAIIAtenRecordFunctionHandle& other) = delete;
 
-  // Initiate an RAII RecordFunction
+  // Initiate an RAII RecordFunction without Inputs
   RAIIAtenRecordFunctionHandle(const char* name, IValueMapHandle kwargs)
       : handle_(nullptr, delete_record_function_object) {
     AtenRecordFunctionHandle tmp_handle = nullptr;
-    aoti_record_function_start(name, kwargs, &tmp_handle);
+    aoti_record_function_start(name, kwargs, nullptr, 0, &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Initiate an RAII RecordFunction with Inputs
+  RAIIAtenRecordFunctionHandle(
+      const char* name,
+      IValueMapHandle kwargs,
+      std::vector<C10IValueHandle> inputs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(
+        name, kwargs, inputs.data(), inputs.size(), &tmp_handle);
     handle_.reset(tmp_handle);
   }
 

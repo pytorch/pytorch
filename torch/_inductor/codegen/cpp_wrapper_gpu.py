@@ -257,7 +257,7 @@ class DeferredTritonCallWrapper:
                         [
                             f"// Create c10::IValue for {k}",
                             f"C10IValueHandle tmp_{arg_name};",
-                            f"aoti_torch_int32_to_ivalue({v}, &tmp_{arg_name});",
+                            f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
                             f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                             f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
                         ]
