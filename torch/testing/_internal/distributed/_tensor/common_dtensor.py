@@ -477,7 +477,9 @@ def with_comms(
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+            self,
+            *args: tuple[object],
+            **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
             self.init_pg(eager_init, backend)
 
