@@ -247,7 +247,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // Checking names before the actual dimensions.
   auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       !materialized.empty(),
       "torch.cat(): expected a non-empty list of Tensors");
 
@@ -274,7 +274,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // when computing the actual output dtype and the flags.
   if (is_out_defined) {
     // Check for type promotion, if the output tensor is defined.
-    TORCH_CHECK(
+    TORCH_CHECK_TYPE(
         canCast(out_dtype, result.scalar_type()),
         "torch.cat(): input types can't be cast to the desired output type ",
         result.scalar_type());
@@ -293,7 +293,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // are compatible, i.e. we can execute `cat` on them.
   bool found_valid_tensor = valid < materialized.size();
   if (found_valid_tensor) {
-    TORCH_CHECK(
+    TORCH_CHECK_INDEX(
         dim <= materialized[valid].get().dim(),
         "torch.cat(): dimension ",
         dim,

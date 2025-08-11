@@ -1,13 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
-import os
 from datetime import timedelta
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import torch
 import torch.nn as nn
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard as ShardedTensorShard,
+    ShardMetadata,
+)
 from torch.distributed.checkpoint._pg_transport import (
     _cast_tensor,
     _prepare_state_dict,
@@ -34,9 +38,56 @@ from torch.testing._internal.common_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _create_sharded_tensor_state_dict(
+    rank: int, world_size: int, device: torch.device
+) -> dict:
+    """
+    Create state_dict with ShardedTensor for deterministic testing.
+    Args:
+        rank: Current rank
+        world_size: Total world size
+        device: Device to create tensors on
+    Returns:
+        dict: State dictionary with ShardedTensor
+    """
+    # Create deterministic local shard for this rank
+    global_size = 64
+    shard_size = global_size // world_size
+    start_idx = rank * shard_size
+    end_idx = (rank + 1) * shard_size
+
+    # Create local tensor with deterministic values
+    local_tensor = torch.arange(
+        start_idx * 8, end_idx * 8, dtype=torch.float32, device=device
+    ).reshape(shard_size, 8)
+
+    # Create ShardedTensor using init_from_local_shards
+    sharded_tensor = init_from_local_shards(
+        [
+            ShardedTensorShard(
+                tensor=local_tensor,
+                metadata=ShardMetadata(
+                    shard_offsets=[start_idx, 0],
+                    shard_sizes=[shard_size, 8],
+                    placement=f"rank:{rank}/{device}",
+                ),
+            )
+        ],
+        global_size,
+        8,
+    )
+
+    return {
+        "sharded_tensor": sharded_tensor,
+        "rank_scalar": torch.tensor(float(rank), device=device),
+    }
+
+
 class SimpleModel(nn.Module):
-    def __init__(self):
+    def __init__(self, seed: int = 42):
         super().__init__()
+        # Set seed for deterministic initialization
+        torch.manual_seed(seed)
         self.net1 = nn.Linear(10, 10)
         self.relu = nn.ReLU()
         self.net2 = nn.Linear(10, 10)
@@ -50,6 +101,7 @@ def ring_send_recv_checkpoint(
 ):
     """
     Use the transport to send to rank + 1 and receive from rank - 1.
+    Each rank exchanges its own state_dict with the previous rank.
     """
     next_rank = (rank + 1) % world_size
     prev_rank = (rank - 1) % world_size
@@ -58,15 +110,11 @@ def ring_send_recv_checkpoint(
         received_checkpoint = transport.recv_checkpoint(prev_rank)
     else:
         received_checkpoint = transport.recv_checkpoint(prev_rank)
-        transport.send_checkpoint([next_rank], received_checkpoint)
+        transport.send_checkpoint([next_rank], state_dict)
     return received_checkpoint
 
 
 def _test_pg_transport(self, device) -> None:
-    # python test/distributed/checkpoint/test_pg_transport.py -k test_pg_transport
-    print(f"{self.rank=} pid: {os.getpid()} {device=}")
-    print("in test")
-
     model = SimpleModel().to(device)
     transport = PGTransport(_get_default_group(), timedelta(seconds=10), device)
     original_state_dict = model.state_dict()
@@ -111,6 +159,48 @@ def _test_pg_transport_with_mixed_content(self, device) -> None:
     self.assertEqual(state_dict, received_checkpoint)
 
 
+def _test_pg_transport_with_sharded_tensor(self, device) -> None:
+    # Set current CUDA device for NCCL
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+
+    state_dict = _create_sharded_tensor_state_dict(self.rank, self.world_size, device)
+    transport = PGTransport(_get_default_group(), timedelta(seconds=10), device)
+    print(state_dict)
+    received_checkpoint = ring_send_recv_checkpoint(
+        transport=transport,
+        state_dict=state_dict,
+        rank=self.rank,
+        world_size=self.world_size,
+    )
+    print("finished comms")
+    print(received_checkpoint)
+
+    # Validate that received checkpoint matches what we expect from rank - 1
+    prev_rank = (self.rank - 1) % self.world_size
+
+    # Compare rank_scalar (should be from previous rank)
+    # Note: PGTransport moves received tensors to CPU when no state_dict callback is provided
+    expected_rank_scalar = torch.tensor(float(prev_rank), device="cpu")
+    received_rank_scalar = received_checkpoint["rank_scalar"]  # type: ignore[index]
+    print(f"{expected_rank_scalar=} {received_rank_scalar=}")
+    torch.testing.assert_close(expected_rank_scalar, received_rank_scalar)
+
+    # For ShardedTensor, validate the local shard data matches what prev_rank would have
+    received_st = received_checkpoint["sharded_tensor"]  # type: ignore[index]
+    global_size = 64
+    shard_size = global_size // self.world_size
+    prev_start_idx = prev_rank * shard_size
+    prev_end_idx = (prev_rank + 1) * shard_size
+    expected_local_tensor = torch.arange(
+        prev_start_idx * 8, prev_end_idx * 8, dtype=torch.float32, device="cpu"
+    ).reshape(shard_size, 8)
+
+    # Compare the actual tensor data
+    received_local_tensor = received_st.local_shards()[0].tensor
+    torch.testing.assert_close(expected_local_tensor, received_local_tensor)
+
+
 class PgTransportCPU(MultiProcContinousTest):
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
@@ -132,6 +222,9 @@ class PgTransportCPU(MultiProcContinousTest):
 
     def test_pg_transport_with_mixed_content(self) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
+
+    def test_pg_transport_with_sharded_tensor(self) -> None:
+        _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
 class PgTransportCUDA(MultiProcContinousTest):
@@ -159,6 +252,11 @@ class PgTransportCUDA(MultiProcContinousTest):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_pg_transport_with_mixed_content(self) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_pg_transport_with_sharded_tensor(self) -> None:
+        _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
 class TestCastTensor(TestCase):
@@ -508,9 +606,6 @@ class TestPGTransportEdgeCases(TestCase):
         # Check that wait was called
         self.assertGreaterEqual(self.mock_work.wait.call_count, 4)
 
-
-# import fbvscode
-# fbvscode.attach_debugger()
 
 if __name__ == "__main__":
     run_tests()
