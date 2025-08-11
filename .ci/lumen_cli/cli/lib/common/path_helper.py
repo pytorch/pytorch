@@ -6,13 +6,32 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 
 logger = logging.getLogger(__name__)
 
 
-def force_create_dir(path: str):
+def get_path(path: Optional[Union[str, Path]], full_path: bool = False) -> Path:
+    """
+    Get a Path object from a string or Path object.
+    If full_path is True, returns the absolute path with currently working directory.
+    """
+    if path is None:
+        raise ValueError("Path cannot be None")
+    if isinstance(path, str):
+        p = Path(path)
+    elif isinstance(path, Path):
+        p = path
+    else:
+        raise TypeError(f"Invalid path type: {type(path)}")
+
+    if full_path:
+        return p.resolve()
+    return p
+
+
+def force_create_dir(path: Path):
     """
     Ensures that the given directory path is freshly created.
 
@@ -23,38 +42,37 @@ def force_create_dir(path: str):
     ensure_dir_exists(path)
 
 
-def ensure_dir_exists(path: str):
+def ensure_dir_exists(path: Optional[Path]):
     """
     Ensure the directory exists. Create it if it doesn't exist.
+    if path is None, throw an exception.
     """
-    if not os.path.exists(path):
-        logger.info("Creating directory '%s' ....", path)
-        os.makedirs(path, exist_ok=True)
+    if not path:
+        raise ValueError("Path cannot be None or empty")
+    p = get_path(path)
+    if not p.exists():
+        logger.info("creating directory '%s' ....", path)
+        p.mkdir(parents=True)
     else:
         logger.info("Directory already exists'%s' ", path)
 
 
-def remove_dir(path: str):
+def remove_dir(path: Optional[Path | str]):
     """
     Remove a directory if it exists.
     """
-    if os.path.exists(path):
+    if not path:
+        logger.info("skip remove operation, the path is empty or None: %s", path)
+        return
+    path = Path(path)
+    if path.exists():
         logger.info("Removing directory '%s'...", path)
         shutil.rmtree(path)
     else:
         logger.info("skip remove operation, Directory not found: %s", path)
 
 
-def get_abs_path(path: str):
-    """
-    Get the absolute path of the given path.
-    """
-    if not path:
-        return ""
-    return os.path.abspath(path)
-
-
-def copy(src: Any, dst: Any, overwrite=True):
+def copy(src: Any, dst: Any, overwrite=True, full_path=True):
     """
     Copy a file or directory from src to dst.
     Creates parent directories for dst if needed.
@@ -62,33 +80,29 @@ def copy(src: Any, dst: Any, overwrite=True):
         - overwrite=True will merge/overwrite
         - overwrite=False will raise FileExistsError
     """
-    src_path = Path(src).resolve()
-    dst_path = Path(dst).resolve()
-    if not src_path.exists():
-        raise FileNotFoundError(f"Source path does not exist: {src_path}")
+    src_path = get_path(src, full_path=full_path)
+    dst_path = get_path(dst, full_path=full_path)
+
+    if not src.exists():
+        raise FileNotFoundError(f"Source path does not exist: {src}")
 
     dst_path.parent.mkdir(parents=True, exist_ok=True)
 
     if src_path.is_file():
-        logger.info("try to copy file %s to dst %s", src, dst)
+        logger.info("try to copy file %s to dst %s", src_path, dst_path)
         shutil.copy2(src_path, dst_path)
-
     elif src_path.is_dir():
-        logger.info("try to copy folder %s to dst %s", src, dst)
+        logger.info("try to copy folder %s to dst %s", src_path, dst_path)
         shutil.copytree(src_path, dst_path, dirs_exist_ok=overwrite)
     else:
-        raise ValueError(f"Unsupported file type: {src_path}")
+        raise TypeError(f"Unsupported source type: {type(src_path)}")
+    logger.info("Done. Copied file %s to dst %s", src_path, dst_path)
 
 
 def get_existing_abs_path(path: str) -> str:
-    """
-    Get and validate the absolute path of the given path.
-    Raises an exception if the path does not exist.
-    """
-
-    path = get_abs_path(path)
-    if is_path_exist(path):
-        raise FileNotFoundError(f"Path does not exist '{path}'")
+    p = get_path(path, full_path=True)
+    if not p.exists():
+        raise FileNotFoundError(f"Path does not exist: {path}")
     return path
 
 

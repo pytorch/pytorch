@@ -246,7 +246,7 @@ jobs:
           docker images
           START_TIME=$(date +%s)
           (
-            cd scripts/lumen_cli
+            cd .ci/lumen_cli
             python3 -m pip install -e .
           )
           python3 -m cli.run build external "$BUILD_TARGET"

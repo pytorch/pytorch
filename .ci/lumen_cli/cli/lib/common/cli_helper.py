@@ -44,6 +44,7 @@ def register_target_commands_and_runner(
     parser: argparse.ArgumentParser,
     target_specs: dict[str, TargetSpec],
     common_args: Callable[[argparse.ArgumentParser], None] = lambda _: None,
+    placeholder_name: str = "target",
 ) -> None:
     """
     Given an argparse parser and a mapping of target names → TargetSpec,
@@ -59,7 +60,7 @@ def register_target_commands_and_runner(
         _runner_class: stored runner class for introspection/testing.
     """
     targets = parser.add_subparsers(
-        dest="target",
+        dest=placeholder_name,
         required=True,
         metavar="{" + ",".join(target_specs.keys()) + "}",
     )

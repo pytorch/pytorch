@@ -28,6 +28,8 @@ def local_image_exists(
     """
     Return True if a local Docker image (by name:tag, id, or digest) exists.
     """
+    if not image_name:
+        return False
     client = client or _get_client()
     logger.info("Checking if image %s exists...", image_name)
     try:
