@@ -291,15 +291,15 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor_dim != 2 && tensor_dim != 3)
     return false;
 
-  if (tensor.is_contiguous())
-    return true;
-
   if (tensor.storage_offset() > 0) {
     // currently onednn asks 64 byte alignment
     constexpr int alignment_byte = 64;
     if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte > 0)
       return false;
   }
+
+  if (tensor.is_contiguous())
+    return true;
 
   // the overlaped cases are not supported
   dnnl::memory::dims strides = get_onednn_strides(tensor);
