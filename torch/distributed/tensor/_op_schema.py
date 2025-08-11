@@ -13,9 +13,15 @@ from torch.distributed.tensor.placement_types import Placement
 
 
 try:
-    from torch.utils._cxx_pytree import tree_leaves, tree_map_only, TreeSpec
+    from torch.utils._cxx_pytree import (
+        register_pytree_node,
+        tree_leaves,
+        tree_map_only,
+        TreeSpec,
+    )
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        register_pytree_node,
         tree_leaves,
         tree_map_only,
         TreeSpec,
@@ -73,12 +79,37 @@ class OpSpec:
     invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
+    # output_specs and input_specs are related: for this op, given these input_specs,
+    # this is the way the output would look
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
-    # redistribute costs to redistribute the operator input shardings to this OpSpec.
-    # Note that We need a nested list to record the cost for each operand of this
-    # operator, and for each operand of this operator it might have multiple OpSpecs.
+    """
+    redistribute_cost tells how expensive it is to redistribute a given input into the
+    placement specified in this OpSpec.
+
+    outer list: one entry (list) per (tensor) input in the op's arg schema
+    inner list: one entry (cost value) per possible sharding spec for that input
+
+    Example:
+    -------
+    another_op() -> tensor_a   # another_op produces the output that becomes our first input
+    my_op(tensor_a)
+
+    Let's assume this OpSpec's input_specs are [Replicate()],
+    but another_op() supports 2 strategies (OpSpecs) which produce outputs of
+       Replicate()
+       Shard(0)
+
+    In this example, redistribute_costs would look like this
+    [
+        # one row representing "my_op's first input" (tensor_a)
+        [
+            # two entries, one for each strategies supported by another_op
+            0.0,  # cost of redistributing tensor_a from 'Replicate()'
+            K,    # cost of redistributing tensor_a from 'Shard(0)'
+        ],
+    """
     redistribute_cost: Optional[list[list[float]]] = None
 
     @cached_property
@@ -217,6 +248,17 @@ class TupleStrategy(StrategyType):
         return f"TupleStrategy({child_strategies_str})"
 
 
+try:
+    register_pytree_node(
+        TupleStrategy,
+        lambda node: (node.children, None),
+        lambda children, _: TupleStrategy(tuple(children)),
+    )
+except ValueError:
+    # already registered TupleStrategy, skip
+    pass
+
+
 @dataclass
 class RuntimeSchemaInfo:
     """
@@ -316,6 +358,15 @@ class OpSchema:
             else:
                 args_schema.append(str(arg))
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
+
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
@@ -517,9 +568,14 @@ class OutputSharding:
     exactly the same as the operator OpSchema, except the DTensorSpecs
     """
 
+    # specifies the output sharding pattern
     output_spec: OutputSpecType
+    # schema for redistribution if needed
     redistribute_schema: Optional[OpSchema] = None
+    # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
+    # flag to use values from `redistribute_schema`
+    use_val_from_redistribute_schema: bool = False
 
     @cached_property
     def mesh(self):

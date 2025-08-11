@@ -34,11 +34,6 @@ PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
       reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
 }
 
-void PyObjectSlot::unchecked_clear_pyobj(PyInterpreter* interpreter) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
-  pyobj_ = nullptr;
-}
-
 PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
   auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
   if (interpreter) {
