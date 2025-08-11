@@ -2,24 +2,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-# ---[ Check if we want to turn off deprecated warning due to glog.
-if(USE_GLOG)
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++17")
-  CHECK_CXX_SOURCE_COMPILES(
-      "#include <glog/stl_logging.h>
-      int main(int argc, char** argv) {
-        return 0;
-      }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
-      FAIL_REGEX ".*-Wno-deprecated.*")
-
-  if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
-    message(STATUS "Turning off deprecation warning due to glog.")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
-  endif()
-  cmake_pop_check_state()
-endif()
-
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
   find_package(AVX) # checks AVX and AVX2
