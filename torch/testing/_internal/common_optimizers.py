@@ -1268,9 +1268,9 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(
-        x in ["foreach", "fused", "differentiable"] for x in skip
-    ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
+        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 
