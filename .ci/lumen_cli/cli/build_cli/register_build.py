@@ -11,7 +11,8 @@ from cli.lib.core.vllm import VllmBuildRunner
 
 logger = logging.getLogger(__name__)
 
-# dict maps target to its argparse configuration and runner
+# Maps targets to their argparse configuration and runner
+# it adds new target to path python -m cli.run build external {target} with buildrunner
 _TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmBuildRunner,
