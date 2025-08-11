@@ -951,10 +951,14 @@ class TritonOverrides(OpOverrides):
 
         if dtype == torch.bool:
             return f"({x} != 0)"
-        elif dtype == torch.uint8:
-            # to work around llvm uint conversion semantics
-            # that produces 0's for negative values
-            return f"{x}.to(tl.int8).to(tl.uint8)"
+        elif dtype == torch.uint8 and (
+            src_dtype is not None and src_dtype.is_floating_point or src_dtype is None
+        ):
+            # to work around llvm uint conversion semantics that produces 0's for negative
+            # values when converting from floating types.
+            # optimization - if source type is known and it's not a floating type, then
+            # do not apply conversion to the intermediate type.
+            return f"{x}.to(tl.int16).to(tl.uint8)"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
@@ -3966,8 +3970,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            # Triton will not accept an OrderedSet for autotune_hints
             "grid_type": self._get_grid_type().__name__,
+            # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
@@ -4479,6 +4483,11 @@ class TritonScheduling(SIMDScheduling):
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
+            if config.aot_inductor.model_name_for_generated_files:
+                # When AOTI compiles multiple submodules, we need to use the model name to
+                # distinguish kernel related symbols.
+                kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
+
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
