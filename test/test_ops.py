@@ -333,6 +333,7 @@ class TestCommon(TestCase):
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
@@ -388,6 +389,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
@@ -584,6 +586,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
@@ -603,6 +606,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
@@ -639,6 +643,7 @@ class TestCommon(TestCase):
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -651,6 +656,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -675,6 +681,7 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -702,6 +709,7 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -795,6 +803,7 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
@@ -934,6 +943,7 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
@@ -1138,6 +1148,7 @@ class TestCommon(TestCase):
                     with self.assertRaises(exc_type, msg=msg_fail):
                         op_out(out=out)
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(
         [
@@ -1177,6 +1188,7 @@ class TestCommon(TestCase):
         with self.assertRaises(RuntimeError, msg=msg), maybe_skip_size_asserts(op):
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
@@ -1221,6 +1233,7 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
@@ -1402,6 +1415,7 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
@@ -1438,6 +1452,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
@@ -1467,6 +1482,7 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1674,6 +1690,7 @@ class TestCommon(TestCase):
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
+    # XPU test will be enabled step by step, skip this test temporarily.
     @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
