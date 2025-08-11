@@ -2493,31 +2493,28 @@ def _reduction_configs(
             )
     
     def make_outer_config():
-        min_x_block, max_x_block = 8, 256
+        max_x_block = 256
         load_factor = inductor_meta.get("num_load", 0)
         x = size_hints["x"]
-        imbalance_threshold = 256
 
+        if x <= 8 * 4096:
+            x_block = 8
+        else:
+            x_block = min(max_x_block, next_power_of_2(x // 4096))
+            if x_block < 64:
+                x_block = 64
         if is_dynamic:
             # Dynamic shapes introduce a lot register pressure for indexing
             outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
-            max_x_block = 128
-            x_block = 64
         else:
             # Try to do reduction in 1 pass
             outer_r_block = min(next_power_of_2(rnumel), 128)
-            # xblock * rblock shouldn't exceed 1024, maximize x_block for coalesced loads
-            # TODO: x_block might want to be set to the lower power of 2
-            x_block = min(1024 // outer_r_block, max_x_block)
+        
+        if x_block * outer_r_block > 4096:
+            x_block = 2048 // outer_r_block
 
-        x_block = max(min_x_block, x_block)
-
-        # Resolve imbalance if the grid dim of x is much larger than r
-        while x // x_block > (rnumel // outer_r_block) * imbalance_threshold and outer_r_block > x_block and outer_r_block > 1 and x_block < max_x_block:
-            x_block *= 2
-            outer_r_block //= 2
-
-        return make_config(x_block, outer_r_block, register_intensive=register_intensive)
+        # Set register intensive to true by default as we try to maximize tiles with heuristic
+        return make_config(x_block, outer_r_block, register_intensive=True)
 
     contiguous_config = make_config(
         1,
