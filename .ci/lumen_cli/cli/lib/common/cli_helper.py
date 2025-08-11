@@ -1,5 +1,6 @@
 """
-Argparse Utility helpers for CLI tasks.
+Cli Argparser Utility helpers for CLI tasks.
+
 """
 
 import argparse
@@ -24,6 +25,15 @@ class RichHelp(
 
 
 class TargetSpec(TypedDict, total=False):
+    # Registry entry for a CLI subcommand.
+    #
+    # Keys:
+    #   runner        – class implementing BaseRunner; will be constructed
+    #                   with the parsed argparse Namespace.
+    #   help          – short help text for the subparser (shows in parent help).
+    #   description   – long help text (falls back to runner.__doc__ if missing).
+    #   add_arguments – optional function to add subparser-specific CLI args.
+
     runner: Required[type[BaseRunner]]
     help: str
     description: str
@@ -35,6 +45,19 @@ def register_target_commands_and_runner(
     target_specs: dict[str, TargetSpec],
     common_args: Callable[[argparse.ArgumentParser], None] = lambda _: None,
 ) -> None:
+    """
+    Given an argparse parser and a mapping of target names → TargetSpec,
+    register each target as a subcommand and wire it to its runner class.
+    - Creates a subparser for each target name.
+    - description: defaults to TargetSpec['description'] or runner.__doc__.
+      - description has higher priority than runner.__doc__.
+    - add_arguments[Optional]: add target-specific CLI args, if 'add_arguments' exists
+    - common_args[Optional]: add shared CLI args to each target parser.
+    - Sets parser defaults:
+        func:         lambda that constructs the runner with parsed args
+                      and calls its .run().
+        _runner_class: stored runner class for introspection/testing.
+    """
     targets = parser.add_subparsers(
         dest="target",
         required=True,

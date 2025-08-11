@@ -40,9 +40,7 @@ class TestArgparseCLI(unittest.TestCase):
 
             output = stdout.getvalue()
             self.assertIn("usage", output)
-            self.assertIn(
-                "external", output
-            )  # assuming "external" is a subcommand of build
+            self.assertIn("external", output)
 
 
 if __name__ == "__main__":

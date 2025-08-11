@@ -41,9 +41,11 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
-    # Enable Inductor UTs on Windows for CPU.
-    # CUDA on Windows is not verified, NVDA developer can continue to enable CUDA based on CPU path.
-    if torch.cuda.is_available() and IS_WINDOWS:
+    if (
+        not torch.xpu.is_available()
+        and IS_WINDOWS
+        and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
+    ):
         return
 
     if isinstance(needs, str):
