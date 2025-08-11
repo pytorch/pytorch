@@ -51,7 +51,6 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
         # if no dst is provided, use the target name
         if not dst:
             dst = target
-
         remove_dir(dst)
         r = Repo.clone_from(repo, dst, progress=PrintProgress())
 
@@ -60,6 +59,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
 
         logger.info("try to find the pinned commit for %s ...", target)
         commit = get_post_build_pinned_commit(target)
+        logger.info("Done.found the pinned commit %s for %s ...", commit, target)
 
         logger.info("checkout %s", commit)
         r.git.checkout(commit)
@@ -73,7 +73,9 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
                 for sm in r.submodules:
                     sm.update(init=True, recursive=True, progress=PrintProgress())
             else:
-                logger.info("No submodules found, skipping submodule update.")
+                logger.info(
+                    "No submodules found for repo %s, skipping submodule update.", repo
+                )
         logger.info("Checked out %s at %s in  %s", target, commit, dst)
         return r
     except GitCommandError as e:
