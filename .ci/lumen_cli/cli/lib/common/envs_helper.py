@@ -1,3 +1,7 @@
+"""
+Environment Variables and Dataclasses Utility helpers for CLI tasks.
+"""
+
 import os
 from dataclasses import field
 from pathlib import Path
@@ -49,10 +53,17 @@ def env_bool(
     return str2bool(val)
 
 
+# ------------------ dataclass fields helper ------------------ #
+
+
 def env_bool_field(
     name: str,
     default: bool = False,
 ):
+    """
+    returns dataclass's factory function for bool field with default
+
+    """
     return field(default_factory=lambda: env_bool(name, default))
 
 
@@ -63,8 +74,8 @@ def env_path_field(
     resolve: bool = True,
 ) -> Optional[Path]:
     """
-    returns dataclass's factory function for Path field with default
-
+    returns dataclass's factory function for Path field with Default value
+    If resolve=True, returns the resolved(absolute) path.
     """
     return field(default_factory=lambda: env_path(name, default, resolve=resolve))
 
@@ -73,4 +84,7 @@ def env_str_field(
     name: str,
     default: str = "",
 ) -> str:
+    """
+    returns dataclass's factory function for str field with default value
+    """
     return field(default_factory=lambda: get_env(name, default))

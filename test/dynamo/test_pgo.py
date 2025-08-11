@@ -12,6 +12,7 @@ import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 import torch.nested
 from torch._dynamo.testing import CompileCounter
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
 
 
@@ -322,8 +323,9 @@ def run(cnt):
         temp_dir1 = tempfile.TemporaryDirectory()
         temp_dir2 = tempfile.TemporaryDirectory()
 
-        path1 = os.path.join(temp_dir1.name, "example.py")
-        path2 = os.path.join(temp_dir2.name, "example.py")
+        # We need normalize_path_separator for Windows file path.
+        path1 = normalize_path_separator(os.path.join(temp_dir1.name, "example.py"))
+        path2 = normalize_path_separator(os.path.join(temp_dir2.name, "example.py"))
         cnts = CompileCounter()
 
         assert path1 != path2
