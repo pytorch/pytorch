@@ -12,7 +12,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Sequence, Set as AbstractSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -108,7 +108,8 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
+    placeholders: Sequence[PlaceholderInfo],
+    mutation_indices: Union[AbstractSet[int], Sequence[int]],
 ) -> str:
     stack_trace: Optional[str] = ""
 
