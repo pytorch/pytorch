@@ -98,7 +98,6 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       case Tag::Int:
         return IntType::get();
       case Tag::UInt:
-        TORCH_CHECK(false, "you should not be called");
         return IntType::get();
       case Tag::SymInt:
         return c10::SymIntType::get();
@@ -382,9 +381,10 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Storage:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
-    case Tag::UInt:
       return c10::get_hash(v.payload.u.as_int);
     // NB: these are technically strict aliasing violations
+    case Tag::UInt:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:

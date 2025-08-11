@@ -661,8 +661,12 @@ struct TORCH_API IValue final {
   }
 
 
+  // See Note [Meaning of HAS_u]
+  // IValue type model closely follows that of c10::Scalar
+  // Where all integers are upcast to 64-bit representation, and `as_int` is used as default
+  // representation unless value could not be represented as signed int
   bool isUnsigned() const {
-    return Tag::UInt == tag || (Tag::Int == tag && payload.u.as_int >= 0);;
+    return Tag::UInt == tag || (Tag::Int == tag && payload.u.as_int >= 0);
   }
 
   uint64_t toUInt() const {
@@ -1374,6 +1378,7 @@ struct TORCH_API IValue final {
     union TriviallyCopyablePayload {
       TriviallyCopyablePayload() : as_int(0) {}
       int64_t as_int;
+      // See Note [Meaning of HAS_u]
       uint64_t as_uint;
       double as_double;
       bool as_bool;
