@@ -38,7 +38,7 @@ from torch.utils._triton import has_triton
 
 
 if has_triton():
-    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
 else:
 
@@ -46,6 +46,9 @@ else:
         pass
 
     class JITFunction:  # type: ignore[no-redef]
+        pass
+
+    class Heuristics:  # type: ignore[no-redef]
         pass
 
 
@@ -363,7 +366,15 @@ isolate_fails_code_str = None
     # Track which grid entry corresponds to the best config
     for id in kernel_side_table.id_to_kernel:
         kernel = kernel_side_table.get_kernel(id)
+
         if isinstance(kernel, Autotuner):
+            if isinstance(kernel.fn, Heuristics):
+                model_str += "ERROR: Repro will not work as intended, "
+                model_str += (
+                    "triton.runtime.autotuner.Heuristics is not currently supported\n"
+                )
+                break
+
             config_strs = []
             for kernel_config in kernel.configs:
                 config_strs.append(f"""triton.Config(
