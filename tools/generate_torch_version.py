@@ -56,7 +56,7 @@ def get_torch_version(sha: str | None = None) -> str:
     pytorch_root = Path(__file__).absolute().parent.parent
     pkg_info_path = pytorch_root / "PKG-INFO"
     if pkg_info_path.exists():
-        with open(pkg_info_path, "r") as f:
+        with open(pkg_info_path) as f:
             pkg_info = email.message_from_file(f)
         version = pkg_info["Version"]
     else:
