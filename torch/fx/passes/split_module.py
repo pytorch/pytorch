@@ -58,6 +58,7 @@ def split_module(
     qualname_map: Optional[dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
+    keep_original_input_name: bool = True,
 ):
     """
     Creates subgraphs out of main graph
@@ -76,7 +77,10 @@ def split_module(
             names in the original module.
         keep_original_order: Optional[bool]: keep the original order of the GraphModule
             or use the Topological order of the new constructed GraphModule
-
+        keep_original_node_name: Optional[bool]: If the partitioned graphs should
+            have the same node names as the original graph.
+        keep_original_input_name: bool: If the partitioned graphs should
+            have the same input names as the original graph.
 
     Returns:
         GraphModule: the module after split.
@@ -390,7 +394,7 @@ def split_module(
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
         for dependent in partitions[root_partition].dependents:
-            partitions[dependent].dependencies.pop(root_partition)
+            partitions[dependent].dependencies.pop(root_partition)  # noqa: B909
             if not partitions[dependent].dependencies:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
@@ -419,10 +423,27 @@ def split_module(
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
         new_inputs: dict[str, None] = {}
+
+        counter = 0
+
         for inp in partition.inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
+
+            def add_placeholder():
+                if keep_original_input_name:
+                    name = inp
+                else:
+                    nonlocal counter
+                    name = f"arg_{counter}"
+                    counter += 1
+                placeholder = partition.graph.placeholder(
+                    name,
+                    type_expr=orig_nodes[inp].type,
+                )
+                new_inputs[inp] = None
+                return placeholder
 
             if orig_node.op == "get_attr":
                 assert isinstance(orig_node.target, str)
@@ -432,17 +453,9 @@ def split_module(
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:
-                    placeholder = partition.graph.placeholder(
-                        inp,
-                        type_expr=orig_nodes[inp].type,
-                    )
-                    new_inputs[inp] = None
+                    placeholder = add_placeholder()
             else:
-                placeholder = partition.graph.placeholder(
-                    inp,
-                    type_expr=orig_nodes[inp].type,
-                )
-                new_inputs[inp] = None
+                placeholder = add_placeholder()
             placeholder.meta = orig_nodes[inp].meta.copy()
             partition.environment[orig_nodes[inp]] = placeholder
         partition.inputs = new_inputs

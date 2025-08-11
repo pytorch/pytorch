@@ -190,7 +190,7 @@ def get_new_attr_name_with_prefix(prefix: str) -> Callable:
 
 
 def collect_producer_nodes(node: Node) -> Optional[list[Node]]:
-    r"""Starting from a target node, trace back until we hit inpu or
+    r"""Starting from a target node, trace back until we hit input or
     getattr node. This is used to extract the chain of operators
     starting from getattr to the target node, for example
     def forward(self, x):

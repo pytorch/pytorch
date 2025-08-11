@@ -33,6 +33,86 @@ class ViewTests(torch._dynamo.test_case.TestCase):
         t = torch.tensor([2, 4], dtype=torch.int32)
         f(t, 8)
 
+    def test_view_with_tensor_shape_params(self):
+        # Test for issue #156720: aten.view.default with tensor shape parameters
+        class TestModel(torch.nn.Module):
+            def forward(self, x, shape_params):
+                return torch.ops.aten.view.default(x, shape_params)
+
+        x = torch.randn(24)
+        shape_params = [
+            torch.tensor(2, dtype=torch.int32),
+            torch.tensor(3, dtype=torch.int32),
+            torch.tensor(4, dtype=torch.int32),
+        ]
+
+        model = TestModel()
+        expected = model(x, shape_params)
+
+        compiled_model = torch.compile(model, backend="eager")
+        result = compiled_model(x, shape_params)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_tensor_view_with_tensor_shape_params(self):
+        # Test tensor.view() method with tensor shape parameters (list version)
+        class TestModel(torch.nn.Module):
+            def forward(self, x, shape_params):
+                return x.view(shape_params)
+
+        x = torch.randn(24)
+        shape_params = (
+            torch.tensor(2, dtype=torch.int32),
+            torch.tensor(3, dtype=torch.int32),
+            torch.tensor(4, dtype=torch.int32),
+        )
+
+        model = TestModel()
+        expected = model(x, shape_params)
+
+        compiled_model = torch.compile(model, backend="eager")
+        result = compiled_model(x, shape_params)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_tensor_view_with_tensor_args(self):
+        # Test tensor.view() method with individual tensor arguments
+        class TestModel(torch.nn.Module):
+            def forward(self, x, dim1, dim2, dim3):
+                return x.view(dim1, dim2, dim3)
+
+        x = torch.randn(24)
+        dim1 = torch.tensor(2, dtype=torch.int32)
+        dim2 = torch.tensor(3, dtype=torch.int32)
+        dim3 = torch.tensor(4, dtype=torch.int32)
+
+        model = TestModel()
+        expected = model(x, dim1, dim2, dim3)
+
+        compiled_model = torch.compile(model, backend="eager")
+        result = compiled_model(x, dim1, dim2, dim3)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_torch_reshape_with_tensor_shape_params(self):
+        # Test torch.reshape() function with tensor shape parameters
+        def test_fn(x, shape_params):
+            return torch.reshape(x, shape_params)
+
+        x = torch.randn(24)
+        shape_params = [
+            torch.tensor(2, dtype=torch.int32),
+            torch.tensor(3, dtype=torch.int32),
+            torch.tensor(4, dtype=torch.int32),
+        ]
+
+        expected = test_fn(x, shape_params)
+
+        compiled_fn = torch.compile(test_fn, backend="eager")
+        result = compiled_fn(x, shape_params)
+
+        torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

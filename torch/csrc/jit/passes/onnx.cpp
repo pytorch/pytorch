@@ -167,7 +167,7 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   py::dict env;
-  // Kept identical to values in env. Used for constant-time existance check.
+  // Kept identical to values in env. Used for constant-time existence check.
   py::set values_in_env;
   try {
     BlockToONNX(
