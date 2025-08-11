@@ -3,6 +3,7 @@
 import importlib
 import math
 import warnings
+from enum import Enum
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -3592,6 +3593,67 @@ def binary_cross_entropy_with_logits(
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum
+    )
+
+
+# TODO: works for now but inconsistent with existing code base.
+class CrossEntropyChunkingStrategy(Enum):
+    # Naive, unfused computation
+    none = "none"
+
+    # Chunk by inputs on batch dimension
+    inputs_on_batch = "inputs_on_batch"
+
+    # Chunk by weights on vocabulary dimension
+    weights_on_vocabulary = "weights_on_vocabulary"
+
+
+def linear_cross_entropy(
+    input: Tensor,
+    target: Tensor,
+    linear_weight: Tensor,
+    chunking_strategy: str = CrossEntropyChunkingStrategy.none.value,
+    #
+    # Parameter for F.linear
+    #
+    bias: Optional[Tensor] = None,
+    #
+    # Parameters for F.cross_entropy
+    #
+    cross_entropy_weight: Optional[Tensor] = None,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+    size_average: Optional[bool] = None,
+) -> Tensor:
+    torch._check_with(
+        AssertionError,
+        hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
+        lambda: (
+            "Expected one of "
+            f"{', '.join(CrossEntropyChunkingStrategy)} but got {chunking_strategy=}"
+        ),
+    )
+    torch._check_with(
+        NotImplementedError,
+        chunking_strategy == CrossEntropyChunkingStrategy.none,
+        lambda: "{chunking_strategy=} is not yet implemented"
+    )
+
+    return cross_entropy(
+        linear(
+            input=input,
+            weight=linear_weight,
+            bias=bias,
+        ),
+        target,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+        reduce=reduce,
+        reduction=reduction,
+        size_average=size_average,
+        weight=cross_entropy_weight,
     )
 
 
