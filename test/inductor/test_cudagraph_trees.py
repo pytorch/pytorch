@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -55,11 +56,8 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
 
 aten = torch.ops.aten
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
@@ -124,7 +122,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
         segments = torch.cuda.memory_snapshot()
@@ -2850,6 +2848,28 @@ if HAS_CUDA:
             self.assertEqual(x, torch.tensor(1, device="cpu"))
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_multiple(self):
+            def f(x, y, z):
+                return x + y, x + z
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            inputs = (
+                torch.ones((), device="cpu"),
+                torch.ones((), device="cpu"),
+                torch.ones(2, 2, device="cuda"),
+            )
+            for i in range(3):
+                if i == 0:
+                    _, code = run_and_get_code(compiled_f, *inputs)
+                    FileCheck().check_regex(r".copy_.*True").run(code[0])
+                    FileCheck().check_count(".copy_", 1, exactly=True).run(code[0])
+                else:
+                    compiled_f(*inputs)
+            self.assertEqual(compiled_f(*inputs), f(*inputs))
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_graph_partition_reduce_overhead_mode_effectiveness(self):
             # test that `mode="reduce-overhead"` still controls whether
@@ -4035,5 +4055,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CUDA:
+    if HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")
