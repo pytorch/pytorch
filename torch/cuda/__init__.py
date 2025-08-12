@@ -1236,14 +1236,21 @@ _cached_hip_to_amdsmi: Optional[dict[int, int]] = None
 def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
     global _cached_hip_to_amdsmi
     if _cached_hip_to_amdsmi is None:
+        amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
 
         def gen():
-            amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
             for amdsmi_idx, handle in enumerate(amdsmi_handles):
                 info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
                 yield info["hip_id"], amdsmi_idx
 
         _cached_hip_to_amdsmi = dict(gen())
+        if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
+            warnings.warn(
+                "Cannot translate HIP ID to AMD SMI ID due to"
+                " lack of translation information prior to ROCM 6.4."
+                " Functions that rely on amdsmi"
+                " (e.g. temperature()) may operate on wrong devices."
+            )
     return _cached_hip_to_amdsmi[device]
 
 
