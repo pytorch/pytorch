@@ -12,6 +12,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
@@ -593,11 +594,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     )
 
         if len(ops) == 0:
-            input_layouts = [node.get_layout() for node in input_nodes]
-            input_strides = [node.get_stride() for node in input_nodes]
-            output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
-            log.warning(warning_msg)
+            log.info(
+                "No suitable Cutlass GEMM configs found, fallbacks used "
+                "( len(ops)=%d, output_layout=%s, input_layouts=%s, input_strides=%s )",
+                len(ops),
+                layout,
+                [node.get_layout() for node in input_nodes],
+                [node.get_stride() for node in input_nodes],
+            )
         log.debug(
             "Added %d Cutlass gemm configs.",
             len(ops),
@@ -918,6 +922,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 "Skipping due to alignment mismatch. op: %s", op.configuration_name()
             )
             return None
+
+        # only use stream k for static shape
+        if op.tile_scheduler.name == "StreamK":
+            static_shape = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+                tuple(X.get_size()) + tuple(W.get_size())
+            )
+            if not static_shape:
+                return None
 
         # Update op.
         op = copy.deepcopy(op)
@@ -1308,7 +1320,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
     def _render_evt(
         self,
