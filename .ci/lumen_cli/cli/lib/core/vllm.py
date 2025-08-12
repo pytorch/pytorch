@@ -178,12 +178,6 @@ class VllmBuildRunner(BaseRunner):
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:
             return ""
-
-        if not inputs.torch_whls_path or not inputs.torch_whls_path.exists():
-            raise FileNotFoundError(
-                "torch whl path is not provided, but use_torch_whl is set to 1"
-            )
-
         tmp_dir = f"./{self.work_directory}/{_VLLM_TEMP_FOLDER}"
         tmp_path = Path(tmp_dir)
         force_create_dir(tmp_path)
@@ -194,11 +188,6 @@ class VllmBuildRunner(BaseRunner):
         if not inputs.use_local_dockerfile:
             logger.info("using vllm default dockerfile.torch_nightly for build")
             return
-
-        if not inputs.dockerfile_path or not inputs.dockerfile_path.exists():
-            raise FileNotFoundError(
-                "dockerfile is not found, but USE_LOCAL_DOCKERFILE env var is set to `true`"
-            )
         dockerfile_path = get_path(inputs.dockerfile_path, full_path=True)
         vllm_torch_dockerfile = Path(
             f"./{self.work_directory}/docker/Dockerfile.nightly_torch"
