@@ -404,7 +404,7 @@ def _prim_elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
+    l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
