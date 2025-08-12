@@ -3,7 +3,6 @@ File And Path Utility helpers for CLI tasks.
 """
 
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -57,7 +56,7 @@ def ensure_dir_exists(path: Optional[Path]):
         logger.info("Directory already exists'%s' ", path)
 
 
-def remove_dir(path: Optional[Union[Path,str]]):
+def remove_dir(path: Optional[Union[Path, str]]):
     """
     Remove a directory if it exists.
     """
@@ -99,17 +98,11 @@ def copy(src: Any, dst: Any, overwrite=True, full_path=True):
     logger.info("Done. Copied file %s to dst %s", src_path, dst_path)
 
 
-def get_existing_abs_path(path: str) -> str:
-    p = get_path(path, full_path=True)
-    if not p.exists():
-        raise FileNotFoundError(f"Path does not exist: {path}")
-    return path
-
-
-def is_path_exist(path: str) -> bool:
+def is_path_exist(path: Union[str, Path]) -> bool:
     """
     Check if a path exists.
     """
     if not path:
         return False
-    return os.path.exists(path)
+    path = get_path(path)
+    return path.exists()
