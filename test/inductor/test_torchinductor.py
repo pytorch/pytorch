@@ -13693,6 +13693,25 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
+def add_test_failures(
+    test_failures: dict[str, TestFailure], added_test_failures: dict[str, TestFailure]
+):
+    """
+    In-place modifies the given dictionary of `test_failures` to add the
+    contents of `added_test_failures` by unioning the test_failure.suffixes, and
+    or-ing the the is_skip value.
+    """
+    for name, new_failure in added_test_failures.items():
+        if name in test_failures:
+            orig_failure = test_failures[name]
+            orig_failure.suffixes = tuple(
+                set(orig_failure.suffixes).union(set(new_failure.suffixes))
+            )
+            orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
+        else:
+            test_failures[name] = new_failure
+
+
 if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
@@ -14519,11 +14538,11 @@ if RUN_GPU:
             else:
                 self.assertTrue("Graph fragment" in code)
                 self.assertTrue(
-                    '%sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
+                    f'%sin : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
                     in code
                 )
                 self.assertTrue(
-                    '%relu : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
+                    f'%relu : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
                     in code
                 )
 

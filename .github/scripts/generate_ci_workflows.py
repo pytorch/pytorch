@@ -59,7 +59,6 @@ class BinaryBuildWorkflow:
     is_scheduled: str = ""
     branches: str = "nightly"
     # Mainly for macos
-    cross_compile_arm64: bool = False
     macos_runner: str = "macos-14-xlarge"
     use_split_build: bool = False
     # Mainly used for libtorch builds
@@ -338,7 +337,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
             generate_binary_build_matrix.RELEASE,
             libtorch_variants=["shared-with-deps"],
         ),
-        cross_compile_arm64=False,
         macos_runner="macos-14-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -351,7 +349,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.MACOS_ARM64
         ),
-        cross_compile_arm64=False,
         macos_runner="macos-14-xlarge",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},

@@ -1509,6 +1509,7 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
+                    node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                         metrics.num_bytes_accessed += num_bytes
@@ -1522,6 +1523,11 @@ class _InProcessFxCompile(FxCompile):
                                 "node_runtimes": node_runtimes,
                             },
                         )
+
+                    # Collect and dump op runtimes for TLParse
+                    if config.log_tlparse:
+                        _, _, node_runtimes = graph.count_bytes()
+                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
 
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
@@ -2046,6 +2052,34 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
     )
 
 
+def partition_fn(
+    gm: GraphModule,
+    joint_inputs: Sequence[object],
+    **kwargs: object,
+) -> tuple[GraphModule, GraphModule]:
+    cuda_context = get_cuda_device_context(gm)
+    with cuda_context:
+        # We can skip the invoke_subgraph because the
+        # entire_partition_fn is called recursively for invoke_subgraph
+        # in partitioning.
+        _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
+
+    static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
+        "static_lifetime_input_indices", None
+    )
+
+    with dynamo_utils.dynamo_timed(
+        "min_cut_rematerialization_partition", log_pt2_compile_event=True
+    ):
+        return min_cut_rematerialization_partition(
+            gm,
+            joint_inputs,
+            compiler="inductor",
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2363,33 +2397,6 @@ def compile_fx(
             inference_compiler = SerializableAOTDispatchCompiler(
                 OutputCode, inference_compiler
             )
-
-        def partition_fn(
-            gm: GraphModule,
-            joint_inputs: Sequence[object],
-            **kwargs: object,
-        ) -> tuple[GraphModule, GraphModule]:
-            cuda_context = get_cuda_device_context(gm)
-            with cuda_context:
-                # We can skip the invoke_subgraph because the
-                # entire_partition_fn is called recursively for invoke_subgraph
-                # in partitioning.
-                _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
-
-            static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
-                "static_lifetime_input_indices", None
-            )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
