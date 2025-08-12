@@ -1959,7 +1959,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
             if "nn_module_stack" not in node.meta:
-                node.meta["nn_module_stack"] = self.module_stack
+                node.meta["nn_module_stack"] = self.module_stack.copy()
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
             for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
                 if isinstance(mod_cls, type):
