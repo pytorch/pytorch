@@ -112,6 +112,27 @@ Simulating creation, release and synchronization for event and steam:
 
 Please refer to [example](example/example.cpp) for example.
 
+The command to compile example.cpp is as follow:
+
+```Shell
+pushd third_party/openreg/
+
+g++ -o out example/example.cpp -L ../../torch_openreg/lib -lopenreg
+LD_LIBRARY_PATH=../../torch_openreg/lib ./out
+
+popd
+```
+
+The output is as follow:
+
+```Shell
+Current environment have 2 devices
+Current is 0 device
+All tasks have been submitted.
+Kernel execution time: 0.238168 ms
+Verification PASSED!
+```
+
 ## Next Steps
 
-Basic functions are already supported, and will be optimized and expanded based on the needs of PyTorch integration.
+The most basic functions of the OpenReg backend are currently supported, and will be dynamically optimized and expanded based on the needs of PyTorch integration.
