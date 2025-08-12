@@ -6459,8 +6459,12 @@ def multi_head_attention_forward(
         # safe softmax
         attn_output_weights = softmax(attn_output_weights, dim=-1)
         all_neginf_along_dim = is_neginf.all(dim=-1, keepdim=True)
-        zeros = torch.scalar_tensor(0.0, dtype=attn_output_weights.dtype, device=attn_output_weights.device)
-        attn_output_weights = torch.where(all_neginf_along_dim, zeros, attn_output_weights)
+        zeros = torch.scalar_tensor(
+            0.0, dtype=attn_output_weights.dtype, device=attn_output_weights.device
+        )
+        attn_output_weights = torch.where(
+            all_neginf_along_dim, zeros, attn_output_weights
+        )
 
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
