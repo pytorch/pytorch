@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from typing import Any, TypeVar
 
 import torch._inductor.config as config
@@ -9,7 +10,7 @@ _T = TypeVar("_T")
 
 
 def gen_best_config(
-    mm_type: str, mats: list[ir.StorageBox], **kwargs: Any
+    mm_type: str, mats: Sequence[ir.StorageBox], **kwargs: Any
 ) -> asyncio.Task[_T]:
     """
     Generate the best GEMM autotune config for the given matrices.

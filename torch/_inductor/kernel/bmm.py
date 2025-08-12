@@ -243,7 +243,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     best_config_future = None
     if torch._inductor.config.remote_gemm_autotune_cache:
-        best_config_future = gen_best_config("bmm", [mat1, mat2])
+        best_config_future = gen_best_config("bmm", (mat1, mat2))
 
     return autotune_select_algorithm(
         name,

@@ -2393,7 +2393,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if best_config_future is not None:
                 best_config = await_sync(best_config_future)
                 if best_config:
-                    important_keys = [
+                    important_keys = (
                         "ACC_TYPE",
                         "ALLOW_TF32",
                         "BLOCK_K",
@@ -2406,7 +2406,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "num_warps",
                         "num_consumer_groups",
                         "num_buffers_warp_spec",
-                    ]
+                    )
                     choices = [
                         choice
                         for choice in choices
