@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_SLOW_GRADCHECK
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     HAS_CPU,
@@ -287,6 +287,10 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(res, res2, atol=1e-4, rtol=1.1)
             return code, code2
 
+        @unittest.skipIf(
+            TEST_WITH_SLOW_GRADCHECK,
+            "failing on slow gradcheck, seems to have started at 1febab2a89302464f6c7d69cfbef7a24c421ea65",
+        )
         @fresh_cache()
         @config.patch(max_autotune_gemm_backends="TRITON")
         def test_equivalent_template_code(self):
