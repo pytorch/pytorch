@@ -9,6 +9,7 @@
 
 #include <deque>
 #include <set>
+#include <stack>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -265,7 +266,7 @@ class RingBuffer {
 
   // Inserts a new entry into the buffer. If buffer is full, overwrites the
   // oldest entry.
-  void insertEntry(const T& entry) {
+  void insertEntries(const T& entry) {
     std::lock_guard<std::mutex> lk(alloc_trace_lock_);
     if (alloc_trace_->size() < alloc_trace_max_entries_) {
       // Buffer not yet full, simply append
@@ -286,7 +287,7 @@ class RingBuffer {
       return;
     }
     result.reserve(alloc_trace_->size());
-    if (alloc_trac_->size() < alloc_trace_max_entries_) {
+    if (alloc_trace_->size() < alloc_trace_max_entries_) {
       // Buffer not yet full, entries are in natural order
       result.insert(result.end(), alloc_trace_->begin(), alloc_trace_->end());
     } else {
@@ -1133,7 +1134,7 @@ struct CachingDeviceAllocatorImpl {
     }
 
     if (record_history) {
-      alloc_buffer.insertEntry(te);
+      alloc_buffer.insertEntries(te);
     }
   }
 
@@ -1155,7 +1156,7 @@ struct CachingDeviceAllocatorImpl {
   // they came from graph_pools or one of the BlockPools above.
   ska::flat_hash_set<BlockT*> active_blocks;
 
-  std::atomic<CreateContextFn> context_recorder_{nullptr};
+  std::atomic<CreateContextFnPtr> context_recorder_{nullptr};
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Outstanding events that are waiting for the used streams to complete.

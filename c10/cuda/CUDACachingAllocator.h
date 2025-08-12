@@ -50,10 +50,11 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
+using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::RecordContext;
+using c10::CachingDeviceAllocator::trace_time_;
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
