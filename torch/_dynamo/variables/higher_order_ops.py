@@ -485,35 +485,54 @@ def _call_while_loop(
 
     body_nn_modules = dict(tx.output.nn_modules)
 
-    cond_name = tx.output.install_subgraph(
-        "cond_fn",
-        torch.fx.GraphModule(cond_nn_modules, cond_graph),
-    )
-    body_name = tx.output.install_subgraph(
-        "body_fn",
-        torch.fx.GraphModule(body_nn_modules, body_graph),
-    )
+    cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
+    body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
+    cond_name = tx.output.install_subgraph("cond_fn", cond_gm)
+    body_name = tx.output.install_subgraph("body_fn", body_gm)
 
     cond_node = make_attr(tx, cond_name)
     body_node = make_attr(tx, body_name)
 
+    operands_proxy = tuple(operand.as_proxy() for operand in operands_seq)
+    additional_inputs_proxy = tuple(
+        [inp.as_proxy() for inp in additional_inputs_seq] + additional_lifted_inputs
+    )
     p_args = (
         cond_node,
         body_node,
-        tuple([operand.as_proxy() for operand in operands_seq]),
-        tuple(
-            [inp.as_proxy() for inp in additional_inputs_seq] + additional_lifted_inputs
-        ),
+        operands_proxy,
+        additional_inputs_proxy,
     )
+    if with_checkpoint:
+        # The outputs of while_loop_with_checkpoint is guaranteed to be flattened.
+        with tx.output.fake_mode:
+            example_outputs = self.value(
+                cond_gm,
+                body_gm,
+                tuple(get_fake_value(proxy.node, tx) for proxy in operands_proxy),
+                tuple(
+                    get_fake_value(proxy.node, tx) for proxy in additional_inputs_proxy
+                ),
+            )
+        _, body_treespec_with_checkpoint = pytree.tree_flatten(example_outputs)
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            {},
+            example_outputs,
+            body_treespec_with_checkpoint,
+        )
 
-    return _call_function_and_unflatten_output(
-        tx,
-        self.value,
-        p_args,
-        {},
-        None,
-        body_treespec,
-    )
+    else:
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            {},
+            None,
+            body_treespec,
+        )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
@@ -1445,6 +1464,22 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         return _call_while_loop(self, tx, args, kwargs, with_checkpoint=False)
+
+
+class WhileLoopWithCheckpointHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    @raise_hard_error_if_graph_break(
+        reason="while_loop_with_checkpoint doesn't work unless it is captured completely with torch.compile."
+    )
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return _call_while_loop(self, tx, args, kwargs, with_checkpoint=True)
 
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -3433,6 +3468,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
+    "while_loop_with_checkpoint": WhileLoopWithCheckpointHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,

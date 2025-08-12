@@ -203,15 +203,12 @@ def while_loop_dense(
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
-    # Initialize checkpoints if needed
-    checkpoints: list[list[torch.Tensor]] = []
-    if with_checkpoint:
-        checkpoints = [[] for _ in range(len(carried_inputs))]
+    # Initialize checkpoints
+    checkpoints: list[list[torch.Tensor]] = [[] for _ in range(len(carried_inputs))]
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
 
-        # Store checkpoints before body_fn execution if needed
         if with_checkpoint:
             for i, carry in enumerate(carried_vals):
                 checkpoints[i].append(carry)
@@ -226,10 +223,13 @@ def while_loop_dense(
         carried_vals = out
 
     if with_checkpoint:
+        assert all(len(ckp_list) != 0 for ckp_list in checkpoints), (
+            "body_fn is not executed at all."
+        )
         checkpoint_tensors = tuple(torch.stack(ckp_list) for ckp_list in checkpoints)
-        return carried_vals + checkpoint_tensors
+        return tuple(carried_vals) + checkpoint_tensors
     else:
-        return carried_vals
+        return tuple(carried_vals)
 
 
 while_loop_op.py_autograd_impl(
