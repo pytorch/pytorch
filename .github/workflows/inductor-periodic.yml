@@ -77,7 +77,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-rocm-py3_10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       sync-tag: rocm-build
       test-matrix: |
         { include: [
