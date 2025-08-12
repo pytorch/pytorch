@@ -175,6 +175,9 @@ checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
 
+  # soxr comes from https://github.com/huggingface/transformers/pull/39429
+  pip install transformers==4.54.0 soxr==0.5.0
+
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
