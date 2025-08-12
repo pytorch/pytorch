@@ -204,8 +204,6 @@ bool _compute_channels_last_contiguous_3d(
 inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides) {
-  // Please don't combine these code, constant array is used here to let
-  // compiler fully unroll the loop to get better performance
   switch (sizes.size()) {
     case 5: {
       auto guard_or_false = [&]() {
