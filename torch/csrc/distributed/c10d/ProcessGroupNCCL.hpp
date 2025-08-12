@@ -960,6 +960,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void enableCollectivesTiming() override;
 
   c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<Backend::Options>& opts) override;
 
