@@ -151,7 +151,7 @@ function install_130 {
 while test $# -gt 0
 do
     case "$1" in
-    12.6|12.6.*) install_126; prune_126
+    12.6|12.6.*) install_126;
         ;;
     12.8|12.8.*) install_128;
         ;;
