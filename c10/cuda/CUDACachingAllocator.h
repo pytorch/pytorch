@@ -163,6 +163,7 @@ struct AllocatorConfigInfo {
   bool expandable_segments;
   bool release_lock_on_malloc;
   bool pinned_use_host_register;
+  bool reclaim_memory_in_graph_capture;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
 };

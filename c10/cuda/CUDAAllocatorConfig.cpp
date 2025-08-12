@@ -373,6 +373,9 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
     } else if (config_item_view == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(config, i);
       used_native_specific_option = true;
+    } else if (config_item_view == "reclaim_memory_in_graph_capture") {
+      i = parseReclaimMemoryInGraphCapture(config, i);
+      used_native_specific_option = true;
     } else {
       TORCH_CHECK(
           false, "Unrecognized CachingAllocator option: ", config_item_view);
@@ -403,6 +406,15 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
     TORCH_CHECK(
         false, "Error, expecting pinned_use_cuda_host_register value", "");
   }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseReclaimMemoryInGraphCapture(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  m_reclaim_memory_in_graph_capture = tokenizer.toBool(++i);
+
   return i;
 }
 

@@ -53,6 +53,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_release_lock_on_cudamalloc;
   }
 
+  static bool reclaim_memory_in_graph_capture() {
+    return instance().m_reclaim_memory_in_graph_capture;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -142,6 +146,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedUseBackgroundThreads(
       const std::vector<std::string>& config,
       size_t i);
+  size_t parseReclaimMemoryInGraphCapture(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_max_split_size;
   std::atomic<size_t> m_max_non_split_rounding_size;
@@ -153,6 +160,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
       m_expandable_segments_handle_type;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
+  std::atomic<bool> m_reclaim_memory_in_graph_capture;
   std::atomic<bool> m_pinned_use_background_threads;
   std::string m_last_allocator_settings;
   std::mutex m_last_allocator_settings_mutex;
