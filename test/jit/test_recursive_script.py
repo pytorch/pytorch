@@ -797,6 +797,7 @@ class TestRecursiveScript(JitTestCase):
         self.assertEqual(s.i_am_ignored(), "new")
 
     def test_thread_safe_error_stacks(self):
+        # prior to #160386, this causes a segfault. See [Note: Thread-safe CallStack]
         class MyClass:
             val: torch.Tensor
 
