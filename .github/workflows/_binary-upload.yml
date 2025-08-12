@@ -51,13 +51,6 @@ on:
         required: false
         type: string
         description: Desired python version
-      use_split_build:
-        description: |
-          [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel.
-        required: false
-        type: boolean
-        default: false
     secrets:
       github-token:
         required: true
@@ -86,7 +79,6 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
