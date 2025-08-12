@@ -1008,6 +1008,13 @@ def filter_supported_tests(t):
         return True
 
 
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of the SEED depends on command line arguments so make sure they're parsed
+    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
+    parse_cmd_line_args()
+
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
 supported_tests = [

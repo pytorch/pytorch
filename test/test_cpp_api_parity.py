@@ -35,6 +35,11 @@ class TestCppApiParity(common.TestCase):
     functional_test_params_map = {}
 
 
+if __name__ == "__main__":
+    # The value of the SEED depends on command line arguments so make sure they're parsed
+    # before instantiating tests because some modules as part of get_new_module_tests() will call torch.randn
+    common.parse_cmd_line_args()
+
 expected_test_params_dicts = []
 
 for test_params_dicts, test_instance_class in [

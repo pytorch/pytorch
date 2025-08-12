@@ -856,7 +856,9 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(f"{wrapper.comment}   {node.format_node()}")
+            detailed_metadata.append(
+                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
+            )
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 

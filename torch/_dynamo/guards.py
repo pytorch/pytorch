@@ -105,6 +105,8 @@ from .source import (
     CallFunctionNoArgsSource,
     CallMethodItemSource,
     ChainedSource,
+    ClosureSource,
+    CodeSource,
     ConstantSource,
     ConstDictKeySource,
     DataclassFieldsSource,
@@ -132,6 +134,8 @@ from .source import (
     TorchFunctionModeStackSource,
     TorchSource,
     TupleIteratorGetItemSource,
+    TypeDictSource,
+    TypeMROSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -862,6 +866,9 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
+        self.already_guarded_not_present_in_generic_dict: OrderedSet[
+            tuple[str, str]
+        ] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1209,6 +1216,20 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, TypeDictSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_dict_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, TypeMROSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.type_mro_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(
             source,
             (
@@ -1495,6 +1516,20 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CodeSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.code_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ClosureSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.closure_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         else:
             raise AssertionError(
                 f"missing guard manager builder {source} - {source.name()}"
@@ -1568,7 +1603,10 @@ class GuardBuilder(GuardBuilderBase):
         return name
 
     def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
-        attr_source = AttrSource(guard.originating_source, attr_name)
+        if attr_name == "__code__":
+            attr_source = CodeSource(guard.originating_source)
+        else:
+            attr_source = AttrSource(guard.originating_source, attr_name)  # type: ignore[assignment]
         # Copy the stack info
         new_guard = Guard(
             attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
@@ -1580,6 +1618,9 @@ class GuardBuilder(GuardBuilderBase):
         source = guard.originating_source
         if isinstance(source, NNModuleSource):
             source = source.base
+        if isinstance(source, CodeSource):
+            # No need to guard that a function has a __code__ attribute
+            return
         assert isinstance(source, AttrSource), f"invalid source {guard.name}"
         base_source = source.base
         base = base_source.name()
@@ -1634,9 +1675,11 @@ class GuardBuilder(GuardBuilderBase):
         assert attr is not None
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        assert isinstance(val, torch.nn.Module)
 
         base_manager = self.get_guard_manager(guard)
+
+        if (ref, attr) in self.already_guarded_not_present_in_generic_dict:
+            return
 
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
@@ -1649,6 +1692,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_generic_dict_manager.add_dict_contains_guard(
             False, attr, get_verbose_code_parts(code, guard)
         )
+        self.already_guarded_not_present_in_generic_dict.add((ref, attr))
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`

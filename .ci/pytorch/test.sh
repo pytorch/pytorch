@@ -627,6 +627,8 @@ test_perf_for_dashboard() {
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
     device=cuda_h100
+  elif [[ "${TEST_CONFIG}" == *b200* ]]; then
+    device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
@@ -801,6 +803,16 @@ test_dynamo_benchmark() {
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
+    # TODO (huydhn): Just smoke test some sample models
+    if [[ "${TEST_CONFIG}" == *b200* ]]; then
+      if [[ "${suite}" == "huggingface" ]]; then
+        export TORCHBENCH_ONLY_MODELS="DistillGPT2"
+      elif [[ "${suite}" == "timm_models" ]]; then
+        export TORCHBENCH_ONLY_MODELS="inception_v3"
+      elif [[ "${suite}" == "torchbench" ]]; then
+        export TORCHBENCH_ONLY_MODELS="hf_Bert"
+      fi
+    fi
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu* ]]; then
