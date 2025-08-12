@@ -317,11 +317,11 @@ class StructuredTraceTest(TestCase):
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4000000}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "is_leaf": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"describe_source": {"describer_id": "ID", "id": 0, "source": "L['y']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_storage": {"id": 1, "describer_id": "ID", "size": 4000000}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 1, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "is_leaf": true, "stride": [1000, 1], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 1, "source": "L['y']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"dynamo_output_graph": {"sizes": {"l_x_": [1000, 1000], "l_y_": [1000, 1000], "add": [1000, 1000]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"describe_source": {"describer_id": "ID", "id": 1, "source": "L['x']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_output_graph": {"sizes": {"l_y_": [1000, 1000], "l_x_": [1000, 1000], "add": [1000, 1000]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "before_pre_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_pre_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "aotautograd_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
@@ -1199,13 +1199,13 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @contextmanager
     def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
         payload_buffer = io.StringIO()
         payload_handler = logging.StreamHandler(payload_buffer)
         payload_handler.setLevel(logging.DEBUG)
         payload_handler.setFormatter(StructuredTracePayloadFormatter())
         payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_tlparse_runtime")
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
         )
         trace_log.addHandler(payload_handler)
         try:
@@ -1246,8 +1246,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1311,8 +1313,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1337,45 +1341,73 @@ def forward(self, x_1: "f32[2][1]cpu"):
     @requires_tlparse
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging(self):
-        """Ensure tensor metadata artifact is emitted and well-formed."""
-        # Capture only the tensor metadata payload
-        payload_buffer = io.StringIO()
-        payload_handler = logging.StreamHandler(payload_buffer)
-        payload_handler.setLevel(logging.DEBUG)
-        payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_tlparse_tensor_meta")
-        )
-        trace_log.addHandler(payload_handler)
+        """Emit unified runtime+tensor-metadata artifact and assert a stable simplified JSON inline."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
 
-        def fn(x):
-            y = x @ x
-            return y + 1
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
 
-        try:
-            fn_opt = torch.compile(fn, backend="inductor")
-            fn_opt(torch.randn(8, 8))
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled(torch.ones(2, 3))
 
-            # Artifact present in main buffer
-            self.assertIn('"inductor_tlparse_tensor_meta"', self.buffer.getvalue())
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
 
-            # Payload is valid and minimal schema is present
             payload = payload_buffer.getvalue().strip()
             if payload:
                 data = json.loads(payload)
-                self.assertIn("ops", data)
-                self.assertGreater(len(data["ops"]), 0)
-                has_outputs = any(len(op.get("outputs", [])) > 0 for op in data["ops"])
-                self.assertTrue(has_outputs)
-                for op in data["ops"]:
-                    for out in op.get("outputs", []):
-                        self.assertIn("shape", out)
-                        self.assertIn("stride", out)
-                        self.assertIn("dtype", out)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                simplified = (
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []}
+                )
+                actual = json.dumps(simplified, indent=2, sort_keys=True)
+
+                # Expect a single compute op producing the final output with shape [2], contiguous stride, dtype float16
+                self.assertExpectedInline(
+                    actual,
+                    r"""{
+  "ops": [
+    {
+      "outputs": [
+        {
+          "dtype": "float16",
+          "shape": [
+            2
+          ],
+          "stride": [
+            1
+          ]
+        }
+      ],
+      "type": "compute"
+    }
+  ]
+}""",
+                )
 
             self.assertParses()
-        finally:
-            trace_log.removeHandler(payload_handler)
 
 
 if __name__ == "__main__":
