@@ -1163,7 +1163,9 @@ class DeviceCachingAllocator {
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
   // See free() for this thing's purpose
-  std::vector<Block*> needs_events_deferred_until_no_capture;
+  // This is a list of empty nodes that are inserted during capture.
+  ska::flat_hash_map<Block*, std::vector<cudaGraphNode_t>> deferred_blocks;
+
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
@@ -1324,6 +1326,10 @@ class DeviceCachingAllocator {
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
       process_events(context);
+    } else {
+      if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
+        capture_safe_free_blocks(context, stream);
+      }
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -1615,6 +1621,116 @@ class DeviceCachingAllocator {
     return block;
   }
 
+  // An "empty node" in a CUDA graph is a no-op node, used here to represent a
+  // free event within the graph.
+  cudaGraphNode_t insert_empty_node(CUDAStream stream) {
+    cudaStreamCaptureStatus status{};
+    cudaGraph_t currently_capturing_graph{};
+    const cudaGraphNode_t* dependencies{};
+    size_t num_dependencies = 0;
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &status,
+        nullptr,
+        &currently_capturing_graph,
+        &dependencies,
+        &num_dependencies));
+
+    // If the stream is not related to a capturing graph, return nullptr.
+    if (status != cudaStreamCaptureStatusActive) {
+      return nullptr;
+    }
+
+    cudaGraphNode_t new_node{};
+    C10_CUDA_CHECK(cudaGraphAddEmptyNode(
+        &new_node, currently_capturing_graph, dependencies, num_dependencies));
+
+    C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+        stream, &new_node, 1, cudaStreamSetCaptureDependencies));
+
+    return new_node;
+  }
+
+  // CUDA graphs are modeled as directed acyclic graphs
+  //
+  // Definitions:
+  // - A "joined node" is any node with in-degree >= 2 (i.e., it has multiple
+  // parents).
+  // - A "joined path" is a path that leads to a joined node; equivalently, any
+  // ancestor of a joined node is on a joined path.
+  // - A "joined empty node" is an empty node that lies on at least one joined
+  // path, i.e., it can reach a joined node downstream.
+  //
+  // Note: The provided stream may not be capturing; if it is not, this function
+  // returns an empty set.
+  ska::flat_hash_set<cudaGraphNode_t> get_joined_empty_nodes(
+      cudaStream_t stream) {
+    cudaStreamCaptureStatus status{};
+    cudaGraph_t capturing_graph{};
+    const cudaGraphNode_t* dependencies = nullptr;
+    size_t num_dependencies = 0;
+
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &status,
+        /*pId*/ nullptr,
+        &capturing_graph,
+        &dependencies,
+        &num_dependencies));
+
+    if (status != cudaStreamCaptureStatusActive || num_dependencies == 0) {
+      return {};
+    }
+
+    // Helper to get the parent nodes (dependencies) of a given node.
+    auto get_parents = [](cudaGraphNode_t n) {
+      size_t count = 0;
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
+          n, nullptr, &count)); // parents = dependencies
+      std::vector<cudaGraphNode_t> out(count);
+      if (count) {
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, out.data(), &count));
+        out.resize(count);
+      }
+      return out;
+    };
+
+    // Helper to check if a node is an empty node.
+    auto is_empty_node = [](cudaGraphNode_t n) {
+      cudaGraphNodeType type{};
+      C10_CUDA_CHECK(cudaGraphNodeGetType(n, &type));
+      return type == cudaGraphNodeTypeEmpty;
+    };
+
+    ska::flat_hash_set<cudaGraphNode_t> visited;
+    ska::flat_hash_set<cudaGraphNode_t> empty_nodes_on_joined_path;
+
+    // The dependencies array contains the frontier nodes of the graph.
+    // We perform a reverse traversal from these frontiers.
+    // If we encounter a joined node (in-degree >= 2), all its ancestors are on
+    // a joined path. If we encounter an empty node on a joined path, it is a
+    // joined empty node.
+    std::function<void(cudaGraphNode_t, bool)> dfs =
+        [&](cudaGraphNode_t node, bool on_the_joined_path) {
+          if (!visited.insert(node).second)
+            return;
+          if (on_the_joined_path && is_empty_node(node)) {
+            empty_nodes_on_joined_path.insert(node);
+          }
+          auto parents = get_parents(node);
+          bool is_joined_node = parents.size() >= 2;
+          for (auto p : parents) {
+            dfs(p, on_the_joined_path || is_joined_node);
+          }
+        };
+
+    for (size_t i = 0; i < num_dependencies; ++i) {
+      dfs(dependencies[i], false);
+    }
+
+    return empty_nodes_on_joined_path;
+  }
+
   void free(Block* block) {
     std::shared_ptr<GatheredContext> context =
         maybeGatherContext(RecordContext::ALL);
@@ -1656,7 +1772,16 @@ class DeviceCachingAllocator {
         // capture. We conservatively defer recording end-of-life events until
         // the next call to process_events() (which won't happen until no
         // captures are underway)
-        needs_events_deferred_until_no_capture.push_back(block);
+        std::vector<cudaGraphNode_t> empty_nodes;
+        if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
+          for (auto& stream : block->stream_uses) {
+            auto empty_node = insert_empty_node(stream);
+            if (empty_node != nullptr) {
+              empty_nodes.push_back(empty_node);
+            }
+          }
+        }
+        deferred_blocks.emplace(block, std::move(empty_nodes));
       } else {
         insert_events(block);
       }
@@ -3284,8 +3409,8 @@ class DeviceCachingAllocator {
 
   void insert_events_deferred_until_no_capture(
       const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!needs_events_deferred_until_no_capture.empty())) {
-      for (auto* block : needs_events_deferred_until_no_capture) {
+    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+      for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // only streams recorded before cudagraph will be used to insert events
         // since we know all streams recorded during cudagraph must have
@@ -3297,7 +3422,54 @@ class DeviceCachingAllocator {
           free_block(block, context);
         }
       }
-      needs_events_deferred_until_no_capture.clear();
+      deferred_blocks.clear();
+    }
+  }
+
+  // A block is safe to free if all its inserted empty nodes are
+  // on a "joined path" in the graph, meaning they are guaranteed to be
+  // synchronized with all relevant graph execution. This function checks for
+  // such blocks and frees them if possible.
+  void capture_safe_free_blocks(
+      const std::shared_ptr<GatheredContext>& context,
+      cudaStream_t stream) {
+    auto joined_empty_nodes = get_joined_empty_nodes(stream);
+
+    // If the stream is not currently capturing, there are no joined empty
+    // nodes, so nothing to do.
+    if (joined_empty_nodes.empty()) {
+      return;
+    }
+
+    std::vector<Block*> blocks_to_erase;
+
+    for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
+      bool all_nodes_joined = true;
+
+      // Check if all empty nodes associated with this block are on a joined
+      // path.
+      for (const auto& node : inserted_empty_nodes) {
+        if (joined_empty_nodes.find(node) == joined_empty_nodes.end()) {
+          all_nodes_joined = false;
+          break;
+        }
+      }
+
+      // If all empty nodes are joined, the block is safe to free.
+      if (all_nodes_joined) {
+        // Clear stream uses, as the graph guarantees synchronization.
+        // No need to insert events, since event queries are not allowed during
+        // capture.
+        block->stream_uses.clear();
+
+        free_block(block, context);
+        blocks_to_erase.push_back(block);
+      }
+    }
+
+    // Remove freed blocks from the deferred_blocks map.
+    for (auto* block : blocks_to_erase) {
+      deferred_blocks.erase(block);
     }
   }
 
@@ -3727,6 +3899,8 @@ class NativeCachingAllocator : public CUDAAllocator {
         CUDAAllocatorConfig::release_lock_on_cudamalloc();
     md.pinned_use_host_register =
         CUDAAllocatorConfig::pinned_use_cuda_host_register();
+    md.reclaim_memory_in_graph_capture =
+        CUDAAllocatorConfig::reclaim_memory_in_graph_capture();
     md.last_allocator_settings =
         AcceleratorAllocatorConfig::last_allocator_settings();
     md.roundup_power2_divisions =
