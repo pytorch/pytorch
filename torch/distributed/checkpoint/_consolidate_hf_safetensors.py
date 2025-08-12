@@ -240,47 +240,59 @@ def _process_output_file(
         output_data: Metadata for the output file
         input_files_data: Dictionary mapping input file paths to their metadata
     """
-    # Process each input safetensors file
-    for safetensors_file in input_files_data.keys():
-        file_metadata = input_files_data[safetensors_file].metadata
-        input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-        for fqn, metadata in file_metadata.items():
-            if fqn == DEFAULT_EXTRA_METADATA_KEY:
-                continue
+    sorted_tensors = sorted(
+        output_data.fqn_data.items(), key=lambda x: x[1].offset_in_file
+    )
 
-            # Skip if this tensor doesn't belong in this output file
-            if fqn not in output_data.fqn_data:
-                continue
-
-            data_offsets = metadata[DATA_OFFSETS_KEY]
-
-            # Use memory mapping to read tensor data efficiently
-            data_to_write = _read_tensor_data_mmap(
-                safetensors_file,
-                data_offsets[0],
-                data_offsets[1],
-                input_metadata_size,
+    with open(output_file, "r+b") as output_stream:
+        output_stream.seek(0, os.SEEK_END)
+        # Process each tensor in sequential output order
+        for tensor_fqn, tensor_fqn_data in sorted_tensors:
+            full_tensor_mv = memoryview(
+                bytearray(
+                    math.prod(tensor_fqn_data.shape_in_file)
+                    * tensor_fqn_data.dtype_size
+                )
             )
 
-            # Get the offsets of this tensor shard within the full tensor
-            custom_metadata = _get_dcp_custom_metadata(file_metadata)
-            offsets_of_tensor_being_read = custom_metadata[fqn][SAVED_OFFSETS_KEY]  # type: ignore[index]
+            # Process each input safetensors file
+            for safetensors_file in input_files_data.keys():
+                file_metadata = input_files_data[safetensors_file].metadata
+                input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-            # Get metadata for this tensor in the output file
-            fqn_data = output_data.fqn_data[fqn]
+                if tensor_fqn not in file_metadata.keys():
+                    continue
 
-            # Write this tensor shard to the appropriate position in the output file
-            _write_sub_tensor_to_file_optimized(
-                data_to_write,
-                fqn_data.dtype_size,  # Size of each element in bytes
-                fqn_data.shape_in_file,  # Full tensor shape
-                offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
-                metadata[SHAPE_KEY],  # Shape of this shard
-                output_file,
-                # Calculate the exact byte position where this tensor data should start
-                output_data.metadata_size + fqn_data.offset_in_file,
-            )
+                metadata = file_metadata[tensor_fqn]
+
+                data_offsets = metadata[DATA_OFFSETS_KEY]
+
+                # Use memory mapping to read tensor data efficiently
+                data_to_write = _read_tensor_data_mmap(
+                    safetensors_file,
+                    data_offsets[0],
+                    data_offsets[1],
+                    input_metadata_size,
+                )
+
+                # Get the offsets of this tensor shard within the full tensor
+                fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
+                    tensor_fqn
+                ]  # type: ignore[index]
+                offsets_of_tensor_being_read = fqn_custom_metadata[SAVED_OFFSETS_KEY]  # type: ignore[index]
+
+                # Write this tensor shard to the appropriate position in the output file
+                _write_sub_tensor_to_file_optimized(
+                    full_tensor_mv,
+                    data_to_write,
+                    tensor_fqn_data.dtype_size,  # Size of each element in bytes
+                    tensor_fqn_data.shape_in_file,  # Full tensor shape
+                    offsets_of_tensor_being_read,  # Where this shard belongs in the full tensor
+                    metadata[SHAPE_KEY],  # Shape of this shard
+                )
+
+            output_stream.write(full_tensor_mv)
 
 
 def _write_data(
@@ -331,13 +343,12 @@ def _write_data(
 
 
 def _write_sub_tensor_to_file_optimized(
+    full_tensor_mv: memoryview,
     sub_tensor_bytes: bytes,
     element_size: int,
     tensor_shape: list[int],
     sub_tensor_offsets: list[int],
     sub_tensor_shape: list[int],
-    output_file_path: str,
-    output_start_byte: int,
 ) -> None:
     """
     Optimized version that writes the maximum number of contiguous bytes possible.
@@ -350,13 +361,12 @@ def _write_sub_tensor_to_file_optimized(
     - Optimized chunks for other patterns
 
     Args:
+        full_tensor_mv: Buffer to write the full tensor to
         sub_tensor_bytes: Raw tensor data as bytes
         element_size: Size of each element in bytes
         tensor_shape: Shape of the full tensor
         sub_tensor_offsets: Starting offsets of the sub-tensor within the full tensor
         sub_tensor_shape: Shape of the sub-tensor
-        output_file_path: Path to the output file
-        output_start_byte: Starting byte position of the tensor in the file
     """
     # Handle empty tensors
     if not tensor_shape or not sub_tensor_shape:
@@ -373,47 +383,44 @@ def _write_sub_tensor_to_file_optimized(
 
     total_elements = math.prod(sub_tensor_shape)
 
-    with open(output_file_path, "r+b") as out_f:
-        elements_written = 0
+    elements_written = 0
+    while elements_written < total_elements:
+        # Convert linear index to multi-dimensional indices
+        temp_idx = elements_written
+        indices = []
+        for dim_size in reversed(sub_tensor_shape):
+            indices.append(temp_idx % dim_size)
+            temp_idx //= dim_size
+        indices.reverse()
 
-        while elements_written < total_elements:
-            # Convert linear index to multi-dimensional indices
-            temp_idx = elements_written
-            indices = []
-            for dim_size in reversed(sub_tensor_shape):
-                indices.append(temp_idx % dim_size)
-                temp_idx //= dim_size
-            indices.reverse()
+        # Calculate maximum contiguous elements we can write from this position
+        max_contiguous = _calculate_max_contiguous_elements(
+            indices, sub_tensor_shape, tensor_shape
+        )
 
-            # Calculate maximum contiguous elements we can write from this position
-            max_contiguous = _calculate_max_contiguous_elements(
-                indices, sub_tensor_shape, tensor_shape
-            )
+        # Calculate source position in bytes
+        src_pos = sum(idx * stride for idx, stride in zip(indices, sub_tensor_strides))
+        src_byte_offset = src_pos * element_size
 
-            # Calculate source position in bytes
-            src_pos = sum(
-                idx * stride for idx, stride in zip(indices, sub_tensor_strides)
-            )
-            src_byte_offset = src_pos * element_size
+        # Calculate destination position in bytes
+        dest_indices = [
+            idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
+        ]
+        dest_pos = sum(
+            idx * stride for idx, stride in zip(dest_indices, tensor_strides)
+        )
+        dest_byte_offset = dest_pos * element_size
 
-            # Calculate destination position in bytes
-            dest_indices = [
-                idx + offset for idx, offset in zip(indices, sub_tensor_offsets)
-            ]
-            dest_pos = sum(
-                idx * stride for idx, stride in zip(dest_indices, tensor_strides)
-            )
-            dest_byte_offset = output_start_byte + dest_pos * element_size
+        # Write the contiguous chunk
+        bytes_to_write = max_contiguous * element_size
+        chunk_data = sub_tensor_bytes[
+            src_byte_offset : src_byte_offset + bytes_to_write
+        ]
+        full_tensor_mv[dest_byte_offset : dest_byte_offset + bytes_to_write] = (
+            chunk_data
+        )
 
-            # Write the contiguous chunk
-            bytes_to_write = max_contiguous * element_size
-            out_f.seek(dest_byte_offset)
-            chunk_data = sub_tensor_bytes[
-                src_byte_offset : src_byte_offset + bytes_to_write
-            ]
-            out_f.write(chunk_data)
-
-            elements_written += max_contiguous
+        elements_written += max_contiguous
 
 
 def _calculate_max_contiguous_elements(
