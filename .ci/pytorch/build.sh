@@ -243,7 +243,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
-  # install build-system requirements before running setup.py commands
+  # Install build-system requirements before running setup.py commands
+  # We need manage the build environment manually because we are not using build isolation
   python -m pip install -r requirements-build.txt
 
   # check that setup.py would fail with bad arguments
