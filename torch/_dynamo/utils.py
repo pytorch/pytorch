@@ -1288,6 +1288,7 @@ class CompilationMetrics:
     compliant_custom_ops: Optional[set[str]] = None
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
+    stack_trace: Optional[list[str]] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
