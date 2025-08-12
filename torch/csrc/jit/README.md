@@ -26,5 +26,5 @@ A brief summary of the source tree:
 **Refer** to each folder for more in-depth documentation.
 
 Other relevant parts of the codebase not contained here:
-- [aten/src/ATen/core](../../../aten/src/ATen/core): contains JIT code re-used by other elements of the
+- [aten/src/ATen/core](../../../aten/src/ATen/core): contains JIT code reused by other elements of the
   runtime system (eager, mobile, etc.)

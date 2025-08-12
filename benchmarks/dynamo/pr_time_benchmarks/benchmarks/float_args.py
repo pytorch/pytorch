@@ -3,7 +3,7 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class Benchmark(BenchmarkBase):
@@ -31,7 +31,7 @@ class Benchmark(BenchmarkBase):
         def f(x, y):
             return x + y
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             for i in range(8):
                 f(torch.arange(3), i * 2.5)
 

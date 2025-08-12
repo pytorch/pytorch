@@ -272,7 +272,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   }
 
   int64_t lengthScalar = length.item<int64_t>() + 1; // length actually holds max index, add 1
-  if (output.sizes().size() != 0) {
+  if (!output.sizes().empty()) {
     output = at::slice(output, dim, 0, lengthScalar);
   }
   if (return_counts)

@@ -126,7 +126,7 @@ class TestTEFuser(JitTestCase):
         super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
-        # note: `self.dynamic_shapes` instatiated in specialization of class
+        # note: `self.dynamic_shapes` instantiated in specialization of class
         # defined below
 
         fusion_strategy = [("DYNAMIC", 20)] if self.dynamic_shapes else [("STATIC", 20)]
@@ -2939,7 +2939,10 @@ def f({", ".join(param_names)}):
 
     @slowTest
     @onlyCPU
-    @ops(op_db, dtypes=OpDTypes.supported)
+    @ops(
+        [op for op in op_db if get_name(op) not in known_failures],
+        dtypes=OpDTypes.supported,
+    )
     def test_nnc_correctness(self, device, dtype, op):
         if not op.supports_tracing:
             self.skipTest("Requires tracing support")

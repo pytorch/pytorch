@@ -5,12 +5,14 @@
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
 #include <cmath>
+#include <math.h>
 #endif // _WIN32
 
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/BFloat16.h> // For c10::is_reduced_floating_point_v.
 
 namespace at::native {
+inline namespace CPU_CAPABILITY {
 constexpr double kGeluBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
 constexpr double kGeluKappa = 0.044715;
 
@@ -77,5 +79,5 @@ vec::Vectorized<T> vectorized_gelu(vec::Vectorized<T> x) {
   return at::vec::convert_from_float<T>(vectorized_gelu(x0), vectorized_gelu(x1));
 }
 
-
-} // namespace
+} // namespace CPU_CAPABILITY
+} // namespace at::native

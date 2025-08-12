@@ -63,7 +63,7 @@ void max_pool3d_with_indices_out_cpu_template(
     TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast3d, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 
   const int64_t nslices = input.size(-4);
@@ -158,7 +158,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast3d, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 
   const int64_t nslices = input.size(-4);
