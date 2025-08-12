@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,7 @@ class TestVllmBuildParameters(unittest.TestCase):
     @patch("cli.lib.core.vllm.local_image_exists", return_value=True)
     @patch("cli.lib.core.vllm.is_path_exist", return_value=True)
     @patch(
-        "cli.lib.common.envs_helper.env_path",
+        "cli.lib.common.envs_helper.env_path_optional",
         side_effect=lambda name, default=None, resolve=True: {
             "DOCKERFILE_PATH": Path("/abs/vllm/Dockerfile"),
             "TORCH_WHEELS_PATH": Path("/abs/dist"),
@@ -44,16 +45,30 @@ class TestVllmBuildParameters(unittest.TestCase):
         os.environ, {"USE_TORCH_WHEEL": "1", "TORCH_WHEELS_PATH": "dist"}, clear=True
     )
     def test_params_missing_torch_whls_raises(self, _is_path):
-        with self.assertRaises(FileNotFoundError):
-            vllm.VllmBuildParameters()
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            with self.assertRaises(ValueError) as cm:
+                vllm.VllmBuildParameters(
+                    use_local_base_image=False,
+                    use_local_dockerfile=False,
+                )
+        err = cm.exception
+        self.assertIn("torch_whls_path is not provided", str(err))
 
     @patch("cli.lib.core.vllm.local_image_exists", return_value=False)
     @patch.dict(
         os.environ, {"USE_LOCAL_BASE_IMAGE": "1", "BASE_IMAGE": "img:tag"}, clear=True
     )
     def test_params_missing_local_base_image_raises(self, _local_img):
-        with self.assertRaises(FileNotFoundError):
-            vllm.VllmBuildParameters()
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            with self.assertRaises(ValueError) as cm:
+                vllm.VllmBuildParameters(
+                    use_torch_whl=False,
+                    use_local_dockerfile=False,
+                )
+        err = cm.exception
+        self.assertIn("base_image", str(err))
 
     @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
     @patch.dict(
@@ -62,33 +77,28 @@ class TestVllmBuildParameters(unittest.TestCase):
         clear=True,
     )
     def test_params_missing_dockerfile_raises(self, _is_path):
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            with self.assertRaises(ValueError) as cm:
+                vllm.VllmBuildParameters(
+                    use_torch_whl=False,
+                    use_local_base_image=False,
+                )
+        err = cm.exception
+        self.assertIn("dockerfile", str(err))
+
+    @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
+    @patch.dict(
+        os.environ,
+        {"OUTPUT_DIR": ""},
+        clear=True,
+    )
+    def test_params_missing_output_dir(self, _is_path):
         with self.assertRaises(FileNotFoundError):
             vllm.VllmBuildParameters()
 
 
 class TestBuildCmdAndRun(unittest.TestCase):
-    @patch.dict(
-        os.environ,
-        {
-            # for VllmDockerBuildArgs
-            "output_dir": "/abs/out",
-            "TARGET": "export-wheels",
-            "TAG": "vllm-wheels",
-            "CUDA_VERSION": "12.8.1",
-            "PYTHON_VERSION": "3.12",
-            "MAX_JOBS": "32",
-            "SCCACHE_BUCKET": "my-bucket",
-            "SCCACHE_REGION": "us-west-2",
-            "TORCH_CUDA_ARCH_LIST": "8.0;9.0",
-            # for VllmBuildParameters (used by run(), but we stub it anyway)
-            "USE_TORCH_WHEEL": "0",
-            "USE_LOCAL_BASE_IMAGE": "1",
-            "USE_LOCAL_DOCKERFILE": "0",
-            "BASE_IMAGE": "img:tag",
-            "OUTPUT_DIR": "/abs/out",
-        },
-        clear=True,
-    )
     @patch("cli.lib.core.vllm.local_image_exists", return_value=True)
     def test_generate_docker_build_cmd_includes_bits(self, _exists):
         runner = vllm.VllmBuildRunner()
@@ -98,6 +108,14 @@ class TestBuildCmdAndRun(unittest.TestCase):
         inputs.use_local_base_image = True
         inputs.base_image = "img:tag"
         inputs.torch_whls_path = Path("./vllm/tmp")
+        inputs.max_jobs = 64
+        inputs.cuda_version = "12.8.1"
+        inputs.python_version = "3.12"
+        inputs.sccache_bucket = "my-bucket"
+        inputs.sccache_region = "us-west-2"
+        inputs.torch_cuda_arch_list = "8.0;9.0"
+        inputs.target_stage = "export-wheels"
+        inputs.tag_name = "vllm-wheels"
 
         cmd = runner._generate_docker_build_cmd(inputs)
         squashed = " ".join(cmd.split())  # normalize whitespace for matching
@@ -108,7 +126,7 @@ class TestBuildCmdAndRun(unittest.TestCase):
         self.assertIn("--build-arg TORCH_WHEELS_PATH=tmp", squashed)
         self.assertIn("--build-arg BUILD_BASE_IMAGE=img:tag", squashed)
         self.assertIn("--build-arg FINAL_BASE_IMAGE=img:tag", squashed)
-        self.assertIn("--build-arg max_jobs=32", squashed)
+        self.assertIn("--build-arg max_jobs=64", squashed)
         self.assertIn("--build-arg CUDA_VERSION=12.8.1", squashed)
         self.assertIn("--build-arg PYTHON_VERSION=3.12", squashed)
         self.assertIn("--build-arg USE_SCCACHE=1", squashed)
