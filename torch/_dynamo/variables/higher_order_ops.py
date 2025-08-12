@@ -938,7 +938,7 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(self.source, "__call__"),
+            source=AttrSource(AttrSource(self.source, "__call__"), "__func__"),
         ).call_function(tx, args, kwargs)
 
 

@@ -186,7 +186,7 @@ def get_dep_modules(test: str) -> set[str]:
 
 
 def parse_test_module(test: str) -> str:
-    return test.split(".", maxsplit=1)[0]
+    return test.split(".")[0]
 
 
 def print_to_stderr(message: str) -> None:
