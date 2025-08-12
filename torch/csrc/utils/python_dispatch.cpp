@@ -26,6 +26,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <utility>
 
@@ -497,13 +499,18 @@ void initDispatchBindings(PyObject* module) {
          const char* file,
          uint32_t linenum) {
         HANDLE_TH_ERRORS
+        // Malloc and leak the file string to ensure it remains valid
+        // for the lifetime of the Library object
+        char* leaked_file = static_cast<char*>(malloc(strlen(file) + 1));
+        strcpy(leaked_file, file);
+
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
             std::string(dispatch).empty()
                 ? std::nullopt
                 : std::make_optional(c10::parseDispatchKey(dispatch)),
-            "/dev/null", // temporary workaround
+            leaked_file,
             linenum);
         END_HANDLE_TH_ERRORS_PYBIND
       },
