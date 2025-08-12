@@ -57,6 +57,7 @@ jobs:
       build-environment: linux-jammy-xpu-2025.1-py3.9
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-2025.1-py3
       runner: linux.12xlarge
+      timeout-minutes: 600
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
