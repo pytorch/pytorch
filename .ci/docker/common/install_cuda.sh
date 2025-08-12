@@ -140,9 +140,13 @@ function install_130 {
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
 
+  # TODO: nvSHMEM 3.3.20 install link is not available for CUDA 13.0.0 yet
+  # install_nvshmem 13 $NVSHMEM_VERSION
+
   CUDA_VERSION=13.0 bash install_nccl.sh
 
-  CUDA_VERSION=13.0 bash install_cusparselt.sh
+  # TODO: cuSparseLt-0.8.0.4 is not available for CUDA 13.0.0 yet
+  # CUDA_VERSION=13.0 bash install_cusparselt.sh
 
   ldconfig
 }
