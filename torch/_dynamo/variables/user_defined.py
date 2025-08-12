@@ -1853,7 +1853,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 "dict_vt must be constructed by builder.py when source is present"
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
