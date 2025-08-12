@@ -1154,7 +1154,7 @@ def bwd_dq_block_mn(
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if WRITE_DQ:
-        scatter_mask = offs_m2[:, None] < Q_LEN and offs_n2[None, :] < KV_LEN
+        scatter_mask = (offs_m2[:, None] < Q_LEN ) & (offs_n2[None, :] < KV_LEN)
         {{ modification(
             subgraph_number=3,
             output_name=None,
@@ -1357,7 +1357,7 @@ def bwd_dkdv_block_mn(
         idx_h = off_hq
         idx_m = m
         idx_n = n
-        scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
+        scatter_mask = (offs_m1[None, :] < Q_LEN) & (offs_n1[:, None] < KV_LEN)
         {{ modification(
             subgraph_number=3,
             output_name=None,

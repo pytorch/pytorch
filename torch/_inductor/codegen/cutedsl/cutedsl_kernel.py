@@ -110,7 +110,7 @@ class CuteDSLTemplateKernel(Kernel):
         )
         return imports.getvalue()
 
-    def gen_cutedsl_params(self, **kwargs) -> str:
+    def gen_defines(self, **kwargs) -> str:
         """Generate CuteDSL parameter definitions from kwargs, similar to Triton's gen_defines."""
         params = IndentedBuffer()
         for name, val in kwargs.items():
@@ -122,7 +122,7 @@ class CuteDSLTemplateKernel(Kernel):
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
-            "gen_cutedsl_params": lambda: self.gen_cutedsl_params(**kwargs),
+            "gen_defines": lambda: self.gen_defines(**kwargs),
         }
 
         # Render the template with the environment and provided kwargs
