@@ -142,8 +142,16 @@ class TestMaxAutotune(TestCase):
             return torch.mm(a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(*((K, M) if a_transposed else (M, K))).to(torch.float16).cuda()
-        b = torch.randn(*((N, K) if b_transposed else (K, N))).to(torch.float16).cuda()
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
 
         with config.patch(
             {
@@ -166,8 +174,8 @@ class TestMaxAutotune(TestCase):
             return torch.mm(a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(M, K).to(torch.float16).cuda()
-        b = torch.randn(K, N).to(torch.float16).cuda()
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
 
         with (
             self.assertRaises(BackendCompilerFailed) as context,
@@ -194,8 +202,8 @@ class TestMaxAutotune(TestCase):
             return torch.mm(a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(M, K).to(torch.float16).cuda()
-        b = torch.randn(K, N).to(torch.float16).cuda()
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
 
         # TMA requires 16-byte alignment: here we repeat the dims
         # by the factor of 8, as float16 is 2-byte. All dims are
@@ -261,9 +269,17 @@ class TestMaxAutotune(TestCase):
             return torch.addmm(x, a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(*((K, M) if a_transposed else (M, K))).to(torch.float16).cuda()
-        b = torch.randn(*((N, K) if b_transposed else (K, N))).to(torch.float16).cuda()
-        x = torch.randn(N).to(torch.float16).cuda()
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
 
         with config.patch(
             {
@@ -286,9 +302,9 @@ class TestMaxAutotune(TestCase):
             return torch.addmm(x, a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(M, K).to(torch.float16).cuda()
-        b = torch.randn(K, N).to(torch.float16).cuda()
-        x = torch.randn(N).to(torch.float16).cuda()
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
+        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
 
         with (
             self.assertRaises(BackendCompilerFailed) as context,
@@ -315,9 +331,9 @@ class TestMaxAutotune(TestCase):
             return torch.addmm(x, a, b)
 
         M, N, K = 21, 31, 11
-        a = torch.randn(M, K).to(torch.float16).cuda()
-        b = torch.randn(K, N).to(torch.float16).cuda()
-        x = torch.randn(N).to(torch.float16).cuda()
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
+        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
 
         # TMA requires 16-byte alignment: here we repeat the dims
         # by the factor of 8, as float16 is 2-byte. All dims are
@@ -362,15 +378,15 @@ class TestMaxAutotune(TestCase):
 
         # Create large matrices to ensure we use all possible sms
         size = 2560
-        a = torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+        a = torch.randn(size, size, device=GPU_TYPE, dtype=torch.bfloat16)
         b = (
-            torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+            torch.randn(size, size, device=GPU_TYPE, dtype=torch.bfloat16)
             .transpose(0, 1)
             .contiguous()
             .transpose(0, 1)
         )
-        scale_a = torch.tensor(1, dtype=torch.float32, device="cuda")
-        scale_b = torch.tensor(1, dtype=torch.float32, device="cuda")
+        scale_a = torch.tensor(1, dtype=torch.float32, device=GPU_TYPE)
+        scale_b = torch.tensor(1, dtype=torch.float32, device=GPU_TYPE)
 
         args = (
             (a.to(torch.float8_e4m3fn), b.to(torch.float8_e4m3fn), scale_a, scale_b)
@@ -949,9 +965,9 @@ class TestMaxAutotune(TestCase):
             loss.backward()
             return loss
 
-        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x = torch.randn(B * T, C, requires_grad=True).to(GPU_TYPE).bfloat16()
         x.retain_grad()
-        y = torch.randint(0, V, (B * T,)).cuda()
+        y = torch.randint(0, V, (B * T,)).to(GPU_TYPE)
 
         import torch._inductor.utils as inductor_utils
 
@@ -985,8 +1001,8 @@ class TestMaxAutotune(TestCase):
 
         M, N, K = sizes
 
-        a = torch.randn(M, K, dtype=dtype, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=dtype, device="cuda", requires_grad=True)
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
 
         possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1083,10 +1099,10 @@ class TestMaxAutotune(TestCase):
             return (a_in @ b).relu()
 
         a = torch.randn(
-            32, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            32, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
         )
         b = torch.randn(
-            32768, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            32768, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
         )
 
         torch._dynamo.reset()
@@ -1126,9 +1142,11 @@ class TestMaxAutotune(TestCase):
             a_in = torch.cat([a for _ in range(256)], dim=0)
             return (a_in @ b).relu().sum()
 
-        a = torch.randn(8, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        a = torch.randn(
+            8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
         b = torch.randn(
-            64, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
         )
 
         torch._dynamo.reset()
@@ -1168,8 +1186,8 @@ class TestMaxAutotune(TestCase):
             a = a.transpose(0, 1)
             return a @ b
 
-        a = torch.randn((32768, 256), device="cuda", dtype=torch.bfloat16)
-        b = torch.randn((32768, 1152), device="cuda", dtype=torch.bfloat16)
+        a = torch.randn((32768, 256), device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn((32768, 1152), device=GPU_TYPE, dtype=torch.bfloat16)
 
         b = b[:, :1096]
 
@@ -1522,8 +1540,8 @@ class TestMaxAutotune(TestCase):
         for M, N, K in shapes:
             get_k_splits.cache_clear()
             use_decompose_k_choice.cache_clear()
-            a = torch.randn(M, K, dtype=torch.float16, device="cuda")
-            b = torch.randn(K, N, dtype=torch.float16, device="cuda")
+            a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
+            b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
 
             with config.patch(
                 {
@@ -1560,8 +1578,8 @@ class TestMaxAutotune(TestCase):
 
         M, N, K = (1024, 1024, 1024)
 
-        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
-        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+        a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE, requires_grad=True)
 
         with mock.patch(
             "torch._inductor.template_registry.get_template_heuristic"
