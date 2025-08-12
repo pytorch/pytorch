@@ -204,7 +204,6 @@ BENCHMARK_USE_SGD = {
     "PLBartForCausalLM",
     "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
-    "Speech2Text2ForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
     # TIMM

@@ -134,6 +134,7 @@ def binary_cross_entropy_with_logits(
     reduce: bool | None = ...,
     reduction: str = ...,
     pos_weight: Tensor | None = ...,
+    label_smoothing: float = ...,
 ) -> Tensor: ...
 
 __all__ += ["binary_cross_entropy_with_logits"]
@@ -145,6 +146,7 @@ def binary_cross_entropy(
     size_average: bool | None = ...,
     reduce: bool | None = ...,
     reduction: str = ...,
+    label_smoothing: float = ...,
 ) -> Tensor: ...
 
 __all__ += ["binary_cross_entropy"]
