@@ -356,16 +356,26 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        return return_and_correct_aliasing(
+        ret = DTensor._op_dispatcher.dispatch(
             func,
             args,
-            kwargs,
-            DTensor._op_dispatcher.dispatch(
+            kwargs or {},
+        )
+        # CPU inner tensor occurs when this rank doesn't participate in a
+        # device mesh.  return_and_correct_aliasing won't work because the
+        # types don't match up.  This DOES give potential for non-SPMD
+        # behavior (e.g., the non-participating ranks will report different
+        # aliasing relationships) but you were already screwed by the fact
+        # that you returned a cpu tensor
+        if ret._local_tensor.device.type == "cpu":
+            return ret
+        else:
+            return return_and_correct_aliasing(
                 func,
                 args,
-                kwargs or {},
-            ),
-        )
+                kwargs,
+                ret,
+            )
 
     @staticmethod
     def from_local(

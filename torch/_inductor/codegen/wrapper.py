@@ -998,7 +998,6 @@ class PythonWrapperCodegen(CodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
-                empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
@@ -2773,9 +2772,8 @@ class PythonWrapperCodegen(CodeGen):
         shape = tuple(buffer.get_size())
         allocation_shape = tuple(V.graph.get_allocation_size(buffer))
         stride = tuple(buffer.get_stride())
-        is_pinned = buffer.get_is_pinned()
         return self.make_allocation(
-            buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned
+            buffer.get_name(), device, dtype, shape, stride, allocation_shape
         )
 
     @cache_on_self
@@ -2787,7 +2785,7 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.splice(import_str, strip=True)
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+        self, name, device, dtype, shape, stride, allocation_shape=None
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -2805,13 +2803,6 @@ class PythonWrapperCodegen(CodeGen):
                 f"dtype={dtype}, "
                 f"device='{device.type}', "
                 f"name='{name}')"
-            )
-        elif device.type == "cpu" and is_pinned:
-            out = (
-                f"{name} = empty_strided_cpu_pinned("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"{dtype})"
             )
         elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below

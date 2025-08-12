@@ -108,12 +108,26 @@ static std::string getBitSizeString(const TensorBase& t) {
 static void validateInputData(const TensorIteratorBase& iter,
                               IntArrayRef index_size,
                               IntArrayRef index_stride,
-                              const std::string& op) {
+                              const std::string& op,
+                              bool accumulate) {
+  using namespace mps;
+
   const auto num_indices = index_size.size();
   TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
 
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(static_cast<int>(num_indices) == iter.ntensors() - 2);
+  const Tensor& inputTensor = iter.tensor(1);
+  const auto scalar_type = inputTensor.scalar_type();
+
+  if (accumulate) {
+    // No atomic support for the complex dtypes
+    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type));
+  } else {
+    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
+                    scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,
+                getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
+  }
 }
 
 static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, const Tensor& mask) {
@@ -144,7 +158,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                   IntArrayRef index_stride,
                                   const std::string& kernel_name,
                                   const bool serial = false) {
-  validateInputData(iter, index_size, index_stride, "index.Tensor_out");
+  validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
   if (iter.numel() == 0)
     return;
   if (!iter.can_use_32bit_indexing()) {
@@ -186,7 +200,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
 }
 
 static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  validateInputData(iter, index_size, index_stride, "index.Tensor_out");
+  validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
   dispatch_index_kernel(
       iter, index_size, index_stride, fmt::format("index_select_{}", getBitSizeString(iter.tensor_base(0))));
 }
@@ -196,7 +210,7 @@ static void index_put_kernel_mps(TensorIterator& iter,
                                  IntArrayRef index_stride,
                                  bool accumulate) {
   @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index_put_impl");
+    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
     if (accumulate) {
       dispatch_index_kernel(iter,
                             index_size,
