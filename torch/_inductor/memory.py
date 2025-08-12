@@ -666,6 +666,7 @@ def reorder_for_peak_memory(
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
         except Exception as e:
             torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+            raise
 
     signpost_event(
         category="inductor",
