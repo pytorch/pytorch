@@ -95,7 +95,7 @@ def _parse_input_metadata(
     """
 
     from safetensors.torch import _getdtype  # type: ignore[import]
-    
+
     # Dictionary to track the full size of each tensor across all shards
     fqn_to_size_mapping: dict[str, tuple[list[int], str]] = {}
 
