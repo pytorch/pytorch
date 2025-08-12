@@ -60,6 +60,8 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
 
   for (const auto i : c10::irange(plan.allocations.size())) {
     auto& planned_allocation = plan.allocations[i];
+    auto& local_max_nbytes = planned_tensors_max_nbytes_local_[i];
+    local_max_nbytes = std::max(local_max_nbytes, planned_allocation.size);
 
     void* offset_ptr =
         layout_buffer_.get_ptr_with_offset(planned_allocation.offset);

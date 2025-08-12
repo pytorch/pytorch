@@ -107,7 +107,9 @@ class ScheduleTest(MultiProcContinousTest):
         stage_modules = [mod.get_submodule(submod_name) for submod_name in submod_names]
         stages = [
             PipelineStage(stage_module, stage_idx, n_stages, self.device)
-            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+            for stage_module, stage_idx in zip(
+                stage_modules, stage_indices, strict=True
+            )
         ]
         return stages, stage_modules, submod_names
 
@@ -138,7 +140,13 @@ class ScheduleTest(MultiProcContinousTest):
                 raise AssertionError(
                     f"One gradient is None for {param_name}: {grad1} vs {grad2}"
                 )
-            torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
+            try:
+                torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
+            except AssertionError:
+                print(
+                    f"Numerical issues detected for {param_name}: param grad {grad1} vs ref grad {grad2}"
+                )
+                raise
 
         if submod_names is None:
             # Single stage case - need to detect tracer vs manual pipeline
@@ -688,6 +696,8 @@ class ScheduleTest(MultiProcContinousTest):
     )
     @parametrize("use_new_runtime", [False, True])
     def test_v_shape_schedules(self, schedule_class, use_new_runtime):
+        # n_stages = 8
+        # rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         n_stages = 4
         rank_stages = {0: [0, 3], 1: [1, 2]}
         mod, ref_mod, x, target, loss_fn = self._setup_models_and_data(
