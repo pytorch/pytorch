@@ -85,7 +85,6 @@ def main():
         cmdclass={
             "clean": BuildClean,  # type: ignore[misc]
         },
-        include_package_data=False,
     )
 
 

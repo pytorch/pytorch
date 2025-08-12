@@ -192,6 +192,9 @@ retry brew install libomp
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
+if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
+    export CMAKE_OSX_ARCHITECTURES=arm64
+fi
 export USE_MKLDNN=OFF
 export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
@@ -199,7 +202,16 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-python setup.py bdist_wheel -d "$whl_tmp_dir"
+if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
+    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel -d "$whl_tmp_dir"
+    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
+    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 CMAKE_FRESH=1 python setup.py bdist_wheel -d "$whl_tmp_dir"
+    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+else
+    python setup.py bdist_wheel -d "$whl_tmp_dir"
+fi
 
 echo "Finished setup.py bdist_wheel at $(date)"
 

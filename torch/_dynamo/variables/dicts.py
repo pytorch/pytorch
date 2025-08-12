@@ -120,7 +120,6 @@ def is_hashable(x):
                 variables.TypingVariable,
                 variables.FunctoolsPartialVariable,
                 variables.WeakRefVariable,
-                variables.TorchHigherOrderOperatorVariable,
             ),
         )
 

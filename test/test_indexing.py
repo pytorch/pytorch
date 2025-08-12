@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     dtypesIfMPS,
-    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -184,7 +183,6 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
-    @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
@@ -1195,7 +1193,6 @@ class TestIndexing(TestCase):
         out_cpu = func1(t, ind, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @expectedFailureMPS  # Doubles not supported
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):

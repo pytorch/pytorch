@@ -1154,8 +1154,6 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
-    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
-    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1233,8 +1231,8 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        fw_compiler,
-        bw_compiler,
+        boxed_nop_preserve_node_meta,
+        boxed_nop_preserve_node_meta,
         default_partition,
         decompositions,
         keep_inference_input_mutations,

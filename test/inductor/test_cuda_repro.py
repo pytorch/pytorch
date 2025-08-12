@@ -26,7 +26,6 @@ from torch._inductor.utils import (
     run_fw_bw_and_get_code,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -178,10 +177,9 @@ class CudaReproTests(TestCase):
             inputs = [q, k, v, mask]
 
             def f(q, k, v, mask):
-                with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-                    return F.scaled_dot_product_attention(
-                        q, k, v, attn_mask=mask, dropout_p=0.0
-                    )
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=mask, dropout_p=0.0
+                )
 
             f_compiled = torch.compile(f)
 
@@ -2218,7 +2216,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+    from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    if HAS_CUDA_AND_TRITON and not TEST_WITH_ASAN:
+    if HAS_CUDA and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

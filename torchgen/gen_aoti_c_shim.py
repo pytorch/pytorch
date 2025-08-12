@@ -744,7 +744,7 @@ https://github.com/pytorch/pytorch/pull/154848 as an example.
             f"c_shim_{device_name}.cpp",
             lambda: gen_aoti_c_shim(
                 fallback_native_functions,
-                fallback_ops_dict,
+                inductor_fallback_ops,
                 structured_func_group_dict,
                 dispatch_key,
                 backend_indices,
