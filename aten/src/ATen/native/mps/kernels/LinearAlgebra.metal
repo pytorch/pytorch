@@ -69,6 +69,37 @@ kernel void matmul(
 }
 
 template <typename T>
+kernel void addmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong2, 4>& strides [[buffer(5)]],
+    constant uint3& sizes [[buffer(6)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 thread_id [[thread_position_in_grid]]) {
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = matmul_inner<T>(
+      mat1Data,
+      mat2Data,
+      reinterpret_cast<constant array<ulong2, 3>&>(strides),
+      sizes,
+      A_tile,
+      B_tile,
+      tid,
+      thread_id);
+  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
+    auto bias =
+        biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
+    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
+        static_cast<T>(alpha_beta[0] * sum + alpha_beta[1] * bias);
+  }
+}
+
+template <typename T>
 kernel void naive_bmm(
     constant T* mat1Data [[buffer(0)]],
     constant T* mat2Data [[buffer(1)]],
@@ -613,17 +644,15 @@ kernel void applyPivots(
   }
 }
 
-#define INSTANTIATE_NAIVE_MM(DTYPE)                                   \
-  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>( \
-      constant DTYPE * mat1Data [[buffer(0)]],                        \
-      constant DTYPE * mat2Data [[buffer(1)]],                        \
-      device DTYPE * outputData [[buffer(2)]],                        \
-      constant array<ulong2, 3> & strides [[buffer(3)]],              \
-      constant uint3 & sizes [[buffer(4)]],                           \
-      uint2 tid [[thread_position_in_threadgroup]],                   \
-      uint2 group_id [[threadgroup_position_in_grid]])
-
-#define INSTANTIATE_NAIVE_BMM(DTYPE)                                        \
+#define INSTANTIATE_MM_OPS(DTYPE)                                           \
+  template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant array<ulong2, 3> & strides [[buffer(3)]],                    \
+      constant uint3 & sizes [[buffer(4)]],                                 \
+      uint2 tid [[thread_position_in_threadgroup]],                         \
+      uint2 group_id [[threadgroup_position_in_grid]]);                     \
   template [[host_name("naive_bmm_" #DTYPE)]] kernel void naive_bmm<DTYPE>( \
       constant DTYPE * mat1Data [[buffer(0)]],                              \
       constant DTYPE * mat2Data [[buffer(1)]],                              \
@@ -631,22 +660,26 @@ kernel void applyPivots(
       constant array<ulong, 9> & strides [[buffer(3)]],                     \
       constant uint4 & sizes [[buffer(4)]],                                 \
       uint3 tid [[thread_position_in_threadgroup]],                         \
-      uint3 group_id [[threadgroup_position_in_grid]])
+      uint3 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("addmm_" #DTYPE)]] kernel void addmm<DTYPE>(         \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong2, 4> & strides [[buffer(5)]],                    \
+      constant uint3 & sizes [[buffer(6)]],                                 \
+      uint2 tid [[thread_position_in_threadgroup]],                         \
+      uint2 group_id [[threadgroup_position_in_grid]])
 
-INSTANTIATE_NAIVE_MM(float);
-INSTANTIATE_NAIVE_MM(half);
-#if __METAL_VERSION__ >= 310
-INSTANTIATE_NAIVE_MM(bfloat);
-#endif
+INSTANTIATE_MM_OPS(float);
+INSTANTIATE_MM_OPS(half);
+INSTANTIATE_MM_OPS(bfloat);
 
 // Integral MM
-INSTANTIATE_NAIVE_MM(short);
-INSTANTIATE_NAIVE_MM(int);
-INSTANTIATE_NAIVE_MM(long);
-INSTANTIATE_NAIVE_MM(char);
-INSTANTIATE_NAIVE_MM(uchar);
-INSTANTIATE_NAIVE_BMM(short);
-INSTANTIATE_NAIVE_BMM(int);
-INSTANTIATE_NAIVE_BMM(long);
-INSTANTIATE_NAIVE_BMM(char);
-INSTANTIATE_NAIVE_BMM(uchar);
+INSTANTIATE_MM_OPS(long);
+INSTANTIATE_MM_OPS(int);
+INSTANTIATE_MM_OPS(short);
+INSTANTIATE_MM_OPS(char);
+INSTANTIATE_MM_OPS(uchar);
