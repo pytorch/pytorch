@@ -87,16 +87,15 @@ jobs:
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-
+        
       - name: Runner check GPU count (distributed jobs)
         if: ${{ contains(matrix.config, 'distributed') }}
         shell: bash
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ $ngpu -lt 4 ]]; then
-              echo "Error: only $ngpu GPU(s) detected, at least 4 GPUs are needed for distributed jobs"
-              echo "$msg"
-              exit 1
+            echo "Error: only $ngpu GPU(s) detected, at least 4 GPUs are needed for distributed jobs"
+            exit 1
           fi
           
       - name: configure aws credentials
