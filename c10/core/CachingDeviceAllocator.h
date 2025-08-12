@@ -365,7 +365,7 @@ struct DeviceBlock {
   bool mapped{true};
   BlockT* prev{nullptr}; // Previous block if split from a larger allocation
   BlockT* next{nullptr}; // Next block if split from a larger allocation
-  int event_count{0}; // Number of outstanding events referencing block
+  int64_t event_count{0}; // Number of outstanding events referencing block
   size_t gc_count_base{0}; // Pool's gc count at block insertion time
   // Records the last time we handed this memory out from our cache
   std::shared_ptr<GatheredContext> context_when_allocated;
@@ -406,11 +406,11 @@ struct PrivatePool {
   BlockPoolT large_blocks; // Large blocks pool this PrivatePool manages
   BlockPoolT small_blocks; // Small blocks pool this PrivatePool manages
   // Number of live graphs using this pool
-  int use_count{1};
+  int64_t use_count{1};
   // Number of unfreed device allocation made for this pool. When use_count and
   // deviceMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
-  int deviceMalloc_count{0};
+  int64_t deviceMalloc_count{0};
 
  private:
   // ID of this private pool, used to identify it in the allocator.
