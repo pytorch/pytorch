@@ -294,6 +294,8 @@ class VllmTestRunner(BaseRunner):
     def __init__(self, args=None):
         self.work_directory = "vllm"
         self.test_name = args.test_name
+        self.torch_whl_path= "torch*.whl"
+        self.torch_whl_extra="opt-einsum"
         self.torch_whl_relatvie_path = [
             "vision/torchvision*.whl",
             "audio/torchaudio*.whl",
@@ -312,29 +314,46 @@ class VllmTestRunner(BaseRunner):
         clone_vllm()
         with working_directory(self.work_directory):
             remove_dir(Path("vllm"))
+
+            logger.info("Running vllm test with inputs: %s", inputs)
+            logger.info("Installing torch wheel")
+            torch_p = f"{str(inputs.torch_whls_path)}/{self.torch_whl_path}"
+            pip_install_first_match(torch_p, self.torch_whl_extra)
+
+            logger.info("Installing other torch-related wheels")
             torch_whls_path = [
                 f"{str(inputs.torch_whls_path)}/{whl_path}"
                 for whl_path in self.torch_whl_relatvie_path
             ]
+            for torch_whl in torch_whls_path:
+                pip_install_first_match(torch_whl)
+            logger.info("Done. Installed torch and other torch-related wheels ")
 
+            logger.info("Installing vllm wheels")
             vllm_whls_path = [
                 f"{str(inputs.vllm_whls_path)}/{whl_path}"
                 for whl_path in self.vllm_whl_relatvie_path
             ]
-            for torch_whl in torch_whls_path:
-                pip_install_first_match(torch_whl)
             for vllm_whl in vllm_whls_path:
                 pip_install_first_match(vllm_whl)
+            logger.info("Done. Installed vllm wheels")
+
+
+            logger.info("remove all torch packages from requirements txt")
             run_python("use_existing_torch.py")
 
+            logger.info("install requirements from vllm work directory")
             for requirements in ["requirements/common.txt", "requirements/build.txt"]:
                 pip_install_packages(
                     requirements=requirements,
                     prefer_uv=True,
                 )
-            preprocess_test_in()
+            logger.info("Done. installed requirements from vllm work directory")
 
-            copy("requirements/test.in", "snapshot_constraint.txt", full_path=False)
+
+            logger.info("generate test.txt from requirements/test.in with local torch whls")
+            preprocess_test_in()
+            copy(Path("requirements/test.in"), Path("snapshot_constraint.txt"), full_path=False)
             run_cmd(
                 f"{sys.executable} -m uv pip compile requirements/test.in "
                 "-o test.txt "
@@ -342,21 +361,29 @@ class VllmTestRunner(BaseRunner):
                 "--constraint snapshot_constraint.txt "
                 "--torch-backend cu128"
             )
+
+            logger.info("install requirements from test.txt")
             pip_install_packages(requirements="test.txt", prefer_uv=True)
             pip_install_packages(
                 "--no-build-isolation",
                 "git+https://github.com/state-spaces/mamba@v2.2.4",
                 prefer_uv=True,
             )
-            patterns = ["torch", "xformers", "torchvision", "torchaudio"]
+            logger.info("Done. installed requirements from test.txt")
+
+            logger.info("double check installed packages")
+            patterns = ["torch", "xformers", "torchvision", "torchaudio","vllm"]
             for pkg in patterns:
                 try:
                     module = __import__(pkg)
                     version = getattr(module, "__version__", None)
-                    print(f"{pkg}: {version or 'Unknown version'}")
+                    logger.info(f"{pkg}: {version or 'Unknown version'}")
                 except ImportError:
-                    print(f"{pkg}: Not installed")
+                    logger.info(f"{pkg}: Not installed")
 
+            logger.info("double check installed packages")
+
+            logger.info("run tests")
             tests = sample_tests()[self.test_name]
             logger.info("Running tests: %s", tests["name"])
             for test in tests["tests"]:
