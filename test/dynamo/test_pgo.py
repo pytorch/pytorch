@@ -14,7 +14,7 @@ import torch.nested
 from torch._dynamo.testing import CompileCounter
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.utils import clear_caches, fresh_cache
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
