@@ -66,15 +66,17 @@ struct orStream {
   }
 };
 
-orError_t internal::addTaskToStream(
+orError_t openreg::addTaskToStream(
     orStream_t stream,
     std::function<void()> task) {
   if (!stream)
     return orErrorUnknown;
+
   {
     std::lock_guard<std::mutex> lock(stream->mtx);
     stream->tasks.push(std::move(task));
   }
+
   stream->cv.notify_one();
   return orSuccess;
 }
@@ -120,10 +122,11 @@ orError_t orEventRecord(orEvent_t event, orStream_t stream) {
       std::lock_guard<std::mutex> lock(event_impl->mtx);
       event_impl->completed.store(true);
     }
+
     event_impl->cv.notify_all();
   };
 
-  return internal::addTaskToStream(stream, record_task);
+  return openreg::addTaskToStream(stream, record_task);
 }
 
 orError_t orEventSynchronize(orEvent_t event) {
@@ -206,12 +209,15 @@ orError_t orStreamCreateWithPriority(
 orError_t orStreamCreate(orStream_t* stream) {
   int min_p, max_p;
   orDeviceGetStreamPriorityRange(&min_p, &max_p);
+
   return orStreamCreateWithPriority(stream, 0, max_p);
 }
 
 orError_t orStreamGetPriority(
     [[maybe_unused]] orStream_t stream,
     int* priority) {
+  // Since OpenReg has only one priority level, the following code
+  // returns 0 directly for convenience.
   *priority = 0;
 
   return orSuccess;
@@ -223,7 +229,6 @@ orError_t orStreamDestroy(orStream_t stream) {
 
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::call_once(g_flag, initialize_registries);
 
     int device_idx = stream->device_index;
     if (device_idx >= 0 && device_idx < g_streams_per_device.size()) {
@@ -239,6 +244,7 @@ orError_t orStreamQuery(orStream_t stream) {
   if (!stream) {
     return orErrorUnknown;
   }
+
   std::lock_guard<std::mutex> lock(stream->mtx);
   return stream->tasks.empty() ? orSuccess : orErrorNotReady;
 }
@@ -246,11 +252,14 @@ orError_t orStreamQuery(orStream_t stream) {
 orError_t orStreamSynchronize(orStream_t stream) {
   if (!stream)
     return orErrorUnknown;
-  orEvent_t sync_event;
-  orEventCreate(&sync_event);
-  orEventRecord(sync_event, stream);
-  orError_t status = orEventSynchronize(sync_event);
-  orEventDestroy(sync_event);
+
+  orEvent_t event;
+  orEventCreate(&event);
+  orEventRecord(event, stream);
+
+  orError_t status = orEventSynchronize(event);
+  orEventDestroy(event);
+
   return status;
 }
 
@@ -263,7 +272,8 @@ orError_t orStreamWaitEvent(orStream_t stream, orEvent_t event, unsigned int) {
     std::unique_lock<std::mutex> lock(event_impl->mtx);
     event_impl->cv.wait(lock, [&] { return event_impl->completed.load(); });
   };
-  return internal::addTaskToStream(stream, wait_task);
+
+  return openreg::addTaskToStream(stream, wait_task);
 }
 
 orError_t orDeviceGetStreamPriorityRange(
@@ -273,6 +283,7 @@ orError_t orDeviceGetStreamPriorityRange(
     return orErrorUnknown;
   }
 
+  // OpenReg have only one priority now.
   *leastPriority = 0;
   *greatestPriority = 0;
   return orSuccess;

@@ -11,7 +11,6 @@
 
 namespace c10::openreg {
 
-// Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = c10::DeviceType::PrivateUse1;
 
@@ -179,13 +178,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     set_device(device_index);
     orDeviceSynchronize();
     set_device(orig_device);
-  }
-
-  void recordDataPtrOnStream(
-      const c10::DataPtr& data_ptr,
-      const c10::Stream& stream) const override {
-    // TODO(FFFrog):
-    // do it when memory management is ready.
   }
 
   double elapsedTime(
