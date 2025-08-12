@@ -7673,6 +7673,31 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
+    @requires_cuda
+    def test_zero_dim_param_mixed_device_grad(self):
+        # cpu 0-dim params with cuda grads
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        model = RegressionModel()
+        model.forward = torch.compile(
+            model.forward, backend="aot_eager", fullgraph=True
+        )
+        inputs = torch.randn(4, 10).to("cuda")
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 
