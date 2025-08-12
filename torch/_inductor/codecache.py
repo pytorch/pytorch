@@ -30,6 +30,7 @@ from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
 from functools import lru_cache, partial
 from pathlib import Path
+from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
 from typing import (
@@ -357,6 +358,36 @@ def get_hash(
     if hash_type in {"cubin", "hsaco", "spv"}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
+
+
+class WritableTempFile:
+    """
+    Avoid "Permission denied error" on Windows:
+      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
+        # Not writable on Windows:
+        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
+
+    Example:
+        with WritableTempFile("w", suffix=".gv") as temp_file:
+            tree.to_dotfile(temp_file.name)
+    """
+
+    def __init__(
+        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
+    ) -> None:
+        self.mode = mode
+        self.encoding = encoding
+        self.suffix = suffix
+
+    def __enter__(self) -> _TemporaryFileWrapper[Any]:
+        self.temp_file = tempfile.NamedTemporaryFile(
+            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
+        )
+        return self.temp_file
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.temp_file.close()
+        os.unlink(self.temp_file.name)
 
 
 def write(
@@ -1622,36 +1653,6 @@ class CudaKernelParamCache:
         return cls.cache.keys()
 
 
-class WritableTempFile:
-    """
-    Avoid "Permission denied error" on Windows:
-      with tempfile.NamedTemporaryFile("w", suffix=".gv") as temp_file:
-        # Not writable on Windows:
-        # https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile
-
-    Example:
-        with WritableTempFile("w", suffix=".gv") as temp_file:
-            tree.to_dotfile(temp_file.name)
-    """
-
-    def __init__(
-        self, mode: str = "w", *, encoding: Any = None, suffix: Any = None
-    ) -> None:
-        self.mode = mode
-        self.encoding = encoding
-        self.suffix = suffix
-
-    def __enter__(self) -> Any:
-        self.temp_file = tempfile.NamedTemporaryFile(
-            self.mode, encoding=self.encoding, suffix=self.suffix, delete=False
-        )
-        return self.temp_file
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.temp_file.close()
-        os.unlink(self.temp_file.name)
-
-
 class AotCodeCompiler:
     """
     Compile AOT Inductor generated code.
@@ -1710,12 +1711,6 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
-        from .utils import aoti_model_name_from_config
-
-        model_class_name = ""
-        if config.aot_inductor.compile_standalone:
-            model_class_name = aoti_model_name_from_config()
-
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1748,6 +1743,8 @@ class AotCodeCompiler:
                     "model.h",
                 )
             ) as f:
+                # model_name_for_generated_files is guaranteed to be non-empty when compile_standalone
+                model_class_name = config.aot_inductor.model_name_for_generated_files
                 class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
 
@@ -1762,7 +1759,7 @@ class AotCodeCompiler:
                     header_code,
                     "h",
                     specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
+                    key=model_class_name,
                 )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
@@ -1887,7 +1884,7 @@ class AotCodeCompiler:
                     consts_asm += f"\t.space {len(consts) - 8}\n"
                 consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
-                return consts_asm, "S"
+                return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
             def format_consts_to_cpp(
@@ -1912,7 +1909,7 @@ ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
                 const_cpp += f"alignas({align_bytes}) extern unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
-                return const_cpp, "cpp"
+                return const_cpp, "weights.cpp"
 
             def get_zero_consts_asm_code(
                 align_bytes: int,
@@ -1978,6 +1975,7 @@ end
                 consts_code,
                 code_ext,
                 specified_dir=str(specified_sub_dir),
+                key=config.aot_inductor.model_name_for_generated_files,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -2003,7 +2001,11 @@ end
                     f.seek(0)
                     hdr = f.read(1024)
                     # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                    start_idx = (
+                        hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                        if sys.byteorder == "little"
+                        else hdr.find(b"\x12\x34\x56\x78\x99\xab\xcd\xef")
+                    )
                     assert start_idx != -1
                     f.seek(start_idx)
                     pos = 0
@@ -2274,7 +2276,13 @@ end
             asm_files = []
             if not _IS_WINDOWS:
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
+                    if kernel_name not in kernels:
+                        # It is possible that CudaKernelParamCache contains more Triton kernels
+                        # than what the current graph uses
+                        continue
+
                     if asm_file := value["asm"]:
                         asm_files.append(asm_file)
 
@@ -2544,7 +2552,7 @@ def _get_cpp_prefix_header(device: str) -> Optional[str]:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
+    base_device = device.split(":", maxsplit=1)[0]
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
