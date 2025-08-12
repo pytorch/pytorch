@@ -4472,11 +4472,11 @@ class ComputedBuffer(OperationBuffer):
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
-        result = (
-            self.layout.get_free_symbol_uses(unbacked_only)
-            | self.data.get_free_symbol_uses(unbacked_only)
-            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
-        )
+        result = self.layout.get_free_symbol_uses(
+            unbacked_only
+        ) | self.data.get_free_symbol_uses(unbacked_only)
+        if isinstance(self.get_store_function(), LoopBody):
+            result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
         return result
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -5215,11 +5215,6 @@ class NopKernel(InputsKernel):
 
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return InputsKernel.get_free_symbol_uses(self, unbacked_only)
 
 
 class ConcatKernel(NopKernel):
