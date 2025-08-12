@@ -518,12 +518,8 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
-coordinate_descent_tuning = (
-    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
-)
-coordinate_descent_check_all_directions = (
-    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS") == "1"
-)
+coordinate_descent_tuning = True
+coordinate_descent_check_all_directions = True
 coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )

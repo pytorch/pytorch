@@ -2508,41 +2508,41 @@ def _reduction_configs(
                 register_intensive=register_intensive,
             )
 
-    def make_outer_config():
-        max_x_block = 256
-        load_factor = inductor_meta.get("num_load", 0)
-        x = size_hints["x"]
-        if x <= 8 * 4096:
-            x_block = 8
-        else:
-            x_block = min(max_x_block, next_power_of_2(x // 4096))
-            if x_block < 64:
-                x_block = 64
-        if is_dynamic:
-            # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
-            outer_r_block = (
-                1
-                if load_factor >= 3
-                else min(next_power_of_2(max(rnumel, 128) // 128), 16)
-            )
-        else:
-            # Try to do reduction in 1 pass
-            outer_r_block = min(next_power_of_2(rnumel), 128)
+    # def make_outer_config():
+    #     max_x_block = 256
+    #     load_factor = inductor_meta.get("num_load", 0)
+    #     x = size_hints["x"]
+    #     if x <= 8 * 4096:
+    #         x_block = 8
+    #     else:
+    #         x_block = min(max_x_block, next_power_of_2(x // 4096))
+    #         if x_block < 64:
+    #             x_block = 64
+    #     if is_dynamic:
+    #         # Dynamic shapes introduce a lot register pressure for indexing
+    #         outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+    #         outer_r_block = (
+    #             1
+    #             if load_factor >= 3
+    #             else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+    #         )
+    #     else:
+    #         # Try to do reduction in 1 pass
+    #         outer_r_block = min(next_power_of_2(rnumel), 128)
         
 
-        if x_block * outer_r_block > 4096:
-            x_block = 2048 // outer_r_block
+    #     if x_block * outer_r_block > 4096:
+    #         x_block = 2048 // outer_r_block
 
-        # Set register intensive to true by default as we try to maximize tiles with heuristic
-        return make_config(x_block, outer_r_block, register_intensive=True)
+    #     # Set register intensive to true by default as we try to maximize tiles with heuristic
+    #     return make_config(x_block, outer_r_block, register_intensive=True)
 
     contiguous_config = make_config(
         1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_outer_config()
+    outer_config = make_config(64, 8, register_intensive=register_intensive)
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
