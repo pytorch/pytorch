@@ -1114,34 +1114,63 @@ def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     return _common_norm_backward_strategy(op_schema, rms_norm=True)
 
 
+def sort_strategy(op_schema: OpSchema, sort_dim: int) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
+    single_mesh_dim_strategies = []
+    all_replicate: PlacementList = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+    for dim in range(input_strategy.ndim):
+        if dim != sort_dim:
+            dim_shardings: PlacementList = [Shard(dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
 @register_op_strategy(
     [aten.topk.default],
     schema_info=RuntimeSchemaInfo(2),
 )
 def topk_strategy(op_schema: OpSchema) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )
-    topk_dim = normalize_dim(topk_dim, input_strategy.ndim)
+    return sort_strategy(op_schema, topk_dim)
 
-    single_mesh_dim_strategies = []
 
-    # two outputs (values, indices), 1 input
-    # replicate always works
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
+@register_op_strategy(
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(
+        1,
+    ),
+)
+def sort_default_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    sort_dim = -1
+    if len(op_schema.args_schema) > 1:
+        sort_dim = cast(int, op_schema.args_schema[1])
+    return sort_strategy(op_schema, sort_dim)
 
-    # every dim except topk dim should work
-    for dim in range(input_strategy.ndim):
-        if dim != topk_dim:
-            dim_shardings: PlacementList = [Shard(dim)] * 3
-            single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requires non-trival reduction, address it later
 
-    return expand_to_full_mesh_op_strategy(
-        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
-    )
+@register_op_strategy(
+    aten.sort.stable,
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+)
+def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    sort_dim = -1
+    if "dim" in op_schema.kwargs_schema:
+        sort_dim = cast(int, op_schema.kwargs_schema["dim"])
+    return sort_strategy(op_schema, sort_dim)
 
 
 @register_op_strategy(

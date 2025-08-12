@@ -456,7 +456,40 @@ def _calculate_max_contiguous_elements(
 
     This determines the largest chunk by checking how elements are laid out in memory
     and finding natural boundaries where contiguity breaks.
+
+    Args:
+        indices: Current position indices in the sub-tensor
+        sub_tensor_shape: Shape of the sub-tensor being written
+        tensor_shape: Shape of the full tensor
+
+    Raises:
+        ValueError: If input lists are empty, have mismatched lengths, or contain invalid values
     """
+    # Validate input lists are not empty
+    if not indices or not sub_tensor_shape or not tensor_shape:
+        raise ValueError("Input lists cannot be empty")
+
+    # Validate all lists have the same length (same number of dimensions)
+    if not (len(indices) == len(sub_tensor_shape) == len(tensor_shape)):
+        raise ValueError(
+            f"All input lists must have the same length. Got indices: {len(indices)}, "
+            f"sub_tensor_shape: {len(sub_tensor_shape)}, tensor_shape: {len(tensor_shape)}"
+        )
+
+    # Validate indices are within bounds of sub_tensor_shape
+    for i, (idx, sub_dim) in enumerate(zip(indices, sub_tensor_shape)):
+        if idx >= sub_dim:
+            raise ValueError(
+                f"Index {idx} at dimension {i} is out of bounds for sub-tensor shape {sub_tensor_shape}"
+            )
+
+    # Validate sub_tensor dimensions don't exceed tensor dimensions
+    for i, (sub_dim, tensor_dim) in enumerate(zip(sub_tensor_shape, tensor_shape)):
+        if sub_dim > tensor_dim:
+            raise ValueError(
+                f"Sub-tensor dimension {sub_dim} at position {i} exceeds tensor dimension {tensor_dim}"
+            )
+
     # Start with elements remaining in the last dimension
     max_contiguous = sub_tensor_shape[-1] - indices[-1]
 

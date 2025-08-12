@@ -1205,7 +1205,9 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                tag = get_layout_constraint_tag(target, with_default=False)
+                tag: Optional[torch._C.Tag] = get_layout_constraint_tag(
+                    target, with_default=False
+                )
                 if (
                     tag is None
                     and torch._library.utils.is_builtin(target)
@@ -1222,8 +1224,10 @@ class GraphLowering(torch.fx.Interpreter):
                     # and identify them one by one.
                     decided_constraint = require_contiguous  # type: ignore[assignment]
                 else:
-                    tag = get_layout_constraint_tag(target, with_default=True)
-                    decided_constraint = tag_to_layout_constraint(tag)
+                    default_tag: torch._C.Tag = get_layout_constraint_tag(
+                        target, with_default=True
+                    )
+                    decided_constraint = tag_to_layout_constraint(default_tag)
 
                 make_fallback(target, layout_constraint=decided_constraint)
 
@@ -1560,8 +1564,10 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             if (
                 n.op == "call_function"
+                # this path only for built-in operators
                 and n.target
-                not in (operator.getitem, torch._higher_order_ops.invoke_subgraph)
+                and isinstance(n.target, torch._ops.OpOverload)
+                and torch._library.utils.is_builtin(n.target)
                 and (
                     fallback_node_due_to_unsupported_type(n)
                     or CompilerBisector.disable_subsystem(
