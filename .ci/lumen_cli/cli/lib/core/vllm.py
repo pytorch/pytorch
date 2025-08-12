@@ -25,7 +25,7 @@ from cli.lib.common.pip_helper import (
     pip_install_packages,
     run_python,
 )
-from cli.lib.common.utils import run_cmd, working_directory
+from cli.lib.common.utils import run_cmd, run_shell, working_directory
 
 
 logger = logging.getLogger(__name__)
@@ -155,6 +155,7 @@ class VllmBuildRunner(BaseRunner):
         3. run docker build
         """
         inputs = VllmBuildParameters()
+        logger.info("Running vllm build with inputs: %s", inputs)
         clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
@@ -361,6 +362,12 @@ class VllmTestRunner(BaseRunner):
                 except ImportError:
                     print(f"{pkg}: Not installed")
 
+            tests = sample_tests()[self.test_name]
+            logger.info("Running tests: %s", tests["name"])
+            for test in tests["tests"]:
+                with working_directory("tests"):
+                    run_shell(test)
+
 
 def clone_vllm():
     clone_external_repo(
@@ -402,3 +409,16 @@ def preprocess_test_in(
     target_path.write_text(out)
 
     print(f"[INFO] Updated {target_file}")
+
+
+def sample_tests():
+    return {
+        "basic_correctness_test":{
+            "title": "Basic Correctness Test",
+            "tests":["export VLLM_WORKER_MULTIPROC_METHOD=spawn",
+                    "pytest -v -s basic_correctness/test_cumem.py",
+                    "pytest -v -s basic_correctness/test_basic_correctness.py",
+                    "pytest -v -s basic_correctness/test_cpu_offload.py",
+                    "VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT=1 pytest -v -s basic_correctness/test_preemption.py"]
+        }
+    }

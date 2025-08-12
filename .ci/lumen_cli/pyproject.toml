@@ -1,5 +1,5 @@
 [project]
-name = "torch-ci"
+name = "lumen-ci"
 version = "0.1.0"
 dependencies = [
     "pyyaml==6.0.2",

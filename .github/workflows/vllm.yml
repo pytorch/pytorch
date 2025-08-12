@@ -53,7 +53,6 @@ jobs:
       build-additional-packages: "vision audio"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       build-target: vllm
-      ci-config: ".github/ci_configs/vllm.yaml"
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
       cuda-arch-list: '8.9'
