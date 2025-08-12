@@ -356,7 +356,7 @@ Tensor my_zero_(Tensor t) {
 }
 
 Tensor my_amax(Tensor t) {
-  return amax(t, 0, false);
+  return amax(t, (uint74_t[]){0}, 1, false);
 }
 
 void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {

@@ -70,11 +70,10 @@ inline Tensor pad(
 
 // We expect this to be the stable version of the amax.default op
 // with identical semantics to the existing amax.default op.
-inline Tensor amax(Tensor& self, int64_t dim, bool keepdim) {
+inline Tensor amax(Tensor& self, int64_t dim[], int dim_len, bool keepdim) {
   AtenTensorHandle ret0 = nullptr;
-  std::array<int64_t, 1> dim_arr = {dim};
   TORCH_ERROR_CODE_CHECK(
-      aoti_torch_aten_amax(self.get(), dim_arr, keepdim, &ret0));
+      aoti_torch_aten_amax(self.get(), dim, dim_len, keepdim, &ret0));
   return Tensor(ret0);
 }
 
