@@ -1409,6 +1409,77 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
             self.assertParses()
 
+    @requires_tlparse
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_dynamic_shapes(self):
+        """Same as test_tensor_metadata_logging, but with dynamic shapes enabled to cover to_size_hints."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
+
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
+
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled(torch.ones(2, 3))
+
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
+
+            payload = payload_buffer.getvalue().strip()
+            if payload:
+                data = json.loads(payload)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                simplified = (
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []}
+                )
+                actual = json.dumps(simplified, indent=2, sort_keys=True)
+
+                self.assertExpectedInline(
+                    actual,
+                    r"""{
+  "ops": [
+    {
+      "outputs": [
+        {
+          "dtype": "float16",
+          "shape": [
+            2
+          ],
+          "stride": [
+            1
+          ]
+        }
+      ],
+      "type": "compute"
+    }
+  ]
+}""",
+                )
+
+            self.assertParses()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
