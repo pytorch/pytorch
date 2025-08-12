@@ -825,14 +825,12 @@ class TestRecursiveScript(JitTestCase):
                 torch.jit._recursive.concrete_type_store.type_store.clear()
                 torch.jit._recursive.concrete_type_store.methods_compiled.clear()
                 yield torch.jit.script(MyModule())
-            # print("-- modules")
 
         def callstack_generator():
             for _ in range(10):
                 for thread_id, stack in sys._current_frames().items():
                     time.sleep(0.03)
                     yield (thread_id, stack)
-            # print(" -- callstacks")
 
         def run_modules():
             for _ in module_generator():
