@@ -2180,7 +2180,7 @@ class CppKernel(Kernel):
         # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
             # return reduction_size > 128
-            return True
+            return False
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
