@@ -53,7 +53,7 @@ class TestVllmBuildParameters(unittest.TestCase):
                     use_local_dockerfile=False,
                 )
         err = cm.exception
-        self.assertIn("torch_whls_path is not provided", str(err))
+        self.assertIn("TORCH_WHEELS_PATH", str(err))
 
     @patch("cli.lib.core.vllm.local_image_exists", return_value=False)
     @patch.dict(
@@ -68,7 +68,7 @@ class TestVllmBuildParameters(unittest.TestCase):
                     use_local_dockerfile=False,
                 )
         err = cm.exception
-        self.assertIn("base_image", str(err))
+        self.assertIn("BASE_IMAGE", str(err))
 
     @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
     @patch.dict(
@@ -85,7 +85,7 @@ class TestVllmBuildParameters(unittest.TestCase):
                     use_local_base_image=False,
                 )
         err = cm.exception
-        self.assertIn("dockerfile", str(err))
+        self.assertIn("DOCKERFILE_PATH", str(err))
 
     @patch("cli.lib.core.vllm.is_path_exist", return_value=False)
     @patch.dict(
