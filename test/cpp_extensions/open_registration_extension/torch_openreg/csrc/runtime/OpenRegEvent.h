@@ -2,6 +2,7 @@
 
 #include <include/openreg.h>
 
+#include "OpenRegException.h"
 #include "OpenRegStream.h"
 
 namespace c10::openreg {
@@ -11,7 +12,7 @@ struct OpenRegEvent {
 
   ~OpenRegEvent() {
     if (is_created_) {
-      orEventDestroy(event_);
+      OPENREG_CHECK(orEventDestroy(event_));
     }
   }
 
@@ -86,16 +87,14 @@ struct OpenRegEvent {
         " does not match recording stream's device ",
         stream.device_index(),
         ".");
-    // CUDAGuard guard(device_index_);
 
-    orEventRecord(event_, stream);
+    OPENREG_CHECK(orEventRecord(event_, stream));
     was_recorded_ = true;
   }
 
   void block(const OpenRegStream& stream) {
     if (is_created_) {
-      // CUDAGuard guard(stream.device_index());
-      orStreamWaitEvent(stream, event_, 0);
+      OPENREG_CHECK(orStreamWaitEvent(stream, event_, 0));
     }
   }
 
@@ -112,14 +111,13 @@ struct OpenRegEvent {
         "Both events must be completed before calculating elapsed time.");
 
     float time_ms = 0;
-    // CUDAGuard guard(device_index_);
-    orEventElapsedTime(&time_ms, event_, other.event_);
+    OPENREG_CHECK(orEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;
   }
 
   void synchronize() const {
     if (is_created_) {
-      orEventSynchronize(event_);
+      OPENREG_CHECK(orEventSynchronize(event_));
     }
   }
 
@@ -132,8 +130,7 @@ struct OpenRegEvent {
 
   void createEvent(DeviceIndex device_index) {
     device_index_ = device_index;
-    // CUDAGuard guard(device_index_);
-    orEventCreateWithFlags(&event_, enable_timing_);
+    OPENREG_CHECK(orEventCreateWithFlags(&event_, enable_timing_));
     is_created_ = true;
   }
 
