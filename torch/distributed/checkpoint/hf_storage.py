@@ -214,6 +214,23 @@ class HuggingFaceStorageReader(FileSystemReader):
         super().__init__(path=path)
         self.thread_count = thread_count
 
+    def _process_read_request(self, f, req: ReadItem, planner: LoadPlanner) -> None:
+        """Helper function to process a single read request."""
+        # Create slices for each dimension based on offsets and lengths
+        slices = tuple(
+            slice(offset, offset + length)
+            for offset, length in zip(req.storage_offsets, req.lengths)
+        )
+        tensor = f.get_slice(req.storage_index.fqn)[slices]
+        target_tensor = planner.resolve_tensor(req).detach()
+
+        assert target_tensor.size() == tensor.size(), (
+            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+        )
+
+        target_tensor.copy_(tensor)
+        planner.commit_tensor(req, target_tensor)
+
     def _read_files_from_queue(
         self,
         file_queue: queue.Queue,
@@ -227,20 +244,7 @@ class HuggingFaceStorageReader(FileSystemReader):
                 file_name, reqs = file_queue.get_nowait()
                 with safe_open(filename=file_name, framework="pt") as f:
                     for req in reqs:
-                        # Create slices for each dimension based on offsets and lengths
-                        slices = tuple(
-                            slice(offset, offset + length)
-                            for offset, length in zip(req.storage_offsets, req.lengths)
-                        )
-                        tensor = f.get_slice(req.storage_index.fqn)[slices]
-                        target_tensor = planner.resolve_tensor(req).detach()
-
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
-
-                        target_tensor.copy_(tensor)
-                        planner.commit_tensor(req, target_tensor)
+                        self._process_read_request(f, req, planner)
                 result_queue.put(True)  # Signal that this file has been processed
         except queue.Empty:
             pass
@@ -259,22 +263,7 @@ class HuggingFaceStorageReader(FileSystemReader):
             for file_name, reqs in per_file.items():
                 with safe_open(filename=file_name, framework="pt") as f:
                     for req in reqs:
-                        item_md = self.storage_data[req.storage_index]
-
-                        # Create slices for each dimension based on offsets and lengths
-                        slices = tuple(
-                            slice(offset, offset + length)
-                            for offset, length in zip(req.storage_offsets, req.lengths)
-                        )
-                        tensor = f.get_slice(req.storage_index.fqn)[slices]
-                        target_tensor = planner.resolve_tensor(req).detach()
-
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
-
-                        target_tensor.copy_(tensor)
-                        planner.commit_tensor(req, target_tensor)
+                        self._process_read_request(f, req, planner)
         else:
             # Use parallel implementation with thread pool
             file_queue: queue.Queue = queue.Queue()
