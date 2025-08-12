@@ -1736,17 +1736,97 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype or ctx.original_dtype
+        placements = previous_spec.placements
+        # placements = grad_output._spec.placements
+        output_dtensor = RedistributeBackward.apply(
+            grad_output,
+            grad_output._spec.device_mesh,
+            placements,
+            ctx.async_op,
+            ctx.backward_dtype,
+        )
+        return (
+            output_dtensor,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
-        if backward_dtype != grad_output._local_tensor.dtype:
-            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+
+class RedistributeBackward(torch.autograd.Function):
+    @staticmethod
+    def forward(  # type: ignore[override]
+        # pyre-fixme[2]: Parameter must be annotated.
+        ctx,
+        grad_output: "dtensor.DTensor",
+        device_mesh: DeviceMesh,
+        placements: tuple[Placement, ...],
+        async_op: bool = False,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
+    ):
+        ctx.async_op = async_op
+        ctx.backward_dtype = backward_dtype
+        ctx.original_dtype = grad_output._local_tensor.dtype
+
+        if (
+            forward_dtype is not None
+            and forward_dtype != grad_output._local_tensor.dtype
+        ):
+            local_tensor = grad_output._local_tensor.to(dtype=forward_dtype)
             current_spec = DTensorSpec(
-                mesh=grad_output._spec.device_mesh,
+                mesh=device_mesh,
                 placements=grad_output._spec.placements,
                 tensor_meta=TensorMeta(
                     shape=grad_output.shape,
                     stride=grad_output.stride(),
+                    dtype=forward_dtype,
+                ),
+            )
+        else:
+            local_tensor = grad_output._local_tensor
+            current_spec = grad_output._spec
+
+        ctx.current_spec = current_spec
+
+        if current_spec.placements != placements:
+            target_spec = DTensorSpec(
+                device_mesh, placements, tensor_meta=current_spec.tensor_meta
+            )
+
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, async_op=async_op
+            )
+        else:
+            # use the same local tensor if placements are the same.
+            output = local_tensor
+            target_spec = current_spec
+
+        # pyrefly: ignore [bad-argument-type]
+        return dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
+            output,
+            target_spec,
+            # pyrefly: ignore [unexpected-keyword]
+            requires_grad=grad_output.requires_grad,
+        )
+
+    @staticmethod
+    def backward(ctx, grad2_output: "dtensor.DTensor"):  # type: ignore[override]
+        previous_spec = ctx.current_spec
+        async_op = ctx.async_op
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
+
+        if backward_dtype != grad2_output._local_tensor.dtype:
+            local_tensor = grad2_output._local_tensor.to(dtype=backward_dtype)
+            current_spec = DTensorSpec(
+                mesh=grad2_output._spec.device_mesh,
+                placements=grad2_output._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=grad2_output.shape,
+                    stride=grad2_output.stride(),
                     dtype=backward_dtype,
                 ),
             )
@@ -1756,8 +1836,8 @@ class Redistribute(torch.autograd.Function):
                 tensor_meta=current_spec.tensor_meta,
             )
         else:
-            local_tensor = grad_output._local_tensor
-            current_spec = grad_output._spec
+            local_tensor = grad2_output._local_tensor
+            current_spec = grad2_output._spec
         # skip the replicate to partial transformation when we are in backward pass
         # In this case we keep the grad as replicate, this is because we don't
         # want to convert the replicated gradients back to partial, although
@@ -1795,8 +1875,8 @@ class Redistribute(torch.autograd.Function):
             previous_spec.device_mesh,
             tuple(normalized_placements),
             tensor_meta=TensorMeta(
-                shape=grad_output.shape,
-                stride=grad_output.stride(),
+                shape=grad2_output.shape,
+                stride=grad2_output.stride(),
                 dtype=output.dtype,
             ),
         )
@@ -1806,7 +1886,7 @@ class Redistribute(torch.autograd.Function):
             output,
             spec,
             # pyrefly: ignore [unexpected-keyword]
-            requires_grad=grad_output.requires_grad,
+            requires_grad=grad2_output.requires_grad,
         )
 
         return (

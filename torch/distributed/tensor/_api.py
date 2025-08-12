@@ -150,13 +150,10 @@ class _ToTorchTensor(torch.autograd.Function):
                 ),
             )
         return (
-            # pyrefly: ignore [bad-argument-type]
-            DTensor(
-                # pyrefly: ignore [bad-argument-count]
+            DTensor.from_local(
                 grad_output,
-                grad_spec,
-                # pyrefly: ignore [unexpected-keyword]
-                requires_grad=grad_output.requires_grad,
+                grad_spec.device_mesh,
+                grad_spec.placements,
             ),
             None,
         )
