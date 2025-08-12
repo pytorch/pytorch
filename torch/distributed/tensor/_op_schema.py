@@ -451,7 +451,10 @@ class OpSchema:
         return "out" in self.op._schema.overload_name
 
     def is_view_op(self) -> bool:
-        return any(a.alias_info is not None and not a.alias_info.is_write for a in self.op._schema.arguments)
+        return any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in self.op._schema.arguments
+        )
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
