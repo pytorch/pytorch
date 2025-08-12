@@ -139,15 +139,29 @@ fi
 echo "Calling setup.py bdist at $(date)"
 
 setup_ccache() {
+    CCACHE_DIR=/opt/ccache/bin
+    CCACHE_LIB_DIR=/opt/ccache/lib
     echo "Installing ccache"
     retry dnf install -y ccache
 
-    # Use CMAKE compiler launchers instead of PATH manipulation
-    # This preserves compiler --version detection while enabling ccache
-    export CMAKE_CUDA_COMPILER_LAUNCHER="ccache"
-    export CMAKE_HIP_COMPILER_LAUNCHER="ccache"
-    export CMAKE_CXX_COMPILER_LAUNCHER="ccache"
-    export CMAKE_C_COMPILER_LAUNCHER="ccache"
+    mkdir -p "${CCACHE_DIR}"
+    mkdir -p "${CCACHE_LIB_DIR}"
+
+    # Regular compilers go in PATH
+    COMPILERS=("gcc" "g++" "cc" "c++" "clang" "clang++" "icx" "icpx")
+    ccache_path=$(which ccache)
+    for compiler in "${COMPILERS[@]}"; do
+        ln -sf "${ccache_path}" "${CCACHE_DIR}/${compiler}"
+    done
+
+    # Special handling for nvcc: create wrapper but move it outside PATH
+    # This prevents CMake CUDA detection issues while still enabling caching
+    ln -sf "${ccache_path}" "${CCACHE_DIR}/nvcc"
+    mv "${CCACHE_DIR}/nvcc" "${CCACHE_LIB_DIR}/"
+
+    # Set CUDA_NVCC_EXECUTABLE so CMake uses our cached nvcc
+    export CUDA_NVCC_EXECUTABLE="${CCACHE_LIB_DIR}/nvcc"
+    export PATH="${CCACHE_DIR}:${PATH}"
 }
 
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
