@@ -352,10 +352,10 @@ template <typename BlockT>
 struct BlockComparatorSize {
   bool operator()(const BlockT* a, const BlockT* b) const {
     // Note [Block Comparator]
-    // Assumes all compared blocks belong to the same device (guaranteed by
-    // the block pool). Without this guarantee, stream.id() could collide
-    // across devices — i.e., different streams on different devices may have
-    // the same stream id.
+    // Assumes all compared blocks belong to the same device (guaranteed by the
+    // block pool). Without this guarantee, stream.id() could collide across
+    // devices — i.e., different streams on different devices may have the same
+    // stream id.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a->device == b->device);
     if (a->size != b->size) {
       return a->size < b->size;
@@ -387,8 +387,8 @@ struct PrivatePool;
 
 /**
  * BlockPool is a memory pool that manages reusable memory blocks of a single
- * type, such as DeviceBlock. Each instance only could contain one kind of
- * block size category (small or large).
+ * type, such as DeviceBlock. Each instance only could contain one kind of block
+ * size category (small or large).
  *
  * It is templated on BlockT, representing the type of memory block being
  * managed. The pool maintains two sets: one for currently allocated and
@@ -458,9 +458,9 @@ template <typename StreamT>
 struct ExpandableSegment;
 
 /**
- * DeviceBlock is typically a fundamental unit of memory used in device
- * caching allocator. It corresponds to a memory block allocated on a specific
- * device and associated with a particular stream.
+ * DeviceBlock is typically a fundamental unit of memory used in device caching
+ * allocator. It corresponds to a memory block allocated on a specific device
+ * and associated with a particular stream.
  *
  * A DeviceBlock may also track which BlockPool it belongs to. This struct is
  * intended to serve as a base type or interface that can be extended by
@@ -500,8 +500,7 @@ struct DeviceBlock {
     return (prev != nullptr) || (next != nullptr);
   }
 
-  // Inserts this block between two existing blocks with [before, this, after]
-  // .
+  // Inserts this block between two existing blocks with [before, this, after].
   void splice(BlockT* before, BlockT* after) {
     if (before) {
       TORCH_INTERNAL_ASSERT(before->next == after);
@@ -614,8 +613,8 @@ struct PrivatePool {
   BlockPoolT small_blocks; // Small blocks pool this PrivatePool manages
   // Number of live graphs using this pool
   int64_t use_count{1};
-  // Number of unfreed device allocation made for this pool. When use_count
-  // and deviceMalloc_count drop to zero, we can delete this PrivatePool from
+  // Number of unfreed device allocation made for this pool. When use_count and
+  // deviceMalloc_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
   int64_t deviceMalloc_count{0};
 
@@ -648,9 +647,9 @@ struct SegmentRange {
 };
 
 // ExpandableSegment traits to map StreamT to its corresponding HandleT for
-// different backends. This must be specialized for each backend's stream
-// type. If the backend does not support expandable segments feature, it
-// should define HandleT as void* as a placeholder.
+// different backends. This must be specialized for each backend's stream type.
+// If the backend does not support expandable segments feature, it should define
+// HandleT as void* as a placeholder.
 template <typename StreamT>
 struct ExpandableSegmentTraits {
   using HandleT = void*;
@@ -671,8 +670,8 @@ struct ExpandableSegmentTraits {
  * backend-specific HandleT (defined by ExpandableSegmentTraits) to represent
  * physical memory handles.
  *
- * This class is intended to be extended by backends (e.g., CUDA, XPU, etc.)
- * to implement memory mapping and access control policies. It is useful for
+ * This class is intended to be extended by backends (e.g., CUDA, XPU, etc.) to
+ * implement memory mapping and access control policies. It is useful for
  * caching allocators that want to reuse virtual address ranges efficiently,
  * grow allocations dynamically, and support multi-device access through peer
  * mappings.
@@ -766,8 +765,7 @@ struct ExpandableSegment {
   // Release the virtual memory address associated with the segment.
   virtual void releaseVirtualMemoryAddress(void* ptr) = 0;
 
-  // Maps the physical memory handles in the range [begin, end) to the
-  // segment.
+  // Maps the physical memory handles in the range [begin, end) to the segment.
   virtual void mapHandles(size_t begin, size_t end) = 0;
 
   // Unmaps the physical memory handles in the range [begin, end) from the
@@ -797,8 +795,8 @@ struct ExpandableSegment {
   // Returns the index of the segment just *past* the one containing pointer
   // `p`, relative to the base pointer `ptr_`. This is the *exclusive* upper
   // bound, useful for [begin, end) style ranges.
-  // If `p` lies exactly on a segment boundary, this is equal to
-  // segmentLeft(p). Otherwise, it rounds up and returns segmentLeft(p) + 1.
+  // If `p` lies exactly on a segment boundary, this is equal to segmentLeft(p).
+  // Otherwise, it rounds up and returns segmentLeft(p) + 1.
   size_t segmentRight(char* p) const {
     size_t offset = p - ptr();
     return numSegments(offset);
