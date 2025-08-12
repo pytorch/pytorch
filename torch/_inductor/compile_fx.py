@@ -1524,10 +1524,10 @@ class _InProcessFxCompile(FxCompile):
                             },
                         )
 
-                    # Collect and dump op runtimes for TLParse
+                    # Collect and dump op runtimes and tensor metadata for TLParse
                     if config.log_tlparse:
                         _, _, node_runtimes = graph.count_bytes()
-                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
+                        torch._inductor.debug.log_runtime_and_tensor_meta(node_runtimes)
 
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
