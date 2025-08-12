@@ -4749,6 +4749,28 @@ class CommonTemplate:
                 ),
             )
 
+    def test_adaptive_avg_pool2d_dynamic_shapes(self):
+        # Previously would crash
+        # https://github.com/pytorch/pytorch/issues/159550
+
+        @torch.compile
+        def resize(input, w, h):
+            permute_1 = input.permute([2, 0, 1])
+            unsqueeze_2 = permute_1.unsqueeze(0)
+            _adaptive_avg_pool2d_3 = torch._adaptive_avg_pool2d(unsqueeze_2, [w, h])
+            select_4 = torch.select(_adaptive_avg_pool2d_3, 0, 0)
+            permute_5 = select_4.permute([1, 2, 0])
+            return permute_5
+
+        with torch.device(self.device):
+            input = torch.randn((1536, 1024, 3))
+            w, h = 1620, 1080
+            resize(input, w, h)
+            input = torch.randn((1902, 1078, 3))
+            w, h = 1908, 1024
+            resize(input, w, h)
+            input = torch.randn((1901, 1079, 3))
+
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d1(self):
