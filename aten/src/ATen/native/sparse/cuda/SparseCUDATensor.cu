@@ -126,7 +126,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
           newValues.data_ptr<scalar_t>(),
           nnz,
           newNnz,
-#if USE_ROCM
+#ifdef USE_ROCM
           nsegments,
 #endif
           stride
