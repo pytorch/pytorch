@@ -908,6 +908,7 @@ def break_graph_if_unsupported(*, push):
             inst: Instruction,
             reason: GraphCompileReason,
         ):
+            breakpoint()
             if (
                 sys.version_info >= (3, 11)
                 and sys.version_info < (3, 12)

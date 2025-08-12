@@ -1294,7 +1294,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.should_exit = True
 
         log.debug("COMPILING GRAPH due to %s", reason)
-
+        # breakpoint()
         # prefix instructions (Python 3.11+)
         prefix_insts: list[Instruction] = []
         if sys.version_info >= (3, 11):

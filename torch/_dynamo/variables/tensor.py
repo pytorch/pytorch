@@ -481,10 +481,17 @@ class TensorVariable(VariableTracker):
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name),
-                    msg="Getting an inplace view on a graph input is not supported",
+                # return variables.misc.DelayGraphBreakVariable(
+                #     source=AttrSource(self.source, name),
+                #     msg="Getting an inplace view on a graph input is not supported",
+                # )
+                unimplemented_v2(
+                    gb_type="Inplace view on graph input",
+                    context=f"see title",
+                    explanation="As stated",
+                    hints=[],
                 )
+
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
