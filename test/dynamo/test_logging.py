@@ -37,9 +37,9 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires cuda")
 requires_gpu = unittest.skipUnless(
     HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
 )
@@ -139,7 +139,7 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
@@ -252,7 +252,7 @@ LoweringException: AssertionError:
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):

@@ -1273,6 +1273,17 @@ bool is_tensor_and_append_overloaded(
     PyObject* obj,
     std::vector<PyObject*>* overloaded_args);
 
+/* Recursively collect overloaded arguments from nested sequences
+ * This function traverses sequences recursively to find any objects
+ * with __torch_function__ and adds them to the overloaded_args list.
+ *
+ * 'obj': the input object which may be a sequence containing overloaded objects
+ * 'overloaded_args': the vector to append the overloaded args
+ */
+void collect_nested_overloaded_args(
+    PyObject* obj,
+    std::vector<PyObject*>* overloaded_args);
+
 /*
  * Check if the input obj is Tensor List or Tensor Tuple type. First check
  * whether obj is Tuple or List type, if true, iterate over each element and
