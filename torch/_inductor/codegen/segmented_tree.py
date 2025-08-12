@@ -4,6 +4,10 @@ from typing import Callable, Generic, Optional, TypeVar
 T = TypeVar("T")
 
 
+def _value_or(opt: Optional[T], default: T) -> T:
+    return opt if opt is not None else default
+
+
 class SegmentedTree(Generic[T]):
     def __init__(
         self,
@@ -33,6 +37,9 @@ class SegmentedTree(Generic[T]):
         self.identity = identity_element
 
         # Size of segment tree array (next power of 2 * 2)
+        # The tree follows a standard heap layout where
+        # node `n`'s children are at `2*n` and `2*n+1`.
+        # Index 0 is unused.
         self.size = 1
         while self.size < self.n:
             self.size *= 2
@@ -40,6 +47,13 @@ class SegmentedTree(Generic[T]):
 
         # Initialize tree and lazy arrays
         self.tree = [identity_element] * self.size
+        # The lazy array contains updates to the given node
+        # Upon update, we only push updates to the top-most
+        # nodes that fully receive the update. We then
+        # propagate the update down as required (i.e., when
+        # we receive an interval query that neither fully
+        # contains the node nor fully doesn't contain the
+        # node
         self.lazy: list[Optional[T]] = [None] * self.size
 
         # Build the tree
@@ -72,6 +86,9 @@ class SegmentedTree(Generic[T]):
         # Update current node with summary of children
         self.tree[node] = self.summary_op(self.tree[left_child], self.tree[right_child])
 
+    def _children(self, node: int) -> list[int]:
+        return [2 * node, 2 * node + 1]
+
     def _push_lazy(self, node: int, start: int, end: int) -> None:
         """
         Push lazy updates down to children.
@@ -87,21 +104,11 @@ class SegmentedTree(Generic[T]):
             self.tree[node] = self.update_op(self.tree[node], lazy_node)
 
             if start != end:  # Not a leaf node
-                left_child = 2 * node
-                right_child = 2 * node + 1
-
                 # Propagate to children
-                lazy_left_child = self.lazy[left_child]
-                if lazy_left_child is None:
-                    self.lazy[left_child] = lazy_node
-                else:
-                    self.lazy[left_child] = self.update_op(lazy_left_child, lazy_node)
-
-                lazy_right_child = self.lazy[right_child]
-                if lazy_right_child is None:
-                    self.lazy[right_child] = lazy_node
-                else:
-                    self.lazy[right_child] = self.update_op(lazy_right_child, lazy_node)
+                for child in self._children(node):
+                    self.lazy[child] = self.update_op(
+                        _value_or(self.lazy[child], self.identity), lazy_node
+                    )
 
             # Clear the lazy value
             self.lazy[node] = None
@@ -130,24 +137,8 @@ class SegmentedTree(Generic[T]):
         # Complete overlap
         if start >= left and end <= right:
             # Apply update to current node
-            self.tree[node] = self.update_op(self.tree[node], value)
-
-            # If not leaf, mark children for lazy update
-            if start != end:
-                left_child = 2 * node
-                right_child = 2 * node + 1
-
-                lazy_left_child = self.lazy[left_child]
-                if lazy_left_child is None:
-                    self.lazy[left_child] = value
-                else:
-                    self.lazy[left_child] = self.update_op(lazy_left_child, value)
-
-                lazy_right_child = self.lazy[right_child]
-                if lazy_right_child is None:
-                    self.lazy[right_child] = value
-                else:
-                    self.lazy[right_child] = self.update_op(lazy_right_child, value)
+            self.lazy[node] = value
+            self._push_lazy(node, start, end)
             return
 
         # Partial overlap, recurse to children
