@@ -135,6 +135,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
         self,
         device,
     ) -> None:
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("Cuda is not available")
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
