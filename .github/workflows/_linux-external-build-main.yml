@@ -230,7 +230,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           MAX_JOBS: ${{ steps.set-max-jobs.outputs.MAX_JOBS }}
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          BASE_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
         run: |
           set -euo pipefail
