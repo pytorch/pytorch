@@ -199,6 +199,13 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    def test_conv_transpose3d_autocast_fp32(self):
+        m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
+        x = torch.randn(20, 16, 10, 50, 100, device="mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = m(x)
+        self.assertEqual(y.dtype, torch.float32)
+
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
         class Model(nn.Module):
