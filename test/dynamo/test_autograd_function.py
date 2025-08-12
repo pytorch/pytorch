@@ -8,7 +8,10 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch.testing._internal.triton_utils import HAS_CUDA_AND_TRITON, requires_cuda
+from torch.testing._internal.triton_utils import (
+    HAS_CUDA_AND_TRITON,
+    requires_cuda_and_triton,
+)
 
 
 if HAS_CUDA_AND_TRITON:
@@ -1473,7 +1476,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
             @staticmethod
@@ -1504,7 +1507,7 @@ class GraphModule(torch.nn.Module):
         loss.backward()
         self.assertEqual(x + y, z)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):
             @staticmethod
