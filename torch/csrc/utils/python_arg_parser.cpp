@@ -303,6 +303,8 @@ static py::object maybe_get_registered_torch_dispatch_rule(
   return result;
 }
 
+// NB: Invariant: if you run this function, you MUST test if the returned
+// py::object is nullptr, as this will occur WITHOUT error condition being set
 static py::object dispatch_on_subclass(
     PyObject* args,
     PyObject* kwargs,
@@ -382,12 +384,7 @@ static py::object dispatch_on_subclass(
       break;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-      ret.ptr() != nullptr,
-      "dispatch_on_subclass called with NO overloaded args that actually triggered dispatch, "
-      "perhaps there is a divergence in how you detect torch function and how overloaded args is "
-      "computed?  overloaded_args = ",
-      overloaded_args);
+  // NB: PyErr_Occurred is NOT set here, this means NO dispatch happened
   return ret;
 }
 
@@ -589,9 +586,15 @@ auto handle_torch_function_no_python_arg_parser(
   }
 
   if (ret.ptr() == nullptr) {
-    // if an exception occurred in a user's implementation of
-    // __torch_function__, throw it
-    throw python_error();
+    // We didn't successfully dispatch anything, this should be impossible
+    TORCH_INTERNAL_ASSERT(
+        0,
+        "dispatch_on_subclass called with NO overloaded args that actually triggered dispatch, "
+        "perhaps there is a divergence in how you detect torch function and how overloaded args is "
+        "computed?  overloaded_args = ",
+        overloaded_args,
+        ", is_mode_active = ",
+        is_mode_active());
   } else if (ret.ptr() == Py_NotImplemented) {
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
