@@ -3,9 +3,10 @@ Environment Variables and Dataclasses Utility helpers for CLI tasks.
 """
 
 import os
-from dataclasses import field
+from dataclasses import field, fields, is_dataclass, MISSING
 from pathlib import Path
-from typing import Optional, Union
+from textwrap import indent
+from typing import Optional, Type, Union
 
 from cli.lib.common.utils import str2bool
 
@@ -105,3 +106,43 @@ def env_str_field(
     returns dataclass's factory function for str field with default value
     """
     return field(default_factory=lambda: get_env(name, default))
+
+
+def generate_dataclass_help(cls) -> str:
+    """Auto-generate help text for dataclass default and default_factory values."""
+    if not is_dataclass(cls):
+        raise TypeError(f"{cls} is not a dataclass")
+
+    lines = []
+    for f in fields(cls):
+        if f.default is not MISSING:
+            # Has a direct default value
+            val = f.default
+        elif f.default_factory is not MISSING:  # type: ignore
+            try:
+                # Call the factory to get the value
+                val = f.default_factory()  # type: ignore
+            except Exception as e:
+                val = f"<error: {e}>"
+        else:
+            val = "<required>"
+
+        lines.append(f"{f.name:<22} = {repr(val)}")
+
+    return indent("\n".join(lines), "    ")
+
+
+def with_params_help(params_cls: Type, title: str = "Parameter defaults"):
+    """
+    Class decorator that appends a help table generated from another dataclass
+    (e.g., VllmParameters) to the decorated class's docstring.
+    """
+    if not is_dataclass(params_cls):
+        raise TypeError(f"{params_cls} must be a dataclass")
+
+    def _decorator(cls: Type) -> Type:
+        block = generate_dataclass_help(params_cls)
+        cls.__doc__ = (cls.__doc__ or "") + f"\n\n{title}:\n{block}"
+        return cls
+
+    return _decorator
