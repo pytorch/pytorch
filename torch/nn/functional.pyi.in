@@ -149,6 +149,22 @@ def binary_cross_entropy(
 
 __all__ += ["binary_cross_entropy"]
 
+def linear_cross_entropy(
+    input: Tensor,
+    target: Tensor,
+    linear_weight: Tensor,
+    chunking_strategy: str = ...,
+    bias: Tensor | None = ...,
+    cross_entropy_weight: Tensor | None = ...,
+    ignore_index: int = ...,
+    label_smoothing: float = ...,
+    reduce: bool | None = ...,
+    reduction: str = ...,
+    size_average: bool | None = ...,
+) -> Tensor:
+
+__all__ += ["linear_cross_entropy"]
+
 def celu(input: Tensor, alpha: float = ..., inplace: bool = ...) -> Tensor: ...
 
 __all__ += ["celu"]
