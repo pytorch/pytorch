@@ -294,7 +294,7 @@ struct DeviceBlock {
     return (prev != nullptr) || (next != nullptr);
   }
 
-  // Inserts this block between two existing blocks with [before, this, after] .
+  // Inserts this block between two existing blocks with [before, this, after].
   void splice(BlockT* before, BlockT* after) {
     if (before) {
       TORCH_INTERNAL_ASSERT(before->next == after);
@@ -418,7 +418,7 @@ struct PrivatePool {
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critical though,
+  // check in BlockComparator. BlockComparator is performance-critical though,
   // I'd rather not add more logic to it.
   DeviceAllocator* allocator_;
 };
