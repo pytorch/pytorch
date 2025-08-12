@@ -280,6 +280,8 @@ def main() -> None:
     else:
         pythons = args.python or [sys.executable]
 
+    has_ccache = run_cmd('ccache --version', capture_output=True).returncode == 0
+
     build_times: dict[str, float] = dict()
 
     if len(pythons) > 1 and args.destination == "dist/":
@@ -292,6 +294,9 @@ def main() -> None:
 
     for interpreter in pythons:
         with venv(interpreter) as venv_interpreter:
+            if has_ccache:
+                run_cmd('ccache --zero-stats')
+
             builder = Builder(venv_interpreter, args.log_destination)
             # clean actually requires setuptools so we need to ensure we
             # install requirements before
@@ -303,6 +308,9 @@ def main() -> None:
             builder.bdist_wheel(args.destination)
 
             end_time = time.time()
+
+            if has_ccache:
+                run_cmd('ccache --show-stats')
 
             build_times[interpreter_version(venv_interpreter)] = end_time - start_time
     for version, build_time in build_times.items():
