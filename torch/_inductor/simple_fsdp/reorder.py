@@ -109,27 +109,25 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
 
     if isinstance(ir_node, ir.FallbackKernel):
         python_kernel_name = ir_node.python_kernel_name
-        if (
-            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
-            and ir_node.inputs[0].inputs[0].python_kernel_name
-            == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-        ):
-            return NodeType.RS_WAIT
-        elif (
-            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
-            and ir_node.inputs[0].inputs[0].python_kernel_name
-            == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-        ):
-            return NodeType.AG_WAIT
+        if python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default" and _check_ir_node_fsdp(ir_node):
+            inputs_rs_kernel_name1 = getattr(ir_node.inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            inputs_rs_kernel_name2 = hasattr(ir_node.inputs[0], "inputs") and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            if inputs_rs_kernel_name1 or inputs_rs_kernel_name2:
+                return NodeType.RS_WAIT
+
+            inputs_ag_kernel_name1 = getattr(ir_node.inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            inputs_ag_kernel_name2 = hasattr(ir_node.inputs[0], "inputs") and  getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            if inputs_ag_kernel_name1 or inputs_ag_kernel_name2:
+                return NodeType.AG_WAIT
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-        ):
+        ) and _check_ir_node_fsdp(ir_node):
             return NodeType.REDUCE_SCATTER
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-        ):
+        ) and _check_ir_node_fsdp(ir_node):
             return NodeType.ALL_GATHER
     return NodeType.COMPUTE
 
@@ -226,12 +224,14 @@ def reorder_reduce_scatter(
     for node in snodes:
         node_to_type[node] = get_node_type(node)
         types.append(get_node_type(node))
+
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]
         if node_type in [NodeType.ALL_GATHER, NodeType.COMPUTE, NodeType.AG_WAIT]:
             if node not in result_list and node not in wait_list:
                 result_list.append(node)
         elif node_type == NodeType.RS_WAIT:
+            # there will sometimes be a memory checker node between rs and rs wait
             assert node_to_type[snodes[idx - 1]] == NodeType.REDUCE_SCATTER
             # gather wait node after reduce scatter
             wait_list.append(node)
@@ -248,5 +248,4 @@ def reorder_reduce_scatter(
 
     if len(wait_list) > 0:
         result_list.extend(wait_list)
-
     return result_list

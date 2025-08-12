@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import math
-from typing import Any, Callable, cast, Dict, Union, TYPE_CHECKING
+from typing import Any, Callable, cast, Dict, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from .. import ir, scheduler
 from ..dependencies import StarDep, WeakDep
 from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
+from .reorder import _check_ir_node_fsdp
 
 
 def get_fx_node(
@@ -34,7 +35,7 @@ def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> 
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node):
             return True
     return False
 
@@ -310,7 +311,7 @@ def bucket_all_gathers(
             param_all_gather_outputs_flattened,
             inp_split_sizes,
             all_gather_input_numel,
-            example_ag_input_tensor.device.index,
+            example_ag_input_tensor.device.index % group_size,
         ),
         {},
     )
@@ -398,7 +399,7 @@ def bucket_reduce_scatters(
     )
     assert all(n.meta["val"].dtype == reduce_dtype for n in unsharded_grads_fx_nodes)
     device = unsharded_grads_fx_nodes[0].meta["val"].device
-    rank = device.index
+    rank = device.index % group_size
     # TODO(yf225): need more work if we want to support non-dim-0 sharding (e.g. search for `shard_dim` in FSDP2 codebase)
     shard_dim = 0
 

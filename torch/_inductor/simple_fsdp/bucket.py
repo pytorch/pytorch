@@ -21,6 +21,7 @@ from .bucket_utils import (
     bucket_reduce_scatters,
     get_fx_node,
 )
+from .reorder import _check_ir_node_fsdp
 
 
 def bucket_fsdp_all_gather_concat_on_scheduler_ir(
@@ -68,7 +69,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node):
             ag_exists = True
             ag_snode = snode
             ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
@@ -193,7 +194,6 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     orig_ag_snodes,
                     orig_wait_snodes,
                 ) = bucket_id_to_bucketed_op_info[bucket_id]
-
                 if len(orig_ag_snodes) == 1:
                     # If there is only one all_gather in the bucket, schedule it normally.
                     schedule_snode(orig_ag_snodes[0])
@@ -313,7 +313,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node):
             rs_exists = True
             rs_snode = snode
 

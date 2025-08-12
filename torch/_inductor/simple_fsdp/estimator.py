@@ -2,7 +2,7 @@ import statistics
 import time
 from collections.abc import Sequence
 from functools import reduce
-from typing import Any, Callable, cast, Union, TYPE_CHECKING
+from typing import Any, Callable, cast, Union
 
 from sympy import Expr
 
@@ -15,10 +15,12 @@ from torch.utils._mode_utils import no_dispatch
 from .. import ir
 from ..utils import contains_collective, contains_wait
 
+
 kernel_name_to_comm_op: dict[str, Callable[..., Any]] = {
     "torch.ops._c10d_functional.all_gather_into_tensor.default": c10d.all_gather_into_tensor,
     "torch.ops._c10d_functional.reduce_scatter_tensor.default": c10d.reduce_scatter_tensor,
     "torch.ops._c10d_functional.all_gather_into_tensor_out.default": c10d.all_gather_into_tensor,
+    "torch.ops._c10d_functional.all_reduce_.default": c10d.all_reduce,
 }
 
 
@@ -73,6 +75,7 @@ class CommPerfCache:
         self.threshold = threshold
         self.ag_max_inp_size = -1
         self.rs_max_out_size = -1
+        self.all_reduce_max_input_size = -1
 
     def _calculate_distance(self, size1, size2):
         word_size1 = get_data_size(size1)
@@ -89,6 +92,10 @@ class CommPerfCache:
                 self.rs_max_out_size = max(
                     self.rs_max_out_size, get_data_size(list(k[1]))
                 )
+            if k[2] == "torch.ops._c10d_functional.all_reduce_.default":
+                self.all_reduce_max_input_size = max(
+                    self.all_reduce_max_input_size, get_data_size(list(k[0]))
+                )
 
     def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, value):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
@@ -100,6 +107,10 @@ class CommPerfCache:
         if comm_func == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
             self.rs_max_out_size = max(
                 self.rs_max_out_size, get_data_size(tensor_output_size)
+            )
+        if comm_func == "torch.ops._c10d_functional.all_reduce_.default":
+            self.all_reduce_max_input_size = max(
+                self.all_reduce_max_input_size, get_data_size(tensor_input_size)
             )
 
     def get_comm_time(
@@ -118,6 +129,19 @@ class CommPerfCache:
 
         for k in self.cache.keys():
             if k[2] == comm_func:
+                if comm_func in [
+                    "torch.ops._c10d_functional.all_gather_into_tensor.default",
+                    "torch.ops._c10d_functional.all_reduce_.default",
+                ] and get_data_size(k[1]) // get_data_size(k[0]) != get_data_size(
+                    tensor_output_size
+                ) // get_data_size(tensor_input_size):
+                    continue
+                if comm_func in [
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+                ] and get_data_size(k[0]) // get_data_size(k[1]) != get_data_size(
+                    tensor_input_size
+                ) // get_data_size(tensor_output_size):
+                    continue
                 input_distance = self._calculate_distance(tensor_input_size, k[0])
                 output_distance = self._calculate_distance(tensor_output_size, k[1])
                 total_distance = input_distance + output_distance
@@ -132,6 +156,9 @@ class CommPerfCache:
         if closest_key:
             return self.cache[closest_key]
 
+        # fall back to 0 if the data has been calibrated, but we cannot find a match
+        if calibrated:
+            return 0
         return None
 
 
@@ -268,15 +295,29 @@ def estimate_comm_time(
 
 
 def benchmark_comm_func(
-    tensor_input, tensor_output, comm_func_name, comm_cache, estimate, verbose=False
+    tensor_input,
+    tensor_output,
+    comm_func_name,
+    comm_cache,
+    group_size,
+    process_group,
+    estimate,
+    verbose=False,
 ):
     rank = c10d.distributed_c10d.get_rank()
     device = torch.device(f"cuda:{rank:d}")
-    process_group = c10d.distributed_c10d._get_default_group()
+    # process_group = c10d.distributed_c10d._get_default_group()
+    # from torch.distributed.device_mesh import init_device_mesh
+    # mesh = init_device_mesh("cuda", mesh_shape=(2, 2, 2), mesh_dim_names=("fsdp", "tp", "cp"))
+    # process_group = mesh.get_group("tp")
+
     if comm_func_name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
         input_args = {"input_tensor": tensor_input, "output_tensor": tensor_output}
     elif comm_func_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
         input_args = {"input": tensor_input, "output": tensor_output}
+    elif comm_func_name == "torch.ops._c10d_functional.all_reduce_.default":
+        input_args = {"tensor": tensor_input}
+
     if comm_cache is not None:
         comm_time = comm_cache.get_comm_time(
             tensor_input.size(), tensor_output.size(), comm_func_name
@@ -293,7 +334,7 @@ def benchmark_comm_func(
         comm_time = cm.estimated_time
     else:
         torch.cuda.synchronize()
-        comm_func(**input_args)
+        comm_func(**input_args, group=process_group)
 
         nruns = 2
         comm_time = 0
@@ -304,7 +345,7 @@ def benchmark_comm_func(
             start_evt = torch.cuda.Event(enable_timing=True)
             end_evt = torch.cuda.Event(enable_timing=True)
             start_evt.record()
-            comm_func(**input_args)
+            comm_func(**input_args, group=process_group)
             end_evt.record()
             end_evt.synchronize()
 
@@ -335,7 +376,12 @@ def estimate_comp_time(
     # Estimate the runtime of a compute node
     # FusedSchedulerNode & BaseSchedulerNode: get the generated triton code and use `do_bench` mode to obtain runtime
     # ExternKernelSchedulerNode: get python kernel and run the kernel to obtain runtime
-    from ..scheduler import BaseSchedulerNode, ExternKernelSchedulerNode, FusedSchedulerNode
+    from ..scheduler import (
+        BaseSchedulerNode,
+        ExternKernelSchedulerNode,
+        FusedSchedulerNode,
+    )
+
     device = cast(torch.device, snode.get_device())
 
     if isinstance(snode, FusedSchedulerNode):
