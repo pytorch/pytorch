@@ -168,7 +168,7 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
-      #  Added: host-side check for distributed configs (require >=4 GPUs)
+      #  host-side check for distributed configs (require >=4 GPUs)
       - name: Validate >=4 GPUs on runner for distributed configs
         if: ${{ matrix.config == 'distributed' }}
         shell: bash
@@ -177,7 +177,7 @@ jobs:
           if command -v rocm-smi >/dev/null 2>&1; then
             GPU_COUNT=$(rocm-smi --showid | grep -c '^GPU\[' || true)
           else
-            # Best-effort fallback if rocm-smi isn't present on the runner
+            # fallback if rocm-smi isn't present on the runner
             GPU_COUNT=$(ls -d /sys/class/drm/card[0-9]* 2>/dev/null | wc -l || echo 0)
           fi
           echo "Detected GPUs on runner: ${GPU_COUNT}"
