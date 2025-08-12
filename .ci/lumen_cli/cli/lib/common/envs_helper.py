@@ -6,7 +6,7 @@ import os
 from dataclasses import field, fields, is_dataclass, MISSING
 from pathlib import Path
 from textwrap import indent
-from typing import Optional, Type, Union
+from typing import Optional, Union
 
 from cli.lib.common.utils import str2bool
 
@@ -118,10 +118,10 @@ def generate_dataclass_help(cls) -> str:
         if f.default is not MISSING:
             # Has a direct default value
             val = f.default
-        elif f.default_factory is not MISSING:  # type: ignore
+        elif f.default_factory is not MISSING:
             try:
                 # Call the factory to get the value
-                val = f.default_factory()  # type: ignore
+                val = f.default_factory()
             except Exception as e:
                 val = f"<error: {e}>"
         else:
@@ -132,7 +132,7 @@ def generate_dataclass_help(cls) -> str:
     return indent("\n".join(lines), "    ")
 
 
-def with_params_help(params_cls: Type, title: str = "Parameter defaults"):
+def with_params_help(params_cls: type, title: str = "Parameter defaults"):
     """
     Class decorator that appends a help table generated from another dataclass
     (e.g., VllmParameters) to the decorated class's docstring.
@@ -140,7 +140,7 @@ def with_params_help(params_cls: Type, title: str = "Parameter defaults"):
     if not is_dataclass(params_cls):
         raise TypeError(f"{params_cls} must be a dataclass")
 
-    def _decorator(cls: Type) -> Type:
+    def _decorator(cls: type) -> type:
         block = generate_dataclass_help(params_cls)
         cls.__doc__ = (cls.__doc__ or "") + f"\n\n{title}:\n{block}"
         return cls
