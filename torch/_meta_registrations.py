@@ -2450,6 +2450,19 @@ def meta_conv(
         elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
 
+    # Expand 1d -> 2d.
+    # This is only done for backends that don't natively support 1d spatial input.
+    k = input_tensor.dim()
+    if k == 3 and not input_tensor.is_mkldnn and not input_tensor.is_xpu:
+        input_tensor = input_tensor.to(memory_format=torch.contiguous_format)
+        input_tensor = input_tensor.unsqueeze(2)
+        weight = weight.unsqueeze(2)
+        if len(stride) == 1:
+            stride.insert(0, 1)
+            padding.insert(0, 0)
+            dilation.insert(0, 1)
+            output_padding.insert(0, 0)
+
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
         weight,
@@ -2468,6 +2481,9 @@ def meta_conv(
 
     out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    # revert 2d -> 1d back
+    if k == 3 and not input_tensor.is_mkldnn and not input_tensor.is_xpu:
+        out = out.squeeze(2)
     return out
 
 
