@@ -1,13 +1,18 @@
 #include <Python.h>
 
-extern PyObject* initOpenRegModule(void);
+#ifdef _WIN32
+  #define OPENREG_EXPORT __declspec(dllexport)
+#else
+  #define OPENREG_EXPORT __attribute__((visibility("default")))
+#endif
 
-#ifndef _WIN32
+extern OPENREG_EXPORT PyObject* initOpenRegModule(void);
+
 #ifdef __cplusplus
 extern "C"
 #endif
-__attribute__((visibility("default"))) PyObject* PyInit__C(void);
-#endif
+
+OPENREG_EXPORT PyObject* PyInit__C(void);
 
 PyMODINIT_FUNC PyInit__C(void)
 {
