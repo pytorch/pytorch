@@ -102,7 +102,7 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the sycl:queue* pointer.
   // So the last bit will be 0.
-  if ((!(s & 1))) {
+  if (!(s & 1)) {
     return StreamIdType(StreamIdType::EXT);
   }
   int mask_for_type = (1 << kStreamTypeBits) - 1;
