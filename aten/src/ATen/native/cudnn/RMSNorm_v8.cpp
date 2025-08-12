@@ -199,7 +199,7 @@ void raw_cudnn_rmsnorm_forward_out(
     TORCH_INTERNAL_ASSERT(
         rmsnorm_graph->build_operation_graph(handle).is_good());
     TORCH_INTERNAL_ASSERT(
-        rmsnorm_graph->create_execution_plans({fe::HeurMode_t::FALLBACK})
+        rmsnorm_graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
             .is_good());
     TORCH_INTERNAL_ASSERT(
         rmsnorm_graph->check_support(handle).is_good(),
@@ -304,7 +304,7 @@ void raw_cudnn_rmsnorm_backward_out(
     TORCH_INTERNAL_ASSERT(
         rmsnorm_graph->build_operation_graph(handle).is_good());
     TORCH_INTERNAL_ASSERT(
-        rmsnorm_graph->create_execution_plans({fe::HeurMode_t::FALLBACK})
+        rmsnorm_graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
             .is_good());
     TORCH_INTERNAL_ASSERT(
         rmsnorm_graph->check_support(handle).is_good(),
