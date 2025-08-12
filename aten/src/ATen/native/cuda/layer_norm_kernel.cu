@@ -1128,8 +1128,9 @@ void LayerNormKernelImplInternal(
 }
 
 inline bool use_cudnn_layernorm(bool gamma, bool beta) {
-  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
-  bool ok = enabled && gamma && beta;
+  // static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
+  // bool ok = enabled && gamma && beta;
+  bool ok = gamma && beta;
   if (ok) {
     TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN LAYERNORM");
   }
@@ -1164,8 +1165,9 @@ void LayerNormKernelImpl(
 }
 
 inline bool use_cudnn_rmsnorm(bool gamma) {
-  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_RMSNORM_ENABLED") == true);
-  bool ok = enabled && gamma;
+  // static bool enabled = (c10::utils::check_env("TORCH_CUDNN_RMSNORM_ENABLED") == true);
+  // bool ok = enabled && gamma;
+  bool ok = gamma;
   if (ok) {
     TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN RMSNORM");
   }
