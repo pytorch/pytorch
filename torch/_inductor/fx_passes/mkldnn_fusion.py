@@ -1451,7 +1451,7 @@ if torch._C._has_mkldnn:
                 weight_node = (
                     weight
                     if (
-                        is_lp_weight
+                        compute_with_lp
                         or mkldnn._is_mkldnn_acl_supported()
                         or V.aot_compilation
                     )
