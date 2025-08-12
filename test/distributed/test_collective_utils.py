@@ -198,17 +198,18 @@ class TestUtils(TestCase):
         summaries = {
             name: _summarize_ranks(ranks_lists[name]) for name in mesh_dim_names
         }
-        self.assertEqual(summaries["pp"], "0, 512, 1024, 1536, 2048, 2560, 3072, 3584")
-        # TODO: what would be the best format for abbreviating striding?
-        # self.assertEqual(summaries["pp"], "0, 512, ..., 3584")
-        # self.assertEqual(summaries["pp"], "0, (stride 512), 3584")
         self.assertEqual(
-            summaries["dp"],
-            "0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, "
-            "184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 264, 272, 280, 288, 296, 304, 312, 320, 328, 336, "
-            "344, 352, 360, 368, 376, 384, 392, 400, 408, 416, 424, 432, 440, 448, 456, 464, 472, 480, 488, 496, 504",
+            summaries["pp"], "(0, 512, ..., 4096)"
+        )  # TODO the last rank is 3584, is this too unintuitive?
+        self.assertEqual(
+            summaries["dp"], "(0, 8, ..., 512)"
+        )  # similarly, last rank is 504
+        self.assertEqual(summaries["tp"], "0:8")
+
+        self.assertEqual(
+            _summarize_ranks([1, 2, 3, 6, 7, 8, 10, 12, 14, 16]),
+            "1:4,6:9,(10, 12, ..., 18)",
         )
-        self.assertEqual(summaries["tp"], "0-7")
 
 
 instantiate_parametrized_tests(TestCollectiveUtils)
