@@ -382,6 +382,12 @@ static py::object dispatch_on_subclass(
       break;
     }
   }
+  TORCH_INTERNAL_ASSERT(
+      ret.ptr() != nullptr,
+      "dispatch_on_subclass called with NO overloaded args that actually triggered dispatch, "
+      "perhaps there is a divergence in how you detect torch function and how overloaded args is "
+      "computed?  overloaded_args = ",
+      overloaded_args);
   return ret;
 }
 
@@ -666,7 +672,23 @@ auto handle_torch_function_indexing(
   auto size = PyTuple_GET_SIZE(index_tup.ptr());
   for (auto i : c10::irange(size)) {
     auto* obj = PyTuple_GetItem(index_tup.ptr(), i);
-    is_tensor_and_append_overloaded(obj, &overridable_args);
+    auto r = is_tensor_and_append_overloaded(obj, &overridable_args);
+    if (!r && PySequence_Check(obj)) {
+      auto inner_size = PySequence_Length(obj);
+      if (inner_size < 0) {
+        // PySequence_Length failed, but we continue as this is optional
+        // optimization
+        PyErr_Clear();
+        continue;
+      }
+      for (auto j : c10::irange(inner_size)) {
+        auto* inner_obj = PySequence_GetItem(obj, j);
+        if (inner_obj) {
+          is_tensor_and_append_overloaded(inner_obj, &overridable_args);
+          Py_DECREF(inner_obj);
+        }
+      }
+    }
   }
   if (val != nullptr) {
     is_tensor_and_append_overloaded(val, &overridable_args);
@@ -1856,21 +1878,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
-    int overflow = -1;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (value == -1 && PyErr_Occurred()) {
-      throw python_error();
-    }
-    if (overflow != 0) {
-      // try unsigned
-      unsigned long long value = PyLong_AsUnsignedLongLong(obj);
-      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
-        throw python_error();
-      }
-      scalar = at::Scalar(static_cast<uint64_t>(value));
-    } else {
-      scalar = at::Scalar(static_cast<int64_t>(value));
-    }
+    scalar = THPUtils_unpackInteger<at::Scalar>(obj);
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
