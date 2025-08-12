@@ -6449,7 +6449,10 @@ def multi_head_attention_forward(
             )
         else:
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+
         attn_output_weights = softmax(attn_output_weights, dim=-1)
+        attn_output_weights = torch.nan_to_num(attn_output_weights, nan=0.0)
+
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
@@ -6470,6 +6473,7 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
             attn_output_weights = attn_output_weights.squeeze(0)
+
         return attn_output, attn_output_weights
     else:
         # attn_mask can be either (L,S) or (N*num_heads, L, S)
