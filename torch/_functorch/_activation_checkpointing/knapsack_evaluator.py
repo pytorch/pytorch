@@ -1,3 +1,4 @@
+import operator
 from collections import deque
 from typing import Callable
 
@@ -165,7 +166,7 @@ class KnapsackEvaluator:
                     for i in saved_nodes_idxs
                 ),
             )
-            peak_memory = max(memory_list, key=lambda x: x[0])[0]
+            peak_memory = max(memory_list, key=operator.itemgetter(0))[0]
         else:
             peak_memory = sum(
                 self._graph_info_provider.all_node_memories[

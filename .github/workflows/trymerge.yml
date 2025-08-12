@@ -28,7 +28,7 @@ jobs:
           check-latest: false
           cache: pip
           architecture: x64
-      - run: pip install pyyaml==6.0
+      - run: pip install pyyaml==6.0.2
 
       - name: Setup committer id
         run: |
@@ -102,7 +102,7 @@ jobs:
           s3-prefix: merges/${{ github.repository }}/${{ github.event.client_payload.pr_num }}/${{ github.event.client_payload.comment_id }}/${{ github.run_id }}
           path: merge_record.json
 
-# We want newer merge commands to supercede old ones
+# We want newer merge commands to supersede old ones
 concurrency:
   group: try-merge-${{ github.event.client_payload.pr_num }}
   cancel-in-progress: true
