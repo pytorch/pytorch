@@ -1409,6 +1409,51 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
             self.assertParses()
 
+    @contextmanager
+    def _setup_graph_execution_capture(self):
+        """Helper to capture the 'inductor_graph_execution' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(
+            StructuredTraceTestingFilter("inductor_graph_execution")
+        )
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+    @requires_tlparse
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_graph_execution_simple(self):
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        with self._setup_graph_execution_capture() as payload_buffer:
+            torch._dynamo.reset()
+            mod = SimpleModule()
+            compiled = torch.compile(mod, backend="inductor")
+            compiled(torch.randn(2, 2))
+
+            # Assert payload inline with dynamic graph name normalized
+            payload_content = payload_buffer.getvalue().strip()
+            normalized = re.sub(
+                r"(\"graph\":\s*)\"[^\"]+\"", r'\1"GRAPH"', payload_content
+            )
+            self.assertExpectedInline(
+                normalized,
+                """\
+{
+"graph": "GRAPH"
+}""",
+            )
+
+            self.assertParses()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
