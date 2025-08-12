@@ -1,6 +1,5 @@
 #include "OpenRegStream.h"
 
-#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -22,19 +21,12 @@ static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr int kStreamTypeBits = 2;
 
-// Non-default streams
-// Note: the number of OpenReg devices is determined at run time,
-// and the low and high priority pools are lazily initialized
-// when the first stream is requested for a device.
-// The device flags track the initialization of each device, while
-// the low and high priority counters track, for each device, the next stream
-// in the pool to be returned when a stream is requested (round-robin fashion
-// , see the note in OpenRegStream.h).
-// The streams are "leaked": they are created but never destroyed because the
-// destruction of global variables could happen after the OpenReg runtime has
-// already been destroyed and thus invoking OpenRegStreamDestroy could lead to a
-// crash. It's likely an issue in OpenReg, but to be safe - let's just "forget"
-// the destruction.
+/*
+ * The stream pools are lazily initialized when the first queue is requested
+ * for a device. The device flags track the initialization of each device. When
+ * a queue is requested, the next queue in the pool to be returned in a
+ * round-robin fashion, see Note [Stream Management].
+ */
 static std::deque<c10::once_flag> device_flags;
 static std::vector<std::array<
     std::array<orStream_t, kStreamsPerPool>,
@@ -46,34 +38,27 @@ static std::deque<
 
 static thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
-// Note [StreamId assignment]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// How do we assign stream IDs?
-//
-// -- 56 bits --  -- 5 bits -----  -- 2 bits --     --1 bit --
-// zeros          stream id index  StreamIdType     Ext/native stream
-//                ignored for ext   ignored for ext
-// for external stream, StreamID is a orStream_t pointer
-// this means that last bit will always be 0
-// so when constructing StreamId for a native stream we set last bit to 1
-// to distinguish between native and external streams
-//
-//
-// We are obligated to treat the stream ID 0 as the default stream, per the
-// invariant specified in c10::Stream, so this is one exception to
-// "last bit = 1 for native streams". However, all other numbers are entirely
-// an internal implementation detail, we reserve the right to renumber streams
-// however we like.
-//
-// Note that it is really important that the MSB is zero; StreamId is a
-// *signed* integer, and unsigned to signed conversion outside of the
-// bounds of signed integer representation is undefined behavior.  You
-// could work around this with something like
-// https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
-// but it seems a bit overkill for this.
-//
-// Also, external managed stream pointers (orStream_t) can be directly stored
-// in the Id field so in this case, we need to check the stream alignment.
+/*
+ * Note [StreamId assignment]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * How do we assign stream IDs?
+ *
+ * -- 56 bits --    -- 5 bits --     -- 2 bits --     -- 1 bit --
+ *     zeros       StreamIdIndex     StreamIdType    Ext/native stream
+ *                ignored for ext   ignored for ext
+ *
+ * Where StreamIdType:
+ *  00 = default stream
+ *  01 = normal stream
+ *  11 = external stream
+ *
+ * For external stream, StreamID is a orStream_t pointer. This means that last
+ * bit will always be 0. So when constructing StreamId for a native stream we
+ * set last bit to 1 to distinguish between native and external streams.
+ *
+ * StreamId is 64-bit, so we can just rely on regular promotion rules.
+ * We rely on StreamIdIndex and StreamIdType being non-negative;
+ */
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
@@ -96,18 +81,13 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream << static_cast<int16_t>(s);
 }
 
-// StreamId is 64-bit, so we can just rely on regular promotion rules.
-// We rely on streamIdIndex and streamIdType being non-negative;
-// see Note [Hazard when concatenating signed integers]
-
 static inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the orStream_ptr
   // so the last bit will be 0
   if (!(s & 1)) {
     return StreamIdType(StreamIdType::EXT);
   }
-  // last bit is external/internal stream, the mask should start from second
-  // rightmost bit
+
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = static_cast<StreamIdType>((s >> 1) & mask_for_type);
   TORCH_CHECK(
@@ -131,8 +111,6 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
       (static_cast<StreamId>(st) << 1) | 1;
 }
 
-// Populates global values.
-// Warning: this function must only be called once!
 static void initGlobalStreamState() {
   num_devices = device_count();
   device_flags.resize(num_devices);
@@ -144,15 +122,13 @@ static void initSingleDeviceStream(
     int priority,
     DeviceIndex device_index,
     int i) {
-  // CUDAGuard device_guard(device_index);
   auto& stream = streams[device_index][priority][i];
 
-  orStreamCreateWithPriority(&stream, 0, priority);
+  OPENREG_CHECK(orStreamCreateWithPriority(&stream, 0, priority));
   priority_counters[device_index][priority] = 0;
 }
 
-// Creates the low and high priority stream pools for the specified device
-// Warning: only call once per device!
+// Creates stream pools for the specified device. It should be call only once.
 static void initDeviceStreamState(DeviceIndex device_index) {
   for (const auto i : c10::irange(kStreamsPerPool)) {
     for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
@@ -161,25 +137,22 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   }
 }
 
-// Init front-end to ensure initialization only occurs once
 static void initOpenRegStreamsOnce() {
-  // Inits default streams (once, globally)
   c10::call_once(init_flag, initGlobalStreamState);
 
   if (current_streams) {
     return;
   }
 
-  // Inits current streams (thread local) to default streams
-  // NOLINTNEXTLINE(*-arrays)
+  // Inits current streams (thread local) to the last queue in the "normal
+  // priority" queue pool. Note: the queue pool have not been initialized yet.
+  // It will be initialized in initDeviceStreamState for the specified device.
   current_streams = std::make_unique<StreamId[]>(num_devices);
   for (const auto i : c10::irange(num_devices)) {
     current_streams[i] = makeStreamId(StreamIdType::DEFAULT, 0);
   }
 }
 
-// Helper to determine the index of the stream to return
-// Note: Streams are returned round-robin (see note in OpenRegStream.h)
 static uint32_t get_idx(std::atomic<uint32_t>& counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
@@ -247,7 +220,6 @@ OpenRegStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
 OpenRegStream getStreamFromExternal(
     orStream_t ext_stream,
     DeviceIndex device_index) {
-  // The stream pointer will be the actual id
   return OpenRegStreamForId(
       device_index, reinterpret_cast<int64_t>(ext_stream));
 }
