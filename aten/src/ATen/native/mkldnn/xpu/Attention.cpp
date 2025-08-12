@@ -66,7 +66,7 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
       params.attn_mask.has_value() && params.attn_mask.value().requires_grad();
   if (debug && attn_mask_needs_grad) {
     TORCH_WARN(
-        "scale_dot_product_attention on xpu is not supported with attn_mask.requires_grad() == True.");
+        "scale_dot_product_attention on xpu is not supported when attn_mask.requires_grad() == True.");
   }
 
   return !is_gqa && !attn_mask_needs_grad;
