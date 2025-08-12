@@ -17,6 +17,7 @@ from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
+    skipIfWindows,
     skipIfXpu,
     TemporaryFileName,
     TestCase,
@@ -284,6 +285,7 @@ class TestOpenReg(TestCase):
         self.assertEqual(torch.openreg.initial_seed(), 2024)  # type: ignore[misc]
 
     # Autograd
+    @skipIfWindows()
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
