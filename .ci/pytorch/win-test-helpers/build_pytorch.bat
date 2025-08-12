@@ -127,6 +127,7 @@ if "%USE_CUDA%"=="1" (
 )
 
 :: Install build-system requirements before running setup.py commands
+:: We need manage the build environment manually because we are not using build isolation
 python -m pip install -r requirements-build.txt
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
