@@ -25,8 +25,8 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import (
     _tmp_donotuse_dont_inline_everything,
-    make_global,
     JitTestCase,
+    make_global,
 )
 
 
