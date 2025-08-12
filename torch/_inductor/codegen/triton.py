@@ -2001,14 +2001,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def want_no_x_dim(self):
-        if (
+        return (
             self.persistent_reduction
             and len(self.numels) == self.num_reduction_dims + 1
-        ):
-            if self.fixed_config:
-                return self.fixed_config["XBLOCK"] == 1
-            return V.choices.want_no_x_dim(self.features)
-        return False
+            and self.fixed_config
+            and self.fixed_config["XBLOCK"] == 1
+        )
 
     @property
     def assert_function(self) -> str:
