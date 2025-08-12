@@ -2,7 +2,7 @@
 
 import unittest
 
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU, HAS_XPU_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton
 
 
