@@ -3623,7 +3623,7 @@ def linear_cross_entropy(
     cross_entropy_weight: Optional[Tensor] = None,
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    reduce: Optional[bool] = None,
+    reduce: Optional[Tensor] = None,
     reduction: str = "mean",
     size_average: Optional[bool] = None,
 ) -> Tensor:

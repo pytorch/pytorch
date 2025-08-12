@@ -1368,7 +1368,7 @@ class LinearCrossEntropyLoss(Module):
         dtype: Optional[torch.dtype] = None,
         #
         # Argument for LinearCrossEntropyLoss
-        # 2
+        #
         chunking_strategy: str = "none",  # F.CrossEntropyChunkingStrategy.none,
         #
         # Arguments for CrossEntropyLoss
@@ -1378,7 +1378,7 @@ class LinearCrossEntropyLoss(Module):
         reduce: Optional[bool] = None,
         reduction: str = "mean",
         size_average: Optional[bool] = None,
-        weight: Optional[Tensor] = None,
+        cross_entropy_weight: Optional[Tensor] = None,
     ) -> None:
         super().__init__()
         self.linear = Linear(
@@ -1395,7 +1395,7 @@ class LinearCrossEntropyLoss(Module):
             reduce=reduce,
             reduction=reduction,
             size_average=size_average,
-            weight=weight,
+            weight=cross_entropy_weight,
         )
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -1409,7 +1409,7 @@ class LinearCrossEntropyLoss(Module):
             label_smoothing=self.cross_entropy.label_smoothing,
             reduce=self.cross_entropy.reduce,
             reduction=self.cross_entropy.reduction,
-            weight=self.cross_entropy.weight,
+            cross_entropy_weight=self.cross_entropy.weight,
         )
 
 
