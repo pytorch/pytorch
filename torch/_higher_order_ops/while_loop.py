@@ -112,10 +112,11 @@ class WhileLoopOp(HigherOrderOperator):
 
         for idx, arg in enumerate(additional_inputs):
             additional_idx = len(carried_inputs) + idx
-            assert additional_idx not in mutated_inputs, (
-                "Lifted additional_inputs cannot be in-place mutated."
+            schema_gen.add_arg(
+                f"additional_input{idx}",
+                arg,
+                is_mutated=additional_idx in mutated_inputs,
             )
-            schema_gen.add_arg(f"additional_input{idx}", arg, is_mutated=False)
 
         for out in body_outputs:
             schema_gen.add_output(out)

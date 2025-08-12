@@ -8799,6 +8799,30 @@ class TestHopSchema(TestCase):
             """while_loop(Any cond_fn, Any body_fn, int carried_input0, int carried_input1, Tensor carried_input2, Tensor additional_input0) -> (int, int, Tensor, Tensor)""",  # noqa: B950
         )
 
+    def test_while_loop_gen_schema_with_input_mutation(self):
+        def cond_fn(x, y, z, c):
+            return x < y
+
+        def body_fn(x, y, z, c):
+            x.add_(1)
+            y.sub_(1)
+            z.sin_()
+            c.add_(x)
+            return x, y, z
+
+        c = torch.randn(3, 3)
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
+            (c,),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor(a2!) carried_input0, Tensor(a3!) carried_input1, Tensor(a4!) carried_input2, Tensor(a5!) additional_input0) -> (Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
