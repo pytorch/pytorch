@@ -1651,6 +1651,9 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
     )
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, "skip native matmul"
+    )
     @config.patch(max_autotune=True, max_autotune_gemm_search_space="EXHAUSTIVE")
     def test_max_autotune_exhaustive(self):
         def f(a, b):
