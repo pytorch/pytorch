@@ -1091,7 +1091,6 @@ ErrorType ProcessGroupNCCL::getError() {
 
 void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
-  auto device = at::Device(at::DeviceType::CUDA, pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
             << "MemPool: " << pool->id() << ", device index: " << key
@@ -1100,7 +1099,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   if (ncclComm == nullptr) {
     C10_THROW_ERROR(
         DistBackendError,
-        "Register symmetric memory with an implicitly created nccl comm is not supported. Please create nccl comm explicitly first.");
+        "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
   TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
   {
