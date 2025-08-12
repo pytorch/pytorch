@@ -1,9 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed.checkpoint._extension import ZStandard
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -278,6 +279,48 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(self.temp_dir),
         )
+
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_checkpoint_with_uneven_shards(self) -> None:
+        """
+        Saving a dtensor with uneven shards.
+        rank 0  -> [[0], [1], [2], [3]]
+        rank 1  -> [[4], [5], [6], [7]]
+        rank 2  -> [[8], [9], [10], [11]]
+        rank 3  -> [[12], [13]]
+        """
+        CHECKPOINT_DIR = self.temp_dir
+        mesh_shape = (self.world_size,)
+        mesh_1 = init_device_mesh(self.device_type, mesh_shape)
+        my_rank = dist.get_rank()
+        # Make the last shard uneven
+        if (my_rank == self.world_size - 1):
+            local_tensor = torch.arange(start = my_rank * 4, end = (my_rank * 4) + 2, dtype=torch.float).view(2, 1)
+        else:
+            local_tensor = torch.arange(start = my_rank * 4, end = (my_rank +1) * 4, dtype=torch.float).view(4, 1)   
+        dtensor = DTensor.from_local(local_tensor, mesh_1,[Shard(0)], run_check = True, shape = [14, 1],stride = [1,1] )        
+        state_dict_to_save = {"uneven_sharded_dtensor": dtensor}
+
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
+            planner=dist_cp.DefaultSavePlanner(),
+        )
+
+        #loading_shard_plan = [(4,1),(4,1),(2,1), (4,1)] 
+        #loading_local_tensor = torch.rand(loading_shard_plan[my_rank], dtype=torch.float)
+        #print(f"rank {my_rank} local_tensor for load :\n {loading_local_tensor}")        
+        #loading_dtensor = DTensor.from_local(loading_local_tensor, mesh_1,[Shard(0)], run_check = True, shape = [14, 1],stride = [1,1] )        
+        loading_full_tensor = torch.rand([14,1], dtype=torch.float, device = 'cpu')        
+        print(f"rank {my_rank} loading_dtensor for load :\n {loading_full_tensor}")        
+        state_dict_to_load = {"uneven_sharded_dtensor": loading_full_tensor} # re-sharding load.
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=dist_cp.FileSystemReader(self.temp_dir),
+        )
+
 
     # TODO: Add a assertEqual for ref_state_dict["dtensor"].full_tensor()
     # and state_dict["dtensor"].full_tensor() after we fix the size mismatch
