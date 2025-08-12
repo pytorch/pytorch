@@ -851,8 +851,8 @@ void gpu_float_sdpa(
   };
 
   // OneDNN doesn't support fp32 ukernel for implicit causal mask,
-  // and the reference implementation is worse than aten math + explict causal
-  // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
+  // and the reference implementation is worse than aten math + explicit causal
+  // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
   if (is_causal && query.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
@@ -960,8 +960,8 @@ void gpu_float_sdpa_backward(
   };
 
   // OneDNN doesn't support fp32 ukernel for implicit causal mask,
-  // and the reference implementation is worse than aten math + explict causal
-  // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
+  // and the reference implementation is worse than aten math + explicit causal
+  // mask. Fall back to explicit causal mask until OneDNN v3.9 which has fp32
   // ukernel for implicit causal mask.
   if (is_causal && query.dtype() == at::kFloat) {
     attn_mask = get_tril_mask();
