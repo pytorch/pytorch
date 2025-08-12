@@ -55,6 +55,14 @@ class MaskBuffer:
     def apply_mask(self, tensor):
         if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
+        # NOTE: During tracing, self.data will not be automatically converted back from functional tensor
+        # in run_functionalized_fw_and_collect_metadata since it is not part of `local_tensor`.
+        # We convert it lazily here if needed instead.
+        if (
+            type(self.data) is torch._subclasses.functional_tensor.FunctionalTensor and
+            type(tensor) is not torch._subclasses.functional_tensor.FunctionalTensor
+        ):
+            self.data = torch._functorch._aot_autograd.functional_utils.from_fun(self.data)
 
         # NOTE: _MaskPartial is being used by the embedding op and the gather op.
         # For gather, the mask has the same dimension as the output tensor, whereas
