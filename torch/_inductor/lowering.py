@@ -4881,7 +4881,9 @@ def _adaptive_pooling_fn(
         w_end_index = w_end_index_fn(bw)
 
         result = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
+        kernel_maxes_0 = V.graph.sizevars.size_hint(kernel_maxes[0])
+        kernel_maxes_1 = V.graph.sizevars.size_hint(kernel_maxes[1])
+        for ih, iw in itertools.product(range(kernel_maxes_0), range(kernel_maxes_1)):
             val = loader(
                 prefix,
                 [ih, iw],
@@ -4988,7 +4990,7 @@ def _adaptive_avg_pool2d(x, output_size):
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
 
-    window_size = h_kernel_max * w_kernel_max
+    window_size = V.graph.sizevars.size_hint(h_kernel_max * w_kernel_max)
     if window_size > 25:
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_avg_pool2d(x, output_size)
