@@ -4476,7 +4476,9 @@ class ComputedBuffer(OperationBuffer):
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
 
-        if isinstance(self.get_store_function(), LoopBody):
+        if self.has_store_function() and isinstance(
+            self.get_store_function(), LoopBody
+        ):
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
         return result
 
@@ -4489,6 +4491,9 @@ class ComputedBuffer(OperationBuffer):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
         return super().make_loader()
+
+    def has_store_function(self) -> bool:
+        return isinstance(self.data, (Reduction, Scan, Sort, Pointwise))
 
     def get_store_function(self) -> Callable[..., None]:
         indexer = self.get_layout().as_fixed().make_indexer()
