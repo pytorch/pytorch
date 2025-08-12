@@ -5,7 +5,6 @@ import os
 import re
 import sys
 import threading
-import time
 import types
 import typing
 import typing_extensions
@@ -26,7 +25,6 @@ from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import (
     _tmp_donotuse_dont_inline_everything,
     JitTestCase,
-    make_global,
 )
 
 
@@ -776,6 +774,25 @@ class TestRecursiveScript(JitTestCase):
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
 
+    def test_thread_safe_error_stacks(self):
+        # prior to #160386, this causes a segfault. See [Note: Thread-safe CallStack]
+        callstacks = []
+
+        def callstack_creator():
+            factory = torch._C._jit_tree_views.SourceRangeFactory(
+                "source code", "a.py", 1, 0
+            )
+            x = torch._C.CallStack("a", factory.make_range(1, 0, 1))
+            callstacks.append(x)
+            del x
+
+        t = threading.Thread(target=callstack_creator)
+        t.start()
+        t.join()
+        del t
+        del callstacks[0]
+        self.assertTrue(len(callstacks) == 0)
+
     def test_override_instance_method_ignore(self):
         class M(torch.nn.Module):
             @torch.jit.ignore
@@ -795,64 +812,6 @@ class TestRecursiveScript(JitTestCase):
         # ScriptModule should correctly reflect the override.
         s = torch.jit.script(m)
         self.assertEqual(s.i_am_ignored(), "new")
-
-    def test_thread_safe_error_stacks(self):
-        # prior to #160386, this causes a segfault. See [Note: Thread-safe CallStack]
-        class MyClass:
-            val: torch.Tensor
-
-            def __init__(self, val: torch.Tensor):
-                self.val = val
-
-            def get_val(self) -> torch.Tensor:
-                return self.val
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = torch.nn.Linear(4, 4)
-
-            def forward(self, x, mc: MyClass):
-                return self.mod(x) * mc.get_val()
-
-        make_global(MyClass)
-
-        def module_generator():
-            for _ in range(10):
-                if hasattr(MyClass, "_jit_override_qualname"):
-                    del MyClass._jit_override_qualname
-                torch.jit._state._clear_class_state()
-                torch.jit._recursive.concrete_type_store.type_store.clear()
-                torch.jit._recursive.concrete_type_store.methods_compiled.clear()
-                yield torch.jit.script(MyModule())
-
-        def callstack_generator():
-            for _ in range(10):
-                for thread_id, stack in sys._current_frames().items():
-                    time.sleep(0.03)
-                    yield (thread_id, stack)
-
-        def run_modules():
-            for _ in module_generator():
-                pass
-
-        def run_callstacks():
-            callstacks = []
-            for cs in callstack_generator():
-                callstacks.append(tuple(cs))
-            return callstacks
-
-        def do_test():
-            t1 = threading.Thread(target=run_modules)
-            t2 = threading.Thread(target=run_callstacks)
-
-            t1.start()
-            t2.start()
-            t1.join()
-            t2.join()
-
-        for _ in range(10):
-            do_test()
 
 
 if __name__ == "__main__":
