@@ -1631,7 +1631,8 @@ class CppBuilder:
         if isinstance(sources, str):
             sources = [sources]
 
-        if config.is_fbcode() and (not self._aot_mode or self._use_relative_path):
+        # Use relative paths only when requested (typically for remote builds)
+        if config.is_fbcode() and self._use_relative_path:
             # Will create another temp directory for building, so do NOT use the
             # absolute path.
             self._orig_source_paths = list(sources)
