@@ -396,10 +396,6 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    # Computes common shape
-    common_shape: list[Union[int, torch.SymInt]] = [
-        1,
-    ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         if not isinstance(shape, Sequence):
             raise RuntimeError(
@@ -407,6 +403,11 @@ def _broadcast_shapes(*_shapes):
                 shape,
             )
 
+    # Computes common shape
+    common_shape: list[Union[int, torch.SymInt]] = [
+        1,
+    ] * reduce(max, (len(shape) for shape in shapes))
+    for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if is_nested_int(shape[idx]):
                 # maintain nested int behaviour added in PR 145957.
