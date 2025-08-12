@@ -168,6 +168,9 @@ void addmm_out_sparse_eigen(
 
   AT_DISPATCH_INDEX_TYPES(
       result_index_dtype, "eigen_sparse_mm", [&]() {
+        typedef Eigen::SparseMatrix<scalar_t, Eigen::RowMajor, index_t> EigenCsrMatrix;
+        typedef Eigen::SparseMatrix<scalar_t, Eigen::ColMajor, index_t> EigenCscMatrix;
+
         at::Tensor mat1_mat2;
         if (is_beta_zero) {
           mat1_mat2 = result;
@@ -181,12 +184,12 @@ void addmm_out_sparse_eigen(
             if (mat2.layout() == kSparseCsr) {
               // Out_csr = M1_csr * M2_csr
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
               // Out_csr = M1_csr * M2_csc
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           } else {
@@ -194,14 +197,14 @@ void addmm_out_sparse_eigen(
             if (mat2.layout() == kSparseCsr) {
               // Out_csr = M1_csc * M2_csr
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
               // Out_csr = M1_csc * M2_csc
               // This multiplication will be computationally inefficient, as it will require
               // additional conversion of the output matrix from CSC to CSR format.
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::RowMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           }
@@ -213,12 +216,12 @@ void addmm_out_sparse_eigen(
               // This multiplication will be computationally inefficient, as it will require
               // additional conversion of the output matrix from CSR to CSC format.
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
               // Out_csc = M1_csr * M2_csc
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           } else {
@@ -226,12 +229,12 @@ void addmm_out_sparse_eigen(
             if (mat2.layout() == kSparseCsr) {
               // Out_csc = M1_csc * M2_csr
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::RowMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             } else {
               // Out_csc = M1_csc * M2_csc
               const auto mat2_eigen = Tensor_to_Eigen<scalar_t, Eigen::ColMajor, index_t>(mat2);
-              const auto mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
+              const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               Eigen_to_Tensor<scalar_t, Eigen::ColMajor, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           }
