@@ -45,10 +45,16 @@ function install_cudnn {
 function install_nvshmem {
   cuda_major_version=$1      # e.g. "12"
   nvshmem_version=$2         # e.g. "3.3.9"
+  include_path="/usr/local/cuda/include/"
+  lib_path="/usr/local/cuda/lib64/"
 
   case "${arch_path}" in
     sbsa)
       dl_arch="aarch64"
+      # Override is required for GLIBC_2.29 related failure
+      # Todo: Remove once https://github.com/pytorch/pytorch/issues/160425
+      include_path="/usr/local/include/"
+      lib_path="/usr/local/lib/"
       ;;
     x86_64)
       dl_arch="x64"
@@ -68,8 +74,8 @@ function install_nvshmem {
   # download, unpack, install
   wget -q "${url}"
   tar xf "${filename}.tar.gz"
-  cp -a "libnvshmem/include/"* /usr/local/cuda/include/
-  cp -a "libnvshmem/lib/"*     /usr/local/cuda/lib64/
+  cp -a "libnvshmem/include/"* "${include_path}"
+  cp -a "libnvshmem/lib/"*     "${lib_path}"
 
   # cleanup
   cd ..
