@@ -1478,9 +1478,6 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if torch._running_with_deploy():
-            return
-
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
