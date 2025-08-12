@@ -213,9 +213,10 @@ void raw_cudnn_layernorm_forward_out(
     TORCH_INTERNAL_ASSERT(layernorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(
         layernorm_graph->build_operation_graph(handle).is_good());
-    TORCH_INTERNAL_ASSERT(
-        layernorm_graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
-            .is_good());
+    TORCH_INTERNAL_ASSERT(layernorm_graph
+                              ->create_execution_plans(
+                                  {fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
+                              .is_good());
     TORCH_INTERNAL_ASSERT(
         layernorm_graph->check_support(handle).is_good(),
         layernorm_graph->check_support(handle).get_message());
@@ -343,9 +344,10 @@ void raw_cudnn_layernorm_backward_out(
     TORCH_INTERNAL_ASSERT(layernorm_graph->validate().is_good());
     TORCH_INTERNAL_ASSERT(
         layernorm_graph->build_operation_graph(handle).is_good());
-    TORCH_INTERNAL_ASSERT(
-        layernorm_graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
-            .is_good());
+    TORCH_INTERNAL_ASSERT(layernorm_graph
+                              ->create_execution_plans(
+                                  {fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK})
+                              .is_good());
     TORCH_INTERNAL_ASSERT(
         layernorm_graph->check_support(handle).is_good(),
         layernorm_graph->check_support(handle).get_message());
@@ -387,4 +389,3 @@ void raw_cudnn_layernorm_backward_out(
 } // namespace at
 
 #endif // AT_CUDNN_ENABLED
-
