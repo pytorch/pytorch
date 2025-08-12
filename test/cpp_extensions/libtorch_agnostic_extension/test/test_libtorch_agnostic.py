@@ -232,6 +232,26 @@ if not IS_WINDOWS:
             )
             self.assertFalse(undefined_tensor_is_defined)
 
+        def test_my_pad(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 3, device=device)
+            out = libtorch_agnostic.ops.my_pad(t)
+            expected = torch.nn.functional.pad(t, [1, 2, 2, 1], "constant", 0.0)
+            self.assertEqual(out, expected)
+
+        def test_my_narrow(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device)
+
+            dim0 = 0
+            start0 = 0
+            length0 = 1
+            out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
+            expected0 = torch.narrow(t, dim0, start0, length0)
+            self.assertEqual(out0, expected0)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

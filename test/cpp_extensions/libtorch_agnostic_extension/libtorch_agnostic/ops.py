@@ -176,3 +176,30 @@ def test_default_constructor(defined) -> bool:
     Returns: bool - result of calling .defined() on the tensor
     """
     return torch.ops.libtorch_agnostic.test_default_constructor.default(defined)
+
+
+def my_pad(t) -> Tensor:
+    """
+    Pads the input tensor with hardcoded padding parameters.
+
+    Args:
+        t: Input tensor
+
+    Returns: Padded tensor with padding [1, 2, 2, 1], mode "constant", value 0.0
+    """
+    return torch.ops.libtorch_agnostic.my_pad.default(t)
+
+
+def my_narrow(t, dim, start, length) -> Tensor:
+    """
+    Returns a new tensor that is a narrowed version of the input tensor.
+
+    Args:
+        t: Input tensor
+        dim: Dimension along which to narrow
+        start: Starting position
+        length: Length of the narrowed section
+
+    Returns: Narrowed tensor
+    """
+    return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
