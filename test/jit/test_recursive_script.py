@@ -841,7 +841,7 @@ class TestRecursiveScript(JitTestCase):
         def run_callstacks():
             callstacks = []
             for cs in callstack_generator():
-                callstacks.append(cs)
+                callstacks.append(tuple(cs))
             return callstacks
 
         def do_test():
