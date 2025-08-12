@@ -593,11 +593,13 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 
 libtorch_nativert_sources = [
+    "torch/nativert/ModelRunner.cpp",
     "torch/nativert/graph/Graph.cpp",
     "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/graph/GraphUtils.cpp",
     "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
@@ -738,6 +740,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
+    "torch/csrc/distributed/c10d/cuda/CUDAEventCache.cpp",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/cuda/StreamBlock.cu",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
@@ -986,6 +989,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
+    "torch/nativert/python/Bindings.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [

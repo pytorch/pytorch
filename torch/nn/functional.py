@@ -338,9 +338,6 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -349,8 +346,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -376,9 +374,6 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -388,7 +383,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -407,9 +404,6 @@ Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions b
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
@@ -419,7 +413,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
@@ -3476,6 +3472,7 @@ def binary_cross_entropy(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between the target and input probabilities.
 
@@ -3494,9 +3491,11 @@ def binary_cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
     Examples::
-
         >>> input = torch.randn(3, 2, requires_grad=True)
         >>> target = torch.rand(3, 2, requires_grad=False)
         >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
@@ -3512,6 +3511,7 @@ def binary_cross_entropy(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
+            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3527,6 +3527,13 @@ def binary_cross_entropy(
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
+    assert 0 <= label_smoothing <= 1, (
+        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
+    )
+
+    if label_smoothing > 0:
+        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
+
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
@@ -3538,6 +3545,7 @@ def binary_cross_entropy_with_logits(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between target and input logits.
 
@@ -3564,9 +3572,11 @@ def binary_cross_entropy_with_logits(
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
-
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
     Examples::
-
          >>> input = torch.randn(3, requires_grad=True)
          >>> target = torch.empty(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
@@ -3583,6 +3593,7 @@ def binary_cross_entropy_with_logits(
             reduce=reduce,
             reduction=reduction,
             pos_weight=pos_weight,
+            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3593,6 +3604,13 @@ def binary_cross_entropy_with_logits(
         raise ValueError(
             f"Target size ({target.size()}) must be the same as input size ({input.size()})"
         )
+
+    assert 0 <= label_smoothing <= 1, (
+        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
+    )
+
+    if label_smoothing > 0:
+        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum

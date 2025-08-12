@@ -119,6 +119,8 @@ file(GLOB_RECURSE native_mps_cpp "native/mps/*.cpp")
 file(GLOB_RECURSE native_mps_mm "native/mps/*.mm")
 file(GLOB_RECURSE native_mps_metal "native/mps/*.metal")
 file(GLOB_RECURSE native_mps_h "native/mps/*.h")
+file(GLOB_RECURSE native_sparse_mps_mm "native/sparse/mps/*.mm")
+file(GLOB_RECURSE native_mps_sparse_metal "native/sparse/mps/*.metal")
 
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
@@ -178,26 +180,27 @@ file(GLOB native_flash_attn_api_cpp "native/transformers/cuda/flash_attn/flash_a
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
 # if USE_FLASH_ATTENTION is set, ensure CK instances get generated
 if(USE_FLASH_ATTENTION)
-  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
-    set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
-      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
-        if(DEFINED ENV{PYTORCH_ROCM_ARCH})
-          list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
-          if(NUM_ARCHS GREATER 1)
-            message(WARNING "Building CK for multiple archs can increase build time considerably!
-            Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
-          endif()
-        endif()
-        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
-        message(STATUS "Generating CK kernel instances...")
-        add_subdirectory(native/transformers/hip/flash_attn/ck)
-        file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
-        list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
-        # FAv3 Generation
-        add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
-        file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
-        list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
+  if("$ENV{USE_CK_FLASH_ATTENTION}" STREQUAL "1")
+    message(STATUS "USE_CK_FLASH_ATTENTION is being deprecated. Please use USE_ROCM_CK_SDPA instead")
+    caffe2_update_option(USE_ROCM_CK_SDPA ON)
+  endif()
+  if(USE_ROCM_CK_SDPA)
+    if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+      list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+      if(NUM_ARCHS GREATER 1)
+        message(WARNING "Building CK for multiple archs can increase build time considerably!
+        Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
       endif()
+    endif()
+    message(STATUS "USE_ROCM_CK_SDPA is set; building PyTorch with CK SDPA enabled")
+    message(STATUS "Generating CK kernel instances...")
+    add_subdirectory(native/transformers/hip/flash_attn/ck)
+    file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
+    list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+    # FAv3 Generation
+    add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
+    file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+    list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
   endif()
   file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
   file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
@@ -245,6 +248,50 @@ if(USE_MEM_EFF_ATTENTION)
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
   list(APPEND MEM_EFF_ATTENTION_CUDA_SOURCES ${native_transformers_cuda_cu} ${mem_eff_attention_cuda_cu} ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${mem_eff_attention_cuda_kernels_cu})
+endif()
+
+IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
+  set(USE_FBGEMM_GENAI off)
+endif()
+
+# FBGEMM GenAI
+IF(USE_FBGEMM_GENAI)
+  set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
+  set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+
+  if(USE_ROCM)
+    # Only include the kernels we want to build to avoid increasing binary size.
+    file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
+      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+    set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+    # Add additional HIPCC compiler flags for performance
+    set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
+      -mllvm
+      -amdgpu-coerce-illegal-types=1
+      -mllvm
+      -enable-post-misched=0
+      -mllvm
+      -greedy-reverse-local-assignment=1
+      -fhip-new-launch-api)
+
+    hip_add_library(
+      fbgemm_genai STATIC
+      ${fbgemm_genai_native_rocm_hip}
+      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
+
+    target_include_directories(fbgemm_genai PUBLIC
+      # FBGEMM version of Composable Kernel is used due to some customizations
+      ${FBGEMM_THIRD_PARTY}/composable_kernel/include
+      ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
+      ${FBGEMM_GENAI_DIR}/include/
+      ${FBGEMM_GENAI_DIR}/common/include/
+    )
+  endif()
 endif()
 
 # XNNPACK
@@ -372,39 +419,42 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
-  # NOTE: The PyTorch build does not actually add_subdirectory
-  # third_party/composable_kernel or use it as a CMake library. What is used
-  # is header only, so this should be ok, except that the CMake build generates
-  # a ck/config.h. We just do that part here. Without this, the ck.h from the
-  # ROCM SDK may get accidentally used instead.
-  function(_pytorch_rocm_generate_ck_conf)
-    set(CK_ENABLE_INT8 "ON")
-    set(CK_ENABLE_FP16 "ON")
-    set(CK_ENABLE_FP32 "ON")
-    set(CK_ENABLE_FP64 "ON")
-    set(CK_ENABLE_BF16 "ON")
-    set(CK_ENABLE_FP8 "ON")
-    set(CK_ENABLE_BF8 "ON")
-    set(CK_USE_XDL "ON")
-    set(CK_USE_WMMA "ON")
-    configure_file(
-      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
-      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
-      )
-  endfunction()
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
-  _pytorch_rocm_generate_ck_conf()
+  if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
+    # NOTE: The PyTorch build does not actually add_subdirectory
+    # third_party/composable_kernel or use it as a CMake library. What is used
+    # is header only, so this should be ok, except that the CMake build generates
+    # a ck/config.h. We just do that part here. Without this, the ck.h from the
+    # ROCM SDK may get accidentally used instead.
+    function(_pytorch_rocm_generate_ck_conf)
+      set(CK_ENABLE_INT8 "ON")
+      set(CK_ENABLE_FP16 "ON")
+      set(CK_ENABLE_FP32 "ON")
+      set(CK_ENABLE_FP64 "ON")
+      set(CK_ENABLE_BF16 "ON")
+      set(CK_ENABLE_FP8 "ON")
+      set(CK_ENABLE_BF8 "ON")
+      set(CK_USE_XDL "ON")
+      set(CK_USE_WMMA "ON")
+      configure_file(
+        "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+        )
+    endfunction()
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
+    _pytorch_rocm_generate_ck_conf()
+  endif()
 
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
-if(USE_FLASH_ATTENTION)
-  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
-endif()
+  if(USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA)
+    list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
+  endif()
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
@@ -414,12 +464,17 @@ endif()
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
-  if(WIN32) # Windows doesn't support Composable Kernels
+  if(NOT USE_ROCM_CK_GEMM)
     file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
     file(GLOB native_hip_ck "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
+  if(WIN32) # Windows doesn't support Composable Kernels and Triton
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
+  endif()
+
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
     ${native_nested_hip_cpp}
@@ -586,17 +641,10 @@ if(USE_CUDA AND NOT USE_ROCM)
       CUDA::cufft_static_nocallback
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
-     if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
-       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-         CUDA::cusolver_static
-         ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-       )
-     elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
-       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-         CUDA::cusolver_static
-         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
-       )
-     endif()
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       CUDA::cusolver_static
+       ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+     )
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -661,29 +709,25 @@ endif()
 if(USE_MPS)
     include(../../../cmake/Metal.cmake)
 
-    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h})
+    set(ATen_MPS_SRCS ${ATen_MPS_SRCS} ${mps_cpp} ${mps_mm} ${mps_h} ${native_mps_cpp} ${native_mps_mm} ${native_mps_h} ${native_sparse_mps_mm})
 
     if(CAN_COMPILE_METAL)
-        foreach(SHADER ${native_mps_metal})
+        foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_30.air")
-            string(CONCAT TGT_BFLOAT ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            list(APPEND AIR_BFLOAT ${TGT_BFLOAT})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.0")
-            metal_to_air(${SHADER} ${TGT_BFLOAT} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
-        air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
-                          DEPENDS kernels_basic.metallib kernels_bfloat.metallib
+                          DEPENDS kernels_basic.metallib
                           OUTPUT metallib_dummy.cpp
                           COMMENT "Updating metallibs timestamp")
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib metallib_dummy.cpp)
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
-        foreach(SHADER ${native_mps_metal})
+        foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
             string(CONCAT SHADER_HDR_NAME  "${CMAKE_CURRENT_BINARY_DIR}" /native/mps/ ${TGT_STEM} "_metallib.h")
             metal_to_metallib_h(${SHADER} ${SHADER_HDR_NAME})

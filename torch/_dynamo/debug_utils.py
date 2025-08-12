@@ -40,6 +40,7 @@ import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
 from torch._dynamo.testing import rand_strided
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
 from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -292,10 +293,10 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         if filter(key)
     ]
     config_string = "\n".join(config_lines)
-    return f"""\
+    return normalize_path_separator(f"""\
 import os
 {config_string}
-    """
+    """)
 
 
 def generate_config_string(*, stable_output: bool = False) -> str:

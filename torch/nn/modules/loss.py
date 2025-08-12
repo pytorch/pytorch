@@ -126,6 +126,9 @@ class L1Loss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.l1_loss(input, target, reduction=self.reduction)
 
 
@@ -250,6 +253,9 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.nll_loss(
             input,
             target,
@@ -354,6 +360,9 @@ class PoissonNLLLoss(_Loss):
         self.eps = eps
 
     def forward(self, log_input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.poisson_nll_loss(
             log_input,
             target,
@@ -445,6 +454,9 @@ class GaussianNLLLoss(_Loss):
     def forward(
         self, input: Tensor, target: Tensor, var: Union[Tensor, float]
     ) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.gaussian_nll_loss(
             input, target, var, full=self.full, eps=self.eps, reduction=self.reduction
         )
@@ -545,6 +557,9 @@ class KLDivLoss(_Loss):
         self.log_target = log_target
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.kl_div(
             input, target, reduction=self.reduction, log_target=self.log_target
         )
@@ -613,6 +628,9 @@ class MSELoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.mse_loss(input, target, reduction=self.reduction)
 
 
@@ -674,6 +692,10 @@ class BCELoss(_WeightedLoss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -699,12 +721,21 @@ class BCELoss(_WeightedLoss):
         size_average=None,
         reduce=None,
         reduction: str = "mean",
+        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(weight, size_average, reduce, reduction)
+        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.binary_cross_entropy(
-            input, target, weight=self.weight, reduction=self.reduction
+            input,
+            target,
+            weight=self.weight,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
         )
 
 
@@ -794,6 +825,10 @@ class BCEWithLogitsLoss(_Loss):
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
+        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -817,20 +852,24 @@ class BCEWithLogitsLoss(_Loss):
         reduce=None,
         reduction: str = "mean",
         pos_weight: Optional[Tensor] = None,
+        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
         self.weight: Optional[Tensor]
         self.pos_weight: Optional[Tensor]
+        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.binary_cross_entropy_with_logits(
             input,
             target,
             self.weight,
             pos_weight=self.pos_weight,
             reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
         )
 
 
@@ -898,6 +937,7 @@ class HingeEmbeddingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.hinge_embedding_loss(
             input, target, margin=self.margin, reduction=self.reduction
         )
@@ -965,6 +1005,7 @@ class MultiLabelMarginLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
 
 
@@ -1049,6 +1090,7 @@ class SmoothL1Loss(_Loss):
         self.beta = beta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.smooth_l1_loss(input, target, reduction=self.reduction, beta=self.beta)
 
 
@@ -1110,6 +1152,7 @@ class HuberLoss(_Loss):
         self.delta = delta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
 
 
@@ -1152,6 +1195,7 @@ class SoftMarginLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.soft_margin_loss(input, target, reduction=self.reduction)
 
 
@@ -1307,6 +1351,7 @@ class CrossEntropyLoss(_WeightedLoss):
         self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.cross_entropy(
             input,
             target,
@@ -1368,6 +1413,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multilabel_soft_margin_loss(
             input, target, weight=self.weight, reduction=self.reduction
         )
@@ -1439,6 +1485,7 @@ class CosineEmbeddingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.cosine_embedding_loss(
             input1, input2, target, margin=self.margin, reduction=self.reduction
         )
@@ -1505,6 +1552,7 @@ class MarginRankingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.margin_ranking_loss(
             input1, input2, target, margin=self.margin, reduction=self.reduction
         )
@@ -1595,6 +1643,7 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multi_margin_loss(
             input,
             target,
@@ -1702,6 +1751,7 @@ class TripletMarginLoss(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.triplet_margin_loss(
             anchor,
             positive,
@@ -1837,6 +1887,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.triplet_margin_with_distance_loss(
             anchor,
             positive,
@@ -2016,6 +2067,7 @@ class CTCLoss(_Loss):
         input_lengths: Tensor,
         target_lengths: Tensor,
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.ctc_loss(
             log_probs,
             targets,
