@@ -1139,6 +1139,59 @@ class DictGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @make_logging_test(recompiles=True)
+    def test_cmp_or(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            d = d1 | d2
+            if d.get(5, False):
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.sin())
+
+        y = fn(x, d1, d1)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.cos())
+        record = self.getRecord(records, "d2")
+        self.assertIn(
+            """KeyError on d2[5]""",
+            munge_exc(record.getMessage()),
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_cmp_ior(self, records):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d1, d2):
+            d2 |= d1
+            if d2.get(3, False):
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        d1 = self.thetype({1: 2, 3: 4})
+        d2 = self.thetype({1: 2, 5: 6})
+        d3, d4 = d2.copy(), d2.copy()
+        y = fn(x, d1, d2)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.sin())
+
+        y = fn(x, d3, d4)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.cos())
+        record = self.getRecord(records, "d1")
+        self.assertIn(
+            """KeyError on d1[3]""",
+            munge_exc(record.getMessage()),
+        )
+
 
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
@@ -1231,6 +1284,53 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test with non-dict types
         self.assertRaises(TypeError, lambda: d1 | 1)
+
+    @make_dynamo_test
+    def test_binop_ior(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test the |= operator
+        d3, d4 = d1.copy(), d2.copy()
+        d3 |= d2
+        d4 |= d1
+        self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
+
+        # Test with an iterable
+        d3, d4 = d1.copy(), d2.copy()
+
+        # Test the __ior__ method
+        d3, d4 = d1.copy(), d2.copy()
+        d3.__ior__(d2)
+        d4.__ior__(d1)
+        self.assertEqual(d3, {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4, {"a": 1, "b": 2, "c": 4})
+
+        # Test Dict.__or__
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertEqual(dict.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(self.thetype.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test return value
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertEqual(d3.__ior__(d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(dict.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+
+        # Test with non-dict types
+        self.assertRaises(TypeError, lambda: dict.__ior__(d1, 1))
+
+    @make_dynamo_test
+    def test_binop_ior_iterable(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+        d3, d4 = d1.copy(), d2.copy()
+
+        def fn(d):
+            yield from d.items()
+
+        self.assertEqual(d3.__ior__(d2.items()), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(d4.__ior__(fn(d1)), {"a": 1, "b": 2, "c": 4})
 
     @make_dynamo_test
     def test_clear(self):
@@ -1432,6 +1532,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.values, 1)
 
+    @make_dynamo_test
+    def test_type(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertIsInstance(d, self.thetype)
+        self.assertIs(type(d), self.thetype)
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
@@ -1449,6 +1555,32 @@ class OrderedDictMethodsTests(DictMethodsTests):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
         self.assertFalse(a == b)
+
+    @make_dynamo_test
+    def test_binop_or_return_type(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test return type
+        self.assertIs(type(d1 | d2), OrderedDict)
+        self.assertIs(type(dict(d1) | d2), OrderedDict)
+        self.assertIs(type(d1 | dict(d2)), OrderedDict)
+
+    @make_dynamo_test
+    def test_binop_ior_return_type(self):
+        d1 = self.thetype({"a": 1, "b": 2})
+        d2 = self.thetype({"b": 3, "c": 4})
+
+        # Test return type
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertIs(type(d3.__ior__(d2)), OrderedDict)
+        self.assertIs(type(dict.__ior__(d4, d2)), OrderedDict)
+        self.assertIs(type(self.thetype.__ior__(d4, d2)), OrderedDict)
+
+        d3, d4 = d1.copy(), d2.copy()
+        self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
+        self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
+        self.assertIs(type(dict(d4).__ior__(d2)), dict)
 
 
 if __name__ == "__main__":
