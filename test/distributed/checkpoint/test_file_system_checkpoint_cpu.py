@@ -3,6 +3,7 @@
 import sys
 import tempfile
 from typing import Any, IO
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -30,6 +31,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -471,6 +473,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual("string", state_dict_to_load["bytes1"])
 
     @with_comms(init_rpc=False, backend="gloo")
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
         path = self.get_file_path()

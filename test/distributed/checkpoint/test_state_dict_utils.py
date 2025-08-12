@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import io
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -21,7 +22,7 @@ from torch.distributed._state_dict_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -129,6 +130,7 @@ class TestStateDictUtils(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "XPU does not support pin_memory from cudart")
     def test_create_cpu_state_dict(self):
         device = torch.device(self.device_type)
         rank = dist.get_rank()
