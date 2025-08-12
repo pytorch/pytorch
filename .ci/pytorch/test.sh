@@ -462,7 +462,7 @@ test_inductor_aoti() {
   # rebuild with the build cache with `BUILD_AOT_INDUCTOR_TEST` enabled
   /usr/bin/env CMAKE_FRESH=1 BUILD_AOT_INDUCTOR_TEST=1 "${BUILD_COMMAND[@]}"
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_cpp_wrapper_shard() {
@@ -627,6 +627,8 @@ test_perf_for_dashboard() {
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
     device=cuda_h100
+  elif [[ "${TEST_CONFIG}" == *b200* ]]; then
+    device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
@@ -801,6 +803,16 @@ test_dynamo_benchmark() {
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
+    # TODO (huydhn): Just smoke test some sample models
+    if [[ "${TEST_CONFIG}" == *b200* ]]; then
+      if [[ "${suite}" == "huggingface" ]]; then
+        export TORCHBENCH_ONLY_MODELS="DistillGPT2"
+      elif [[ "${suite}" == "timm_models" ]]; then
+        export TORCHBENCH_ONLY_MODELS="inception_v3"
+      elif [[ "${suite}" == "torchbench" ]]; then
+        export TORCHBENCH_ONLY_MODELS="hf_Bert"
+      fi
+    fi
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu* ]]; then
@@ -1670,7 +1682,6 @@ elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
-  install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74

@@ -1255,6 +1255,7 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
+    const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
   auto deviceIdx = guessDeviceId();
@@ -1288,7 +1289,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(), groupRank, ranks.size(), ncclOpts);
+      store->clone(), groupRank, ranks.size(), ncclOpts);
   pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
@@ -2283,6 +2284,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // Work status logging for desync debug
       desyncDebugger_.logWorkStart(work);
 
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
       // multiple times after the start
@@ -2293,10 +2298,6 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastStartedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
-
-      // allow watchdog to do an event query on a side thread
-      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
 
       // Clean up completed work
       if (work.isCompleted()) {
@@ -5429,6 +5430,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
 
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto inputTensor = inputTensors.back();
+  check_gpu_single_tensor(inputTensor);
 
   std::vector<at::Tensor> outputs;
 
