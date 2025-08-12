@@ -1322,6 +1322,26 @@ def _get_amdsmi_handler(device: Device = None):
     return handle
 
 
+_cached_hip_to_amdsmi: Optional[dict[int, int]] = None
+
+
+def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
+    r"""Return amdsmi index from HIP device index. On RDNA systems they are not always the same.
+
+    Assume amdsmi_init() already completes successfully."""
+    global _cached_hip_to_amdsmi
+    if _cached_hip_to_amdsmi is None:
+
+        def gen():
+            amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
+            for amdsmi_idx, handle in enumerate(amdsmi_handles):
+                info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
+                yield info["hip_id"], amdsmi_idx
+
+        _cached_hip_to_amdsmi = dict(gen())
+    return _cached_hip_to_amdsmi[device]
+
+
 def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
@@ -1339,7 +1359,7 @@ def _get_amdsmi_device_index(device: Device) -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
