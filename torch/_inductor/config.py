@@ -96,7 +96,7 @@ fx_graph_cache: bool = Config(
     default=True,
 )
 
-remote_gemm_autotune_cache: bool = False
+remote_gemm_autotune_cache: bool = True
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -420,13 +420,13 @@ use_experimental_benchmarker: bool = Config(
 )
 
 # enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = True
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
-max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+max_autotune_pointwise = True
 
 # enable slow autotuning passes to select gemm algorithms
-max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+max_autotune_gemm = True
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
