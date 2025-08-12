@@ -7736,6 +7736,8 @@ class TestMPS(TestCaseMPS):
         y = torch.arange(32, device='mps', dtype=torch.int32)
         self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
         self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+        # Regression test for https://github.com/pytorch/pytorch/issues/160208
+        self.assertEqual(torch.add(y, x, alpha=2).cpu(), torch.add(y.cpu(), x.cpu(), alpha=2))
 
     # Test add
     def test_add_scalars(self):
