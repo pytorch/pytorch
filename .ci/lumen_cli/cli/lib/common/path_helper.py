@@ -82,7 +82,7 @@ def copy(src: Any, dst: Any, overwrite=True, full_path=True):
     src_path = get_path(src, full_path=full_path)
     dst_path = get_path(dst, full_path=full_path)
 
-    if not src.exists():
+    if not src_path.exists():
         raise FileNotFoundError(f"Source path does not exist: {src}")
 
     dst_path.parent.mkdir(parents=True, exist_ok=True)
