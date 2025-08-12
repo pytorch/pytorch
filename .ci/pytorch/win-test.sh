@@ -83,6 +83,14 @@ run_tests() {
     fi
 }
 
-run_tests
+run_inductor_tests(){
+    "$SCRIPT_HELPERS_DIR"/test_inductor_shard.bat
+}
+
+if [[ "${TEST_CONFIG}" == *inductor* ]]; then
+    run_inductor_tests
+else
+    run_tests
+fi
 assert_git_not_dirty
 echo "TEST PASSED"

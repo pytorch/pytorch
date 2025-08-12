@@ -1,0 +1,59 @@
+name: inductor-windows
+
+on:
+  push:
+    tags:
+      - ciflow/inductor-windows/*
+  workflow_dispatch:
+  schedule:
+    # Run every 12 hours during the week and every 24 hours on the weekend
+    - cron: 45 0,12 * * 1-5
+    - cron: 45 0 * * 0,6
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-default-label-prefix:
+    name: get-default-label-prefix
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    needs: get-default-label-prefix
+    with:
+      build-environment: win-vs2022-cpu-py3
+      cuda-version: cpu
+      runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral"
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral" },
+        ]}
+    secrets: inherit
+
+  win-vs2022-cpu-py3-inductor-test:
+    name: win-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs:
+      - win-vs2022-cpu-py3-build
+    with:
+      build-environment: win-vs2022-cpu-py3
+      cuda-version: cpu
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      disable-monitor: false
+    secrets: inherit
