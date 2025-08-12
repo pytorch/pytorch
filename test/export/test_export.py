@@ -1308,8 +1308,8 @@ graph():
 
         foo = Foo()
         ref = ReferenceControl(foo)
-        with self.assertRaisesRegex(
-            RuntimeError,
+        with self.assertWarnsRegex(
+            UserWarning,
             "While exporting, we found certain side effects happened in the model.forward. "
             "Here are the list of potential sources you can double check: "
             "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
