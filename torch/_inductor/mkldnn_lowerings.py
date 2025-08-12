@@ -408,9 +408,7 @@ def register_onednn_fusion_ops():
                 b = ir.ExternKernel.realize_input(b)  # type: ignore[assignment]
             choices: list[ChoiceCaller] = []
             if config.max_autotune or config.max_autotune_gemm:
-                *_, layout, x, w, y = mm_args(
-                    x, w, y, layout=layout
-                )
+                *_, layout, x, w, y = mm_args(x, w, y, layout=layout)
                 if use_cpp_gemm_template(layout, x, w):
 
                     def epilogue_creator(buf):

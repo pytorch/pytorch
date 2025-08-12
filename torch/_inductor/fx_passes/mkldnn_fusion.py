@@ -55,9 +55,7 @@ if torch._C._has_mkldnn:
         ):
             raise NotImplementedError
 
-        def pack_linear_weight(
-            self, graph, is_lp_weight, weight_node, batch_size
-        ):
+        def pack_linear_weight(self, graph, is_lp_weight, weight_node, batch_size):
             raise NotImplementedError
 
         def pack_linear(
@@ -84,9 +82,7 @@ if torch._C._has_mkldnn:
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
 
-        def pack_linear_weight(
-            self, graph, is_lp_weight, weight_node, batch_size
-        ):
+        def pack_linear_weight(self, graph, is_lp_weight, weight_node, batch_size):
             # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
             packed_weight_inputs = (
                 weight_node,
