@@ -108,10 +108,10 @@
 #include <torch/csrc/profiler/kineto_client_interface.h>
 #include <sstream>
 
-#ifdef USE_ROCM
+#ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
-#include <ATen/hip/HIPConfig.h>
-#include <ATen/native/transformers/hip/sdp_utils.h>
+#include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
@@ -1855,7 +1855,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
-#ifdef USE_ROCM
+#ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
@@ -1987,7 +1987,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::mps::python_functions());
-#ifdef USE_ROCM
+#ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
 #ifdef USE_XPU
@@ -2058,10 +2058,10 @@ PyObject* initModule() {
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
-#ifdef USE_ROCM
+#ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_ROCM) && !defined(USE_ROCM)
+#if defined(USE_CUDA) && !defined(USE_ROCM)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
@@ -2077,7 +2077,7 @@ PyObject* initModule() {
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
-#ifdef USE_ROCM
+#ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back
@@ -2381,7 +2381,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def("_is_flash_attention_available", []() {
-#ifdef USE_ROCM
+#ifdef USE_CUDA
     return sdp::is_flash_attention_available();
 #else
     return false;
@@ -2390,7 +2390,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_ROCM
+#ifdef USE_CUDA
         return sdp::can_use_flash_attention(params, debug);
 #else
         return false;
@@ -2399,7 +2399,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_mem_efficient_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_ROCM
+#ifdef USE_CUDA
         return sdp::can_use_mem_efficient_attention(params, debug);
 #else
         return false;
@@ -2408,7 +2408,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_cudnn_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_ROCM
+#ifdef USE_CUDA
         return sdp::can_use_cudnn_attention(params, debug);
 #else
         return false;
@@ -2579,7 +2579,7 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("check") = nullptr);
 
-#ifdef USE_ROCM
+#ifdef USE_CUDA
   PyObject* has_cuda = Py_True;
 #else
   PyObject* has_cuda = Py_False;
@@ -2709,7 +2709,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
       [](const at::Tensor& input, bool training) {
-#ifdef USE_ROCM
+#ifdef USE_CUDA
         return at::native::_get_cudnn_batch_norm_reserve_space_size(
             input, training);
 #else
