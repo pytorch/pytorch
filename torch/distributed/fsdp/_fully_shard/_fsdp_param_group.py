@@ -367,7 +367,7 @@ class FSDPParamGroup:
                 fsdp_param.init_all_gather_outputs(
                     [all_gather_input.numel()],
                     [all_gather_input.dtype],
-                    1,
+                    world_size,
                     self.device,
                     force_recreate=False,
                 )
