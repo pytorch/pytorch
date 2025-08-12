@@ -451,15 +451,9 @@ class TestPublicBindings(TestCase):
                     ]
 
         def test_module(modname):
-            try:
-                if "__main__" in modname:
-                    return
-                mod = importlib.import_module(modname)
-            except Exception:
-                # It is ok to ignore here as we have a test above that ensures
-                # this should never happen
-
+            if "__main__" in modname:
                 return
+            mod = importlib.import_module(modname)
             if not self._is_mod_public(modname):
                 return
             # verifies that each public API has the correct module name and naming semantics
