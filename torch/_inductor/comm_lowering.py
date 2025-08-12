@@ -209,7 +209,9 @@ def register_comm_lowerings():
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
         inp = ir.ExternKernel.require_contiguous(inp)
-        ir._AllReduceKernel.create_inplace(
+        # Because we are lowering as inplace c10d.all_reduce_, we should generate
+        # _AllReduce_Kernel instead of _AllReduceKernel.
+        ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
             inp,  # type: ignore[arg-type]
             reduce_op,
