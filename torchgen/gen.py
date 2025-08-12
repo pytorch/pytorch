@@ -2849,14 +2849,13 @@ def main() -> None:
     # TODO: stop generating CUDA kernels for non-CUDA builds
     ignore_keys = set()
 
+    MPS_KEYS = {DispatchKey.MPS, DispatchKey.SparseMPS, DispatchKey.SparseCsrMPS}
     if options.mps or options.update_aoti_c_shim:
-        functions_keys.add(DispatchKey.MPS)
+        functions_keys.update(MPS_KEYS)
         aoti_backends.add(DispatchKey.MPS)
     else:
-        ignore_keys.add(DispatchKey.MPS)
-
-        if DispatchKey.MPS in dispatch_keys:
-            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+        ignore_keys.update(MPS_KEYS)
+        dispatch_keys[:] = [k for k in dispatch_keys if k not in MPS_KEYS]
 
     if options.xpu or options.update_aoti_c_shim:
         functions_keys.add(DispatchKey.XPU)

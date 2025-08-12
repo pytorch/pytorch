@@ -8,7 +8,8 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIf, skipIfRocm, skipIfXpu
+from unittest import skipIf
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
@@ -465,6 +466,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return3(self):
         def fn(x):
             p = torch.nn.Parameter(x + 123)
@@ -481,6 +483,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return4(self):
         def fn(x):
             p = torch.nn.Parameter(x + 123, requires_grad=False)
