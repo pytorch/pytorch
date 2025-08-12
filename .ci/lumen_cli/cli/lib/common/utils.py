@@ -7,7 +7,6 @@ import os
 import shlex
 import subprocess
 import sys
-from typing import Optional
 from contextlib import contextmanager
 from typing import Dict, List, Optional
 
