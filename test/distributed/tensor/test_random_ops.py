@@ -113,11 +113,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
         #     (`torch.distributed.tensor._random._rng_tracker._manual_seed`)
         # (b) If we try to match the semantics of (a) with a user-supplied RNG, they may be very surprised to find that
         #     their RNG object never advances its state after using it with DTensor.
-        # torch.distributed.tensor._random._rng_tracker._manual_seed(55)
-        # rng.manual_seed(55)
-        # torch.nn.init.uniform_(t1, 0.0, 1.0)
-        # torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
-        # self.assertEqual(t1.full_tensor(), t2.full_tensor())
+        torch.manual_seed(55)
+        rng.manual_seed(55)
+        torch.nn.init.uniform_(t1, 0.0, 1.0)
+        torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
+        self.assertEqual(t1.full_tensor(), t2.full_tensor())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
