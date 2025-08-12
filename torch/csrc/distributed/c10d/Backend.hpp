@@ -8,6 +8,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
+#include <torch/csrc/distributed/c10d/Communicator.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
@@ -28,7 +29,7 @@ enum class ErrorType {
   REMOTE_ERROR = 3
 };
 
-class TORCH_API Backend : public torch::CustomClassHolder {
+class TORCH_API Backend : public Communicator {
  public:
   // Backend Options is a base struct that defines the basic options
   // when constructing a Backend. Each Backend subclass should
@@ -131,6 +132,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         false,
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
   }
+
+  c10::intrusive_ptr<c10d::Work> allreduceImpl(
+      std::vector<at::Tensor>& tensors,
+      c10d::ReduceOp reduceOp = c10d::ReduceOp::SUM,
+      bool asyncOp = false,
+      std::chrono::milliseconds timeout = kCommDefaultTimeout,
+      std::optional<at::Tensor> sparseIndices = std::nullopt) override;
 
   virtual c10::intrusive_ptr<Work> allreduce_sparse(
       std::vector<at::Tensor>& /* tensors */,

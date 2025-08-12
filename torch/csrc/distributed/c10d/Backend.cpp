@@ -5,7 +5,10 @@
 namespace c10d {
 
 Backend::Backend(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
+    : Communicator(rank, size),
+      rank_(rank),
+      size_(size),
+      dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.backend");
 }
 
@@ -13,6 +16,17 @@ Backend::~Backend() = default;
 
 void Backend::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
+}
+
+c10::intrusive_ptr<c10d::Work> Backend::allreduceImpl(
+    std::vector<at::Tensor>& tensors,
+    c10d::ReduceOp reduceOp,
+    bool asyncOp,
+    std::chrono::milliseconds timeout,
+    std::optional<at::Tensor> sparseIndices) {
+  TORCH_CHECK(
+      false,
+      c10::str("Backend ", getBackendName(), " does not support allreduce"));
 }
 
 } // namespace c10d

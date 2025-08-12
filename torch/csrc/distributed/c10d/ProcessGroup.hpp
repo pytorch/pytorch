@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Communicator.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <memory>
 #include <unordered_map>
@@ -24,31 +25,6 @@ constexpr auto kProcessGroupDefaultTimeout =
 
 namespace c10d {
 
-// We only call `register_work()` in two cases:
-// 1. If the work object is created from a functional collective call.
-// 2. If the work object is created from a non-functional collective call within
-//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
-C10_EXPORT void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work);
-
-C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
-
-// We only call `unregister_work()` in one case:
-// 1. If the work object is created from a non-functional collective call within
-//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
-//
-// Q: What about the functional collective case?
-// A: The unregistration of work object for functional collective is done in
-//    the required user-side explicit call to `wait_tensor()`.
-C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
-
-C10_EXPORT size_t get_work_registry_size();
-
-C10_EXPORT void set_allow_inflight_collective_as_graph_input(bool value);
-
-C10_EXPORT bool allow_inflight_collective_as_graph_input();
-
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
 //
@@ -69,7 +45,7 @@ C10_EXPORT bool allow_inflight_collective_as_graph_input();
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class TORCH_API ProcessGroup : public torch::CustomClassHolder {
+class TORCH_API ProcessGroup : public Communicator {
  public:
   struct TORCH_API MergeOptions : torch::CustomClassHolder {
     explicit MergeOptions(
@@ -267,6 +243,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     }
     return work;
   }
+
+  c10::intrusive_ptr<c10d::Work> allreduceImpl(
+      std::vector<at::Tensor>& tensors,
+      c10d::ReduceOp reduceOp = c10d::ReduceOp::SUM,
+      bool asyncOp = false,
+      std::chrono::milliseconds timeout = kCommDefaultTimeout,
+      std::optional<at::Tensor> sparseIndices = std::nullopt) override;
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,

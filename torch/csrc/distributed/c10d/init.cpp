@@ -2689,6 +2689,25 @@ Arguments:
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
+  auto communicator =
+      py::class_<
+          ::c10d::Communicator,
+          c10::intrusive_ptr<::c10d::Communicator>>(module, "Communicator")
+          .def("rank", &::c10d::Communicator::getRank)
+          .def("size", &::c10d::Communicator::getSize)
+          .def(
+              "allreduce",
+              &::c10d::Communicator::allreduce,
+              py::arg("tensors"),
+              py::arg("reduceOp") = ::c10d::ReduceOp::SUM,
+              py::arg("asyncOp") = false,
+              py::arg("timeout") = ::c10d::kUnsetTimeout,
+              py::arg("sparseIndices") = std::nullopt,
+              py::call_guard<py::gil_scoped_release>());
+
+  // TODO: The collection definitions handles direct instantiation of
+  // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
+  // and should be removed once all tests are transitioned
   auto backend =
       py::class_<::c10d::Backend, c10::intrusive_ptr<::c10d::Backend>>(
           module, "Backend")

@@ -182,4 +182,29 @@ struct TORCH_API WorkInfo {
   std::chrono::duration<float> activeDuration;
 };
 
+// We only call `register_work()` in two cases:
+// 1. If the work object is created from a functional collective call.
+// 2. If the work object is created from a non-functional collective call within
+//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
+C10_EXPORT void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work);
+
+C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
+
+// We only call `unregister_work()` in one case:
+// 1. If the work object is created from a non-functional collective call within
+//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
+//
+// Q: What about the functional collective case?
+// A: The unregistration of work object for functional collective is done in
+//    the required user-side explicit call to `wait_tensor()`.
+C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
+
+C10_EXPORT size_t get_work_registry_size();
+
+C10_EXPORT void set_allow_inflight_collective_as_graph_input(bool value);
+
+C10_EXPORT bool allow_inflight_collective_as_graph_input();
+
 } // namespace c10d
