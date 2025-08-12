@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 logger = logging.getLogger(__name__)
@@ -134,14 +134,14 @@ def str2bool(value: Optional[str]) -> bool:
 
 
 @contextmanager
-def temp_environ(updates: Dict[str, str]):
+def temp_environ(updates: dict[str, str]):
     """
     Temporarily set environment variables and restore them after the block.
     Args:
         updates: Dict of environment variables to set.
     """
     missing = object()
-    old: Dict[str, str | object] = {k: os.environ.get(k, missing) for k in updates}
+    old: dict[str, str | object] = {k: os.environ.get(k, missing) for k in updates}
     try:
         os.environ.update(updates)
         yield
@@ -151,16 +151,6 @@ def temp_environ(updates: Dict[str, str]):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v  # type: ignore[arg-type]
-
-
-def list_to_env_dict(env_list: List[str]) -> Dict[str, str]:
-    env_dict: Dict[str, str] = {}
-    for item in env_list:
-        if "=" not in item:
-            raise ValueError(f"Invalid env var format: {item!r}, expected KEY=VALUE")
-        key, value = item.split("=", 1)
-        env_dict[key.strip()] = value.strip()
-    return env_dict
 
 
 @contextmanager

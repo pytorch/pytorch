@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import textwrap
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -270,7 +271,7 @@ class VllmTestParameters:
     """
     Parameters defining the vllm external test input
 
-    !!!DO NOT ADD SECRECTS IN THIS CLASS!!!
+    !!!DO NOT ADD SECRETS IN THIS CLASS!!!
     you can put environment variable name in VllmTestParameters if it's not the same as the secret one
     fetch secrests directly from env variables during runtime
     """
@@ -334,7 +335,7 @@ class VllmTestRunner(BaseRunner):
         requirements/test.in file from vllm repo.
 
         Then generate the test.txt file using uv pip compile, along with requirements/test.txt as constrain to
-        match workable packages' version. Notice during the uv pip comiple. --constarint is a soft constraint.
+        match workable packages' version. Notice during the uv pip compile. --constarint is a soft constraint.
 
         """
         # TODO(elainewy): move this as part of vllm build, to generate the test.txt file
@@ -396,7 +397,7 @@ class VllmTestRunner(BaseRunner):
             try:
                 module = __import__(pkg)
                 version = getattr(module, "__version__", None)
-                logger.info(f"{pkg}: {version or 'Unknown version'}")
+                logger.info("%s: %v", pkg, version or "Unknown version")
             except ImportError:
                 logger.info(" %s: Not installed", pkg)
         logger.info("Done. checked installed packages")
@@ -465,12 +466,12 @@ def clone_vllm():
 
 
 def preprocess_test_in(
-    target_file: str = "requirements/test.in",
-    additional_package_to_move: list[str] = [],
+    target_file: str = "requirements/test.in", additional_packages: Iterable[str] = ()
 ):
     """
-    remove torch packges in target_file and replace with local torch whls
+    remove torch packages in target_file and replace with local torch whls
     """
+    additional_package_to_move = list(additional_packages or ())
     pkgs_to_remove = [
         "torch",
         "torchvision",
@@ -500,7 +501,6 @@ def preprocess_test_in(
     # Write back: header_lines + blank + kept_lines
     out = "\n".join(header_lines + [""] + kept_lines) + "\n"
     target_path.write_text(out)
-
     print(f"[INFO] Updated {target_file}")
 
 
