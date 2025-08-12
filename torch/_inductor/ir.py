@@ -4475,7 +4475,7 @@ class ComputedBuffer(OperationBuffer):
         result = self.layout.get_free_symbol_uses(
             unbacked_only
         ) | self.data.get_free_symbol_uses(unbacked_only)
-        
+
         if isinstance(self.get_store_function(), LoopBody):
             result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
         return result
