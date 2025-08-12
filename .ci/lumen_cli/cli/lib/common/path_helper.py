@@ -57,7 +57,7 @@ def ensure_dir_exists(path: Optional[Path]):
         logger.info("Directory already exists'%s' ", path)
 
 
-def remove_dir(path: Optional[Path | str]):
+def remove_dir(path: Optional[Union[Path,str]]):
     """
     Remove a directory if it exists.
     """
