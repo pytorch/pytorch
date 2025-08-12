@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lumen-cli-unit-tests-python3.12:
+  lumen-cli-unit-tests-python312:
     permissions:
       contents: read
       pull-requests: write
@@ -44,7 +44,7 @@ jobs:
           pip install -e .ci/lumen_cli/
           pytest -v -s .ci/lumen_cli/tests/*
 
-  lumen-cli-compatible-python3.9:
+  lumen-cli-compatible-python39:
     permissions:
       contents: read
       pull-requests: write

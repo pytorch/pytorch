@@ -21,7 +21,7 @@ def get_env(name: str, default: str = "") -> str:
     return val
 
 
-def env_path(
+def env_path_optional(
     name: str,
     default: Optional[Union[str, Path]] = None,
     *,
@@ -32,15 +32,32 @@ def env_path(
     If the variable is not set or empty str, returns the default.
     the default is None.
     If resolve=True, returns the resolved path.
-
     """
-    val = os.getenv(name)
+    val = get_env(name)
     if not val:
         val = default
-    if val is None:
+
+    if not val:
         return None
-    p = Path(val)
+
+    if isinstance(val, Path):
+        p = val
+    else:
+        p = Path(val)
+
     return p.resolve() if resolve else p
+
+
+def env_path(
+    name: str,
+    default: Optional[Union[str, Path]] = None,
+    *,
+    resolve: bool = True,
+) -> Path:
+    p = env_path_optional(name, default, resolve=resolve)
+    if not p:
+        raise ValueError(f"Missing path value for {name}: {p}")
+    return p
 
 
 def env_bool(
@@ -69,10 +86,10 @@ def env_bool_field(
 
 def env_path_field(
     name: str,
-    default: Optional[Union[str, Path]] = None,
+    default: Union[str, Path] = "",
     *,
     resolve: bool = True,
-) -> Optional[Path]:
+) -> Path:
     """
     returns dataclass's factory function for Path field with Default value
     If resolve=True, returns the resolved(absolute) path.
