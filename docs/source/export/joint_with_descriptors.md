@@ -16,7 +16,90 @@ a distributed SPMD program.
 ## Descriptors
 
 ```{eval-rst}
-.. automodule:: torch._functorch._aot_autograd.descriptors
+.. currentmodule:: torch._functorch._aot_autograd.descriptors
+
+.. autoclass:: AOTInput
+  :members:
+
+.. autoclass:: AOTOutput
+  :members:
+
+.. autoclass:: BackwardTokenAOTInput
+  :members:
+
+.. autoclass:: BackwardTokenAOTOutput
+  :members:
+
+.. autoclass:: BufferAOTInput
+  :members:
+
+.. autoclass:: DummyAOTInput
+  :members:
+
+.. autoclass:: DummyAOTOutput
+  :members:
+
+.. autoclass:: GradAOTOutput
+  :members:
+
+.. autoclass:: InputMutationAOTOutput
+  :members:
+
+.. autoclass:: IntermediateBaseAOTOutput
+  :members:
+
+.. autoclass:: ParamAOTInput
+  :members:
+
+.. autoclass:: PhiloxBackwardBaseOffsetAOTInput
+  :members:
+
+.. autoclass:: PhiloxBackwardSeedAOTInput
+  :members:
+
+.. autoclass:: PhiloxForwardBaseOffsetAOTInput
+  :members:
+
+.. autoclass:: PhiloxForwardSeedAOTInput
+  :members:
+
+.. autoclass:: PhiloxUpdatedBackwardOffsetAOTOutput
+  :members:
+
+.. autoclass:: PhiloxUpdatedForwardOffsetAOTOutput
+  :members:
+
+.. autoclass:: PlainAOTInput
+  :members:
+
+.. autoclass:: PlainAOTOutput
+  :members:
+
+.. autoclass:: SavedForBackwardsAOTOutput
+  :members:
+
+.. autoclass:: SubclassGetAttrAOTInput
+  :members:
+
+.. autoclass:: SubclassGetAttrAOTOutput
+  :members:
+
+.. autoclass:: SubclassSizeAOTInput
+  :members:
+
+.. autoclass:: SubclassSizeAOTOutput
+  :members:
+
+.. autoclass:: SubclassStrideAOTInput
+  :members:
+
+.. autoclass:: SubclassStrideAOTOutput
+  :members:
+
+.. autoclass:: SyntheticBaseAOTInput
+  :members:
+
+.. autoclass:: ViewBaseAOTInput
   :members:
 ```
 
