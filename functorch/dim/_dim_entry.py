@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from . import Dim
 
-import torch
+import torch  # noqa: TC002
 
 
 # NB: The old code represented dimension was from as negative number, so we

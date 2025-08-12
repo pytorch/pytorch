@@ -44,7 +44,7 @@ class EnableAllLayers:
         # Sort by level for stable ordering
         self.levels_to_dim.sort(key=lambda d: d._level)
 
-    def __enter__(self) -> EnableAllLayers:
+    def __enter__(self) -> EnableAllLayers:  # noqa: PYI034
         # Create functorch dynamic layers
         for i, dim in enumerate(self.levels_to_dim):
             batch_size = dim.size

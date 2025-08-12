@@ -640,6 +640,16 @@ class Tensor(torch._C.TensorBase):
         Returns:
             First-class tensor with specified dimensions bound
         """
+        # TODO: make it possible to dispatch on positions/dims
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.index,
+                (self,),
+                self,
+                positions,
+                dims,
+            )
+
         from functorch.dim import index
 
         return index(self, positions, dims)

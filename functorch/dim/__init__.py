@@ -3,8 +3,11 @@ from __future__ import annotations
 import dis
 import inspect
 import sys
-from collections.abc import Sequence
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 import torch
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -173,7 +176,7 @@ class DimList:
         """
         # Initialize attributes
         self._name = name
-        self._dims: List = []
+        self._dims: list = []
         self._bound = False
 
         if isinstance(len_or_dims, int):
@@ -188,7 +191,7 @@ class DimList:
                     dims.append(Dim(item))
             self._set_dims(dims)
 
-    def _set_dims(self, dims: List) -> None:
+    def _set_dims(self, dims: list) -> None:
         """Set the dimensions and mark as bound."""
         self._bound = True
         self._dims = dims
@@ -301,7 +304,7 @@ class DimList:
 
 
 def _create_dimlist(
-    name: str, size: Optional[Union[int, List[Optional[int]]]] = None
+    name: str, size: Optional[Union[int, list[Optional[int]]]] = None
 ) -> DimList:
     """Create a DimList object with the given name and optional size."""
     dimlist = DimList(name=name)
@@ -318,8 +321,8 @@ def _create_dimlist(
 
 
 def dimlists(
-    n: Optional[int] = None, sizes: Optional[List[Optional[int]]] = None
-) -> Union[DimList, Tuple[DimList, ...]]:
+    n: Optional[int] = None, sizes: Optional[list[Optional[int]]] = None
+) -> Union[DimList, tuple[DimList, ...]]:
     """
     Create and return one or more DimList objects.
 
@@ -448,7 +451,7 @@ class _Tensor:
     # fast path around slow wrapping/unwrapping logic for simply queries used
     # by the implementation...
 
-    def _get_levels(self) -> List[Any]:
+    def _get_levels(self) -> list[Any]:
         # Abstract method - must be implemented by subclasses
         raise NotImplementedError("_get_levels must be implemented by subclass")
 
@@ -773,17 +776,14 @@ class _Tensor:
                 raise TypeError(
                     f"dims ({len(dims)}) and indices ({len(indices)}) must have the same length"
                 )
-            for d in dims:
-                dims_list.append(d)
-            for idx in indices:
-                indices_list.append(idx)
+            dims_list.extend(dims)
+            indices_list.extend(indices)
         else:
             dims_list.append(dims)
             indices_list.append(indices)
 
         # Create tensor info
         self_info = TensorInfo.create(self, False, False)
-        ndim = self_info.ndim()
 
         new_levels = []
         to_flatten = []
@@ -910,6 +910,10 @@ class Dim(_Tensor):
         self._range = None
         self._batchtensor = None
 
+    @property
+    def ndim(self):
+        return 1
+
     @classmethod
     def check_exact(cls, obj: Any) -> bool:
         return type(obj) is cls
@@ -979,6 +983,10 @@ class Tensor(_Tensor):
 
     # NB: capture_levels is just assign to _levels
 
+    @property
+    def ndim(self):
+        return sum(1 if l.is_positional() else 0 for l in self._levels)
+
     @classmethod
     def check_exact(cls, other):
         return type(other) is cls
@@ -1039,9 +1047,6 @@ class Tensor(_Tensor):
         assert tensor.dim() == len(levels), (
             f"Tensor has {tensor.dim()} dimensions but {len(levels)} levels provided"
         )
-
-        # Add the ndim property that __repr__ expects
-        result.ndim = ndim_of_levels(levels)
 
         return result
 
@@ -1121,14 +1126,13 @@ class Tensor(_Tensor):
             r = 0
 
             # Direct port of the C++ for loop
-            for l in levels:
+            for r, l in enumerate(levels):
                 if not l.is_none():
                     if not l.is_positional() and l.dim()._level < min_value:
                         min_value = l.dim()._level
                         min_index = i
                         min_real_index = r
                     i += 1
-                r += 1
 
             if min_index == -1:
                 return t
@@ -1198,7 +1202,7 @@ def stack(tensors, new_dim, dim=0):
         try:
             idx = result_levels.index(d)
         except ValueError:
-            raise TypeError(f"Dimension {dim} does not exist in inputs")
+            raise TypeError(f"Dimension {dim} does not exist in inputs") from None
         rawdim = idx
 
     # Stack tensors at the resolved dimension

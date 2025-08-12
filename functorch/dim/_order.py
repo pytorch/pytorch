@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Union
+from typing import Any, TYPE_CHECKING, Union
 
-import torch
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+import torch  # noqa: TC002
 
 from ._dim_entry import _match_levels, DimEntry, ndim_of_levels
 
@@ -95,7 +98,8 @@ def order(
         if idx is None:
             if d.is_positional():
                 raise ValueError(
-                    f"tensor has {orig_ndim} positional dimensions, but {d.position() + orig_ndim} specified, or it was specified twice"
+                    f"tensor has {orig_ndim} positional dimensions, but {d.position() + orig_ndim} specified, "
+                    f"or it was specified twice"
                 )
             else:
                 raise ValueError(

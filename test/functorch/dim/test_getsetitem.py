@@ -187,7 +187,6 @@ class TestGetSetItem(TestCase):
 
         # Complex mixed indexing
         idx = torch.tensor([0, 2])
-        mask = torch.tensor([True, False, True, False, True])
 
         result1 = tensor[a, 1:3, None, idx, :]
         self.assertTrue(isinstance(result1, (torch.Tensor, Tensor)))
@@ -199,7 +198,6 @@ class TestGetSetItem(TestCase):
 
     def test_edge_cases(self):
         """Test edge cases and boundary conditions."""
-        tensor = torch.randn(2, 3, 4)
         x, y, z = dims(3)
 
         # Single dimension tensor

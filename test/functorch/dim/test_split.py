@@ -257,7 +257,7 @@ class TestSplit(TestCase):
         d3 = Dim("d3")
 
         # Split should bind dimensions
-        result = t.split([d1, d2, d3], dim=y)
+        t.split([d1, d2, d3], dim=y)
 
         # Use the bound dimensions in another operation
         self.assertTrue(d1.is_bound)
@@ -429,7 +429,7 @@ class TestSplit(TestCase):
         self.assertEqual(y.size, 4)
 
         # Test with repeated dimensions
-        x2, x3 = Dim("x2"), Dim("x3")
+        x2 = Dim("x2")
         result2 = torch.randn(8).split([x2, x2], dim=0)
         self.assertEqual(len(result2), 2)
         self.assertEqual(x2.size, 4)  # Both chunks should be size 4

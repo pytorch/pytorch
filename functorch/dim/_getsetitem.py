@@ -132,9 +132,8 @@ def extractIndices(index, indices: list) -> bool:
         # Check each item in the sequence
         for item in index:
             if (
-                isinstance(item, torch.Tensor)
+                isinstance(item, (torch.Tensor, slice))
                 or hasattr(item, "__iter__")
-                or isinstance(item, slice)
                 or item is ...
                 or item is None
                 or has_dims(item)
@@ -201,7 +200,8 @@ def setitem(self, index, rhs):
                             result_dims.append(rl.dim())
 
                     raise DimensionBindError(
-                        f"rhs of setitem contains dimension {l.dim()!r} which is not in the dimension on the left ({tuple(result_dims)!r})"
+                        f"rhs of setitem contains dimension {l.dim()!r} which is not in the dimension on the left "
+                        f"({tuple(result_dims)!r})"
                     )
 
         # Match RHS tensor to result levels
@@ -263,7 +263,8 @@ def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
             from . import DimensionBindError
 
             raise DimensionBindError(
-                f"at most one ... or unbound dimension list can exist in indexing list but found 2 at offsets {expanding_object} and {i}"
+                f"at most one ... or unbound dimension list can exist in indexing list but found 2 at offsets "
+                f"{expanding_object} and {i}"
             )
         expanding_object = i
 
@@ -306,7 +307,6 @@ def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
         return IndexingInfo(can_call_original=True)
 
     self_info = TensorInfo.create(self, False, True)
-    ndim = self_info.ndim()
     total_dims = len(self_info.levels)  # Total dimensions (positional + named)
     if dims_indexed > total_dims:
         raise ValueError(
