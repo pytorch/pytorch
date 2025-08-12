@@ -82,7 +82,9 @@ disable_progress = True
 verbose_progress = False
 
 # Configurable compile worker logging path for subproc_pool
-worker_log_path = "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+worker_log_path = (
+    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+)
 
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
@@ -93,6 +95,8 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
+
+remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -433,7 +437,11 @@ max_autotune_report_choices_stats = (
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
+    == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
