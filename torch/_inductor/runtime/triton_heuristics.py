@@ -2689,21 +2689,30 @@ def _persistent_reduction_configs(
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
 
-    MAX_PERSISTENT_BLOCK_NUMEL = 4096
+    max_autotune_enabled = not disable_pointwise_autotuning(inductor_meta) or (
+        inductor_meta.get("max_autotune")
+        or inductor_meta.get("max_autotune_pointwise")
+    )
 
+    configs = [
+        triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+        for xblock in (1, 8, 32, 128)
+        if xblock == 1 or (xblock <= xnumel and (max_autotune_enabled or rnumel * xblock <= 4096))
+    ]
+    
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
             for xblock in (1, 8, 32, 128)
             if xblock == 1
-            or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
+            or (rnumel * xblock <= 4096 and xblock <= xnumel)
         ]
     else:
         configs = []
         assert "tiling_scores" in inductor_meta
         x_y_scores = {dim: inductor_meta["tiling_scores"][dim] for dim in ("x", "y")}
         for target_block_size in (1, 8, 32, 64, 128):
-            if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
+            if target_block_size * rnumel > 4096:
                 continue
 
             block_sizes = match_target_block_product(
@@ -2718,19 +2727,28 @@ def _persistent_reduction_configs(
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
-    # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
-        configs = configs[:1]
-    elif reduction_hint == ReductionHint.OUTER:
-        configs = configs[-1:]
-    elif reduction_hint == ReductionHint.OUTER_TINY:
-        configs = [
+
+    if not max_autotune_enabled: # Don't filter if tuning enabled
+        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            configs = configs[:1]
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+
+    if reduction_hint == ReductionHint.OUTER_TINY:
+        tiny_configs = [
             triton_config_reduction(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
             )
         ]
+        if max_autotune_enabled:
+            for tconfig in tiny_configs:
+                if tconfig not in configs:
+                    configs.append(tconfig)
+            else:
+                configs = tiny_configs
+
     for c in configs:
         # we don't need Rn_BLOCK for persistent reduction
         for prefix in size_hints:
@@ -2922,19 +2940,28 @@ def user_autotune(
     )
 
 
-def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
+def foreach(triton_meta, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
+    configs = []
+    if disable_pointwise_autotuning(inductor_meta) and not (
+        inductor_meta.get("max_autotune") or
+        inductor_meta.get("max_autotune_pointwise")
+    ):
+        configs.append(triton.Config({}, num_stages=1, num_warps=8))
+    else:
+        for warps in [1, 2, 4, 8]:
+            configs.append(triton.Config({}, num_stages=1, num_warps=warps))
+
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=1, num_warps=num_warps)],
+        configs,
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
     )
-
 
 @dataclasses.dataclass
 class GridExpr:

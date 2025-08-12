@@ -1288,7 +1288,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def tanh(x):
-        return f"libdevice.tanh({x})"
+        return f"libdevice.fast_tanhf({x})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1999,13 +1999,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def want_no_x_dim(self):
-        if (
-            self.persistent_reduction
-            and len(self.numels) == self.num_reduction_dims + 1
-        ):
-            if self.fixed_config:
-                return self.fixed_config["XBLOCK"] == 1
-            return V.choices.want_no_x_dim(self.features)
+        """
+        ROCm branch change: Remove want_no_x_dim for persistent reduction.
+        Inductor benchmarks show no perf advantage and simplifies autotune flow.
+        """
         return False
 
     @property
