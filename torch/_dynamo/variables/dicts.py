@@ -678,32 +678,24 @@ class ConstDictVariable(VariableTracker):
         elif name == "__or__":
             assert len(args) == 1
             # Dicts can only be unioned with other dicts or subclasses of dicts.
-            # Sets can be unioned with other sets, frozensets or subclasses of sets.
-            _raise = not (
-                (
-                    istype(self, ConstDictVariable)
-                    and istype(
-                        args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
-                    )
-                )
-                or (
-                    isinstance(self, SetVariable)
-                    and isinstance(
-                        args[0], (SetVariable, variables.UserDefinedSetVariable)
-                    )
-                )
-            )
-
-            if _raise:
+            if not istype(
+                args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
+            ):
                 msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{args[0].python_type().__name__}'"
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
+            # Rule of thumb:
+            # - If either user_cls is defaultdict, use dict
+            # - If either is OrderedDict, use OrderedDict
+            # - Otherwise, use dict
             ts = {self.user_cls, args[0].user_cls}
             user_cls = (
-                collections.OrderedDict if collections.OrderedDict in ts else dict
+                collections.OrderedDict
+                if any(issubclass(t, collections.OrderedDict) for t in ts)
+                else dict
             )
 
             self.install_dict_keys_match_guard()
