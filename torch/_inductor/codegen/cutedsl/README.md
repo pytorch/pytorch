@@ -52,7 +52,7 @@ Templates use Jinja2 syntax with these available hooks:
 - `{{def_kernel(args...)}}` - Generates kernel function signature and argument handling
 - `{{input_nodes}}` - List of input buffers
 - `{{output_node}}` - Output buffer
-- `{{gen_cutedsl_params()}}` - Generates autotunable parameter definitions with proper CuteDSL typing
+- `{{gen_defines()}}` - Generates autotunable parameter definitions with proper CuteDSL typing
 
 ## Autotunable Parameters
 
@@ -60,7 +60,7 @@ CuteDSL templates support autotunable parameters similar to Triton's `tl.constex
 
 ```python
 template_source = r"""
-{{gen_cutedsl_params()}}
+{{gen_defines()}}
 
 @cute.kernel
 def {{kernel_name}}_kernel(gA: cute.Tensor, gB: cute.Tensor, gC: cute.Tensor):
@@ -84,7 +84,7 @@ Templates must:
 1. Define a `@cute.kernel` decorated function
 2. Use `{{def_kernel()}}` to create the entry point
 3. Return the output tensor
-4. Use `{{gen_cutedsl_params()}}` for autotunable parameters
+4. Use `{{gen_defines()}}` for autotunable parameters
 
 See [test_cutedsl_template.py](../../../../test/inductor/test_cutedsl_template.py) for complete examples.
 
