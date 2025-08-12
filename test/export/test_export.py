@@ -107,7 +107,7 @@ if HAS_GPU:
     from torch._library import capture_triton
 
 try:
-    from torchrec.sparse.jagged_tensor import KeyedJaggedTensor, JaggedTensor
+    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
 
     HAS_TORCHREC = True
 except ImportError:
