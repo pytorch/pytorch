@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import functools
+
 from typing import Callable, TYPE_CHECKING, Union
 
 import torch
+from functorch.dim import dims  # noqa: F401
 
 from ._parsing import (
     _ellipsis,
@@ -12,7 +14,6 @@ from ._parsing import (
     parse_pattern,
     validate_rearrange_expressions,
 )
-
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
