@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: profiler"]
 
 import json
-import subprocess
 import sys
 import time
 
@@ -63,46 +62,6 @@ class TestPythonTracer(TestCase):
                 self.assertEqual(name, None)
         name = monitoring.get_tool(2)
         self.assertEqual(name, None)
-
-    def test_unexpected_c_return_events(self):
-        code = """
-import threading
-import time
-import torch
-
-from threading import Event, Lock
-
-lock = Lock()
-lock.acquire()
-event1 = Event()
-event2 = Event()
-event3 = Event()
-
-def run():
-    event1.set()
-    event2.wait()
-    lock.acquire()
-    event3.set()
-
-threading.Thread(target=run).start()
-
-with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True):
-    event1.wait()
-    event2.set()
-    time.sleep(1)
-
-with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], with_stack=True):
-    lock.release()
-    event3.wait()
-    """
-
-        result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, check=True
-        )
-
-        self.assertFalse(
-            "Python replay stack is empty during pop operation" in result.stderr
-        )
 
 
 if __name__ == "__main__":

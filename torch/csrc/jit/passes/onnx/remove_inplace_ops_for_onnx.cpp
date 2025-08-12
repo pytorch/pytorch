@@ -10,6 +10,8 @@
 
 #include <c10/util/irange.h>
 
+#include <limits>
+
 namespace torch::jit {
 
 namespace {
@@ -342,7 +344,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
         auto it =
             std::find(node->inputs().begin(), node->inputs().end(), input);
         if (it != node->inputs().end()) {
-          auto index = std::distance(node->inputs().begin(), it);
+          int index = std::distance(node->inputs().begin(), it);
           TORCH_WARN(
               "ONNX Preprocess - Removing mutation from node ",
               node->kind().toQualString(),

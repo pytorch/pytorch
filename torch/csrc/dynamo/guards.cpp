@@ -1042,8 +1042,7 @@ static void _parse_empty_strided_args(
 static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
-    c10::DeviceType device_type,
-    bool is_pinned = false) {
+    c10::DeviceType device_type) {
   HANDLE_TH_ERRORS;
   at::SmallVector<int64_t, 8> sizes;
   at::SmallVector<int64_t, 8> strides;
@@ -1051,7 +1050,7 @@ static PyObject* _empty_strided_device(
   _parse_empty_strided_args(args, sizes, strides, dtype);
   if (device_type == c10::DeviceType::CPU) {
     return THPVariable_Wrap(
-        at::detail::empty_strided_cpu(sizes, strides, dtype, is_pinned));
+        at::detail::empty_strided_cpu(sizes, strides, dtype));
   }
 #ifdef USE_CUDA
   else if (device_type == c10::DeviceType::CUDA) {
@@ -1083,13 +1082,6 @@ static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
   return _empty_strided_device(dummy, args, c10::DeviceType::CPU);
-}
-
-static PyObject* _empty_strided_cpu_pinned(PyObject* dummy, PyObject* args) {
-  // at::empty_strided is surprising slow.  This is a lower-overhead
-  // version that saves ~2us on every allocation.
-  return _empty_strided_device(
-      dummy, args, c10::DeviceType::CPU, /*is_pinned=*/true);
 }
 
 static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
@@ -1135,10 +1127,6 @@ static PyMethodDef _methods[] = {
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
-    {"_empty_strided_cpu_pinned",
-     _empty_strided_cpu_pinned,
-     METH_VARARGS,
-     nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
     {"_empty_strided_mtia", _empty_strided_mtia, METH_VARARGS, nullptr},

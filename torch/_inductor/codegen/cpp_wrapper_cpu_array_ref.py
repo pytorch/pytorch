@@ -565,18 +565,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buffer.get_size(),
             buffer.get_stride(),
             buffer if self.can_stack_allocate_buffer(buffer) else None,
-            buffer.get_is_pinned(),
         )
 
     def make_allocation(
-        self,
-        name,
-        device,
-        dtype,
-        shape,
-        stride,
-        buffer_if_can_stack_allocate=None,
-        is_pinned=False,
+        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
         orig_stride = stride
         device_str = self.codegen_device(device)
@@ -623,9 +615,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
-        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
         )
 
         return f"RAIIAtenTensorHandle {name}({name}_handle);"

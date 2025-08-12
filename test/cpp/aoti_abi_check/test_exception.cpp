@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <torch/headeronly/util/Exception.h>
-#include <torch/headeronly/util/shim_utils.h>
 
 namespace torch {
 namespace aot_inductor {
@@ -14,11 +13,6 @@ TEST(TestExceptions, TestStdTorchCheck) {
   EXPECT_THROW(
       STD_TORCH_CHECK(false, "dummy ", "false ", "message"),
       std::runtime_error);
-}
-
-TEST(TestExceptions, TestTorchErrorCodeCheck) {
-  EXPECT_NO_THROW(TORCH_ERROR_CODE_CHECK(0));
-  EXPECT_THROW(TORCH_ERROR_CODE_CHECK(1), std::runtime_error);
 }
 
 } // namespace aot_inductor
