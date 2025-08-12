@@ -36,6 +36,11 @@ Tensor sgd_out_of_place(
     const bool maximize) {
   STD_TORCH_CHECK(param.dim() == 1, "param must be 1D");
 
+  // these test the get_device() and get_device_index() methods
+  // while ascertaining that we are still on CPU
+  STD_TORCH_CHECK(param.get_device() == -1, "CPU device index = -1");
+  STD_TORCH_CHECK(param.get_device_index() == -1, "CPU device index = -1");
+
   int64_t *param_sizes;
   int64_t *param_strides;
   aoti_torch_get_sizes(param.get(), &param_sizes);
