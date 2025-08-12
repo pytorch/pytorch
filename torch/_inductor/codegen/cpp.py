@@ -219,6 +219,7 @@ def reduction_combine(
     helper_val=None,
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
+    use_helper=True,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
@@ -239,7 +240,10 @@ def reduction_combine(
         if helper_val:
             return f"welford_combine({var}, {next_value}, &{helper_val})"
         else:
-            return f"welford_combine({var}, {next_value})"
+            if use_helper:
+                return f"welford_combine({var}, {next_value})"
+            else:
+                return f"welford_combine({var}, {next_value}, false, false)"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -1969,6 +1973,7 @@ class CppKernel(Kernel):
         dtype,
         reduction_combine_fn=reduction_combine,
         reduction_init_fn=reduction_init,
+        use_helper=True,
     ):
         if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
             self.parallel_reduction_prefix.writeline(
@@ -1997,7 +2002,7 @@ class CppKernel(Kernel):
             [
                 f"for (int tid = 0; tid < {num_threads}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, src_dtype=dtype)};",
+                f"    {acc} = {reduction_combine_fn(reduction_type, acc, acc_local_in_array, src_dtype=dtype, use_helper=use_helper)};",
                 "}",
             ],
         )
@@ -2176,18 +2181,13 @@ class CppKernel(Kernel):
         # sum and welford
         # Note: using helper has non-negligible impact on performance
 
-        # keep the original behavior for welford_reduce
-        # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
-            # return reduction_size > 128
+            # return not reduction_size.is_number or reduction_size > 4096
             return False
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
             assert self.call_ranges is not None
-            reduction_size = functools.reduce(
-                operator.mul, self.call_ranges[self.reduction_depth :]
-            )
             if config.cpp.dynamic_threads:
                 # If dynamic threads, to be conservative,
                 # use reduction_size as the range size
@@ -2312,7 +2312,8 @@ class CppKernel(Kernel):
         reduction_size = functools.reduce(
             operator.mul, self.ranges[self.reduction_depth :]
         )
-        if self.need_use_acc_helper(reduction_type, dtype, reduction_size):
+        use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, reduction_size)
+        if use_acc_helper:
             # use welford_helper/cascade_helper for vec kernel
             if reduction_type == "welford_reduce":
                 helper_val = self.welford_helper_cse.generate(
@@ -2343,11 +2344,13 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
             if reduction_type == "welford_reduce":
-                self.non_parallel_reduction_suffix.writeline(
+                self.reduction_suffix.writeline(
                     f"{acc} = welford_combine({acc}, Welford<{DTYPE_TO_CPP[dtype]}>(), false, false, true);"
                 )
 
-        self._gen_parallel_reduction_buffers(acc, acc_type, reduction_type, init_dtype)
+        self._gen_parallel_reduction_buffers(
+            acc, acc_type, reduction_type, init_dtype, use_helper=use_acc_helper
+        )
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -3137,6 +3140,7 @@ class CppVecKernel(CppKernel):
             init_dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
+            use_helper=use_acc_helper,
         )
         self._gen_parallel_reduction_buffers(
             acc,
@@ -3145,6 +3149,7 @@ class CppVecKernel(CppKernel):
             init_dtype,
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
+            use_helper=use_acc_helper,
         )
         if use_acc_helper:
             # use masked acc_vec for tail vec kernel
@@ -3155,6 +3160,7 @@ class CppVecKernel(CppKernel):
                 dtype,
                 reduction_combine_fn=self.reduction_combine_vec,
                 reduction_init_fn=self.reduction_init_vec,
+                use_helper=use_acc_helper,
             )
         tmpvar: Union[str, CSEVariable]
         is_bool = dtype == torch.bool
@@ -3356,6 +3362,7 @@ class CppVecKernel(CppKernel):
         index: Optional[sympy.Symbol] = None,
         horizontal_reduction: Optional[bool] = None,
         src_dtype: Optional[torch.dtype] = torch.float32,
+        use_helper=True,
     ):
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
@@ -3408,7 +3415,10 @@ class CppVecKernel(CppKernel):
                 if self.tail_size:
                     return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)})"
                 else:
-                    return f"welford_combine({var}, {next_value})"
+                    if use_helper:
+                        return f"welford_combine({var}, {next_value})"
+                    else:
+                        return f"welford_combine({var}, {next_value}, false, false)"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
