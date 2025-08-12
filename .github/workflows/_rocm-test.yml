@@ -280,17 +280,6 @@ jobs:
           # save container name for later step
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
 
-          # >>> Added: validate >=4 GPUs visible INSIDE the container for distributed configs
-          if [[ "$TEST_CONFIG" == "distributed" ]]; then
-            COUNT=$(docker exec -t "${container_name}" bash -lc 'command -v rocm-smi >/dev/null && rocm-smi --showid | grep -c "^GPU\[" || echo 0')
-            echo "GPUs visible in container: ${COUNT}"
-            if [[ "${COUNT:-0}" -lt 4 ]]; then
-              echo "::error::Distributed config requires >= 4 GPUs visible inside the container"
-              exit 1
-            fi
-          fi
-          # <<<
-
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
