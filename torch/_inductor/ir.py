@@ -5529,6 +5529,10 @@ class ExternKernel(InputsKernel):
 
         device = d.type if (d := self.get_device()) else V.graph.device_type
         if V.graph.cpp_wrapper:
+            if V.graph.fx_wrapper:
+                assert self.python_kernel_name is not None
+                return self.python_kernel_name
+
             assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
                 V.graph.wrapper_code
             )

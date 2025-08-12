@@ -117,7 +117,9 @@ try:
         from .test_aot_inductor_utils import (
             AOTIRunnerUtil,
             check_model,
+            check_model_fx,
             check_model_with_multiple_inputs,
+            check_model_with_multiple_inputs_fx,
             code_check_count,
         )
         from .test_control_flow import (
@@ -131,7 +133,9 @@ try:
         from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
             AOTIRunnerUtil,
             check_model,
+            check_model_fx,
             check_model_with_multiple_inputs,
+            check_model_with_multiple_inputs_fx,
             code_check_count,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
@@ -7045,6 +7049,24 @@ copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleGpu,
     GPU_TYPE,
+    GPU_TEST_FAILURES,
+)
+
+
+class AOTInductorTestFX(TestCase):
+    device = "cuda"
+    device_type = "cuda"
+    check_model = check_model_fx
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs_fx
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestFX,
+    "cuda",
     GPU_TEST_FAILURES,
 )
 
