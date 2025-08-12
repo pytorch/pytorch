@@ -92,7 +92,7 @@ void setLayerNormParams(
     const Tensor& X,
     int64_t M,
     int64_t N) {
-  memset(&params, 0, sizeof(params));
+  std::memset(&params, 0, sizeof(params));
   params.device_id = at::cuda::current_device();
   params.dataType = get_fe_dtype(X);
   params.M = M;
