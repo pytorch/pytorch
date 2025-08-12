@@ -774,7 +774,7 @@ class TestReplicateTrainingCompose(FSDPTest):
                 )
 
 
-class TestFullyShardSharedParams(FSDPTest):
+class TestReplicateSharedParams(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
