@@ -79,7 +79,7 @@ class TestEmbeddingOp(DTensorTestBase):
 
         if use_compile:
             sharded_embedding = torch.compile(sharded_embedding, fullgraph=True)
-    
+
         # Run sharded computation
         torch.manual_seed(10)
         inp = torch.randint(
@@ -134,8 +134,12 @@ class TestEmbeddingOp(DTensorTestBase):
             local_embedding.weight,
             **kwargs,
         )
-        maybe_compiled_emb = torch.compile(torch.nn.functional.embedding, fullgraph=True) if use_compile else torch.nn.functional.embedding
-        sharded_output =  maybe_compiled_emb(
+        maybe_compiled_emb = (
+            torch.compile(torch.nn.functional.embedding, fullgraph=True)
+            if use_compile
+            else torch.nn.functional.embedding
+        )
+        sharded_output = maybe_compiled_emb(
             DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False),
             sharded_embedding.weight,
             **kwargs,
@@ -232,12 +236,12 @@ class TestEmbeddingOp(DTensorTestBase):
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
-
     @with_comms
     def test_embedding_compile(self):
         mesh = self.build_device_mesh()
         self._run_embedding_op_test(mesh, 1, [5, 4], 17, 12)
         self._run_embedding_op_test(mesh, 0, [5, 12], 16, 22, use_compile=True)
-        
+
+
 if __name__ == "__main__":
     run_tests()
