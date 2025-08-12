@@ -19,7 +19,7 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 try:
@@ -229,7 +229,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_cuda(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cuda")
 
@@ -237,7 +237,7 @@ class TestProvenanceTracingArtifact(TestCase):
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
         M = 8
         N = 6
@@ -285,7 +285,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def _test_pt_tracing_combo_kernel(self, backend):
         """This test checks that generated provenance tracing artifact from triton combo kernel to post grad nodes"""
         a = torch.randn(10, 10, device="cuda")
@@ -320,7 +320,7 @@ class TestProvenanceTracingArtifact(TestCase):
             expected_data = {"triton_poi_fused_0": ["relu", "sigmoid", "tanh"]}
             self._check_provenance_tracing_artifact(filepath, expected_data)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_combo_kernel(self):
         self._test_pt_tracing_combo_kernel(backend="inductor")
         self._test_pt_tracing_combo_kernel(backend="aot_inductor")
@@ -437,7 +437,7 @@ class TestProvenanceTracingNodeMeta(TestCase):
         """
         return next(iter([node for node in gm.graph.nodes if node.target == target]))
 
-    @requires_cuda  # test only works for cuda pattern matcher
+    @requires_cuda_and_triton  # test only works for cuda pattern matcher
     def test_pattern_matcher_transfer_meta(self):
         """
         Test that stack trace is transfered when node is decomposed in post_grad_passes
