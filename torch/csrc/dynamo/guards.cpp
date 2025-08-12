@@ -4089,12 +4089,14 @@ static int dict_recursive_tag_watch_callback(
     PyObject* dict,
     PyObject* key,
     PyObject* new_value) noexcept {
-  auto it = dict_to_guard_managers.find(dict);
-  if (it != dict_to_guard_managers.end()) {
-    auto guard_managers = it->second;
-    for (auto& guard_manager : guard_managers) {
-      if (guard_manager) {
-        guard_manager->disable_recursive_dict_tag_optimization();
+  if (event != PyDict_EVENT_CLONED) {
+    auto it = dict_to_guard_managers.find(dict);
+    if (it != dict_to_guard_managers.end()) {
+      auto guard_managers = it->second;
+      for (auto& guard_manager : guard_managers) {
+        if (guard_manager) {
+          guard_manager->disable_recursive_dict_tag_optimization();
+        }
       }
     }
   }
