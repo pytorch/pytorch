@@ -22,6 +22,19 @@ _TARGETS: dict[str, TargetSpec] = {
 }
 
 
+def common_args(parser: argparse.ArgumentParser) -> None:
+    """
+    Add common CLI arguments to the given parser.
+    """
+    parser.add_argument(
+        "-tn",
+        "--test-name",
+        type=str,
+        help="Test to run",
+        required=True,
+    )
+
+
 def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
     build_parser = subparsers.add_parser(
         "test",
@@ -38,4 +51,6 @@ def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
         description="Test third-party targets.\n\nAvailable targets:\n" + overview,
         formatter_class=RichHelp,
     )
-    register_target_commands_and_runner(external_parser, _TARGETS)
+    register_target_commands_and_runner(
+        external_parser, _TARGETS, common_args=common_args
+    )

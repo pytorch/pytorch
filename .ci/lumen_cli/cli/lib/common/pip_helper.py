@@ -4,7 +4,7 @@ import shlex
 import shutil
 import sys
 from collections.abc import Iterable
-from typing import Optional
+from typing import Optional, Union
 
 from cli.lib.common.utils import run_cmd
 
@@ -42,7 +42,7 @@ def pip_install_packages(
     logger.info("Done installing packages")
 
 
-def pip_install_first_match(pattern: str, extras: str | None = None, pref_uv=False):
+def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=False):
     """
     Install the first local whl that matches the given glob pattern.
 
@@ -58,7 +58,7 @@ def pip_install_first_match(pattern: str, extras: str | None = None, pref_uv=Fal
     pip_install_packages([target], prefer_uv=pref_uv)
 
 
-def pip_install(args: str | list[str], env=None, prefer_uv: bool = False) -> None:
+def pip_install(args: Union[str, list[str]], env=None, prefer_uv: bool = False) -> None:
     """
     Install a package using pip for the python in current environment.
     This is loose version to allow for more flexibility in the args.
@@ -75,9 +75,11 @@ def pip_install(args: str | list[str], env=None, prefer_uv: bool = False) -> Non
     run_cmd(" ".join(map(shlex.quote, cmd)), env=env)
 
 
-def run_python(args: str | list[str], env=None):
+def run_python(args: Union[str, list[str]], env=None):
     """
     Run the python in the current environment.
     """
-    cmd = [sys.executable]
+    if isinstance(args, str):
+        args = shlex.split(args)
+    cmd = [sys.executable] + args
     run_cmd(" ".join(map(shlex.quote, cmd)), env=env)

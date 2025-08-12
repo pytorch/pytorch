@@ -21,7 +21,6 @@ from cli.lib.common.path_helper import (
     remove_dir,
 )
 from cli.lib.common.pip_helper import (
-    pip_install,
     pip_install_first_match,
     pip_install_packages,
     run_python,
@@ -48,31 +47,43 @@ class VllmBuildParameters:
 
     # USE_TORCH_WHEEL: when true, use local Torch wheels; requires TORCH_WHEELS_PATH.
     #  Otherwise docker build pull torch nightly during build
+    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
     use_torch_whl: bool = env_bool_field("USE_TORCH_WHEEL", True)
+    torch_whls_path: Path = env_path_field("TORCH_WHEELS_PATH", "./dist")
 
     # USE_LOCAL_BASE_IMAGE: when true, use an existing local Docker base image; requires BASE_IMAGE
     # Otherwise, pull dockerfile's default image remotely
-
-    use_local_base_image: bool = env_bool_field("USE_LOCAL_BASE_IMAGE", True)
-    # USE_LOCAL_DOCKERFILE: when true("1"), use a local Dockerfile; requires DOCKERFILE_PATH.
-    # otherwise, use vllm's default dockerfile.torch_nightly for build
-    use_local_dockerfile: bool = env_bool_field("USE_LOCAL_DOCKERFILE", True)
-
-    # --- Pre-build condition inputs ------------------------------------------
     # BASE_IMAGE: name:tag (only needed when use_local_base_image is True)
+    use_local_base_image: bool = env_bool_field("USE_LOCAL_BASE_IMAGE", True)
     base_image: str = env_str_field("BASE_IMAGE")
 
+    # USE_LOCAL_DOCKERFILE: when true("1"), use a local Dockerfile; requires DOCKERFILE_PATH.
+    # otherwise, use vllm's default dockerfile.torch_nightly for build
     # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile is True"
-    dockerfile_path: Optional[Path] = env_path_field(
+    use_local_dockerfile: bool = env_bool_field("USE_LOCAL_DOCKERFILE", True)
+    dockerfile_path: Path = env_path_field(
         "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
     )
 
-    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
-    torch_whls_path: Optional[Path] = env_path_field("TORCH_WHEELS_PATH", "./dist")
+    # OUTPUT_DIR: where docker buildx (local exporter) will write artifacts
+    output_dir: Path = env_path_field("OUTPUT_DIR", "shared")
 
-    # --- Build output ---------------------------------------------------------
-    # output_dir: where docker buildx (local exporter) will write artifacts
-    output_dir: Optional[Path] = env_path_field("OUTPUT_DIR", "shared")
+    # --- Build args ----------------------------------------------------------
+    target_stage: str = env_str_field("TARGET_STAGE", "export-wheels")
+
+    tag_name: str = env_str_field("TAG", "vllm-wheels")
+
+    cuda_version: str = env_str_field("CUDA_VERSION", "12.8.1")
+
+    python_version: str = env_str_field("PYTHON_VERSION", "3.12")
+
+    max_jobs: str = env_str_field("MAX_JOBS", "64")
+
+    sccache_bucket: str = env_str_field("SCCACHE_BUCKET")
+
+    sccache_region: str = env_str_field("SCCACHE_REGION")
+
+    torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
     def __post_init__(self):
         checks = [
@@ -107,23 +118,6 @@ class VllmBuildParameters:
                 logger.info("flag  %s is not set", flag)
         if not self.output_dir:
             raise ValueError("missing required output_dir")
-
-
-@dataclass
-class VllmDockerBuildArgs:
-    """
-    Parameters defining the vllm main build arguments.
-    Combine with VllmBuildParameters to define the vllm build environment
-    """
-
-    target: str = env_str_field("TARGET", "export-wheels")
-    tag_name: str = env_str_field("TAG", "vllm-wheels")
-    cuda: str = env_str_field("CUDA_VERSION", "12.8.1")
-    py: str = env_str_field("PYTHON_VERSION", "3.12")
-    max_jobs: str = env_str_field("MAX_JOBS", "64")
-    sccache_bucket: str = env_str_field("SCCACHE_BUCKET")
-    sccache_region: str = env_str_field("SCCACHE_REGION")
-    torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
 
 class VllmBuildRunner(BaseRunner):
@@ -246,7 +240,6 @@ class VllmBuildRunner(BaseRunner):
         self,
         inputs: VllmBuildParameters,
     ) -> str:
-        cfg = VllmDockerBuildArgs()
         base_image_arg, final_base_image_arg, pull_flag = self._get_base_image_args(
             inputs
         )
@@ -261,15 +254,15 @@ class VllmBuildRunner(BaseRunner):
                 {torch_arg} \
                 {base_image_arg} \
                 {final_base_image_arg} \
-                --build-arg max_jobs={cfg.max_jobs} \
-                --build-arg CUDA_VERSION={cfg.cuda} \
-                --build-arg PYTHON_VERSION={cfg.py} \
-                --build-arg USE_SCCACHE={int(bool(cfg.sccache_bucket and cfg.sccache_region))} \
-                --build-arg SCCACHE_BUCKET_NAME={cfg.sccache_bucket} \
-                --build-arg SCCACHE_REGION_NAME={cfg.sccache_region} \
-                --build-arg torch_cuda_arch_list='{cfg.torch_cuda_arch_list}' \
-                --target {cfg.target} \
-                -t {cfg.tag_name} \
+                --build-arg max_jobs={inputs.max_jobs} \
+                --build-arg CUDA_VERSION={inputs.cuda_version} \
+                --build-arg PYTHON_VERSION={inputs.python_version} \
+                --build-arg USE_SCCACHE={int(bool(inputs.sccache_bucket and inputs.sccache_region))} \
+                --build-arg SCCACHE_BUCKET_NAME={inputs.sccache_bucket} \
+                --build-arg SCCACHE_REGION_NAME={inputs.sccache_region} \
+                --build-arg torch_cuda_arch_list='{inputs.torch_cuda_arch_list}' \
+                --target {inputs.target_stage} \
+                -t {inputs.tag_name} \
                 --progress=plain .
         """
         ).strip()
@@ -291,6 +284,7 @@ class VllmTestParameters:
             raise ValueError("missing torch_whls_path")
         if not self.vllm_whls_path or not self.vllm_whls_path.exists():
             raise ValueError("missing vllm_whls_path")
+
     @property
     def torch_whls_path(self) -> Path:
         return self._torch_whls_path  # type: ignore
@@ -354,7 +348,8 @@ class VllmTestRunner(BaseRunner):
             )
             pip_install_packages(requirements="test.txt", prefer_uv=True)
             pip_install_packages(
-                "--no-build-isolation", "git+https://github.com/state-spaces/mamba@v2.2.4"
+                "--no-build-isolation",
+                "git+https://github.com/state-spaces/mamba@v2.2.4",
                 prefer_uv=True,
             )
             patterns = ["torch", "xformers", "torchvision", "torchaudio"]
@@ -365,6 +360,7 @@ class VllmTestRunner(BaseRunner):
                     print(f"{pkg}: {version or 'Unknown version'}")
                 except ImportError:
                     print(f"{pkg}: Not installed")
+
 
 def clone_vllm():
     clone_external_repo(

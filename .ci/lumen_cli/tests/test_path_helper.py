@@ -11,7 +11,6 @@ from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
     force_create_dir,
-    get_existing_abs_path,
     get_path,
     is_path_exist,
     remove_dir,
@@ -127,22 +126,13 @@ class TestPathHelper(unittest.TestCase):
             copy(src, dst)
         self.assertTrue(any("Done. Copied file" in msg for msg in cm.output))
 
-    # -------- get_existing_abs_path / is_path_exist --------
-    def test_get_existing_abs_path_success(self):
-        p = self.tmp_path / "ok.txt"
-        p.write_text("hi")
-        out = get_existing_abs_path(str(p))
-        self.assertEqual(out, str(p))
-
-    def test_get_existing_abs_path_missing_raises(self):
-        with self.assertRaises(FileNotFoundError):
-            get_existing_abs_path(str(self.tmp_path / "nope.txt"))
-
-    def test_is_path_exist(self):
+    def test_is_str_path_exist(self):
         p = self.tmp_path / "x.txt"
         p.write_text("1")
         self.assertTrue(is_path_exist(str(p)))
+        self.assertTrue(is_path_exist(p))
         self.assertFalse(is_path_exist(str(self.tmp_path / "missing")))
+        self.assertFalse(is_path_exist(self.tmp_path / "missing"))
         self.assertFalse(is_path_exist(""))
 
 
