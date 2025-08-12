@@ -124,9 +124,10 @@ RUN python3 -mpip install cmake==3.28.0
 # install newest flatbuffers version first:
 # for some reason old version is getting pulled in otherwise.
 # packaging package is required for onnxruntime wheel build.
-RUN pip3 install 'setuptools>=77.0' 'packaging>=24.2' && \
-  pip3 install flatbuffers cython 'pkgconfig>=1.5.5' 'numpy<2.3.0' && \
+RUN pip3 install flatbuffers && \
+  pip3 install cython 'pkgconfig>=1.5.5' 'setuptools>=77' 'numpy<2.3.0' && \
   pip3 install --no-build-isolation h5py==3.11.0 && \
+  pip3 install packaging && \
   git clone https://github.com/microsoft/onnxruntime && \
   cd onnxruntime && git checkout v1.21.0 && \
   git submodule update --init --recursive && \

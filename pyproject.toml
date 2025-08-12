@@ -5,8 +5,9 @@ requires = [
     # 77.0.0: min version for SPDX expression support for project.license
     "setuptools>=77.0.0",
     "cmake>=3.27",
-    "ninja>=1.11",
+    "ninja",
     "numpy",
+    # 24.2: min version required by setuptools for SPDX expression support
     "packaging>=24.2",
     "pyyaml",
     "requests",
