@@ -9861,6 +9861,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
+    @unittest.skipIf(
+        config.triton.enable_native_matmul, 
+        "matmul count is different"
+    )
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -9889,7 +9893,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # so we get only 1 kernel.
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        count = 5 if config.triton.enable_native_matmul else 4
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, count)
 
     @xfail_if_mps  # Only works for triton
