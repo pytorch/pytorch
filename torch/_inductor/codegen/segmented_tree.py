@@ -99,19 +99,21 @@ class SegmentedTree(Generic[T]):
             end: End index of the segment
         """
         lazy_node = self.lazy[node]
-        if lazy_node is not None:
-            # Apply lazy update to current node
-            self.tree[node] = self.update_op(self.tree[node], lazy_node)
+        if lazy_node is None:
+            return
 
-            if start != end:  # Not a leaf node
-                # Propagate to children
-                for child in self._children(node):
-                    self.lazy[child] = self.update_op(
-                        _value_or(self.lazy[child], self.identity), lazy_node
-                    )
+        # Apply lazy update to current node
+        self.tree[node] = self.update_op(self.tree[node], lazy_node)
 
-            # Clear the lazy value
-            self.lazy[node] = None
+        if start != end:  # Not a leaf node
+            # Propagate to children
+            for child in self._children(node):
+                self.lazy[child] = self.update_op(
+                    _value_or(self.lazy[child], self.identity), lazy_node
+                )
+
+        # Clear the lazy value
+        self.lazy[node] = None
 
     def _update_range_helper(
         self, node: int, start: int, end: int, left: int, right: int, value: T

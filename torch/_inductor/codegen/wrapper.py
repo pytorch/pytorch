@@ -589,12 +589,16 @@ class MemoryPlanningLine(WrapperLine):
 
 class EfficientPeakEstimate:
     def __init__(self):
-        from ..memory import estimate_peak_memory
+        from ..memory import estimate_peak_memory, get_freeable_input_buf
 
+        scheduler_nodes = V.graph.scheduler.nodes
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+        names_to_freeable_bufs = get_freeable_input_buf(scheduler_nodes, graph_inputs)
         self.overall_peak_memory, peak_by_scheduler_node = estimate_peak_memory(
-            V.graph.scheduler.nodes,
-            {},
-            OrderedSet(V.graph.get_output_names()),
+            scheduler_nodes,
+            names_to_freeable_bufs,
+            graph_outputs,
         )
 
         from .segmented_tree import SegmentedTree
