@@ -10,7 +10,12 @@ from typing import Optional
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
-from cli.lib.common.envs_helper import env_bool_field, env_path_field, env_str_field
+from cli.lib.common.envs_helper import (
+    env_bool_field,
+    env_path_field,
+    env_str_field,
+    with_params_help,
+)
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.path_helper import (
     copy,
@@ -92,21 +97,21 @@ class VllmBuildParameters:
                 True,  # trigger_value
                 "torch_whls_path",  # resource
                 is_path_exist,  # check_func
-                "torch_whls_path is not provided, but use_torch_whl is set to 1",
+                "TORCH_WHEELS_PATH is not provided, but USE_TORCH_WHEEL is set to 1",
             ),
             (
                 self.use_local_base_image,
                 True,
                 "base_image",
                 local_image_exists,
-                f"base_image {self.base_image} does not found, but use_local_base_image is set to 1",
+                f"BASE_IMAGE {self.base_image} does not found, but USE_LOCAL_BASE_IMAGE is set to 1",
             ),
             (
                 self.use_local_dockerfile,
                 True,
                 "dockerfile_path",
                 is_path_exist,
-                "dockerfile path does not found, but use_local_dockerfile is set to 1",
+                " DOCKERFILE_PATH path does not found, but USE_LOCAL_DOCKERFILE is set to 1",
             ),
         ]
         for flag, trigger_value, attr_name, check_func, error_msg in checks:
@@ -120,6 +125,7 @@ class VllmBuildParameters:
             raise ValueError("missing required output_dir")
 
 
+@with_params_help(VllmBuildParameters)
 class VllmBuildRunner(BaseRunner):
     """
     Build vLLM using docker buildx.
