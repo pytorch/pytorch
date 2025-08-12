@@ -181,19 +181,11 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
-# tested and likely won't work without additional changes.
-if(NOT LINUX AND NOT WIN32)
-  set(USE_DISTRIBUTED
-      OFF
-      CACHE STRING "Use distributed")
-  # On macOS, if USE_DISTRIBUTED is enabled (specified by the user), then make
-  # Gloo build with the libuv transport.
-  if(APPLE AND USE_DISTRIBUTED)
-    set(USE_LIBUV
-        ON
-        CACHE STRING "")
-  endif()
+# On macOS, make Gloo build with the libuv transport.
+if(APPLE AND USE_DISTRIBUTED)
+set(USE_LIBUV
+    ON
+    CACHE STRING "")
 endif()
 
 # ---[ Options. Note to developers: if you add an option below, make sure you
@@ -429,11 +421,10 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
-      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
           "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
       )
     else()
