@@ -253,6 +253,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__dict__":
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
+        elif name == "__mro__":
+            attr_source = self.source and TypeMROSource(self.source)
+            return VariableTracker.build(tx, self.value.__mro__, attr_source)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -295,10 +298,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             func = obj.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
         elif source:
-            # __mro__ is a member in < 3.12, an attribute in >= 3.12
-            if inspect.ismemberdescriptor(obj) or (
-                sys.version_info >= (3, 12) and name == "__mro__"
-            ):
+            if inspect.ismemberdescriptor(obj):
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
         if ConstantVariable.is_literal(obj):
@@ -1031,17 +1031,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = None
-                if self.source:
-                    source = self.get_source_by_walking_mro(name)
+                source = self.source
+                source_fn = None
+                if source:
+                    source_fn = self.get_source_by_walking_mro(name)
                 # TODO(jansel): add a guard to check for monkey patching?
                 from ..mutation_guard import unpatched_nn_module_init
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
-                return UserMethodVariable(method, self, source=source).call_function(
-                    tx, args, kwargs
-                )
+                return UserMethodVariable(
+                    method, self, source_fn=source_fn, source=source
+                ).call_function(tx, args, kwargs)
 
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
@@ -1402,7 +1403,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             self.value.__class__, name, NO_SUCH_SUBOBJ
         )
         is_accessible_from_type_mro = (
-            subobj_from_class is subobj and self.cls_source is not None
+            subobj_from_class is subobj
+            and self.cls_source is not None
+            and self.source is not None
         )
 
         if isinstance(subobj, property):
@@ -1411,9 +1414,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(name)
                 # Get the getter function
                 source = AttrSource(source, "fget")
-            return variables.UserMethodVariable(
-                subobj.fget, self, source=source
-            ).call_function(tx, [], {})
+
+            # Avoid using UserMethodVariable here because there is no way to
+            # access the method object here. Direct inline by creating the
+            # UserFunctionVariable.
+            return variables.UserFunctionVariable(
+                subobj.fget, source=source
+            ).call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
             # emulate its `__get__`, which is implemented in C.
@@ -1434,8 +1441,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
+            source_fn = None
+            if is_accessible_from_type_mro:
+                # Accessing from __dict__ does not resolve the descriptor, it
+                # returns a classmethod object, so access the __func__
+                # attribute to get to the actual function.
+                source_fn = AttrSource(self.get_source_by_walking_mro(name), "__func__")
             return variables.UserMethodVariable(
-                subobj.__func__, self.var_getattr(tx, "__class__"), source=source
+                subobj.__func__,
+                self.var_getattr(tx, "__class__"),
+                source_fn=source_fn,
+                source=source,
             )
         elif isinstance(subobj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static({}, "fromkeys")
@@ -1525,7 +1541,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func = subobj
 
             if inspect.ismethod(dynamic_subobj):
-                return variables.UserMethodVariable(func, self, source=source)
+                source_fn = None
+                if is_accessible_from_type_mro:
+                    source_fn = self.get_source_by_walking_mro(name)
+                return variables.UserMethodVariable(
+                    func, self, source_fn=source_fn, source=source
+                )
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
