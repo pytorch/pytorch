@@ -1669,6 +1669,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
+        "_inductor/kernel/flex/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
