@@ -385,11 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-        is_nested_int,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -400,16 +396,17 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    # Type checking
-    # TODO: make common validations available as utils
-    for shape in shapes:
-        assert isinstance(shape, Sequence)
-
     # Computes common shape
     common_shape: list[Union[int, torch.SymInt]] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
+        if not isinstance(shape, Sequence):
+            raise RuntimeError(
+                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
+                shape,
+            )
+
         for idx in range(-1, -1 - len(shape), -1):
             if is_nested_int(shape[idx]):
                 # maintain nested int behaviour added in PR 145957.
