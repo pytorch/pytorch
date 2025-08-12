@@ -42,7 +42,6 @@ from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
-    UserMethodVariable,
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -251,10 +250,7 @@ class PyCodegen:
             value.source is not None
             and allow_cache
             and not (
-                value.is_realized()
-                and isinstance(
-                    value, (LocalGeneratorObjectVariable, UserMethodVariable)
-                )
+                value.is_realized() and isinstance(value, LocalGeneratorObjectVariable)
             )
         ):
             # There's a corner case for export: for instance, if the computation

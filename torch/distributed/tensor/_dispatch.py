@@ -138,7 +138,6 @@ class OpDispatcher:
         (2) registered sharding strategy, then rule
         (3) composite implicit autograd decomposition
         """
-
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -197,8 +196,19 @@ class OpDispatcher:
                     cast(dtensor.DTensor, args[0]),
                     cast(torch.Tensor, local_tensor_args[0]),
                 )
+
+                # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
+                # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
+                # our RNG manager)
+                maybe_user_generator = op_info.local_kwargs.pop("generator", None)
+                assert maybe_user_generator is None or isinstance(
+                    maybe_user_generator, torch.Generator
+                )
+                # maybe_user_generator = None
                 rng_context = (
-                    random._rng_tracker._distribute_region(first_arg._spec)
+                    random._rng_tracker._distribute_region(
+                        first_arg._spec, generator=maybe_user_generator
+                    )
                     if random._rng_tracker and not first_local_arg.is_meta
                     else contextlib.nullcontext()
                 )
