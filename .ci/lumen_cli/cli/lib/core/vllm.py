@@ -397,17 +397,18 @@ class VllmTestRunner(BaseRunner):
             try:
                 module = __import__(pkg)
                 version = getattr(module, "__version__", None)
-                logger.info("%s: %v", pkg, version or "Unknown version")
+                version = version if version else "Unknown version"
+                logger.info("%s: %s", pkg, version)
             except ImportError:
                 logger.info(" %s: Not installed", pkg)
         logger.info("Done. checked installed packages")
 
     def _set_envs(self, inputs: VllmTestParameters):
         os.environ["TORCH_CUDA_ARCH_LIST"] = inputs.torch_cuda_arch_list
-        os.environ["HF_TOKEN"] = os.getenv("VLLM_HF_TOKEN", "")
+        os.environ["HF_TOKEN"] = os.getenv("VLLM_TEST_HUGGING_FACE_TOKEN", "")
         if not get_env("HF_TOKEN"):
             raise ValueError(
-                "missing required HF_TOKEN, please set VLLM_HF_TOKEN env var"
+                "missing required HF_TOKEN, please set VLLM_TEST_HUGGING_FACE_TOKEN env var"
             )
         if not get_env("TORCH_CUDA_ARCH_LIST"):
             raise ValueError(
@@ -429,6 +430,7 @@ class VllmTestRunner(BaseRunner):
             self.check_versions()
 
             # Must set env variables before running tests
+            self.run_test(self.test_name)
 
     def run_test(self, test_name: str):
         logger.info("run tests.....")
@@ -447,7 +449,7 @@ class VllmTestRunner(BaseRunner):
                     temp_environ(step.get("env_var", {})),
                     working_directory(step.get("working_directory", "tests")),
                 ):
-                    code = run_shell(cmd=step, check=False)
+                    code = run_shell(cmd=step["command"], check=False)
                     if code != 0:
                         failures.append(step)
             if failures:
@@ -501,7 +503,7 @@ def preprocess_test_in(
     # Write back: header_lines + blank + kept_lines
     out = "\n".join(header_lines + [""] + kept_lines) + "\n"
     target_path.write_text(out)
-    print(f"[INFO] Updated {target_file}")
+    logger.info("[INFO] Updated %s", target_file)
 
 
 def sample_tests():
@@ -513,7 +515,7 @@ def sample_tests():
             "env_var": {
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             },
-            "steps:": [
+            "steps": [
                 {
                     "command": "pytest -v -s basic_correctness/test_cumem.py",
                 },

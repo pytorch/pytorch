@@ -58,23 +58,6 @@ def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=
     pip_install_packages([target], prefer_uv=pref_uv)
 
 
-def pip_install(args: Union[str, list[str]], env=None, prefer_uv: bool = False) -> None:
-    """
-    Install a package using pip for the python in current environment.
-    This is loose version to allow for more flexibility in the args.
-    """
-    if isinstance(args, str):
-        args = shlex.split(args)
-    use_uv = prefer_uv and shutil.which("uv") is not None
-    base = (
-        [sys.executable, "-m", "uv", "pip", "install"]
-        if use_uv
-        else [sys.executable, "-m", "pip", "install"]
-    )
-    cmd = base + args
-    run_cmd(" ".join(map(shlex.quote, cmd)), env=env)
-
-
 def run_python(args: Union[str, list[str]], env=None):
     """
     Run the python in the current environment.
