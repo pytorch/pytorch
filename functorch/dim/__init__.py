@@ -158,7 +158,7 @@ class DimList:
     2. Bound: Either created with specific dimensions/sizes, or bound later via bind() or bind_len()
     """
 
-    _name: str
+    _name: Optional[str]
     _dims: list[Dim]
     _bound: bool
 
@@ -426,7 +426,7 @@ class DimensionBindError(Exception):
 from . import op_properties
 
 
-def _safe_print(*args, **kwargs):
+def _safe_print(*args: Any, **kwargs: Any) -> None:
     """Safe print that avoids recursive torch function dispatches."""
     import sys
 
@@ -455,7 +455,7 @@ class _Tensor:
         # Abstract method - must be implemented by subclasses
         raise NotImplementedError("_get_levels must be implemented by subclass")
 
-    def _get_tensor(self) -> torch.Tensor:
+    def _get_tensor(self) -> Optional[torch.Tensor]:
         # Abstract method - must be implemented by subclasses
         raise NotImplementedError("_get_tensor must be implemented by subclass")
 
@@ -502,6 +502,8 @@ class _Tensor:
                 if (
                     lhs_info
                     and rhs_info
+                    and lhs_info.tensor is not None
+                    and rhs_info.tensor is not None
                     and lhs_info.tensor.dim() == 0
                     and rhs_info.tensor.dim() == 0
                 ):
@@ -556,8 +558,8 @@ class _Tensor:
 
         if (
             func is torch.Tensor.split
-            or func is torch._VF.split
-            or func is torch._VF.split_with_sizes
+            or func is torch._VF.split  # type: ignore[attr-defined]
+            or func is torch._VF.split_with_sizes  # type: ignore[attr-defined]
             or func is torch.split
         ):
             return split(*args, **kwargs)
@@ -565,7 +567,9 @@ class _Tensor:
         return _Tensor._torch_function_fallback(func, types, args, kwargs)
 
     @staticmethod
-    def _torch_function_fallback(func, types, args, kwargs):
+    def _torch_function_fallback(
+        func: Callable, types: tuple, args: tuple, kwargs: dict
+    ) -> Any:
         """Fallback torch function implementation for non-special-cased functions."""
         is_pointwise = POINTWISE_OPTIMIZE and func in op_properties.pointwise
         # TODO: optimize pytree here
@@ -591,7 +595,7 @@ class _Tensor:
         if is_pointwise:
             # Pointwise operation: match all tensors to common levels
             for i, info in enumerate(infos):
-                if info:
+                if info and info.tensor is not None:
                     tensor = info.tensor
                     if device_holding_tensor is not None and not info.has_device:
                         tensor = tensor.to(device_holding_tensor.device)
@@ -619,7 +623,7 @@ class _Tensor:
         with EnableAllLayers(result_levels) as guard:
             # Update arguments with batched tensors
             for i, info in enumerate(infos):
-                if info:
+                if info and info.batchedtensor is not None:
                     batched = info.batchedtensor
                     if device_holding_tensor is not None and not info.has_device:
                         batched = batched.to(device_holding_tensor.device)
@@ -640,7 +644,7 @@ class _Tensor:
             else:
                 return tree_map(unwrap_tensor, result)
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index: Any, value: Any) -> None:
         """Set values in tensor using first-class dimensions."""
         from functorch.dim._getsetitem import setitem
 
@@ -649,7 +653,7 @@ class _Tensor:
     # expand and index are OK to be methods because they don't have torch.*
     # versions, but if they did they need the stack/cat treatment
 
-    def expand(self, *args) -> _Tensor:
+    def expand(self, *args: Dim) -> _Tensor:
         """
         Expand tensor by adding new dimensions or expanding existing dimensions.
 
@@ -692,10 +696,16 @@ class _Tensor:
 
         # First-class dimension expansion - all args are Dim objects
         data = info.tensor
+        if data is None:
+            # No tensor data available, fallback
+            return self.__torch_function__(
+                torch.Tensor.expand, (type(self),), (self,) + args
+            )
+
         levels = info.levels
 
         # Build new levels list - new dims come first (following C++ logic)
-        new_levels = []
+        new_levels: list[DimEntry] = []
         new_sizes = []
         new_strides = []
 
@@ -730,9 +740,20 @@ class _Tensor:
         expanded_data = data.as_strided(new_sizes, new_strides, data.storage_offset())
 
         # Return new tensor with expanded dimensions
-        return Tensor.from_positional(expanded_data, new_levels, info.has_device)
+        result = Tensor.from_positional(expanded_data, new_levels, info.has_device)
+        return result  # type: ignore[return-value]  # Tensor and torch.Tensor are interchangeable
 
-    def index(self, dims, indices):
+    def index(
+        self,
+        dims: Union[int, Dim, tuple[Union[int, Dim], ...], list[Union[int, Dim]]],
+        indices: Union[
+            int,
+            slice,
+            torch.Tensor,
+            tuple[Union[int, slice, torch.Tensor], ...],
+            list[Union[int, slice, torch.Tensor]],
+        ],
+    ) -> _Tensor:
         """
         Index tensor using first-class dimensions.
 
@@ -743,20 +764,20 @@ class _Tensor:
         from ._wrap import _wrap_dim
 
         # Helper to check if obj is a dimpack (tuple/list) and extract items
-        def maybe_dimpack(obj, check_first=False):
+        def maybe_dimpack(obj: Any, check_first: bool = False) -> tuple[Any, bool]:
             if isinstance(obj, (tuple, list)):
                 return list(obj), True
             return None, False
 
         # Helper to parse dimension entry matching C++ _wrap_dim
-        def parse_dim_entry(s):
+        def parse_dim_entry(s: Any) -> Any:
             d = _wrap_dim(s, self.ndim, False)
             if d.is_none():
                 raise TypeError(f"expected a dimension specifyer but found {repr(s)}")
             return d
 
         # Helper for dimension not present errors
-        def dim_not_present(d):
+        def dim_not_present(d: Any) -> None:
             if d.is_positional():
                 raise TypeError(
                     f"dimension {d.position() + self.ndim} not in tensor of {self.ndim} dimensions"
@@ -765,28 +786,31 @@ class _Tensor:
                 raise TypeError(f"dimension {repr(d.dim())} not in tensor")
 
         # Normalize dims and indices to lists (faithful to C++ logic)
-        dims_list = []
-        indices_list = []
+        dims_list: list[Union[int, Dim]] = []
+        indices_list: list[Union[int, slice, torch.Tensor]] = []
 
         lhs_list = isinstance(dims, (tuple, list))
         rhs_list = isinstance(indices, (tuple, list))
 
         if lhs_list and rhs_list:
-            if len(dims) != len(indices):
+            # Type narrowing: we know dims and indices are sequences here
+            dims_seq = dims  # type: ignore[assignment]
+            indices_seq = indices  # type: ignore[assignment]
+            if len(dims_seq) != len(indices_seq):  # type: ignore[arg-type]
                 raise TypeError(
-                    f"dims ({len(dims)}) and indices ({len(indices)}) must have the same length"
+                    f"dims ({len(dims_seq)}) and indices ({len(indices_seq)}) must have the same length"  # type: ignore[arg-type]
                 )
-            dims_list.extend(dims)
-            indices_list.extend(indices)
+            dims_list.extend(dims_seq)  # type: ignore[arg-type]
+            indices_list.extend(indices_seq)  # type: ignore[arg-type]
         else:
-            dims_list.append(dims)
-            indices_list.append(indices)
+            dims_list.append(dims)  # type: ignore[arg-type]
+            indices_list.append(indices)  # type: ignore[arg-type]
 
         # Create tensor info
         self_info = TensorInfo.create(self, False, False)
 
-        new_levels = []
-        to_flatten = []
+        new_levels: list[Any] = []
+        to_flatten: list[Any] = []
         dims_list_flat = []
 
         # Process each dim specification
@@ -829,6 +853,7 @@ class _Tensor:
                         break
                 if first_idx is None:
                     dim_not_present(first)
+                    continue  # Skip this iteration if dimension not found
 
                 # Insert rest after first (faithful to C++ slice insertion)
                 for j, r in enumerate(rest):
@@ -839,9 +864,12 @@ class _Tensor:
 
         # Handle dimension flattening if needed
         if len(to_flatten) > 0:
+            assert self_info.tensor is not None, (
+                "Cannot perform dimension flattening on None tensor"
+            )
             rearranged = _match_levels(self_info.tensor, self_info.levels, new_levels)
             sizes = rearranged.size()
-            new_sizes = []
+            new_sizes: list[Any] = []
             reshape_levels = []
 
             for i in range(len(new_levels)):
@@ -888,7 +916,7 @@ class _Tensor:
                 dims_repr.append(l.data)
             else:
                 dims_repr.append(l)
-        return f"{tensor}\nwith dims={tuple(dims_repr)} sizes={tuple(tensor.size())}"
+        return f"{tensor}\nwith dims={tuple(dims_repr)} sizes={tuple(tensor.size())}"  # type: ignore[union-attr]
 
 
 TensorLike = (_Tensor, torch.Tensor)
@@ -901,7 +929,7 @@ class Dim(_Tensor):
     _range: Optional[torch.Tensor]
     _batchtensor: Optional[torch.Tensor]
 
-    def __init__(self, name, s: int = -1):
+    def __init__(self, name: str, s: int = -1) -> None:
         global _n_dims_created
         self._name = name
         self._size = s
@@ -911,7 +939,7 @@ class Dim(_Tensor):
         self._batchtensor = None
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         return 1
 
     @classmethod
@@ -973,8 +1001,8 @@ class Dim(_Tensor):
 
 
 class Tensor(_Tensor):
-    _tensor: torch.Tensor
-    _batchtensor: torch.Tensor
+    _tensor: Optional[torch.Tensor]
+    _batchtensor: Optional[torch.Tensor]
     _levels: list[DimEntry]
     _has_device: bool
     _delayed: Optional[Callable[[], torch.Tensor]]
@@ -984,17 +1012,17 @@ class Tensor(_Tensor):
     # NB: capture_levels is just assign to _levels
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         return sum(1 if l.is_positional() else 0 for l in self._levels)
 
     @classmethod
-    def check_exact(cls, other):
+    def check_exact(cls, other: Any) -> bool:
         return type(other) is cls
 
     @classmethod
     def from_positional(
         cls, tensor: torch.Tensor, levels: list[DimEntry], has_device: bool
-    ):
+    ) -> Union[_Tensor, torch.Tensor]:
         """
         Create a functorch Tensor from a regular PyTorch tensor with specified dimension levels.
 
@@ -1053,7 +1081,7 @@ class Tensor(_Tensor):
     @classmethod
     def create_delayed(
         cls, orig: Callable, args: tuple, levels: list[DimEntry], has_device: bool
-    ):
+    ) -> _Tensor:
         """
         Create a delayed tensor that defers the operation until later.
 
@@ -1068,7 +1096,7 @@ class Tensor(_Tensor):
         result._delayed_args = args
 
         # Create delayed evaluation function that unwraps Tensor objects
-        def evaluate_delayed():
+        def evaluate_delayed() -> torch.Tensor:
             unwrapped_args = []
             for arg in args:
                 if hasattr(arg, "_get_tensor"):
@@ -1079,12 +1107,9 @@ class Tensor(_Tensor):
 
         result._delayed = evaluate_delayed
 
-        # Calculate ndim from levels
-        result.ndim = ndim_of_levels(levels)
-
         return result
 
-    def _get_tensor(self):
+    def _get_tensor(self) -> Optional[torch.Tensor]:
         """Get the underlying tensor, handling delayed operations if needed."""
         if (
             hasattr(self, "_delayed")
@@ -1099,15 +1124,15 @@ class Tensor(_Tensor):
             self._delayed_args = None
         return self._tensor
 
-    def _get_levels(self):
+    def _get_levels(self) -> list[Any]:
         """Get the dimension levels."""
         return self._levels
 
-    def _get_has_device(self):
+    def _get_has_device(self) -> bool:
         """Get whether this tensor has device information."""
         return self._has_device
 
-    def _get_batchtensor(self):
+    def _get_batchtensor(self) -> Optional[torch.Tensor]:
         """Get the batched tensor representation, creating it lazily if needed."""
         if self._batchtensor is None:
             self._batchtensor = self._add_batch_dims(
@@ -1115,7 +1140,9 @@ class Tensor(_Tensor):
             )
         return self._batchtensor
 
-    def _add_batch_dims(self, t, levels_):
+    def _add_batch_dims(
+        self, t: Optional[torch.Tensor], levels_: list[Any]
+    ) -> Optional[torch.Tensor]:
         levels = list(levels_)
 
         while True:
@@ -1138,19 +1165,21 @@ class Tensor(_Tensor):
                 return t
 
             # at::functorch::addBatchDim(std::move(t), min_index, min_value)
-            t = torch._C._functorch._add_batch_dim(t, min_index, min_value)
+            assert t is not None:
+            t = torch._C._functorch._add_batch_dim(t, min_index, int(min_value))
 
             levels[min_real_index] = DimEntry()
         return None
 
-    def order(self, *dims):
+    def order(self, *dims: Any) -> _Tensor:
         """Reorder the dimensions of this tensor."""
         from ._order import order
 
-        return order(self, *dims)
+        result = order(self, *dims)
+        return result  # type: ignore[return-value]  # Tensor and torch.Tensor are interchangeable
 
 
-def stack(tensors, new_dim, dim=0):
+def stack(tensors: Any, new_dim: Any, dim: int = 0) -> _Tensor:
     """
     Stack tensors along a new dimension.
 
@@ -1170,7 +1199,8 @@ def stack(tensors, new_dim, dim=0):
     # Check if new_dim is a Dim object
     if not isinstance(new_dim, Dim):
         # Fall back to regular torch.stack
-        return torch.stack(tensors, dim=dim)
+        result = torch.stack(tensors, dim=dim)
+        return result  # type: ignore[return-value]
 
     # Collect all result_levels from input tensors
     result_levels = []
@@ -1189,6 +1219,7 @@ def stack(tensors, new_dim, dim=0):
     # Match all tensors to the common level structure using _match_levels
     inputs = []
     for info in infos:
+        assert info.tensor is not None, "Cannot stack tensors with None tensor data"
         matched_tensor = _match_levels(info.tensor, info.levels, result_levels)
         inputs.append(matched_tensor)
 
@@ -1212,12 +1243,13 @@ def stack(tensors, new_dim, dim=0):
     result_levels.insert(rawdim, DimEntry(new_dim))
 
     # Return as a first-class tensor
-    return Tensor.from_positional(
+    tensor_result = Tensor.from_positional(
         result, result_levels, infos[0].has_device if infos else True
     )
+    return tensor_result  # type: ignore[return-value]
 
 
-def split(tensor, split_size_or_sections, dim=None):
+def split(tensor: Any, split_size_or_sections: Any, dim: Any = None) -> tuple:
     """
     Split tensor along a dimension.
 
@@ -1279,11 +1311,7 @@ def split(tensor, split_size_or_sections, dim=None):
         raise TypeError("split expects at least a 1-dimension tensor")
 
     # Wrap the dimension
-    dim_l = (
-        _wrap_dim(dim, ndim, False)
-        if dim is not None
-        else DimEntry.from_positional(-ndim)
-    )
+    dim_l = _wrap_dim(dim, ndim, False) if dim is not None else DimEntry(-ndim)
 
     # Find the index of the dimension in levels
     idx = None
@@ -1310,6 +1338,7 @@ def split(tensor, split_size_or_sections, dim=None):
             indices.append(0)
             unbound.append(i)
 
+    assert self_info.tensor is not None, "Cannot get tensor size on None tensor"
     tensor_size = self_info.tensor.size(idx)
 
     # Handle unbound dimensions
@@ -1348,9 +1377,9 @@ def split(tensor, split_size_or_sections, dim=None):
     return tuple(result)
 
 
-def cat(tensors, dim, new_dim):
-    n = dims()
-    return stack(tensors, n, dim).index([n, dim], new_dim)
+def cat(tensors: Any, dim: Any, new_dim: Any) -> _Tensor:
+    n = dims(1)  # Get single Dim instead of tuple
+    return stack(tensors, n, dim).index([n, dim], new_dim)  # type: ignore[list-item]
 
 
 class DotPart:
@@ -1359,11 +1388,11 @@ class DotPart:
     Port of C++ DotPart structure.
     """
 
-    def __init__(self):
-        self.dims = []
+    def __init__(self) -> None:
+        self.dims: list[DimEntry] = []
         self.total_size = 1
 
-    def append(self, dim_entry):
+    def append(self, dim_entry: Any) -> None:
         """Add a dimension entry to this part."""
         self.dims.append(dim_entry)
         if not dim_entry.is_positional():
@@ -1383,6 +1412,8 @@ def dot_prepare(parts: list[DotPart], tensor_info: TensorInfo) -> torch.Tensor:
             needs_reshape = True
         new_levels.extend(part.dims)
 
+    if tensor_info.tensor is None:
+        raise RuntimeError("Cannot perform dot product on None tensor")
     result = _match_levels(tensor_info.tensor, tensor_info.levels, new_levels)
 
     if not needs_reshape:
@@ -1412,10 +1443,11 @@ def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
             new_size.append(level.dim().size)
         result_tensor = result_tensor.reshape(new_size)
 
-    return Tensor.from_positional(result_tensor, result_levels, True)
+    tensor_result = Tensor.from_positional(result_tensor, result_levels, True)
+    return tensor_result  # type: ignore[return-value]
 
 
-def dot(lhs, rhs, sum_dims):
+def dot(lhs: Any, rhs: Any, sum_dims: Any) -> Union[_Tensor, torch.Tensor]:
     """
     Perform dot product between two tensors along specified dimensions.
     Port of C++ dot function.
@@ -1436,6 +1468,10 @@ def dot(lhs, rhs, sum_dims):
         # Fall back to regular operations
         return torch.matmul(lhs, rhs)
 
+    assert lhs_info.tensor is not None and rhs_info.tensor is not None, (
+        "Cannot perform dot product on None tensors"
+    )
+
     lhs_strides = lhs_info.tensor.stride()
     rhs_strides = rhs_info.tensor.stride()
 
@@ -1445,7 +1481,7 @@ def dot(lhs, rhs, sum_dims):
     ro_dims = DotPart()  # Right-output only
     lr_dims = DotPart()  # Left-right (contracted dims)
 
-    def insert_dim(d, lhs_idx, rhs_idx):
+    def insert_dim(d: Any, lhs_idx: Any, rhs_idx: Any) -> None:
         """Insert dimension into appropriate part based on stride pattern."""
         reduced = d in sum_dims
         lhs_stride = lhs_strides[lhs_idx] if lhs_idx is not None else 0
@@ -1509,7 +1545,7 @@ wrap_type(_Tensor, torch.Tensor, _Tensor.__torch_function__)
 del _Tensor.ndim
 
 
-def index(self, positions, dims):
+def index(self: Any, positions: Any, dims: Any) -> _Tensor:
     """
     Index a regular tensor by binding specified positions to dims.
 
@@ -1531,13 +1567,15 @@ def index(self, positions, dims):
     info = TensorInfo.create(self, ensure_batched=False, ensure_present=False)
 
     # Create the first-class tensor
+    assert info.tensor is not None, "Cannot index None tensor"
     result = Tensor.from_positional(info.tensor, info.levels, info.has_device)
 
     # Now call the index method on the first-class tensor
-    return _Tensor.index(result, positions, dims)
+    # Cast result to _Tensor for the method call
+    return _Tensor.index(result, positions, dims)  # type: ignore[arg-type]
 
 
-def _def(name, *args, **kwargs):
+def _def(name: str, *args: Any, **kwargs: Any) -> None:
     orig = getattr(torch.Tensor, name)
     setattr(_Tensor, name, _wrap(orig, *args, **kwargs))
 

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Union, TYPE_CHECKING
 
 import torch
 
 from ._dim_entry import _match_levels, DimEntry
 from ._tensor_info import TensorInfo
 
+if TYPE_CHECKING:
+    from . import Dim
 
-def _safe_index(lst, item):
+
+def _safe_index(lst: list, item: Any) -> Optional[int]:
     """
     Helper function to find index of item in list.
 
@@ -38,7 +41,7 @@ class IndexingInfo:
     has_device: bool = False
 
 
-def has_dims(obj) -> bool:
+def has_dims(obj: Any) -> bool:
     """
     Check if an object has first-class dimensions.
 
@@ -51,7 +54,7 @@ def has_dims(obj) -> bool:
     return Dim.check_exact(obj) or Tensor.check_exact(obj)
 
 
-def _bind_dims_to_size(sz: int, sd: int, dims: list, nsz: list, nsd: list):
+def _bind_dims_to_size(sz: int, sd: int, dims: list, nsz: list, nsd: list) -> None:
     """
     Bind dimensions to size and calculate proper strides for dim packs.
     Based on the C++ implementation in functorch/csrc/dim/dim.cpp:2192-2225
@@ -109,7 +112,7 @@ def slice_to_tuple(flat_inputs: list) -> tuple:
     return tuple(flat_inputs)
 
 
-def extractIndices(index, indices: list) -> bool:
+def extractIndices(index: Any, indices: list) -> bool:
     # Follow the C++ switch structure more closely
     if isinstance(index, tuple):  # mpy::tuple_view::check
         indices.extend(index)
@@ -150,7 +153,7 @@ def extractIndices(index, indices: list) -> bool:
     return False
 
 
-def getitem(cls, func, types, args, kwargs):
+def getitem(cls: Any, func: Any, types: Any, args: Any, kwargs: Any) -> Any:
     self = args[0]
     index = args[1]
 
@@ -162,7 +165,7 @@ def getitem(cls, func, types, args, kwargs):
     return invoke_getitem(iinfo)
 
 
-def setitem(self, index, rhs):
+def setitem(self: Any, index: Any, rhs: Any) -> None:
     """Set values in tensor using first-class dimensions."""
     from . import DimensionBindError, TensorInfo
 
@@ -192,7 +195,7 @@ def setitem(self, index, rhs):
 
                 if not found:
                     # Create tuple representation of result levels for error message
-                    result_dims = []
+                    result_dims: list[Union[int, Dim]] = []
                     for rl in iinfo.result_levels:
                         if rl.is_positional():
                             result_dims.append(rl.position())
@@ -205,6 +208,7 @@ def setitem(self, index, rhs):
                     )
 
         # Match RHS tensor to result levels
+        assert rhs_info.tensor is not None, "Cannot match levels on None tensor"
         matched_rhs = _match_levels(
             rhs_info.tensor, rhs_info.levels, iinfo.result_levels
         )
@@ -216,19 +220,28 @@ def setitem(self, index, rhs):
     if iinfo.advanced_indexing:
         # Use advanced indexing - the flat_inputs already contain matched tensors
         tup = slice_to_tuple(iinfo.flat_inputs)
+        if iinfo.self_tensor is None:
+            raise RuntimeError("Cannot setitem on None tensor")
         torch._C.TensorBase.__setitem__(iinfo.self_tensor, tup, matched_rhs)
     else:
         # Simple copy operation
+        if iinfo.self_tensor is None:
+            raise RuntimeError("Cannot copy to None tensor")
         iinfo.self_tensor.copy_(matched_rhs)
 
 
-def invoke_getitem(iinfo: IndexingInfo):
+def invoke_getitem(iinfo: IndexingInfo) -> Any:
     if iinfo.advanced_indexing:
         self_tensor = iinfo.self_tensor
         tup = slice_to_tuple(iinfo.flat_inputs)
+        if self_tensor is None:
+            raise RuntimeError("Cannot getitem on None tensor")
         rtensor = self_tensor[tup]
     else:
-        rtensor = iinfo.self_tensor
+        rtensor = iinfo.self_tensor  # type: ignore[assignment]
+        if rtensor is None:
+            raise RuntimeError("Cannot getitem on None tensor")
+        # rtensor is now guaranteed to be not None
 
     # Create a Tensor with the proper dimensions using the class method
     from . import Tensor
@@ -236,7 +249,7 @@ def invoke_getitem(iinfo: IndexingInfo):
     return Tensor.from_positional(rtensor, iinfo.result_levels, iinfo.has_device)
 
 
-def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
+def getsetitem(self: Any, index: Any, tensors_have_dims: bool) -> IndexingInfo:
     from . import DimList  # Import DimList for type checking
 
     can_call_original_getitem = not tensors_have_dims
@@ -257,7 +270,7 @@ def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
     unbound_dim_list = None
     dimlists = []  # Track DimList positions for later processing
 
-    def check_expanding(i):
+    def check_expanding(i: int) -> None:
         nonlocal expanding_object
         if expanding_object != -1:
             from . import DimensionBindError
@@ -268,7 +281,7 @@ def getsetitem(self, index, tensors_have_dims: bool) -> IndexingInfo:
             )
         expanding_object = i
 
-    def is_dimpack(s):
+    def is_dimpack(s: Any) -> bool:
         # Check if s is a tuple/list of Dim objects, following C++ dimpack logic
         from . import Dim
 
@@ -361,10 +374,10 @@ def getsetitem_flat(
     from . import Dim
 
     # Track dimension usage
-    seen_dims = []
-    seen_dims_nuses = []
+    seen_dims: list[Any] = []
+    seen_dims_nuses: list[int] = []
 
-    def add_dim(dim):
+    def add_dim(dim: Any) -> None:
         # Use safe indexing to avoid triggering __torch_function__ on Dim objects
         idx = _safe_index(seen_dims, dim)
         if idx is not None:
@@ -374,14 +387,14 @@ def getsetitem_flat(
             seen_dims_nuses.append(1)
 
     flat_inputs = []
-    tensor_inputs = []
+    tensor_inputs: list[Any] = []
     device_holding_tensor = None
 
-    def append_flat_handle(handle):
+    def append_flat_handle(handle: Any) -> None:
         flat_inputs.append(handle)
         tensor_inputs.append(None)
 
-    def append_tensor_input(ti: TensorInfo):
+    def append_tensor_input(ti: TensorInfo) -> None:
         flat_inputs.append(None)
         tensor_inputs.append(ti)
         nonlocal device_holding_tensor
@@ -390,17 +403,19 @@ def getsetitem_flat(
 
     nsz = []
     nsd = []
+    if self_info.tensor is None:
+        raise RuntimeError("Cannot get size/stride on None tensor")
     sz = self_info.tensor.size()
     sd = self_info.tensor.stride()
 
-    def append_size(i):
+    def append_size(i: int) -> None:
         if has_dimpacks_or_none:
             nsz.append(sz[i])
             nsd.append(sd[i])
 
     input_it = input_list[:]
 
-    def parse_nones():
+    def parse_nones() -> None:
         nonlocal input_it
         while input_it and input_it[0] is None:
             append_flat_handle(slice(None))
@@ -408,7 +423,7 @@ def getsetitem_flat(
             nsd.append(0)
             input_it = input_it[1:]
 
-    def append_item(i, arg):
+    def append_item(i: int, arg: Any) -> None:
         if Dim.check_exact(arg):
             d = arg
             if d._size == -1:
@@ -465,6 +480,8 @@ def getsetitem_flat(
 
     # Restride tensor if needed
     if has_dimpacks_or_none and nsz:
+        if self_info.tensor is None:
+            raise RuntimeError("Cannot restride None tensor")
         self_tensor = self_info.tensor.as_strided(
             nsz, nsd, self_info.tensor.storage_offset()
         )
@@ -472,12 +489,12 @@ def getsetitem_flat(
         self_tensor = self_info.tensor
 
     # Determine result shape and indexing requirements
-    result_levels = []
+    result_levels: list[Any] = []
     index_levels = []
     tensor_insert_point = -1
     requires_getindex = False
 
-    def mark_tensor_index():
+    def mark_tensor_index() -> None:
         nonlocal tensor_insert_point
         if tensor_insert_point == -1:
             tensor_insert_point = len(result_levels)
@@ -524,6 +541,7 @@ def getsetitem_flat(
         for i in range(len(flat_inputs)):
             if tensor_inputs[i] is not None:
                 t = tensor_inputs[i].tensor
+                assert t is not None, "TensorInfo should have valid tensor data"
                 if (
                     not tensor_inputs[i].has_device
                     and device_holding_tensor is not None

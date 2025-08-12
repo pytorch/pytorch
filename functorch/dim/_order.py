@@ -158,6 +158,7 @@ def order(
         new_levels.extend(flat_positional_dims)
 
     # Match tensor to new level structure
+    assert data is not None, "Cannot reorder None tensor"
     ndata = _match_levels(data, orig_levels, new_levels)
 
     # Handle dimension flattening if requested
@@ -213,4 +214,5 @@ def order(
             seen -= 1
             new_levels[i] = DimEntry(seen)
 
-    return Tensor.from_positional(ndata, new_levels, has_device)
+    result = Tensor.from_positional(ndata, new_levels, has_device)
+    return result  # type: ignore[return-value]
