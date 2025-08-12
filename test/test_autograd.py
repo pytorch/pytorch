@@ -1223,7 +1223,6 @@ class TestAutograd(TestCase):
         del out
         torch.autograd.backward(edge)
 
-
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
