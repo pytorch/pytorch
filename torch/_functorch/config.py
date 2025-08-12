@@ -281,6 +281,17 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # real tensor outputs.
 generate_fake_kernels_from_real_mismatches = False
 
+# When there are device mismatches in FakeTensor device propagation,
+# prefer a specific device type over others. This is particularly useful
+# in full compiled mode where intermediate tensors with device mismatches
+# represent only logical differences during compilation - these intermediate
+# tensors will never physically materialize in the binary execution, so the
+# device mismatch is not a real runtime concern. Enabling this allows the
+# compiler to proceed with compilation by choosing the preferred device type
+# for consistency. For example, set to "mtia" to prefer MTIA devices over
+# CPU, or "cuda" to prefer CUDA devices over CPU.
+fake_tensor_prefer_device_type: Optional[str] = None
+
 # CUDAGraph save run_with_rng functionalization.
 # TODO: turn on by default
 graphsafe_rng_functionalization = True

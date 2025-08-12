@@ -31,6 +31,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    MultiProcContinousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -40,6 +41,8 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
+
+DEVICE_COUNT: int
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
@@ -334,6 +337,21 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
+class DTensorContinuousTestBase(MultiProcContinousTest):
+    @classmethod
+    def device_type(cls) -> str:
+        # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < cls.world_size:
+            return "cpu"
+        else:
+            return DEVICE_TYPE
+
+    @classmethod
+    def backend_str(cls) -> str:
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        return backend
+
+
 class DTensorTestBase(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -459,7 +477,9 @@ def with_comms(
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+            self,
+            *args: tuple[object],
+            **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
             self.init_pg(eager_init, backend)
 

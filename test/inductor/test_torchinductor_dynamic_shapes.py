@@ -147,7 +147,7 @@ class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
-        # HAS_CUDA also checks compute capability to skip tests
+        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
         # on older devices
         if not HAS_GPU:
             self.skipTest("Triton not available")

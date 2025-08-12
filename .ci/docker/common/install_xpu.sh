@@ -34,18 +34,27 @@ function install_ubuntu() {
 
     # The xpu-smi packages
     apt-get install -y flex bison xpu-smi
-    # Compute and Media Runtimes
-    apt-get install -y \
-        intel-opencl-icd intel-level-zero-gpu level-zero \
-        intel-media-va-driver-non-free libmfx1 libmfxgen1 libvpl2 \
-        libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
-        libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
-        mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo
-    if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
-        apt-get install -y intel-ocloc
+
+    if [[ "${XPU_DRIVER_TYPE,,}" == "lts" ]]; then
+        # Compute and Media Runtimes
+        apt-get install -y \
+            intel-opencl-icd intel-level-zero-gpu level-zero \
+            intel-media-va-driver-non-free libmfx1 libmfxgen1 libvpl2 \
+            libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
+            libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
+            mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo
+        # Development Packages
+        apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
+    else # rolling driver
+        apt-get install -y \
+            intel-opencl-icd libze-intel-gpu1 libze1 \
+            intel-media-va-driver-non-free libmfx-gen1 libvpl2 \
+            libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
+            libglapi-mesa libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
+            mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo intel-ocloc
+        apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev libze-dev
     fi
-    # Development Packages
-    apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
+
     # Install Intel Support Packages
     apt-get install -y ${XPU_PACKAGES}
 
@@ -130,11 +139,11 @@ function install_sles() {
 
 }
 
-# Default use GPU driver LTS releases
-XPU_DRIVER_VERSION="/lts/2350"
-if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
-    # Use GPU driver rolling releases
-    XPU_DRIVER_VERSION=""
+# Default use GPU driver rolling releases
+XPU_DRIVER_VERSION=""
+if [[ "${XPU_DRIVER_TYPE,,}" == "lts" ]]; then
+    # Use GPU driver LTS releases
+    XPU_DRIVER_VERSION="/lts/2350"
 fi
 
 # Default use Intel® oneAPI Deep Learning Essentials 2025.0

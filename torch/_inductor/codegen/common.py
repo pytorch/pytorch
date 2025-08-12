@@ -253,6 +253,9 @@ class WorkspaceArg(CodegenSymbol):
     def get_name(self) -> str:
         return self.outer_name
 
+    def get_is_pinned(self) -> bool:
+        return False
+
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
@@ -359,8 +362,8 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(
-        self, idx: int, workspace: TritonScratchWorkspace
+    def cpp_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
     ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError

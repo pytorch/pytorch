@@ -3247,7 +3247,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),

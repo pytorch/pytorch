@@ -1601,6 +1601,16 @@ class TestCommon(TestCase):
         ) == 0:
             return
 
+        if TEST_WITH_TORCHDYNAMO:
+            # NOTE: Also for TEST_WITH_TORCHINDUCTOR tests
+            # Under compile, some ops may be decomposed into supported ops
+            # So it is okay to have supported_but_unclaimed_*
+            if (
+                len(claimed_but_unsupported_forward)
+                + len(claimed_but_unsupported_backward)
+            ) == 0:
+                return
+
         # Reference operators often support additional dtypes, and that's OK
         if op in python_ref_db:
             if (

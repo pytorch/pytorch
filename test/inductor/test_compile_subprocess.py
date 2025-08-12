@@ -62,9 +62,6 @@ test_failures = {
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
-    # TODO:remove test_upsample_bicubic2d after the following issue resolved:
-    # https://github.com/intel/intel-xpu-backend-for-triton/issues/4184
-    "test_upsample_bicubic2d": TestFailure(("xpu"), is_skip=False),
 }
 
 

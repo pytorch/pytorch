@@ -417,6 +417,7 @@ class Op:
         else:
             self.input_sizes, self.output_sizes = None, None
         self.collective_seq_id = event["collective_seq_id"]
+        self.stack_id = event.get("stack_id", -1)
         self.p2p_seq_id = event["p2p_seq_id"]
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
@@ -456,6 +457,7 @@ class Op:
                 f"pg_name={self.pg_name}",
                 f"pg_description={self.pg_desc}",
                 f"pg_size={self.pg_size}",
+                f"stack_id={self.stack_id}",
                 f"state={self.state}",
             )
             return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)

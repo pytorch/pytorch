@@ -233,9 +233,9 @@ class InplacePaddingTest(TestCase):
             loss.backward()
             return loss
 
-        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x = torch.randn(B * T, C, requires_grad=True).to(GPU_TYPE).bfloat16()
         x.retain_grad()
-        y = torch.randint(0, V, (B * T,)).cuda()
+        y = torch.randint(0, V, (B * T,)).to(GPU_TYPE)
 
         opt_f = torch.compile(f)
 

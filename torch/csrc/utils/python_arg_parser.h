@@ -322,6 +322,12 @@ struct FunctionParameter {
       int argnum,
       int64_t* failed_idx = nullptr);
 
+  bool _check(
+      PyObject* obj,
+      std::vector<PyObject*>& overloaded_args,
+      int argnum,
+      int64_t* failed_idx = nullptr);
+
   void set_default_str(const std::string& str);
   TORCH_PYTHON_API std::string type_name() const;
 

@@ -49,6 +49,7 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
+from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -479,22 +480,29 @@ class AsyncCompile:
                 log_waitcounter=True,
                 waitcounter_name_override="compile_triton",
             ):
-                start_ns = time_ns()
-                _set_triton_ptxas_path()
-                kernel = load_kernel()
-                kernel.set_compile_info(compile_id, is_backward)
-                kernel.precompile(
-                    warm_cache_only=False,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
-                elapsed_us = (time_ns() - start_ns) // 1000
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
-                info = kernel.autotune_cache_info or {}
-                info["compile_time_us"] = elapsed_us
-                _add_triton_kernel_info(kernel_name, info)
-                return kernel
+                fail = None
+                try:
+                    start_ns = time_ns()
+                    _set_triton_ptxas_path()
+                    kernel = load_kernel()
+                    kernel.set_compile_info(compile_id, is_backward)
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                    elapsed_us = (time_ns() - start_ns) // 1000
+                    get_metrics_context().add_top_n(
+                        "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                    )
+                    info = kernel.autotune_cache_info or {}
+                    info["compile_time_us"] = elapsed_us
+                    _add_triton_kernel_info(kernel_name, info)
+                    return kernel
+                except Exception as e:
+                    fail = str(e)
+                    raise
+                finally:
+                    log_triton_builds(fail=fail)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall

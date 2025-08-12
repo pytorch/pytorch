@@ -1270,6 +1270,11 @@ def _fused_scaled_matmul_reduce_scatter_impl(
             .flatten(0, -2)
         )
         A_scale_shards = list(A_scale.chunk(group.size()))
+        # cuBLAS's row-wise kernel requires scales to be aligned to 16 bytes.
+        # When we slice them we might break this and need to reallocate them.
+        A_scale_shards = [
+            t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
+        ]
     else:
         raise ValueError("A_scale cannot be none for scaled_mm")
 

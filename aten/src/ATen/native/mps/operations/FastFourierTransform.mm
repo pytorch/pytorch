@@ -88,7 +88,6 @@ using namespace mps;
 
 // TODO: Investigate numerical discrepancies see https://github.com/pytorch/pytorch/issues/120237
 Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided, Tensor& out) {
-  TORCH_CHECK(supportsComplex(), "FFT operations are only supported on MacOS 14+");
   auto key = __func__ + getTensorsStringKey({self, out}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(onesided);
   @autoreleasepool {
@@ -129,7 +128,6 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
                          int64_t normalization,
                          int64_t last_dim_size,
                          Tensor& out) {
-  TORCH_CHECK(supportsComplex(), "FFT operations are only supported on MacOS 14+");
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(last_dim_size);
   @autoreleasepool {
@@ -155,7 +153,6 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
 }
 
 Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward, Tensor& out) {
-  TORCH_CHECK(supportsComplex(), "FFT operations are only supported on MacOS 14+");
   auto key = __func__ + getTensorsStringKey({self}) + ":" + getArrayRefString(dim) + ":" +
       std::to_string(normalization) + ":" + std::to_string(forward);
   @autoreleasepool {

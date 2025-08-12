@@ -89,6 +89,38 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
+    def test_init_with_user_generator(self):
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+        rng = torch.Generator(device="cuda").manual_seed(42)
+        t1 = torch.distributed.tensor.empty(
+            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+        t2 = torch.distributed.tensor.empty(
+            (8, 3), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+        for i in range(2):
+            # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
+            torch.nn.init.uniform_(t1, 0.0, 1.0)
+            torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
+            self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
+
+        # ensure that we do not cache the 'seed' of `rng` from the first time we see it in DTensor
+        # TODO: we have a semantics decision to make
+        # There is a discontinuity between how the default RNG and a user-supplied RNG behaves with DTensor:
+        # (a) if the user calls `torch.manual_seed` after already using the default RNG with DTensor,
+        #     they may be surprised that it has no effect on DTensor.  They must instead call this private API
+        #     (`torch.distributed.tensor._random._rng_tracker._manual_seed`)
+        # (b) If we try to match the semantics of (a) with a user-supplied RNG, they may be very surprised to find that
+        #     their RNG object never advances its state after using it with DTensor.
+        # torch.distributed.tensor._random._rng_tracker._manual_seed(55)
+        # rng.manual_seed(55)
+        # torch.nn.init.uniform_(t1, 0.0, 1.0)
+        # torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
+        # self.assertEqual(t1.full_tensor(), t2.full_tensor())
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).

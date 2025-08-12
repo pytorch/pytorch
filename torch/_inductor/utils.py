@@ -895,7 +895,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and not ir.IRNode.is_realized_node(n)
+        return isinstance(n, ir.IRNode) and not isinstance(
+            n,
+            (
+                ir.ComputedBuffer,
+                ir.InputsKernel,
+                ir.InputBuffer,
+                ir.TemplateBuffer,
+            ),
+        )
 
     # kwargs and args may include a container of node, for example torch.cat([t1, t2])
     # flatten them before search the unrealized nodes
@@ -3321,6 +3329,13 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
+def is_using_cudagraph_partition() -> bool:
+    return (
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    )
+
+
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -3366,13 +3381,12 @@ def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
         for i, e in enumerate(row):
             widths[i] = max(widths[i], len(str(e)))
     lines = []
-    # Need nested {} for string formatting; ignore SET_LINTER here
-    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))  # noqa: set_linter
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
     #              widths          whitespace      horizontal separators
     total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
     lines.append("-" * total_width)
     for row in elements:
-        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))  # noqa: set_linter
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
     return "\n".join(lines)
 
 
@@ -3427,20 +3441,36 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     Returns:
         dict[str, Any]: The possibly-updated `config_patches` dictionary.
     """
+
+    def patch_config(
+        config_patches: dict[str, Any], config_name: str, config_value: Any
+    ) -> None:
+        value = config_patches.get(config_name, getattr(config, config_name))
+        if value is None:
+            config_patches[config_name] = config_value
+        elif not value and value != config_value:
+            raise RuntimeError(
+                f"Invalid config: {config_name}={config_value} when aot_inductor.compile_standalone is True."
+            )
+
     compile_standalone = config_patches.get(
         "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
     )
+    # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
+    config_patches = config_patches.copy()
     if compile_standalone:
-        package_cpp_only = config_patches.get(
-            "aot_inductor.package_cpp_only", config.aot_inductor.package_cpp_only
+        # Standlaone AOTInductor means only generate cpp project for building a standalone binary
+        patch_config(config_patches, "aot_inductor.package_cpp_only", True)
+        # Standlaone AOTInductor needs to embed the kernel code in the binary
+        patch_config(config_patches, "aot_inductor.embed_kernel_binary", True)
+        # Default to use multi-arch kernel codegen for non-rocm GPU
+        patch_config(
+            config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
         )
-        if package_cpp_only is None:
-            config_patches = {**config_patches, "aot_inductor.package_cpp_only": True}
-        elif not package_cpp_only:
-            raise RuntimeError(
-                "compile_standalone=True requires package_cpp_only=True. "
-                "Please set aot_inductor.package_cpp_only=True in your inductor config."
-            )
+        patch_config(
+            config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
+        )
+
     return config_patches
 
 
@@ -3469,14 +3499,6 @@ def is_valid_aoti_model_name() -> bool:
         )
 
     return True
-
-
-def aoti_model_name_from_config() -> str:
-    from torch._inductor import config
-
-    model_name = config.aot_inductor.model_name_for_generated_files
-    model_name = "aoti_model" if model_name is None else model_name
-    return model_name
 
 
 def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:

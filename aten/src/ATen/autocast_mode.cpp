@@ -239,6 +239,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
+  KERNEL_MPS(conv_transpose3d, input, fp32)
   KERNEL_MPS(acos, fp32)
   KERNEL_MPS(asin, fp32)
   KERNEL_MPS(cosh, fp32)

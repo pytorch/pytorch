@@ -600,6 +600,18 @@ class TestFakeTensorExport(common_utils.TestCase):
                 SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
             )
 
+    def test_model_output_can_be_none(self):
+        class ModelWithNoneOutput(torch.nn.Module):
+            def forward(self, x):
+                return x + 1, None
+
+        onnx_program = torch.onnx.export(
+            ModelWithNoneOutput(),
+            (torch.randn(1, 1, 2),),
+            dynamo=True,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

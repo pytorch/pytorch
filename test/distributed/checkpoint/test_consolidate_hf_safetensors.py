@@ -8,6 +8,7 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
+    _calculate_max_contiguous_elements,
     consolidate_safetensors_files,
 )
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
@@ -152,6 +153,76 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
                     },
                 )
         dist.barrier()
+
+    def test_calculate_max_contiguous_elements_validations(self) -> None:
+        """Test validation logic in _calculate_max_contiguous_elements function."""
+
+        # Test empty lists validation
+        with self.assertRaisesRegex(ValueError, "Input lists cannot be empty"):
+            _calculate_max_contiguous_elements([], [2, 3], [4, 5])
+
+        # Test mismatched list lengths validation
+        with self.assertRaisesRegex(
+            ValueError, "All input lists must have the same length"
+        ):
+            _calculate_max_contiguous_elements([1], [2, 3], [4, 5])
+
+        # Test indices out of bounds validation
+        with self.assertRaisesRegex(
+            ValueError, "Index .* at dimension .* is out of bounds for sub-tensor shape"
+        ):
+            _calculate_max_contiguous_elements(
+                [2, 1], [2, 3], [4, 5]
+            )  # indices[0] >= sub_tensor_shape[0]
+
+        # Test sub-tensor dimensions exceeding tensor dimensions validation
+        with self.assertRaisesRegex(
+            ValueError,
+            "Sub-tensor dimension .* at position .* exceeds tensor dimension",
+        ):
+            _calculate_max_contiguous_elements(
+                [1, 2], [2, 6], [4, 5]
+            )  # sub_tensor_shape[1] > tensor_shape[1]
+
+    def test_calculate_max_contiguous_elements_valid_cases(self) -> None:
+        """Test valid cases for _calculate_max_contiguous_elements function."""
+
+        # Test 1D case - simple remaining elements
+        result = _calculate_max_contiguous_elements([2], [5], [10])
+        self.assertEqual(result, 3)  # 5 - 2 = 3 elements remaining
+
+        # Test 2D case - at start of row, can write complete rows
+        result = _calculate_max_contiguous_elements([1, 0], [3, 4], [6, 4])
+        self.assertEqual(result, 8)  # 2 rows * 4 columns = 8 elements
+
+        # Test 2D case - middle of row, only remaining in current row
+        result = _calculate_max_contiguous_elements([1, 2], [3, 4], [6, 8])
+        self.assertEqual(result, 2)  # 4 - 2 = 2 elements remaining in row
+
+        # Test 3D case - at start of 2D slice, can write complete slices
+        result = _calculate_max_contiguous_elements([1, 0, 0], [3, 2, 4], [5, 2, 4])
+        self.assertEqual(result, 16)  # 2 slices * 2 rows * 4 columns = 16 elements
+
+        # Test edge case - at last position
+        result = _calculate_max_contiguous_elements([2, 3], [3, 4], [6, 8])
+        self.assertEqual(result, 1)  # Only 1 element remaining
+
+        # Test case where sub-tensor spans full width
+        result = _calculate_max_contiguous_elements([0, 0], [2, 5], [4, 5])
+        self.assertEqual(result, 10)  # 2 rows * 5 columns = 10 elements
+
+        # Test column-wise sharded case - sub-tensor doesn't span full width
+        # Even at start of row, can only write width of one row due to column sharding
+        result = _calculate_max_contiguous_elements([1, 0], [3, 2], [4, 8])
+        self.assertEqual(
+            result, 2
+        )  # Only 2 elements (width of sub-tensor) can be written contiguously
+
+        # Test another column-wise sharded case - middle of tensor
+        result = _calculate_max_contiguous_elements([0, 0], [2, 3], [6, 10])
+        self.assertEqual(
+            result, 3
+        )  # Only 3 elements (width of sub-tensor) can be written contiguously
 
 
 if __name__ == "__main__":

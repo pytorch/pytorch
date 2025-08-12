@@ -2227,6 +2227,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ],
             # doesn't cover iphonesimulator-x86_64
             "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
+            "ovr_config//runtime:fbcode-arm64": [":arm64_lib"],
             "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
         }),
     )

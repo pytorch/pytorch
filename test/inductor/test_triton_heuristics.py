@@ -257,7 +257,7 @@ class TestTritonHeuristics(TestCase):
         def fn(x):
             return triton_sqr(x)
 
-        x = torch.randn(32, device="cuda")
+        x = torch.randn(32, device=GPU_TYPE)
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)

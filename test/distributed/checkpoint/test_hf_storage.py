@@ -162,8 +162,16 @@ class TestHfStorage(TestCase):
             )
 
     def test_read_data_hf(self) -> None:
-        # Create test tensors
         tensor_0 = torch.tensor([1.0, 2.0, 3.0, 4.0])
+
+        mock_safe_open = MagicMock()
+        mock_context = MagicMock()
+        mock_context.__enter__.return_value.get_slice.return_value = tensor_0
+        mock_safe_open.return_value = mock_context
+
+        sys.modules["safetensors"] = MagicMock()
+        sys.modules["safetensors"].safe_open = mock_safe_open
+
         with tempfile.TemporaryDirectory() as path:
             # Create the reader
             reader = HuggingFaceStorageReader(path=path)
@@ -200,8 +208,6 @@ class TestHfStorage(TestCase):
                     fqn="tensor_0", offset=torch.Size([0]), index=None
                 ): _HFStorageInfo(
                     file_path,
-                    len(metadata_bytes) + NUM_BYTES_FOR_HEADER_LEN,
-                    tensor_0.numel() * tensor_0.element_size(),
                     tensor_0.shape,
                     tensor_0.dtype,
                 ),
@@ -260,6 +266,9 @@ class TestHfStorage(TestCase):
             # Verify results - the target tensors should now contain the values from our test tensor
             self.assertTrue(torch.equal(state_dict["tensor_0"], tensor_0))
 
+            mock_safe_open.assert_called_once_with(filename=file_path, framework="pt")
+            mock_context.__enter__.return_value.get_slice.assert_called_with("tensor_0")
+
     def test_write_metadata_hf(self) -> None:
         mock_module = MagicMock()
         sys.modules["huggingface_hub"] = mock_module
@@ -313,35 +322,50 @@ class TestHfStorage(TestCase):
                 self.assertEqual(metadata, expected_metadata)
 
     def test_read_metadata_hf(self):
+        mock_safe_open = MagicMock()
+        mock_context = MagicMock()
+
+        mock_safe_open.return_value = mock_context
+
+        mock_context.__enter__.return_value.keys.return_value = ["tensor_0"]
+        mock_context.__enter__.return_value.metadata.return_value = {}
+
+        mock_slice = MagicMock()
+        mock_slice.get_shape.return_value = [5, 10]
+        mock_slice.get_dtype.return_value = "F32"
+        mock_context.__enter__.return_value.get_slice.return_value = mock_slice
+
+        mock_safetensors = MagicMock()
+        mock_safetensors.safe_open = mock_safe_open
+
+        mock_safetensors.torch._getdtype = MagicMock(return_value=torch.float32)
+
+        sys.modules["safetensors"] = mock_safetensors
+        sys.modules["safetensors.torch"] = mock_safetensors.torch
+
         with tempfile.TemporaryDirectory() as path:
             reader = HuggingFaceStorageReader(path=path)
 
             key = "tensor_0"
             file_name = "test.safetensors"
-            with open(os.path.join(path, file_name), "wb") as f:
-                # write metadata the same way it would be in safetensors file
-                metadata_contents = json.dumps(
-                    {
-                        "tensor_0": {
-                            "dtype": "F32",
-                            "shape": [5, 10],
-                            "data_offsets": [0, 200],
-                        }
-                    }
-                )
-                metadata_bytes = metadata_contents.encode("utf-8")
+            file_path = os.path.join(path, file_name)
 
-                f.write(
-                    len(metadata_bytes).to_bytes(
-                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
-                    )
-                )
-                f.write(metadata_bytes)
+            # Create an empty file so fs.ls can find it
+            with open(file_path, "wb") as _:
+                pass
 
-                tensor = torch.rand(5, 10)
-                f.write(tensor.numpy().tobytes())
+            # Mock the fs.ls method to return our test file
+            original_ls = reader.fs.ls
+            reader.fs.ls = MagicMock(return_value=[file_path])
 
-            metadata = reader.read_metadata()
+            try:
+                metadata = reader.read_metadata()
+            finally:
+                # Restore the original ls method
+                reader.fs.ls = original_ls
+
+            # Verify that safe_open was called with our file path
+            mock_safe_open.assert_called_once_with(file_path, framework="pt")
 
             self.assertEqual(
                 metadata.state_dict_metadata,
@@ -365,8 +389,6 @@ class TestHfStorage(TestCase):
                         fqn=key, offset=torch.Size([0, 0]), index=None
                     ): _HFStorageInfo(
                         os.path.join(path, file_name),
-                        len(metadata_bytes) + NUM_BYTES_FOR_HEADER_LEN,
-                        200,
                         torch.Size([5, 10]),
                         torch.float32,
                     )

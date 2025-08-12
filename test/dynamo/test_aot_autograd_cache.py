@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -447,8 +447,8 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(x, y):
             return (x * 2, y @ y)
 
-        a = torch.rand(25, device="cuda")
-        b = torch.rand(5, 5, device="cuda")
+        a = torch.rand(25, device=GPU_TYPE)
+        b = torch.rand(5, 5, device=GPU_TYPE)
 
         compiled_fn = torch.compile(fn, backend="inductor")
         self.assertEqual(fn(a, b), compiled_fn(a, b))
@@ -690,7 +690,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -746,7 +746,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -788,7 +788,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @requires_triton()
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -822,7 +822,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a):
             return MyAutogradFunction.apply(a)
 
-        a = torch.randn(5, device="cuda", requires_grad=True)
+        a = torch.randn(5, device=GPU_TYPE, requires_grad=True)
         a2 = a.clone().detach_().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
         result = compiled_fn(a)
@@ -1260,7 +1260,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             result = f()
             self.assertEqual(result[0].device, torch.device("cuda:1"))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
