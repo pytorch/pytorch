@@ -11,10 +11,6 @@ on:
         required: true
         type: string
         description: target library to build
-      ci-config:
-        required: false
-        type: string
-        description: CI config to use for the build and test.
       use-gha:
         required: false
         type: string
@@ -144,7 +140,6 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: Login to Amazon ECR
         if: ${{ inputs.aws-role-to-assume != ''}}
@@ -180,13 +175,11 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -239,7 +232,6 @@ jobs:
           MAX_JOBS: ${{ steps.set-max-jobs.outputs.MAX_JOBS }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           BUILD_TARGET: ${{ inputs.build-target }}
-          CI_CONFIG: ${{ inputs.ci-config }}
         run: |
           set -euo pipefail
           python3 --version
@@ -281,7 +273,7 @@ jobs:
 
       - name: Copy logs
         shell: bash
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor}}
         continue-on-error: true
         run: |
           rm -f ./usage_logs
@@ -289,7 +281,7 @@ jobs:
           cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
 
       - name: Upload raw usage log to s3
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor}}
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
@@ -299,7 +291,7 @@ jobs:
           path: usage_logs/usage_log_build_*.txt
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -312,12 +304,11 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: always()
 
       - name: Cleanup docker
-        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: always()
         shell: bash
         run: |
-          # on s390x stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true
