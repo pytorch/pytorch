@@ -1,7 +1,13 @@
 # Owner(s): ["module: functorch"]
+import unittest
+
 import torch
 from functorch.dim import Dim, dims, Tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 class TestSplit(TestCase):
@@ -246,6 +252,10 @@ class TestSplit(TestCase):
         self.assertEqual(len(result), 1)  # Single chunk containing entire dimension
         self.assertEqual(result[0].order(x, d1, z).shape, (3, 12, 5))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "TorchDynamo doesn't preserve side effects during tracing",
+    )
     def test_dimension_binding_consistency(self):
         """Test that split properly binds dimensions and they remain consistent."""
         tensor = torch.randn(3, 15, 5)
@@ -386,6 +396,9 @@ class TestSplit(TestCase):
         for i, part in enumerate(result):
             self.assertEqual(part.order(x, split_dims[i], z).shape, (3, 1, 4))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO, "TorchDynamo has issues with torch._tensor.split"
+    )
     def test_split_function_directly(self):
         """Test that the standalone split function works correctly."""
         from functorch.dim import split
@@ -408,6 +421,10 @@ class TestSplit(TestCase):
         self.assertEqual(result[0].order(x, d1, z).shape, (3, 4, 5))
         self.assertEqual(result[1].order(x, d2, z).shape, (3, 8, 5))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "TorchDynamo can't parse dims() without arguments from bytecode",
+    )
     def test_split_on_plain_tensor_with_fcd_args(self):
         """Test that split() works on plain tensors when FCD arguments are provided."""
         # Test the exact example from the user message
