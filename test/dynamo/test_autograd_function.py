@@ -8,10 +8,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch.testing._internal.triton_utils import (
-    HAS_GPU,
-    requires_gpu
-)
+from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
