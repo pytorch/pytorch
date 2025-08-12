@@ -3587,7 +3587,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     def test_subclass(self):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
-        dynamic = False
 
         @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
