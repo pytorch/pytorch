@@ -1165,7 +1165,7 @@ class Tensor(_Tensor):
                 return t
 
             # at::functorch::addBatchDim(std::move(t), min_index, min_value)
-            assert t is not None:
+            assert t is not None
             t = torch._C._functorch._add_batch_dim(t, min_index, int(min_value))
 
             levels[min_real_index] = DimEntry()
