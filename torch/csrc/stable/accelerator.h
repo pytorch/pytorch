@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 namespace torch::stable::accelerator {
@@ -66,6 +65,13 @@ Stream getCurrentStream(DeviceIndex device_index) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_current_stream(device_index, &stream));
   return Stream(stream);
+}
+
+// Get the current device index
+inline DeviceIndex getCurrentDevice() {
+  DeviceIndex device_index;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_device(&device_index));
+  return device_index;
 }
 
 } // namespace torch::stable::accelerator

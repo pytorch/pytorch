@@ -523,6 +523,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
     StreamHandle* ret_stream // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_device(int32_t* ret_device_index);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;

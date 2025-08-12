@@ -1668,3 +1668,8 @@ AOTITorchError aoti_torch_get_current_stream(
     *ret_stream = reinterpret_cast<StreamHandle>(stream_ptr);
   });
 }
+
+AOTITorchError aoti_torch_get_current_device(int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_device_index = at::accelerator::getDeviceIndex(); });
+}
