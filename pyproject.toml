@@ -69,9 +69,6 @@ pyyaml = ["pyyaml"]
 
 # Linter tools #################################################################
 
-[tool.black]
-line-length = 88
-
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
 extra_standard_library = ["typing_extensions"]
