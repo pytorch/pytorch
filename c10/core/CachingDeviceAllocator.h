@@ -624,8 +624,8 @@ struct PrivatePool {
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critical
-  // though, I'd rather not add more logic to it.
+  // check in BlockComparator. BlockComparator is performance-critical though,
+  // I'd rather not add more logic to it.
   DeviceAllocator* allocator_;
 };
 
