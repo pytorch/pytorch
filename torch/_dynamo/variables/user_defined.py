@@ -253,6 +253,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__dict__":
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
+        elif name == "__mro__":
+            attr_source = self.source and TypeMROSource(self.source)
+            return VariableTracker.build(tx, self.value.__mro__, attr_source)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -295,10 +298,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             func = obj.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
         elif source:
-            # __mro__ is a member in < 3.12, an attribute in >= 3.12
-            if inspect.ismemberdescriptor(obj) or (
-                sys.version_info >= (3, 12) and name == "__mro__"
-            ):
+            if inspect.ismemberdescriptor(obj):
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
         if ConstantVariable.is_literal(obj):
