@@ -18,21 +18,6 @@
 #include <unordered_set>
 #include <utility>
 
-namespace c10 {
-
-// Caching allocator will execute every registered callback if it unable to find
-// block inside of already allocated area.
-class C10_CUDA_API FreeMemoryCallback {
- public:
-  virtual ~FreeMemoryCallback() = default;
-  virtual bool Execute() = 0;
-};
-
-C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
-#define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__)
-} // namespace c10
-  //
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do
 // this, but it was a bit irritating to figure out how to also correctly
 // apply pimpl pattern so I didn't have to leak any internal implementation

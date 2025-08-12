@@ -55,8 +55,7 @@ typedef CUmemFabricHandle_v1 CUmemFabricHandle;
 
 namespace c10 {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
+C10_DEFINE_REGISTRY(FreeMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
 
