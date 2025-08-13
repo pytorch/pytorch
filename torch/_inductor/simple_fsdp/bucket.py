@@ -189,7 +189,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     ag_and_wait_snodes |= OrderedSet(ag_snode_to_wait_snode.values())  # wait_tensor
 
     for snode in snodes:
-        if snode not in ag_and_wait_snodes and snode not in list(ag_snode_to_cast_snode.values()):
+        if snode not in ag_and_wait_snodes: #and snode not in list(ag_snode_to_cast_snode.values()):
             # not all_gather or its wait_tensor - schedule it normally
             schedule_snode(snode)
         elif snode in ag_snodes:
@@ -215,7 +215,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 for idx, (ag_input_ir_nodes, orig_ag_snodes, orig_wait_snodes) in enumerate(zip(all_ag_input_ir_nodes, all_orig_ag_snodes, all_orig_wait_snodes)):
                     if len(orig_ag_snodes) == 1:
                         # If there is only one all_gather in the bucket, schedule it normally.
-                        AG_Group_node_list.append(ag_snode_to_cast_snode[orig_ag_snodes[0]])
+                        if orig_ag_snodes[0] in ag_snode_to_cast_snode:
+                            AG_Group_node_list.append(ag_snode_to_cast_snode[orig_ag_snodes[0]])
                         AG_Group_node_list.append(orig_ag_snodes[0])
                         Wait_Group_node_list.append(orig_wait_snodes[0])
                     else:
