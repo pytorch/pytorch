@@ -316,25 +316,31 @@ class OutputGraphGuardsState:
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
     global_state_guard: torch._C._dynamo.guards.GlobalStateGuard
-    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
+    _guards: torch._guards.GuardsSet
+    _aotautograd_guards: list[torch._guards.GuardEnvExpr]
 
     export: bool = False
     export_constraints: bool = False
-
-    _guards: Optional[torch._guards.GuardsSet] = None
-    _aotautograd_guards: Optional[list[torch._guards.GuardEnvExpr]] = None
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     @property
     def shape_env(self) -> ShapeEnv:
         raise AssertionError(f"shape_env shouldn't be accessed from {type(self)}")
 
     @property
-    def guards(self) -> Optional[torch._guards.GuardsSet]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self._guards
 
     @property
-    def aotautograd_guards(self) -> Optional[list[torch._guards.GuardEnvExpr]]:
+    def aotautograd_guards(self) -> list[torch._guards.GuardEnvExpr]:
         return self._aotautograd_guards
+
+    def load_guards(self) -> None:
+        """
+        Iterate through guards and run any deserialization steps
+        """
+        assert self._guards is not None
+        breakpoint()
 
 
 @dataclass
@@ -409,6 +415,9 @@ class OutputGraph(OutputGraphGuardsState):
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
             or torch._C._dynamo.guards.GlobalStateGuard(),
+            # These are set by @property instead, just initialize them as blank
+            _guards=torch._guards.GuardsSet(),
+            _aotautograd_guards=[],
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -682,7 +691,12 @@ class OutputGraph(OutputGraphGuardsState):
         assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
         return [pack_subgraph_name, unpack_subgraph_name]
 
+    # Guards are already loaded on the OutputGraph object
+    def load_guards(self) -> None:
+        return
+
     def dump_guards_state(self) -> OutputGraphGuardsState:
+        # Dump a serializable version of self without extras
         return OutputGraphGuardsState(
             local_scope=self.local_scope,
             global_scope=self.global_scope,
