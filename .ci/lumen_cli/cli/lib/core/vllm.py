@@ -437,7 +437,7 @@ class VllmTestRunner(BaseRunner):
         a method to run test based on the test plan. currently this only
         used to run vllm tests.
         """
-
+        # TODO(elainwy): setup data model for test plan, and test step
         logger.info("run vllm tests.....")
         tests_map = sample_tests()
         if test_name not in tests_map:
@@ -520,9 +520,9 @@ def sample_tests():
     """
     # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
     return {
+         # test plan:
+        # required id, title, and steps
         "basic_correctness_test": {
-            # test plan:
-            # required id, title, and steps
             "title": "Basic Correctness Test",
             "id": "basic_correctness_test",
             "env_var": {
