@@ -62,7 +62,7 @@ class Stream {
   std::shared_ptr<StreamOpaque> stream_;
 };
 
-Stream getCurrentStream(DeviceIndex device_index) {
+inline Stream getCurrentStream(DeviceIndex device_index) {
   StreamHandle stream = nullptr;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_stream(device_index, &stream));
   return Stream(stream);
@@ -71,7 +71,7 @@ Stream getCurrentStream(DeviceIndex device_index) {
 // Get the current device index
 inline DeviceIndex getCurrentDeviceIndex() {
   DeviceIndex device_index;
-  AOTI_TORCH_ERROR_CODE_CHECK(
+  TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_current_device_index(&device_index));
   return device_index;
 }
