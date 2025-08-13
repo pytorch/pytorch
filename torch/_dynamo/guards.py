@@ -3261,7 +3261,6 @@ class CheckFunctionManager:
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
     ):
-        from torch._dynamo.output_graph import OutputGraph
 
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3430,6 +3429,7 @@ class CheckFunctionManager:
 
         self.guards_state: Optional[bytes] = None
         if save_guards:
+            from torch._dynamo.output_graph import OutputGraph
             assert isinstance(self.output_graph, OutputGraph)
             self.guards_state = self.serialize_guards(sorted_guards, self.output_graph)
 

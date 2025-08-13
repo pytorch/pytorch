@@ -687,10 +687,6 @@ class OutputGraph(OutputGraphGuardsState):
         assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
         return [pack_subgraph_name, unpack_subgraph_name]
 
-    # Guards are already loaded on the OutputGraph object
-    def load_guards(self) -> None:
-        return
-
     def dump_guards_state(self) -> OutputGraphGuardsState:
         # Dump a serializable version of self without extras
         return OutputGraphGuardsState(
