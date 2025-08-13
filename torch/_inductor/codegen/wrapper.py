@@ -1830,7 +1830,9 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_dynamic_slice_size(self, node):
         def clamp_index(x):
             pos = self.codegen_sizevar(sympy.Max(0, sympy.Min(x, node.size)))
-            neg = self.codegen_sizevar(sympy.Max(0, sympy.Min(x + node.size, node.size)))
+            neg = self.codegen_sizevar(
+                sympy.Max(0, sympy.Min(x + node.size, node.size))
+            )
             return f"{pos} if {x} >= 0 else {neg}"
 
         # codegen start, end

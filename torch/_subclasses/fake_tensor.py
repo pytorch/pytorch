@@ -2616,7 +2616,9 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func not in meta_table
             and not self.cpp_meta_supports_symint(func)
-            and not (has_symbolic_sizes and func in self._unbacked_special_fake_handling_ops)
+            and not (
+                has_symbolic_sizes and func in self._unbacked_special_fake_handling_ops
+            )
         ):
             from torch._decomp import decomposition_table
 

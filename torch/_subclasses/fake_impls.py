@@ -771,7 +771,10 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false, 
+        statically_known_true,
+    )
 
     shape_env = fake_mode.shape_env
 
@@ -786,11 +789,7 @@ def slice_forward(
         raise RuntimeError("slice step must be positive")
 
     # start, end
-    start_index = (
-        0
-        if start is None
-        else _compute_slice_index(sizes[dim], start)
-    )
+    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
     end_index = (
         sizes[dim]
         if statically_known_true(end == sys.maxsize) or end is None
@@ -799,10 +798,7 @@ def slice_forward(
 
     # size
     new_size = None
-    if (
-        start_index is not None
-        and end_index is not None
-    ):
+    if start_index is not None and end_index is not None:
         if guard_or_false(end_index >= start_index):
             new_size = (end_index - start_index + step - 1) // step
         elif guard_or_false(start_index >= end_index):

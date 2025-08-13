@@ -3466,7 +3466,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
         ge_3: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_2 = None
-        return (slice_1,)""",
+        return (slice_1,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )

@@ -7166,7 +7166,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
-        clamp: bool
+        clamp: bool,
     ) -> None:
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen the following:
@@ -7191,6 +7191,21 @@ class DynamicSelectStorageOffset(ExternKernel):
 
 
 class DynamicSliceSize(ExternKernel):
+    """
+    Computes the output size of a slice call, handling the correct semantics in codegen.
+    We do this for flexible handling for unbacked indices (to not data-dependent error).
+
+    Slicing has 4 semantics for indices, i.e. x[start:] could be:
+    1) start < -x.size(0)            -> x[0:]                    # negative out-of-bounds
+    2) start in [-x.size(0), 0)      -> x[x.size(0) + start:]    # negative slicing
+    3) start in [0, x.size(0))       -> x[start:]                # standard slicing
+    4) start >= x.size(0)            -> empty slice              # positive out-of-bounds
+
+    If the appropriate semantics are known beforehand, the output size is computed based on
+    the start & end indices. If not (with unbacked indices), a new unbacked symbol is created
+    to represent the output size, and codegen handles computing the correct case.
+    """
+
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
 

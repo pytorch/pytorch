@@ -1172,7 +1172,16 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
-    from torch.fx.experimental.symbolic_shapes import CallMethodKey, resolve_unbacked_bindings
+    """
+    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
+    if the indices are unbacked and appropriate semantics aren't known.
+    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
+    """
+
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
 
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
@@ -1182,7 +1191,11 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
     # maybe apply slice optimization
     try:
-        if start == 0 and V.graph.sizevars.statically_known_leq(size, end) and step == 1:
+        if (
+            start == 0
+            and V.graph.sizevars.statically_known_leq(size, end)
+            and step == 1
+        ):
             return x
     except TypeError:
         pass
@@ -1209,7 +1222,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
 
     # go to SliceView/ReinterpretView
     if static_slice:
-        return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+        return TensorBox(
+            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
+        )
 
     # unbacked territory: create DynamicSlice ExternKernel
     # clamp is True, unbacked start / end
