@@ -858,7 +858,7 @@ template <typename StreamT, typename BlockT = DeviceBlock<StreamT>>
 struct AllocParams {
   using BlockPoolT = BlockPool<BlockT>;
 
-  enum class Status : uint8_t { Ok, OOM, Error };
+  enum Status : uint8_t { Ok, OOM, Error };
 
   AllocParams(
       c10::DeviceIndex device,
@@ -914,58 +914,6 @@ struct CachingDeviceAllocatorImpl {
     context_recorder_.store(nullptr);
   }
 
-  BlockT* malloc(DeviceIndex device, size_t orig_size, StreamT stream) {
-    // done outside the lock because we don't know what locks the recorder
-    // needs to have...
-    auto context = maybeGatherContext(RecordContext::STATE);
-
-    std::unique_lock<std::recursive_mutex> lock(mutex);
-
-    if (C10_LIKELY(captures_underway.empty())) {
-      // Reclaim allocations used on multiple streams if their GPU-side uses
-      // are complete.
-      //
-      // NOTE: We skip process_events if a capture might be underway because
-      // process_events performs event queries which are illegal during graph
-      // capture.
-      //
-      // Dumb simple solution: defer reclaiming these allocations until after
-      // capture. Cross-stream memory use is uncommon, so the deferral's effect
-      // on memory use during capture should be small.
-      process_events(context);
-    }
-
-    const size_t size = get_round_size(orig_size);
-    auto& pool = get_pool(size, stream);
-    const size_t alloc_size = get_allocation_size(size);
-    AllocParamsT params(device, size, stream, &pool, alloc_size);
-    params.stat_types = pool->get_stat_types();
-
-    // First, try to get a block from the existing pool.
-    bool block_found =
-        // Search pool
-        get_free_block(params)
-        // Trigger callbacks and retry search
-        || (trigger_free_memory_callbacks(params) && get_free_block(params));
-
-    // Can't reuse an existing block; try to get a new one.
-    if (!block_found) {
-      // Do garbage collection if the flag is set.
-      if (C10_UNLIKELY(
-              set_fraction &&
-              AcceleratorAllocatorConfig::garbage_collection_threshold() >
-                  0.0)) {
-        garbage_collect_cached_blocks(context);
-      }
-
-      // Attempt allocate
-      // WARNING: alloc_block may release the allocator lock when calling
-      // cudaMalloc. So far this function has not modified allocator state, but
-      // keep in mind that any observed allocator state may change across calls
-      // to alloc_block since it may release the lock.
-    }
-  }
-
  private:
   /* Internal methods for processing runtime Stream/Event */
 
@@ -979,6 +927,9 @@ struct CachingDeviceAllocatorImpl {
   // Queries the status of an event. Returns true if the event is complete.
   // Note this function may be called under allocator lock.
   virtual bool query_event(const EventT& event) = 0;
+
+  // Synchronizes the given event, blocking until it completes.
+  virtual void synchronize_event(const EventT& event) = 0;
 
   // Records events for all streams that have used the given memory block.
   // This function transfers the ownership of the block’s `stream_uses` set.
@@ -1075,9 +1026,55 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
+  // Synchronizes all outstanding events across all streams and frees associated
+  // memory blocks when safe.
+  void synchronize_and_free_events(
+      const std::shared_ptr<GatheredContext>& context,
+      PrivatePoolT* pool = nullptr) {
+    // Synchronize on outstanding events and then free associated blocks.
+    stats.num_sync_all_streams++;
+
+    // This function syncs, so capture should not be underway. Might as well
+    // make sure capture-deferred end of life events get processed too.
+    TORCH_INTERNAL_ASSERT(captures_underway.empty());
+    insert_events_deferred_until_no_capture(context);
+
+    for (auto it = outstanding_events.begin();
+         it != outstanding_events.end();) {
+      for (auto e = it->second.begin(); e != it->second.end();) {
+        BlockT* block = e->second;
+
+        // If a pool was passed, only synchronize the events
+        // that are associated with the pool, otherwise move on
+        if (pool && block->pool->owner_PrivatePool != pool) {
+          ++e;
+          continue;
+        }
+
+        EventT event = std::move(e->first);
+
+        synchronize_event(event);
+
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block, context);
+        }
+        // We are done with the event, so erase it from the deque
+        e = it->second.erase(e);
+      }
+
+      // If the events deque is empty, only then erase it from the map
+      if (it->second.empty()) {
+        it = outstanding_events.erase(it);
+      } else {
+        it++;
+      }
+    }
+  }
+
   /* Internal methods for managing device blocks */
 
-  /* Moves a block into a pool of cached free blocks */
+  // Moves a block into a pool of cached free blocks
   void free_block(
       BlockT* block,
       const std::shared_ptr<GatheredContext>& context) {
@@ -1152,6 +1149,7 @@ struct CachingDeviceAllocatorImpl {
     });
   }
 
+  // Releases a block back to the system.
   void release_block(
       BlockT* block,
       const std::shared_ptr<GatheredContext>& context) {
@@ -1202,6 +1200,60 @@ struct CachingDeviceAllocatorImpl {
     auto earsed = pool->blocks.erase(block);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(earsed == 1);
     delete block;
+  }
+
+  // Release one or more oversize blocks to the system allocator. But only
+  // enough to satisfy the target size.
+  bool release_available_cached_blocks(
+      const AllocParamsT& p,
+      const std::shared_ptr<GatheredContext>& context) {
+    if (AcceleratorAllocatorConfig::max_split_size() ==
+        std::numeric_limits<size_t>::max())
+      return false;
+
+    BlockPoolT& pool = *p.pool;
+    BlockT key(p.device(), p.stream(), p.size());
+    if (key.size < AcceleratorAllocatorConfig::max_split_size())
+      key.size = AcceleratorAllocatorConfig::max_split_size();
+
+    auto it = pool.blocks.lower_bound(&key);
+    if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
+        (*it)->expandable_segment_) {
+      // No single block is large enough; free multiple oversize blocks,
+      // starting with the largest
+      if (it == pool.blocks.begin())
+        return false;
+
+      size_t totalReleased = 0;
+      --it; // Back up one item. Now on the largest block for the correct stream
+
+      while ((totalReleased < key.size) &&
+             ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()) &&
+             ((*it)->stream == p.stream())) {
+        auto cur = it;
+        bool is_first = cur == pool.blocks.begin();
+        if (!is_first) {
+          --it;
+        }
+
+        if (!(*cur)->expandable_segment_) {
+          release_block(*cur, context);
+          totalReleased += (*cur)->size;
+        }
+
+        if (is_first) {
+          break;
+        }
+      }
+
+      if (totalReleased < key.size)
+        return false;
+
+    } else {
+      release_block(*it, context);
+    }
+
+    return true;
   }
 
   // Attempts to find a free block in the pool that matches the search key.
