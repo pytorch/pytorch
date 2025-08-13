@@ -120,9 +120,10 @@ struct LayerNormGraphCache {
     return &(it->second);
   }
 
-  void update(const KeyType& key, T& results) {
+  template <typename U>
+  void update(const KeyType& key, U&& results) {
     engine_cache.erase(key);
-    engine_cache.emplace(key, std::move(results));
+    engine_cache.emplace(key, std::forward<U>(results));
   }
 };
 
@@ -238,7 +239,7 @@ void raw_cudnn_layernorm_forward_out(
         scale_fe,
         bias_fe,
         Y_fe);
-    layernorm_forward_graph_cache.update(key, result);
+    layernorm_forward_graph_cache.update(key, std::move(result));
   }
   cudnnHandle_t handle = getCudnnHandle();
   size_t workspace_size = layernorm_graph->get_workspace_size();
@@ -373,7 +374,7 @@ void raw_cudnn_layernorm_backward_out(
         dscale_fe,
         dbias_fe,
         DX_fe);
-    layernorm_backward_graph_cache.update(key, result);
+    layernorm_backward_graph_cache.update(key, std::move(result));
   }
   cudnnHandle_t handle = getCudnnHandle();
   size_t workspace_size = layernorm_graph->get_workspace_size();
