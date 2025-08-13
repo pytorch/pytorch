@@ -47,9 +47,7 @@ __all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
 
 class HuggingFaceStorageWriter(FileSystemWriter):
     """
-    A writer that writes to a huggingface repository in the huggingface format.
-    Uses Fsspec back-end to communicate with back-end storage.
-    Fsspec registration of the storage solution is required.
+    A writer that writes to storage in the huggingface safetensors format.
     """
 
     def __init__(
@@ -196,9 +194,7 @@ class HuggingFaceStorageWriter(FileSystemWriter):
 
 class HuggingFaceStorageReader(FileSystemReader):
     """
-    A reader that reads from a huggingface repository in the huggingface format.
-    Uses in Fsspec back-end to communicate with storage.
-    Fsspec registration of the storage solution is required.
+    A reader that reads a checkpoint in the huggingface safetensors format.
     """
 
     def __init__(self, path: str) -> None:
