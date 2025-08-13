@@ -1267,7 +1267,7 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
  *   - Groupwise kernels expect BF16 scales
  *   - Channelwise kernels expect FP32 scales
  *   - Bias is currently unsupported in fallback path
- */ 
+ */
 void dyn_quant_matmul_4bit_kernel(
     const Tensor& output,
     const Tensor& inp,
