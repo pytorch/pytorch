@@ -279,10 +279,10 @@ def _check_cpu_rng_sync(
     torch.distributed.all_gather(all_state_tensors, state_tensor)
     state_ranks = defaultdict(set)
     for rank, state_tensor in enumerate(all_state_tensors):
-        # Hacky way to summarize the state vector of the CPU rng. Is there a better way to do this?
+        # Summarize the state vector of the CPU rng.
         # The properties that matter most are (1) its different if there is a state difference, (2) its printable
         # (see desync table- not viable to print whole state vector of size 5k)
-        state_ranks[hash(tuple(state_tensor.tolist()))].add(rank)
+        state_ranks[torch.hash_tensor(state_tensor).item()].add(rank)
     return state_ranks, "Generator state hash"
 
 
