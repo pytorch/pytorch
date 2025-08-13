@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_list.py b/test/dynamo/cpython/3_13/test_list.py
-index 23ef902aa0b..10528f623b1 100644
+index 23ef902aa0b..b9afb1ef26e 100644
 --- a/test/dynamo/cpython/3_13/test_list.py
 +++ b/test/dynamo/cpython/3_13/test_list.py
 @@ -1,6 +1,60 @@
@@ -69,7 +69,7 @@ index 23ef902aa0b..10528f623b1 100644
              # thread for the details:
  
 -            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
-+            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html  @lint-ignore
++            # @lint-ignore http://sources.redhat.com/ml/newlib/2002/msg00369.html
              self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
  
          # This code used to segfault in Py2.4a3
