@@ -2,6 +2,7 @@
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
+#include <ATen/record_function.h>
 
 namespace {
 
@@ -50,6 +51,12 @@ private:
 };
 
 void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  // Otherwise, find a PyInterpreter on a Tensor
+  const auto& schema = op.schema();
+  const auto num_arguments = schema.arguments().size();
+
+  RECORD_FUNCTION("Python", torch::jit::last(*stack, num_arguments));
+
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
@@ -64,9 +71,6 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
     return;
   }
 
-  // Otherwise, find a PyInterpreter on a Tensor
-  const auto& schema = op.schema();
-  const auto num_arguments = schema.arguments().size();
   // It is safe to dispatch on the very first Tensor with a pyobj_interpreter
   // without checking the interpreters of any of the arguments, because when
   // we actually run dispatch(), we will take out PyObjects in the context
