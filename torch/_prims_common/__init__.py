@@ -535,15 +535,15 @@ def compute_elementwise_output_logical_to_physical_perm(
 
     # Short-circuits for CPU scalar case
     if len(tensors) == 0:
-        return []
+        return [], False
 
     # Short-circuits for shapes with zero or one dimensions
     # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
-        return []
+        return [], False
     if ndim == 1:
-        return [0]
+        return [0], False
 
     # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
@@ -558,10 +558,10 @@ def compute_elementwise_output_logical_to_physical_perm(
         )
 
     if is_contiguous and not is_channels_last:
-        return list(range(ndim))
+        return list(range(ndim)), False
 
     if is_channels_last and not is_contiguous:
-        return [0, *list(range(2, ndim)), 1]
+        return [0, *list(range(2, ndim)), 1], False
 
     shape = tensors[0].shape
 
