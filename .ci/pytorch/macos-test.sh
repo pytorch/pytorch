@@ -16,7 +16,7 @@ popd
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
-export __TEST_PYTHON_HAS_SETUP=''
+__TEST_PYTHON_HAS_SETUP=''
 
 setup_test_python() {
   if [[ -n "${__TEST_PYTHON_HAS_SETUP}" ]]; then
@@ -40,7 +40,7 @@ setup_test_python() {
   # might help with intermittent compiler test failures
   ulimit -n 16384
 
-  export __TEST_PYTHON_HAS_SETUP=1
+  __TEST_PYTHON_HAS_SETUP=1
 }
 
 test_python_all() {
@@ -198,8 +198,6 @@ checkout_install_torchbench() {
 }
 
 torchbench_setup_macos() {
-  setup_test_python
-
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
   brew install jpeg-turbo libpng
