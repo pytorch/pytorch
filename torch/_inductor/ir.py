@@ -5105,7 +5105,7 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         layout: Layout,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
-        template: Any,  # CuteDSLTemplate - using Any to avoid circular import
+        template: Any,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
