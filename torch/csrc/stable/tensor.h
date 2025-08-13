@@ -1,13 +1,15 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
+#include <climits>
 #include <memory>
-
 namespace torch::stable {
 
-using DeviceIndex =
-    int8_t; // this is from c10/core/Device.h and can be header only
+// this is bigger than DeviceIndex in c10/core/Device.h but it is the type we
+// can converge on in this world as DeviceIndex in libtorch is not stable.
+using DeviceIndex = int32_t;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
 // the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
@@ -103,11 +105,30 @@ class Tensor {
     return stride;
   }
 
-  DeviceIndex get_device() const {
+  // This is almost the same API as the one in TensorBase.h, except
+  // we add a check that the returned device_index is within the
+  // range of int8_t.
+  int8_t get_device() const {
     int32_t device_index;
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
-    return static_cast<DeviceIndex>(device_index);
+    STD_TORCH_CHECK(
+        device_index >= std::numeric_limits<int8_t>::min() &&
+            device_index <= std::numeric_limits<int8_t>::max(),
+        "Device index is out of range of return type int8_t, please use get_device_index() instead.");
+    return static_cast<int8_t>(device_index);
+  }
+
+  // The same as get_device but with two differences:
+  // 1. it has a more suiting name
+  // 2. it returns a DeviceIndex, which is int32_t in this world
+  //    that should be more stable than the likely shifting
+  //    DeviceIndex in libtorch (it is int8_t that might become int16_t)
+  DeviceIndex get_device_index() const {
+    int32_t device_index;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_device_index(ath_.get(), &device_index));
+    return device_index;
   }
 
   bool is_cuda() const {
