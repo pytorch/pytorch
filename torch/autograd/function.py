@@ -4,8 +4,8 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import Concatenate, deprecated, ParamSpec
+from typing import Any, Optional
+from typing_extensions import deprecated
 
 import torch
 import torch._C as _C
@@ -28,10 +28,6 @@ __all__ = [
 # Unique id provider for each class inheriting from Function
 # This is incremented in FunctionMeta during class definition
 AUTOGRAD_FUNCTION_COUNTER = itertools.count()
-
-_T = TypeVar("_T")
-_R = TypeVar("_R")
-_P = ParamSpec("_P")
 
 
 # Formerly known as: _ContextMethodMixin
@@ -339,6 +335,9 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
+        backward_fn._bw_module = None  # type: ignore[attr-defined]
+        if getattr(cls, "_lazy_backward_info", None):
+            backward_fn._bw_module = cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -369,7 +368,6 @@ class _SingleLevelFunction(
             @staticmethod
             def forward(*args: Any, **kwargs: Any) -> Any:
                 pass
-
 
             @staticmethod
             def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
@@ -599,13 +597,11 @@ def _is_setup_context_defined(fn):
     return fn != _SingleLevelFunction.setup_context
 
 
-def once_differentiable(
-    fn: Callable[Concatenate[_T, _P], _R],
-) -> Callable[Concatenate[_T, _P], _R]:
+def once_differentiable(fn):
     @functools.wraps(fn)
-    def wrapper(ctx: _T, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def wrapper(ctx, *args):
         with torch.no_grad():
-            outputs = fn(ctx, *args, **kwargs)
+            outputs = fn(ctx, *args)
 
         if not torch.is_grad_enabled():
             return outputs
@@ -626,14 +622,12 @@ def once_differentiable(
             return outputs
 
         if not isinstance(outputs, tuple):
-            outputs_ = (outputs,)
-        else:
-            outputs_ = outputs
+            outputs = (outputs,)
 
         err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked "
             b"with @once_differentiable",
-            len(outputs_),
+            len(outputs),
         )
 
         # Create aliases of each output that has requires_grad=True. We need
@@ -645,7 +639,7 @@ def once_differentiable(
                 var.requires_grad = True
             return var
 
-        return err_fn(*[fake_requires_grad(v) for v in outputs_])  # type: ignore[return-value]
+        return err_fn(*[fake_requires_grad(v) for v in outputs])
 
     return wrapper
 
@@ -775,7 +769,6 @@ class NestedIOFunction(Function):
     This class is here only for backward compatibility reasons.
     Use :class:`Function` instead of this for any new use case.
     """
-
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
     # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
@@ -822,7 +815,7 @@ class NestedIOFunction(Function):
         self._to_save_nested = args
 
     @property
-    def saved_tensors(self):  # type: ignore[override]
+    def saved_tensors(self):
         r"""
         See :meth:`Function.saved_tensors`.
         """

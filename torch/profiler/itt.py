@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager
-from typing import NoReturn
 
 
 try:
@@ -9,13 +8,13 @@ except ImportError:
 
     class _ITTStub:
         @staticmethod
-        def _fail(*args, **kwargs) -> NoReturn:
+        def _fail(*args, **kwargs):
             raise RuntimeError(
                 "ITT functions not installed. Are you sure you have a ITT build?"
             )
 
         @staticmethod
-        def is_available() -> bool:
+        def is_available():
             return False
 
         rangePush = _fail

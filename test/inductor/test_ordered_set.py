@@ -156,8 +156,8 @@ class TestJointOps(TestCase):
             "Pure python equivalent of isdisjoint()"
             return not OrderedSet(s1).intersection(s2)
 
-        for large in "", "a", "ab", "abc", "ababac", "cdc", "cc", "efgfe", "ccb", "ef":
-            s1 = self.thetype(large)
+        for larg in "", "a", "ab", "abc", "ababac", "cdc", "cc", "efgfe", "ccb", "ef":
+            s1 = self.thetype(larg)
             for rarg in (
                 "",
                 "a",
@@ -235,8 +235,7 @@ class TestJointOps(TestCase):
         self.assertRaises(TypeError, self.s.symmetric_difference, [[]])
         for C in OrderedSet, frozenset, dict.fromkeys, str, list, tuple:
             self.assertEqual(
-                self.thetype("abcba").symmetric_difference(C("cdc")),
-                OrderedSet("abd"),  # codespell:ignore
+                self.thetype("abcba").symmetric_difference(C("cdc")), OrderedSet("abd")
             )
             self.assertEqual(
                 self.thetype("abcba").symmetric_difference(C("efgfe")),
@@ -652,7 +651,7 @@ class TestSet(TestJointOps, TestCase):
         )
         self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
         for p, q in (
-            ("cdc", "abd"),  # codespell:ignore
+            ("cdc", "abd"),
             ("efgfe", "abcefg"),
             ("ccb", "a"),
             ("ef", "abcef"),
@@ -991,7 +990,7 @@ class TestExceptionPropagation(TestCase):
         s = OrderedSet([1, 2, 3])
         try:
             for i in s:
-                s.update([4])  # noqa: B909
+                s.update([4])
         except RuntimeError:
             pass
         else:

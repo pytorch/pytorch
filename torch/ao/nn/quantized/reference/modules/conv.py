@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -62,7 +62,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
         weight_qparams: Optional[dict[str, Any]] = None,
@@ -110,7 +110,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         return "QuantizedConv1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -173,7 +173,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return "QuantizedConv2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -236,7 +236,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return "QuantizedConv3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -282,7 +282,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
         weight_qparams: Optional[dict[str, Any]] = None,
@@ -346,7 +346,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         return "QuantizedConvTranspose1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -427,7 +427,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         return "QuantizedConvTranspose2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -507,5 +507,5 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         return "QuantizedConvTranspose3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
+    def from_float(cls, float_conv, weight_qparams):
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)

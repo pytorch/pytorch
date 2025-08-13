@@ -203,7 +203,9 @@ try:
             return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(self.floor(number) < number, self.floor(number + 1), number)  # type: ignore[return-value]
+            return z3.If(
+                self.floor(number) < number, self.floor(number + 1), number
+            )  # type: ignore[return-value]
 
         def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
@@ -361,9 +363,9 @@ try:
                 return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
-            assert len(args) == 1, (
-                f"expected 1 argument on assertion. Got: {len(args)} "
-            )
+            assert (
+                len(args) == 1
+            ), f"expected 1 argument on assertion. Got: {len(args)} "
             self.validator.add_source_expr(args[0])  # type: ignore[arg-type]
 
     # Translates SymPy expressions into Z3 expressions.
@@ -534,9 +536,9 @@ try:
 
         def to_z3_boolean_expr(self, e: sympy.Basic) -> z3.BoolRef:
             z3expr = SympyToZ3(self).run(e)
-            assert isinstance(z3expr, z3.BoolRef), (
-                f"expected boolean expression. Got: {z3expr}"
-            )
+            assert isinstance(
+                z3expr, z3.BoolRef
+            ), f"expected boolean expression. Got: {z3expr}"
             return z3expr
 
         def add_source_expr(self, e: z3.BoolRef) -> None:
@@ -651,7 +653,7 @@ from torch.fx.experimental import _config as config
 
 
 def translation_validation_enabled() -> bool:
-    # Checks every time this function is called, in case the Dynamo
+    # Checks everytime this function is called, in case the Dynamo
     # option is set, but Z3 is not installed.
     _assert_z3_installed_if_tv_set()
     return _HAS_Z3 and config.translation_validation

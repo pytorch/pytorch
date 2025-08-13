@@ -42,7 +42,7 @@ cspdarknet53,pass,0
 
 
 
-deit_base_distilled_patch16_224,pass,0
+deit_base_distilled_patch16_224,fail_to_run,0
 
 
 
@@ -114,7 +114,7 @@ lcnet_050,pass,0
 
 
 
-levit_128,pass,0
+levit_128,fail_to_run,0
 
 
 
@@ -238,7 +238,7 @@ vit_base_patch16_224,pass,0
 
 
 
-volo_d1_224,pass,0
+volo_d1_224,fail_to_run,0
 
 
 

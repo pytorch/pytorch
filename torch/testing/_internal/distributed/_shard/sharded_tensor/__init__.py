@@ -22,7 +22,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi", "hccl"]:
+        if backend not in ["nccl", "gloo", "mpi"]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(

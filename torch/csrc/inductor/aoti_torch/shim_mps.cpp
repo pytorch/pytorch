@@ -4,7 +4,7 @@
 
 using namespace torch::aot_inductor;
 
-AOTITorchError aoti_torch_mps_set_arg_tensor(
+AOTITorchError aoti_torch_mps_set_arg(
     AOTIMetalKernelFunctionHandle handle,
     unsigned idx,
     AtenTensorHandle tensor) {
@@ -15,15 +15,5 @@ AOTITorchError aoti_torch_mps_set_arg_tensor(
     }
     auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
     func->setArg(idx, *t);
-  });
-}
-
-AOTITorchError aoti_torch_mps_set_arg_int(
-    AOTIMetalKernelFunctionHandle handle,
-    unsigned idx,
-    int64_t val) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
-    func->setArg(idx, val);
   });
 }

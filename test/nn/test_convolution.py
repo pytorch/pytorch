@@ -1293,12 +1293,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
             torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []
         )
     )
-    @parametrize_test("dilation", [1, 2, 3])
-    def test_Conv2d_deterministic_cudnn(self, device, dtype, dilation):
-        inputs = torch.randn(2, 3, 7, 7, device=device, dtype=dtype, requires_grad=True)
+    def test_Conv2d_deterministic_cudnn(self, device, dtype):
+        inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
-            conv2 = torch.nn.Conv2d(3, 3, 3, dilation=dilation).to(device, dtype)
+            conv1 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3).to(device, dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
@@ -4055,15 +4054,13 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
-    @largeTensorTest("64GB", "cpu")
+    @largeTensorTest("80GB", "cpu")
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half)
-        c = nn.Conv2d(
-            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
-        )
+        x = torch.randn(1, 2, 32800, 32800)
+        c = nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, groups=2)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
+        self.assertEqual(yref, y)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

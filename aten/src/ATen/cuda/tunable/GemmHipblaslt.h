@@ -206,43 +206,23 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 }
 
 template <typename T>
-ScalingType GetAScalingTypeFromParams(const GemmParams<T>* params) {
-  return ScalingType::TensorWise;
+bool GetUseRowwiseFromParams(const GemmParams<T>* params) {
+  return false;
 }
 
 template <typename T>
-ScalingType GetBScalingTypeFromParams(const GemmParams<T>* params) {
-  return ScalingType::TensorWise;
+bool GetUseRowwiseFromParams(const GemmAndBiasParams<T>* params) {
+  return false;
 }
 
 template <typename T>
-ScalingType GetAScalingTypeFromParams(const GemmAndBiasParams<T>* params) {
-  return ScalingType::TensorWise;
+bool GetUseRowwiseFromParams(const GemmStridedBatchedParams<T>* params) {
+  return false;
 }
 
 template <typename T>
-ScalingType GetBScalingTypeFromParams(const GemmAndBiasParams<T>* params) {
-  return ScalingType::TensorWise;
-}
-
-template <typename T>
-ScalingType GetAScalingTypeFromParams(const GemmStridedBatchedParams<T>* params) {
-  return ScalingType::TensorWise;
-}
-
-template <typename T>
-ScalingType GetBScalingTypeFromParams(const GemmStridedBatchedParams<T>* params) {
-  return ScalingType::TensorWise;
-}
-
-template <typename T>
-ScalingType GetAScalingTypeFromParams(const ScaledGemmParams<T>* params) {
-  return params->a_scaling_type;
-}
-
-template <typename T>
-ScalingType GetBScalingTypeFromParams(const ScaledGemmParams<T>* params) {
-  return params->b_scaling_type;
+bool GetUseRowwiseFromParams(const ScaledGemmParams<T>* params) {
+  return params->use_rowwise;
 }
 
 template <typename T>
@@ -401,6 +381,28 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
   return HIPBLAS_OP_T;
 }
 
+static size_t GetHipblasltWorkspaceSize() {
+  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+  // 256MB is max workspace size allowed for hipblaslt
+  // hipblaslt-bench uses 32MB
+  // recommendation from hipblaslt author was 76MB
+  // TunableOp hipBLASLt workspace size is aligned with
+  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
+  size_t workspace_size = 76*1024;
+  if (env) {
+    try {
+      workspace_size = std::stoi(env.value());
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " KiB.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("HIPBLASLT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " KiB.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
 template <typename T, cublasStatus_t (*destructor)(T*)>
 struct HipBlasLtDeleter {
   void operator()(T* x) {
@@ -497,7 +499,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       }
 
       hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
-      if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+      if (at::globalContext().allowTF32CuBLAS()) {
         computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
       }
       HipBlasLtMatmulDescriptor matmul(computeType, HIP_R_32F);
@@ -509,24 +511,17 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
-        hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
-        hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-        if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
-#if defined(HIPBLASLT_OUTER_VEC)
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-#elif defined(HIPBLASLT_VEC_EXT)
-          a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
-#endif
+#ifdef HIPBLASLT_VEC_EXT
+        if (GetUseRowwiseFromParams<CT>(params)) {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
         }
-        if (GetBScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
-#if defined(HIPBLASLT_OUTER_VEC)
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-#elif defined(HIPBLASLT_VEC_EXT)
-          b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
+        else
 #endif
+        {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
         }
-        matmul.setAttribute(a_scale_ptr_desc, mat1_scale_ptr);
-        matmul.setAttribute(b_scale_ptr_desc, mat2_scale_ptr);
       }
       if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
@@ -549,7 +544,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         }
       }
 
-      size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
+      size_t workspace_size = GetHipblasltWorkspaceSize();
 
       auto op_handle = at::cuda::getCurrentCUDABlasLtHandle();
 
@@ -574,7 +569,10 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
+      void* workspace_buffer = nullptr;
+      if (workspace_size > 0) {
+        workspace_buffer = c10::cuda::CUDACachingAllocator::raw_alloc(workspace_size);
+      }
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
@@ -597,6 +595,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
+      if (workspace_size > 0) {
+        c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
+      }
       return OK;
     }
 

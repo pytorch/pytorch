@@ -74,6 +74,8 @@ struct TORCH_API ChannelRegistration {
 
 TORCH_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
+constexpr auto kDefaultNumWorkerThreads = 16;
+
 struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,
@@ -119,8 +121,8 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
       deviceMaps[workerName] = deviceMap;
     } else {
       for (auto& entry : deviceMap) {
-        // c10::Device has no default constructor, hence map[device] doesn't
-        // work In C++-17 we can use insert_or_assign.
+        // c10::Device has no default constructor, hence map[device] dosn't work
+        // In C++-17 we can use insert_or_assign.
         auto entryIter = iter->second.find(entry.first);
         if (entryIter == iter->second.end()) {
           iter->second.emplace(entry.first, entry.second);

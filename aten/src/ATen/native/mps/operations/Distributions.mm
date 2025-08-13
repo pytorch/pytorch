@@ -418,9 +418,8 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
     MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:subtractTensor name:nil];
     return [mpsGraph divisionWithPrimaryTensor:logTensor secondaryTensor:minusLambdaTensor name:nil];
   };
-  auto eps = std::numeric_limits<float>::epsilon();
   return mps::random_mps_impl<double>(self,
-                                      eps,
+                                      0.0,
                                       1.0,
                                       std::nullopt,
                                       std::nullopt,

@@ -19,7 +19,8 @@ float halfbits2float(unsigned short h) {
     exponent = 0xff;
   } else if (!exponent) { /* Denorm or Zero */
     if (mantissa) {
-      unsigned int msb = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      unsigned int msb;
       exponent = 0x71;
       do {
         msb = (mantissa & 0x400000);

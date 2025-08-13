@@ -13,7 +13,13 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
+from torch.distributed.tensor._op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpInfo,
+    OpSchema,
+    OutputSpecType,
+)
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -133,12 +139,17 @@ class OpDispatcher:
         kwargs: dict[str, object],
     ) -> object:
         """
-        Main dispatching logic.  Follows precedence order:
-        (1) custom_op_handler
-        (2) registered sharding strategy, then rule
-        (3) composite implicit autograd decomposition
+        Main dispatching logic
         """
-
+        # operators that does not need to go through sharding propagation
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+            # so we manually decompose them, here
+            out = op_call.decompose(*args, **kwargs)
+            assert out is not NotImplemented
+            return out
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -146,20 +157,7 @@ class OpDispatcher:
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
         logger.debug("Dispatching op_call: %s", op_info.schema)
 
-        try:
-            self.sharding_propagator.propagate(op_info)
-        except NotImplementedError:
-            if torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            ):
-                # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
-                # so we manually decompose them, here
-                out = op_call.decompose(*args, **kwargs)
-                assert out is not NotImplemented
-                return out
-            else:
-                raise
-
+        self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
@@ -172,9 +170,7 @@ class OpDispatcher:
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info,
-                    output_sharding.redistribute_schema,
-                    output_sharding.use_val_from_redistribute_schema,
+                    op_info, output_sharding.redistribute_schema
                 )
 
             local_tensor_args = (
@@ -264,13 +260,13 @@ class OpDispatcher:
                 # perform reduce on the collection with AND op
                 local_results = functools.reduce(operator.and_, obj_list, True)
 
-        if op_info.schema.is_inplace_op():
+        if _is_inplace_op(op_call):
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 return args[0]
             else:
                 return None
-        elif op_info.schema.is_out_variant_op():
+        elif _is_out_variant_op(op_call):
             # out variant could possibly have multiple out args (i.e. lu_unpack.out)
             output_specs = (
                 (output_sharding.output_spec,)
@@ -295,7 +291,6 @@ class OpDispatcher:
     def redistribute_local_args(
         op_info: OpInfo,
         suggested_input_schema: OpSchema,
-        use_val_from_redistribute_schema: bool,
     ) -> None:
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
@@ -318,12 +313,7 @@ class OpDispatcher:
                 else:
                     new_local_args.append(local_tensor)
             else:
-                if use_val_from_redistribute_schema:
-                    # args can be updated for view related ops, we refer to the
-                    # update in redistribute_schema.
-                    new_local_args.append(reshard_arg_spec)
-                else:
-                    new_local_args.append(arg_spec)
+                new_local_args.append(reshard_arg_spec)
 
         op_info.local_args = tuple(new_local_args)
 
@@ -450,7 +440,7 @@ class OpDispatcher:
                 "Found a non-scalar tensor with numel=1 and ndim!=0, "
                 "we are implicitly creating a replicated DTensor for it. "
                 "However, please consider changing it to a scalar tensor "
-                "or explicitly create a DTensor under distributed environment."
+                "or explicitly create a DTensor under distributed enviroment."
             )
 
         if tensor_arg.numel() == 1 or self._allow_implicit_replication:

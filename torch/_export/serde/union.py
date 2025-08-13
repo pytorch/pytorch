@@ -1,12 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Hashable
-from dataclasses import dataclass, fields
-from typing import TypeVar
-from typing_extensions import dataclass_transform
-
-
-T = TypeVar("T", bound="_Union")
+from dataclasses import fields
 
 
 class _UnionTag(str):
@@ -23,9 +18,9 @@ class _UnionTag(str):
     def __eq__(self, cmp) -> bool:
         assert isinstance(cmp, str)
         other = str(cmp)
-        assert other in _get_field_names(self._cls), (
-            f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
-        )
+        assert other in _get_field_names(
+            self._cls
+        ), f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
         return str(self) == other
 
     def __hash__(self):
@@ -35,18 +30,6 @@ class _UnionTag(str):
 @functools.cache
 def _get_field_names(cls) -> set[str]:
     return {f.name for f in fields(cls)}
-
-
-# If you turn a schema class that inherits from union into a dataclass, please use
-# this decorator to configure it. It's safe, faster and allows code sharing.
-#
-# For example, _union_dataclass customizes the __eq__ method to only check the type
-# and value property instead of default implementation of dataclass which goes
-# through every field in the dataclass.
-@dataclass_transform(eq_default=False)
-def _union_dataclass(cls: type[T]) -> type[T]:
-    assert issubclass(cls, _Union), f"{cls} must inheirt from {_Union}."
-    return dataclass(repr=False, eq=False)(cls)
 
 
 class _Union:
@@ -60,10 +43,7 @@ class _Union:
         return obj
 
     def __post_init__(self):
-        assert not any(
-            f.name in ("type", "_type", "create", "value")
-            for f in fields(self)  # type: ignore[arg-type, misc]
-        )
+        assert not any(f.name in ("type", "_type", "create", "value") for f in fields(self))  # type: ignore[arg-type, misc]
 
     @property
     def type(self) -> str:
@@ -83,11 +63,6 @@ class _Union:
         if attr is None and name in _get_field_names(type(self)) and name != self.type:  # type: ignore[arg-type]
             raise AttributeError(f"Field {name} is not set.")
         return attr
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _Union):
-            return False
-        return self.type == other.type and self.value == other.value
 
     def __str__(self):
         return self.__repr__()

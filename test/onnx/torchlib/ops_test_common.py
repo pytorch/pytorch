@@ -246,7 +246,7 @@ def duplicate_opinfo_for_prims(
             new_opinfo = copy.deepcopy(opinfo)
             new_opinfo.name = new_name
             new_opinfo.op = getattr(torch.ops.prims, prims_name)
-            opinfos.append(new_opinfo)  # noqa: B909
+            opinfos.append(new_opinfo)
             return
     raise RuntimeError(f"OpInfo '{name}' not found in the database.")
 

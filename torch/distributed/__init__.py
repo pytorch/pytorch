@@ -4,7 +4,6 @@ import pdb
 import sys
 import traceback
 import typing
-from datetime import timedelta
 
 import torch
 
@@ -83,7 +82,7 @@ if is_available():
 
     _breakpoint_cache: dict[int, typing.Any] = {}
 
-    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
+    def breakpoint(rank: int = 0, skip: int = 0):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.
@@ -99,13 +98,6 @@ if is_available():
             if counter <= skip:
                 log.warning("Skip the breakpoint, counter=%d", counter)
                 return
-
-        # avoid having the default timeout (if short) interrupt your debug session
-        if timeout_s is not None:
-            for group in torch.distributed.distributed_c10d._pg_map:
-                torch.distributed.distributed_c10d._set_pg_timeout(
-                    timedelta(seconds=timeout_s), group
-                )
 
         if get_rank() == rank:
             pdb = _DistributedPdb()

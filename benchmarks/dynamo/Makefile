@@ -1,9 +1,3 @@
-# Usage:
-#   make build-deps TORCHBENCH_MODELS=<model_names>
-#   Support install a single torchbench model (e.g., "alexnet"),
-#   or multiple torchbench model names (e.g., "alexnet basic_gnn_gcn BERT_pytorch"),
-#   or empty (i.e., "") for installing all torchbench models.
-
 clone-deps:
 	(cd ../../.. \
 		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
@@ -27,13 +21,17 @@ pull-deps: clone-deps
 	(cd ../../../torchbenchmark && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchbench.txt)" && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	uv pip install numpy scipy ninja pyyaml six mkl mkl-include setuptools wheel cmake \
-		typing-extensions requests protobuf numba cython scikit-learn librosa
-	(cd ../../../torchvision && uv pip install -e . --no-build-isolation)
+	# Install uv with
+	curl -LsSf https://astral.sh/uv/install.sh | sh
+	# and create the virtual env
+	uv venv pt-benchmark-py3.12 --python 3.12 && source pt-benchmark-py3.12/bin/activate
+	uv pip install astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+		typing-extensions requests protobuf numba cython scikit-learn torch librosa
+	(cd ../../../torchvision && uv pip install -e .)
 	(cd ../../../torchdata && uv pip install -e .)
 	(cd ../../../torchaudio && uv pip install -e . --no-build-isolation)
 	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchrec && uv pip install -e .)
 	(cd ../../../detectron2 && uv pip install -e . --no-build-isolation)
-	(cd ../../../torchbenchmark && python install.py --continue_on_fail $(if $(TORCHBENCH_MODELS),models $(TORCHBENCH_MODELS)))
+	(cd ../../../torchbenchmark && python install.py --continue_on_fail)
 	uv pip uninstall torchrec-nightly fbgemm-gpu-nightly

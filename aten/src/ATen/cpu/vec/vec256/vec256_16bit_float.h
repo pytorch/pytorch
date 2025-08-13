@@ -488,9 +488,6 @@ class Vectorized16 {
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
   }
-  Vectorized<T> fexp_u20() const {
-    return exp();
-  }
   Vectorized<T> exp_u20() const {
     return exp();
   }

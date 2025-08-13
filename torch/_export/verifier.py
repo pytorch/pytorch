@@ -215,7 +215,6 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
-                torch.sym_sum,
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later

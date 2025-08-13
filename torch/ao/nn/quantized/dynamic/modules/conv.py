@@ -2,7 +2,7 @@
 r"""Dynamically quantized convolution modules."""
 
 import warnings
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Optional
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -62,7 +62,7 @@ class Conv1d(nnq.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
         reduce_range=True,
@@ -133,7 +133,6 @@ class Conv2d(nnq.Conv2d):
         >>> output = m(input)
 
     """
-
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
@@ -218,7 +217,6 @@ class Conv3d(nnq.Conv3d):
         >>> output = m(input)
 
     """
-
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None

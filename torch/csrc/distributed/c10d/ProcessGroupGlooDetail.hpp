@@ -93,8 +93,7 @@ TORCH_DECLARE_TYPED_REGISTRY(
     std::vector<at::Tensor>&,
     ReduceOp,
     uint32_t,
-    uint64_t,
-    std::chrono::milliseconds);
+    uint64_t);
 
 // This function initializes a vector of CUDA streams, one for every
 // tensor in the input tensor vector, and ensures that these streams are
@@ -270,14 +269,12 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq,
-      std::chrono::milliseconds timeout)
+      uint64_t seq)
       : ProcessGroupGloo::AsyncWork(
             std::move(context),
             {inputs},
             OpType::ALLREDUCE,
             seq,
-            timeout,
             "gloo:all_reduce",
             inputs),
         inputs(inputs),
@@ -293,7 +290,6 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     gloo::AllreduceOptions opts(context_);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
     GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors);
     gloo::allreduce(opts);
 
@@ -336,15 +332,8 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq,
-      std::chrono::milliseconds timeout)
-      : AsyncAllreduceWork(
-            context,
-            inputs,
-            std::move(reduceOp),
-            tag,
-            seq,
-            timeout) {}
+      uint64_t seq)
+      : AsyncAllreduceWork(context, inputs, std::move(reduceOp), tag, seq) {}
 
   void run() override {
     allreduceCoalesced(inputs);
@@ -375,14 +364,12 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
-      uint64_t seq,
-      std::chrono::milliseconds timeout)
+      uint64_t seq)
       : ProcessGroupGloo::AsyncWork(
             std::move(context),
             {inputs},
             OpType::_ALLREDUCE_SPARSE,
             seq,
-            timeout,
             "gloo:sparse_all_reduce",
             inputs),
         inputs(inputs),
@@ -557,7 +544,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     gloo::AllgatherOptions opts(context_);
     opts.setOutput(buffer.mutable_data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
     gloo::allgather(opts);
 
     return metadata;
@@ -589,7 +575,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         input.numel());
     opts.setOutput(output.mutable_data_ptr<int64_t>(), counts);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
     gloo::allgatherv(opts);
 
     // Compile indices tensor per rank.
@@ -635,7 +620,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(
         valueTensor.scalar_type(), setOutput, opts, output, counts);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
     gloo::allgatherv(opts);
 
     // Compile values tensor per rank.

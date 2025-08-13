@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
+import enum
 import functools
 import json
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 
@@ -29,14 +30,15 @@ class CUTLASSOperationSerializer:
     ]
 
     @classmethod
-    def serialize(cls, operation: "GemmOperation") -> str:  # type: ignore[name-defined]  # noqa: F821
+    def serialize(cls, operation: "GemmOperation"):  # type: ignore[name-defined]  # noqa: F821
         """Serialize a GEMM operation to JSON string.
 
         Args:
             operation: GemmOperation object
+            indent: JSON indentation spaces
 
         Returns:
-            str: JSON string representation of the operation
+            str: JSON representation of the operation
         """
         assert operation.__class__.__qualname__ == "GemmOperation", (
             "Only GemmOperation objects are supported via the main API"
@@ -57,7 +59,7 @@ class CUTLASSOperationSerializer:
         return cls._json_to_gemm_operation(json_dict)
 
     @classmethod
-    def _gemm_operation_to_json(cls, operation: "GemmOperation") -> dict[str, Any]:  # type: ignore[name-defined]  # noqa: F821
+    def _gemm_operation_to_json(cls, operation):
         """Convert GemmOperation to JSON-serializable dict.
 
         Args:
@@ -119,7 +121,7 @@ class CUTLASSOperationSerializer:
         return result
 
     @classmethod
-    def _json_to_gemm_operation(cls, json_dict: dict[str, Any]) -> "GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+    def _json_to_gemm_operation(cls, json_dict):
         """Convert JSON dict to GemmOperation object.
 
         Args:
@@ -144,9 +146,9 @@ class CUTLASSOperationSerializer:
         gemm_kind = cls._json_to_enum(json_dict["gemm_kind"], GemmKind)
         arch = json_dict["arch"]
         tile_description = cls._json_to_tile_description(json_dict["tile_description"])
-        A = cls._json_to_tensor_description(json_dict.get("A"), "A")
-        B = cls._json_to_tensor_description(json_dict.get("B"), "B")
-        C = cls._json_to_tensor_description(json_dict.get("C"), "C")
+        A = cls._json_to_tensor_description(json_dict.get("A"))
+        B = cls._json_to_tensor_description(json_dict.get("B"))
+        C = cls._json_to_tensor_description(json_dict.get("C"))
         element_epilogue = cls._json_to_enum(json_dict["element_epilogue"], DataType)
 
         # Get optional parameters with defaults
@@ -157,7 +159,7 @@ class CUTLASSOperationSerializer:
         swizzling_functor = cls._json_to_enum(
             json_dict.get("swizzling_functor"), SwizzlingFunctor
         )
-        D = cls._json_to_tensor_description(json_dict.get("D"), "D")
+        D = cls._json_to_tensor_description(json_dict.get("D"))
         kernel_schedule = cls._json_to_enum(
             json_dict.get("kernel_schedule"), KernelScheduleType
         )
@@ -181,7 +183,7 @@ class CUTLASSOperationSerializer:
         if "ScaleFactorD" in json_dict and "ScaleFactorVectorSize" in json_dict:
             ScaleFactorD = {
                 "tensor": cls._json_to_tensor_description(
-                    json_dict.get("ScaleFactorD"), "ScaleFactorD"
+                    json_dict.get("ScaleFactorD")
                 ),
                 "vector_size": json_dict.get("ScaleFactorVectorSize"),
             }
@@ -218,26 +220,52 @@ class CUTLASSOperationSerializer:
         return operation
 
     @classmethod
-    @functools.lru_cache(None)
-    def _tile_description_to_json(cls, tile_desc: "TileDescription") -> str:  # type: ignore[name-defined]  # noqa: F821
+    def _tile_description_to_json(cls, tile_desc):
         """
-        Convert TileDescription to JSON string.
+        Convert TileDescription to JSON dict.
 
         Args:
             tile_desc: TileDescription object
 
         Returns:
-            str: JSON string representation
+            dict: Dictionary representation
         """
+        if tile_desc is None:
+            return None
+
+        # Create a dictionary for math_instruction if it exists
+        math_instruction_dict = None
+        if (
+            hasattr(tile_desc, "math_instruction")
+            and tile_desc.math_instruction is not None
+        ):
+            math_instruction = tile_desc.math_instruction
+            math_instruction_dict = {
+                "instruction_shape": math_instruction.instruction_shape,
+                "element_a": cls._enum_to_json(math_instruction.element_a),
+                "element_b": cls._enum_to_json(math_instruction.element_b),
+                "element_accumulator": cls._enum_to_json(
+                    math_instruction.element_accumulator
+                ),
+                "opcode_class": cls._enum_to_json(math_instruction.opcode_class),
+                "math_operation": cls._enum_to_json(math_instruction.math_operation),
+            }
+
+            # Add element_scale_factor if it exists
+            if (
+                hasattr(math_instruction, "element_scale_factor")
+                and math_instruction.element_scale_factor is not None
+            ):
+                math_instruction_dict["element_scale_factor"] = cls._enum_to_json(
+                    math_instruction.element_scale_factor
+                )
 
         # Create the main dictionary with field names matching TileDescription constructor parameters
         result = {
             "threadblock_shape": tile_desc.threadblock_shape,
             "stages": tile_desc.stages,
             "warp_count": tile_desc.warp_count,
-            "math_instruction": cls._math_instruction_to_json(
-                tile_desc.math_instruction
-            ),
+            "math_instruction": math_instruction_dict,
             "min_compute": tile_desc.minimum_compute_capability,  # Store as min_compute for constructor
             "max_compute": tile_desc.maximum_compute_capability,  # Store as max_compute for constructor
             "cluster_shape": tile_desc.cluster_shape,
@@ -251,13 +279,10 @@ class CUTLASSOperationSerializer:
         ):
             result["tile_shape"] = tile_desc.tile_shape
 
-        return json.dumps(result)
+        return result
 
     @classmethod
-    @functools.lru_cache(None)
-    def _json_to_tile_description(
-        cls, json_dict: Optional[str]
-    ) -> Optional["TileDescription"]:  # type: ignore[name-defined]  # noqa: F821
+    def _json_to_tile_description(cls, json_dict):
         """
         Convert JSON dict to TileDescription object.
 
@@ -270,176 +295,116 @@ class CUTLASSOperationSerializer:
         if json_dict is None:
             return None
 
-        tile_dict = json.loads(json_dict)
+        from cutlass_library import DataType
+        from cutlass_library.library import (
+            MathInstruction,
+            MathOperation,
+            OpcodeClass,
+            TileDescription,
+        )
 
-        from cutlass_library.library import TileDescription
+        # First, reconstruct the math_instruction if it exists
+        math_instruction_obj = None
+        if (
+            "math_instruction" in json_dict
+            and json_dict["math_instruction"] is not None
+        ):
+            mi_dict = json_dict["math_instruction"]
 
-        math_instruction = cls._json_to_math_instruction(tile_dict["math_instruction"])
+            # Convert string enum names back to enum values
+            element_a = cls._json_to_enum(mi_dict["element_a"], DataType)
+            element_b = cls._json_to_enum(mi_dict["element_b"], DataType)
+            element_acc = cls._json_to_enum(mi_dict["element_accumulator"], DataType)
+
+            # Get the opcode_class enum
+            opcode_class = cls._json_to_enum(mi_dict["opcode_class"], OpcodeClass)
+
+            # Get the math_operation enum
+            math_op = cls._json_to_enum(mi_dict["math_operation"], MathOperation)
+
+            # Create the MathInstruction object
+            math_instruction_obj = MathInstruction(
+                instruction_shape=mi_dict["instruction_shape"],
+                element_a=element_a,
+                element_b=element_b,
+                element_accumulator=element_acc,
+                opcode_class=opcode_class,
+                math_operation=math_op,
+            )
+
+            # Add element_scale_factor if it exists
+            if (
+                "element_scale_factor" in mi_dict
+                and mi_dict["element_scale_factor"] is not None
+            ):
+                math_instruction_obj.element_scale_factor = cls._json_to_enum(
+                    mi_dict["element_scale_factor"], DataType
+                )
 
         # Get compute capability values, checking both naming conventions
-        min_compute = tile_dict.get(
-            "min_compute", tile_dict.get("minimum_compute_capability")
+        min_compute = json_dict.get(
+            "min_compute", json_dict.get("minimum_compute_capability")
         )
-        max_compute = tile_dict.get(
-            "max_compute", tile_dict.get("maximum_compute_capability")
+        max_compute = json_dict.get(
+            "max_compute", json_dict.get("maximum_compute_capability")
         )
 
         # Get cluster shape with default value
-        cluster_shape = tile_dict.get("cluster_shape", [1, 1, 1])
+        cluster_shape = json_dict.get("cluster_shape", [1, 1, 1])
 
         # Create the TileDescription object
         tile_desc = TileDescription(
-            threadblock_shape=tile_dict["threadblock_shape"],
-            stages=tile_dict["stages"],
-            warp_count=tile_dict["warp_count"],
-            math_instruction=math_instruction,
+            threadblock_shape=json_dict["threadblock_shape"],
+            stages=json_dict["stages"],
+            warp_count=json_dict["warp_count"],
+            math_instruction=math_instruction_obj,
             min_compute=min_compute,
             max_compute=max_compute,
             cluster_shape=cluster_shape,
-            explicit_vector_sizes=tile_dict.get("explicit_vector_sizes"),
+            explicit_vector_sizes=json_dict.get("explicit_vector_sizes"),
         )
 
         # Set tile_shape if it exists and differs from threadblock_shape
         if (
-            "tile_shape" in tile_dict
-            and tile_dict["tile_shape"] != tile_dict["threadblock_shape"]
+            "tile_shape" in json_dict
+            and json_dict["tile_shape"] != json_dict["threadblock_shape"]
         ):
-            tile_desc.tile_shape = tile_dict["tile_shape"]
+            tile_desc.tile_shape = json_dict["tile_shape"]
 
         return tile_desc
 
     @classmethod
-    @functools.lru_cache(None)
-    def _math_instruction_to_json(
-        cls,
-        math_instruction: Optional["MathInstruction"],  # type: ignore[name-defined]  # noqa: F821
-    ) -> Optional[str]:
-        """Convert MathInstruction to JSON string.
-
-        Args:
-            math_instruction: MathInstruction object
-
-        Returns:
-            Optional[str]: JSON string representation or None
-        """
-        if math_instruction is None:
-            return None
-
-        result = {
-            "instruction_shape": math_instruction.instruction_shape,
-            "element_a": cls._enum_to_json(math_instruction.element_a),
-            "element_b": cls._enum_to_json(math_instruction.element_b),
-            "element_accumulator": cls._enum_to_json(
-                math_instruction.element_accumulator
-            ),
-            "opcode_class": cls._enum_to_json(math_instruction.opcode_class),
-            "math_operation": cls._enum_to_json(math_instruction.math_operation),
-            "element_scale_factor": cls._enum_to_json(
-                math_instruction.element_scale_factor
-            ),
-        }
-
-        return json.dumps(result)
-
-    @classmethod
-    @functools.lru_cache(None)
-    def _json_to_math_instruction(
-        cls, json_dict: Optional[str]
-    ) -> Optional["MathInstruction"]:  # type: ignore[name-defined]  # noqa: F821
-        """Convert JSON string to MathInstruction object.
-
-        Args:
-            json_dict: JSON string representation
-
-        Returns:
-            Optional[MathInstruction]: Reconstructed object or None
-        """
-        if json_dict is None:
-            return None
-
-        from cutlass_library import DataType
-        from cutlass_library.library import MathInstruction, MathOperation, OpcodeClass
-
-        mi_dict = json.loads(json_dict)
-
-        # Convert string enum names back to enum values
-        element_a = cls._json_to_enum(mi_dict["element_a"], DataType)
-        element_b = cls._json_to_enum(mi_dict["element_b"], DataType)
-        element_acc = cls._json_to_enum(mi_dict["element_accumulator"], DataType)
-
-        # Get the opcode_class enum
-        opcode_class = cls._json_to_enum(mi_dict["opcode_class"], OpcodeClass)
-
-        # Get the math_operation enum
-        math_op = cls._json_to_enum(mi_dict["math_operation"], MathOperation)
-
-        # Create the MathInstruction object
-        math_instruction_obj = MathInstruction(
-            instruction_shape=mi_dict["instruction_shape"],
-            element_a=element_a,
-            element_b=element_b,
-            element_accumulator=element_acc,
-            opcode_class=opcode_class,
-            math_operation=math_op,
-        )
-
-        # Add element_scale_factor if it exists
-        if (
-            "element_scale_factor" in mi_dict
-            and mi_dict["element_scale_factor"] is not None
-        ):
-            math_instruction_obj.element_scale_factor = cls._json_to_enum(
-                mi_dict["element_scale_factor"], DataType
-            )
-
-        return math_instruction_obj
-
-    @classmethod
-    @functools.lru_cache(None)
-    def _tensor_description_to_json(
-        cls,
-        tensor_desc: Optional["TensorDescription"],  # type: ignore[name-defined]  # noqa: F821
-    ) -> Optional[str]:
-        """Convert TensorDescription to JSON string.
+    def _tensor_description_to_json(cls, tensor_desc):
+        """Convert TensorDescription to JSON dict.
 
         Args:
             tensor_desc: TensorDescription object
 
         Returns:
-            Optional[str]: JSON string representation or None
+            dict: Dictionary representation
         """
         if tensor_desc is None:
             return None
 
-        result = {
+        return {
             "element": cls._enum_to_json(tensor_desc.element),
             "layout": cls._enum_to_json(tensor_desc.layout),
             "alignment": tensor_desc.alignment,
             "complex_transform": cls._enum_to_json(tensor_desc.complex_transform),
         }
 
-        return json.dumps(result)
-
     @classmethod
-    @functools.lru_cache(None)
-    def _json_to_tensor_description(
-        cls,
-        json_dict: Optional[str],
-        tensor_name: Optional[str] = None,
-    ) -> Optional["TensorDescription"]:  # type: ignore[name-defined]  # noqa: F821
-        """Convert JSON string to TensorDescription object.
+    def _json_to_tensor_description(cls, tensor_json):
+        """Convert JSON dict to TensorDescription object.
 
         Args:
-            json_dict: JSON string representation
-            tensor_name: Name of the tensor to avoid cache in the same op
+            tensor_json: Dictionary representation
 
         Returns:
-            Optional[TensorDescription]: Reconstructed object or None
+            TensorDescription: Reconstructed object
         """
-        if json_dict is None:
+        if tensor_json is None:
             return None
-
-        tensor_dict = json.loads(json_dict)
 
         from cutlass_library import DataType
         from cutlass_library.library import (
@@ -448,56 +413,50 @@ class CUTLASSOperationSerializer:
             TensorDescription,
         )
 
-        element = cls._json_to_enum(tensor_dict["element"], DataType)
-        layout = cls._json_to_enum(tensor_dict["layout"], LayoutType)
-        alignment = tensor_dict["alignment"]
+        element = cls._json_to_enum(tensor_json["element"], DataType)
+        layout = cls._json_to_enum(tensor_json["layout"], LayoutType)
+        alignment = tensor_json["alignment"]
         complex_transform = cls._json_to_enum(
-            tensor_dict["complex_transform"], ComplexTransform
+            tensor_json["complex_transform"], ComplexTransform
         )
 
         return TensorDescription(element, layout, alignment, complex_transform)
 
     @classmethod
-    @functools.lru_cache(None)
-    def _enum_to_json(cls, enum_value: Optional[Enum]) -> Optional[str]:
-        """Convert enum value to JSON string.
+    def _enum_to_json(cls, enum_value):
+        """Convert enum value to JSON dict.
 
         Args:
             enum_value: Enum value
 
         Returns:
-            Optional[str]: JSON string representation or None
+            dict: Dictionary representation
         """
         if enum_value is None:
             return None
 
-        result = {
+        assert isinstance(enum_value, enum.Enum)
+        return {
             "type": enum_value.__class__.__name__,
             "name": enum_value.name,
         }
 
-        return json.dumps(result)
-
     @classmethod
-    @functools.lru_cache(None)
-    def _json_to_enum(cls, json_dict: Optional[str], enum_class: Any) -> Optional[Enum]:
-        """Convert JSON string to enum value.
+    def _json_to_enum(cls, json_dict, enum_class):
+        """Convert JSON dict to enum value.
 
         Format: {name: "EnumName", value: 1}
 
         Args:
-            json_dict: JSON string representation
+            json_dict: Dictionary representation
             enum_class: Target enum class
 
         Returns:
-            Optional[Enum]: Reconstructed enum value or None
+            Reconstructed enum value
         """
-        if json_dict is None:
+        if json_dict is None or json_dict.get("name", "None") == "None":
             return None
-
-        enum_dict = json.loads(json_dict)
-
-        return enum_class[enum_dict["name"]]
+        return enum_class[json_dict["name"]]
 
 
 @functools.lru_cache(1)

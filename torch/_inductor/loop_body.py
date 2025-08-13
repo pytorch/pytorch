@@ -36,7 +36,7 @@ T = TypeVar("T")
 
 class InterpreterShim(torch.fx.Interpreter):
     @staticmethod
-    @functools.cache
+    @functools.lru_cache(None)
     def _dummy_gm():
         return torch.fx.symbolic_trace(identity)
 

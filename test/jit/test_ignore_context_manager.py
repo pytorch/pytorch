@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 
 import torch
 
@@ -9,11 +10,20 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.jit.frontend import _IS_ASTUNPARSE_INSTALLED
 from torch.testing._internal.jit_utils import JitTestCase
 
 
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
+
 class TestIgnoreContextManager(JitTestCase):
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_inp_out(self):
         class A(torch.nn.Module):
             def forward(self):
@@ -65,6 +75,7 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), 6)
         self.assertEqual(s(), model())
 
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_inp(self):
         class A(torch.nn.Module):
             def forward(self):
@@ -79,6 +90,7 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), 4)
         self.assertEqual(s(), model())
 
+    @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_out(self):
         class A(torch.nn.Module):
             def forward(self):
@@ -91,7 +103,3 @@ class TestIgnoreContextManager(JitTestCase):
         s = torch.jit.script(model)
         self.assertEqual(s(), 5)
         self.assertEqual(s(), model())
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_jit.py")

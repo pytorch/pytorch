@@ -4,7 +4,7 @@ import unittest
 from collections import namedtuple
 from functools import partial
 
-import torch_openreg  # noqa: F401
+import pytorch_openreg  # noqa: F401
 
 import torch
 from torch.nn.attention import SDPBackend

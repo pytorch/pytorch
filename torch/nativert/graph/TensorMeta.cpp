@@ -41,10 +41,6 @@ c10::ScalarType convertJsonScalarType(
       return c10::ScalarType::Float8_e4m3fn;
     case torch::_export::ScalarType::FLOAT8E5M2:
       return c10::ScalarType::Float8_e5m2;
-    case torch::_export::ScalarType::FLOAT8E4M3FNUZ:
-      return c10::ScalarType::Float8_e4m3fnuz;
-    case torch::_export::ScalarType::FLOAT8E5M2FNUZ:
-      return c10::ScalarType::Float8_e5m2fnuz;
     default:
       TORCH_CHECK(false, "unknown scalar type", static_cast<int>(scalarType));
   }
@@ -110,7 +106,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();
   } else {
-    TORCH_CHECK(false, "SymInt not supported yet");
+    CHECK(false) << "SymInt not supported yet";
   }
 
   for (const auto& size : tensorMeta.get_sizes()) {
@@ -120,7 +116,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       numel_ *= val;
     } else if (size.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
       // TODO: it's still unclear how SymInt shape should be used in runtime
-      // One potential use cases is for verifying inputs shape matches constrain
+      // One potential use cases is for verifing inputs shape matches constrain
       // This would require unpacking the serialized constrain, which is NYI
       //
       // For the time being, we just set the symbolic dim to -1

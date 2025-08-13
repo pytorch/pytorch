@@ -24,7 +24,7 @@ from torch.distributed.pipelining.stage import PipelineStage
 
 
 def get_schedule_ops(
-    schedule: Union[str, type[_PipelineSchedule]],
+    schedule: Union[str, _PipelineSchedule],
     pp_degree: int,
     num_microbatches: int,
     num_stages_per_rank: Optional[int] = None,
@@ -38,7 +38,7 @@ def get_schedule_ops(
 
     if isinstance(schedule, str):
         schedule_class = get_schedule_class(schedule)
-    elif issubclass(schedule, _PipelineSchedule):
+    elif type(schedule) == _PipelineSchedule:
         schedule_class = schedule
     else:
         raise ValueError(f"Invalid schedule: {schedule}")
@@ -56,14 +56,14 @@ def get_schedule_ops(
             num_stages_per_rank = 1
         assert num_stages_per_rank == 1
         stages = mock_pipeline_stage
-        stages.num_stages = num_stages_per_rank * pp_degree
+        stages.num_stages = num_stages_per_rank
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
         assert num_stages_per_rank >= 2
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
-            stage.num_stages = num_stages_per_rank * pp_degree
+            stage.num_stages = num_stages_per_rank
 
     else:
         raise ValueError(f"Invalid schedule: {schedule_class}")
@@ -98,7 +98,6 @@ action_type_to_color_mapping = {
     _ComputationType.BACKWARD_INPUT: _ComputationTypeColor("teal", "Backward Input"),
     _ComputationType.BACKWARD_WEIGHT: _ComputationTypeColor("green", "Backward Weight"),
     _ComputationType.FULL_BACKWARD: _ComputationTypeColor("orange", "Full Backward", 2),
-    _ComputationType.OVERLAP_F_B: _ComputationTypeColor("purple", "Overlap F+B", 3),
 }
 
 
@@ -137,15 +136,6 @@ def visualize_schedule(
                 used_computation.add(action.computation_type)
                 color = comp_type_color.color
                 width = comp_type_color.width
-
-                # Check if action has sub_actions to determine styling
-                if action.sub_actions is not None:
-                    linewidth = 2  # Thicker border for compound actions
-                    text_weight = "normal"  # Bold text for compound actions
-                else:
-                    linewidth = 1  # Default linewidth for regular actions
-                    text_weight = "normal"  # Default text weight
-
                 # Draw the rectangle to represent the action duration
                 rect = Rectangle(
                     (draw_position, num_ranks - rank_idx - 1),
@@ -153,10 +143,8 @@ def visualize_schedule(
                     1,
                     facecolor=color,
                     edgecolor="black",
-                    linewidth=linewidth,
                 )
                 ax.add_patch(rect)
-
                 # Draw the text centered within the rectangle
                 ax.text(
                     draw_position + width / 2,
@@ -166,9 +154,8 @@ def visualize_schedule(
                     va="center",
                     fontsize=font_size,
                     color="white",
-                    weight=text_weight,
                 )
-
+                # Increment the drawing position by the width of the current action
                 draw_position += width
             else:
                 draw_position += 1  # Move to the next

@@ -1,7 +1,5 @@
+# mypy: allow-untyped-defs
 import warnings
-from typing import Callable, Union
-
-from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 
 from .base_scheduler import BaseScheduler
 
@@ -23,7 +21,7 @@ class LambdaSL(BaseScheduler):
     Example:
         >>> # Assuming sparsifier has two groups.
         >>> lambda1 = lambda epoch: epoch // 30
-        >>> lambda2 = lambda epoch: 0.95**epoch
+        >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> # xdoctest: +SKIP
         >>> scheduler = LambdaSL(sparsifier, sl_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):
@@ -32,13 +30,7 @@ class LambdaSL(BaseScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(
-        self,
-        sparsifier: BaseSparsifier,
-        sl_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
-        last_epoch: int = -1,
-        verbose: bool = False,
-    ) -> None:
+    def __init__(self, sparsifier, sl_lambda, last_epoch=-1, verbose=False):
         self.sparsifier = sparsifier
 
         if not isinstance(sl_lambda, list) and not isinstance(sl_lambda, tuple):
@@ -49,9 +41,9 @@ class LambdaSL(BaseScheduler):
                     f"Expected {len(sparsifier.groups)} lr_lambdas, but got {len(sl_lambda)}"
                 )
             self.sl_lambdas = list(sl_lambda)
-        super().__init__(sparsifier, last_epoch, verbose)  # type: ignore[no-untyped-call]
+        super().__init__(sparsifier, last_epoch, verbose)
 
-    def get_sl(self) -> list[float]:
+    def get_sl(self):
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "

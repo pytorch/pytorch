@@ -38,8 +38,6 @@ enum class Backend {
   SparseCUDA,
   SparseCsrCPU,
   SparseCsrCUDA,
-  SparseCsrMPS,
-  SparseMPS,
   SparseHIP,
   SparseVE,
   SparseXPU,
@@ -96,10 +94,6 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
     return Backend::SparseCUDA;
-  } else if (t == DispatchKey::SparseMPS) {
-    return Backend::SparseMPS;
-  } else if (t == DispatchKey::SparseCsrMPS) {
-    return Backend::SparseCsrMPS;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
   } else if (t == DispatchKey::SparseVE) {
@@ -178,10 +172,6 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCPU;
     case Backend::SparseCUDA:
       return DispatchKey::SparseCUDA;
-    case Backend::SparseMPS:
-      return DispatchKey::SparseMPS;
-    case Backend::SparseCsrMPS:
-      return DispatchKey::SparseCsrMPS;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
     case Backend::SparseVE:
@@ -237,8 +227,6 @@ inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::CUDA:
     case Backend::SparseCUDA:
-    case Backend::SparseMPS:
-    case Backend::SparseCsrMPS:
     case Backend::QuantizedCUDA:
     case Backend::SparseCsrCUDA:
       return DeviceType::CUDA;
@@ -321,10 +309,6 @@ inline const char* toString(Backend b) {
       return "SparseCPU";
     case Backend::SparseCUDA:
       return "SparseCUDA";
-    case Backend::SparseMPS:
-      return "SparseMPS";
-    case Backend::SparseCsrMPS:
-      return "SparseCsrMPS";
     case Backend::SparseHIP:
       return "SparseHIP";
     case Backend::SparseVE:
@@ -377,7 +361,6 @@ inline bool isSparse(Backend b) {
     case Backend::SparseXPU:
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
-    case Backend::SparseMPS:
     case Backend::SparseHIP:
     case Backend::SparseVE:
     case Backend::SparsePrivateUse1:

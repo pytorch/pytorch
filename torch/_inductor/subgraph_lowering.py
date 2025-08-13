@@ -13,7 +13,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .exc import SubgraphLoweringException
-from .graph import GraphLowering
 from .ops_handler import SimpleCSEHandler
 from .virtualized import ops, V, WrapperHandler
 
@@ -33,7 +32,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     """
 
     graph_outputs: Optional[list[ir.IRNode]]
-    root_graph: GraphLowering
+    root_graph: torch._inductor.graph.GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
     allowed_mutations: Optional[OrderedSet[OpOverload]]
@@ -44,7 +43,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        root_graph_lowering: GraphLowering,
+        root_graph_lowering: torch._inductor.graph.GraphLowering,
         allowed_mutations: Optional[OrderedSet[OpOverload]] = None,
         additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:

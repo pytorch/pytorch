@@ -1,13 +1,11 @@
-import torch
-
-from typing import Optional, Union
-from collections.abc import Sequence
+# mypy: allow-untyped-defs
+from typing import Optional
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-def attr_value_proto(dtype: object, shape: Optional[Sequence[int]], s: Optional[str]) -> dict[str, AttrValue]:
+def attr_value_proto(dtype, shape, s):
     """Create a dict of objects matching a NodeDef's attr field.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/attr_value.proto
@@ -23,7 +21,7 @@ def attr_value_proto(dtype: object, shape: Optional[Sequence[int]], s: Optional[
     return attr
 
 
-def tensor_shape_proto(outputsize: Sequence[int]) -> TensorShapeProto:
+def tensor_shape_proto(outputsize):
     """Create an object matching a tensor_shape field.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/tensor_shape.proto .
@@ -32,14 +30,14 @@ def tensor_shape_proto(outputsize: Sequence[int]) -> TensorShapeProto:
 
 
 def node_proto(
-    name: str,
-    op: str = "UnSpecified",
-    input: Optional[Union[list[str], str]] = None,
-    dtype: Optional[torch.dtype] = None,
-    shape: Optional[tuple[int, ...]] = None,
-    outputsize: Optional[Sequence[int]] = None,
-    attributes: str = "",
-) -> NodeDef:
+    name,
+    op="UnSpecified",
+    input=None,
+    dtype=None,
+    shape: Optional[tuple] = None,
+    outputsize=None,
+    attributes="",
+):
     """Create an object matching a NodeDef.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/node_def.proto .

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import time
-from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from functools import partial
@@ -14,7 +13,6 @@ import torch.distributed.checkpoint as DCP
 import torch.distributed.checkpoint.state_dict_saver as saver
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.checkpoint.staging import DefaultStager, StagingOptions
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -24,10 +22,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
-from torch.distributed.checkpoint.state_dict_saver import (
-    AsyncCheckpointerType,
-    AsyncSaveResponse,
-)
+from torch.distributed.checkpoint.state_dict_saver import AsyncCheckpointerType
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.device_mesh import init_device_mesh
@@ -221,26 +216,21 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     @parametrize(
-        "cache_staged_state_dict, async_checkpointer_type, zoc",
+        "cache_staged_state_dict, async_checkpointer_type",
         [
-            (False, AsyncCheckpointerType.THREAD, False),
-            (True, AsyncCheckpointerType.THREAD, False),
-            (False, AsyncCheckpointerType.PROCESS, False),
-            (True, AsyncCheckpointerType.PROCESS, False),
-            (False, AsyncCheckpointerType.PROCESS, True),
-            (False, AsyncCheckpointerType.THREAD, True),
+            (False, AsyncCheckpointerType.THREAD),
+            (True, AsyncCheckpointerType.THREAD),
+            (False, AsyncCheckpointerType.PROCESS),
+            (True, AsyncCheckpointerType.PROCESS),
         ],
     )
-    def test_e2e_async_cached(
-        self, cache_staged_state_dict, async_checkpointer_type, zoc
-    ):
+    def test_e2e_async_cached(self, cache_staged_state_dict, async_checkpointer_type):
         self._run_e2e_test(
             compile=False,
             model_type=ModelType.FSDP,
             async_op=True,
             cache_staged_state_dict=cache_staged_state_dict,
             async_checkpointer_type=async_checkpointer_type,
-            zoc=zoc,
         )
 
     def _run_e2e_test(
@@ -250,7 +240,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         async_op=False,
         cache_staged_state_dict=False,
         async_checkpointer_type=None,
-        zoc=False,
     ):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
@@ -270,19 +259,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             writer = DCP.FileSystemWriter(
                 self.temp_dir, cache_staged_state_dict=cache_staged_state_dict
             )
-            stager = None
-            if not cache_staged_state_dict:
-                use_shared_memory = (
-                    async_checkpointer_type == AsyncCheckpointerType.PROCESS
-                )
-                staging_options = StagingOptions(
-                    use_async_staging=zoc,
-                    use_shared_memory=use_shared_memory,
-                    use_pinned_memory=zoc,
-                    use_non_blocking_copy=zoc,
-                )
-                stager = DefaultStager(staging_options)
-            async_save_response_or_future = saver.async_save(
+            f = saver.async_save(
                 sd,
                 storage_writer=writer,
                 async_checkpointer_type=(
@@ -290,20 +267,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     if async_checkpointer_type
                     else AsyncCheckpointerType.THREAD
                 ),
-                async_stager=stager,
             )
-            if isinstance(async_save_response_or_future, Future):
-                save_future = async_save_response_or_future
-            else:
-                assert isinstance(async_save_response_or_future, AsyncSaveResponse)
-                save_future = async_save_response_or_future.upload_completion
-            # wait for the future to complete
             t = time.monotonic()
-            while not save_future.done():
+            while not f.done():
                 time.sleep(1)
                 print(f"still waiting... {time.monotonic() - t}")
 
-            save_future.result()
+            f.result()
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
 

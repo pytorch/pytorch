@@ -374,101 +374,90 @@ def update_automatic_dynamic(
 ) -> FrameStateSizeEntry:
     code_id = CodeId.make(tx.f_code)
     frame_state = get_code_state()[code_id]
-    if torch._dynamo.config.automatic_dynamic_shapes:
-        is_update = name in frame_state.automatic_dynamic
-        mut_entry = frame_state.automatic_dynamic[name]
-        old_entry = copy.copy(mut_entry)
-        mut_entry |= entry
+    is_update = name in frame_state.automatic_dynamic
+    mut_entry = frame_state.automatic_dynamic[name]
+    old_entry = copy.copy(mut_entry)
+    mut_entry |= entry
 
-        # Do some logs (damn, I spend more code logging than I do actually doing
-        # the updates lol)
-        if is_update and old_entry.scalar != mut_entry.scalar:
-            log.debug(
-                "automatic dynamic int %s val %s != %s",
-                name,
-                entry.scalar,
-                old_entry.scalar,
-            )
-            CompileEventLogger.instant(
-                "automatic_dynamic",
-                {
-                    "name": name,
-                    "dim_changed": "scalar",
-                    "reason": "scalar change",
-                    "cached": str(old_entry.scalar),
-                    "new": str(entry.scalar),
-                },
-            )
-            if is_unspecialized_nn_module:
-                log.info(
-                    "%s is converted to a symbolic integer. It is an attribute of a "
-                    "user defined nn module class. If you wish to keep it static, you can "
-                    "mark the nn module class as `torch._dynamo.mark_static`.",
-                    name,
-                )
-
-        def log_tup(
-            tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
-        ) -> None:
-            entry_tup = (
-                getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
-            )
-            old_entry_tup = (
-                getattr(old_entry, tup_name)
-                if i is None
-                else getattr(old_entry, tup_name)[i]
-            )
-            log.debug(
-                "automatic dynamic %s %s %s %s != %s",
-                tup_name,
-                name,
-                short_reason,
-                # NB: We used to only report len(...) here for dim mismatch
-                entry_tup,
-                old_entry_tup,
-            )
-            CompileEventLogger.instant(
-                "automatic_dynamic",
-                {
-                    "name": name,
-                    "dim_changed": "all" if i is None else i,
-                    "reason": long_reason,
-                    "cached": str(old_entry_tup),
-                    "new": str(entry_tup),
-                },
-            )
-
-        if is_update and old_entry.size != mut_entry.size:
-            if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
-                if len(old_entry.size) != len(entry.size):
-                    log_tup("size", "dim", "dimensionality change")
-                else:
-                    for i in range(len(entry.size)):
-                        if old_entry.size[i] != entry.size[i]:
-                            log_tup("size", f"size({i})", "size change", i)
-            else:
-                log_tup("size", "other", "other")
-
-        if is_update and old_entry.stride != mut_entry.stride:
-            if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
-                if len(old_entry.stride) != len(entry.stride):
-                    log_tup("stride", "dim", "dimensionality change")
-                else:
-                    for i in range(len(entry.stride)):
-                        if old_entry.stride[i] != entry.stride[i]:
-                            log_tup("stride", f"stride({i})", "stride change", i)
-            else:
-                log_tup("stride", "other", "other")
-    else:
-        old_entry = frame_state.automatic_dynamic[name]
+    # Do some logs (damn, I spend more code logging than I do actually doing
+    # the updates lol)
+    if is_update and old_entry.scalar != mut_entry.scalar:
         log.debug(
-            "automatic dynamic is off, overwriting int %s val %s -> %s",
+            "automatic dynamic int %s val %s != %s",
             name,
-            old_entry.scalar,
             entry.scalar,
+            old_entry.scalar,
         )
-        frame_state.automatic_dynamic[name] = entry
-        mut_entry = entry
+        CompileEventLogger.instant(
+            "automatic_dynamic",
+            {
+                "name": name,
+                "dim_changed": "scalar",
+                "reason": "scalar change",
+                "cached": str(old_entry.scalar),
+                "new": str(entry.scalar),
+            },
+        )
+        if is_unspecialized_nn_module:
+            log.info(
+                "%s is converted to a symbolic integer. It is an attribute of a "
+                "user defined nn module class. If you wish to keep it static, you can "
+                "mark the nn module class as `torch._dynamo.mark_static`.",
+                name,
+            )
+
+    def log_tup(
+        tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
+    ) -> None:
+        entry_tup = (
+            getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
+        )
+        old_entry_tup = (
+            getattr(old_entry, tup_name)
+            if i is None
+            else getattr(old_entry, tup_name)[i]
+        )
+        log.debug(
+            "automatic dynamic %s %s %s %s != %s",
+            tup_name,
+            name,
+            short_reason,
+            # NB: We used to only report len(...) here for dim mismatch
+            entry_tup,
+            old_entry_tup,
+        )
+        CompileEventLogger.instant(
+            "automatic_dynamic",
+            {
+                "name": name,
+                "dim_changed": "all" if i is None else i,
+                "reason": long_reason,
+                "cached": str(old_entry_tup),
+                "new": str(entry_tup),
+            },
+        )
+
+    if is_update and old_entry.size != mut_entry.size:
+        if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
+            if len(old_entry.size) != len(entry.size):
+                log_tup("size", "dim", "dimensionality change")
+            else:
+                for i in range(len(entry.size)):
+                    if old_entry.size[i] != entry.size[i]:
+                        log_tup("size", f"size({i})", "size change", i)
+        else:
+            log_tup("size", "other", "other")
+
+    if is_update and old_entry.stride != mut_entry.stride:
+        if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
+            if len(old_entry.stride) != len(entry.stride):
+                log_tup("stride", "dim", "dimensionality change")
+            else:
+                for i in range(len(entry.stride)):
+                    if old_entry.stride[i] != entry.stride[i]:
+                        log_tup("stride", f"stride({i})", "stride change", i)
+        else:
+            log_tup("stride", "other", "other")
 
     return mut_entry
 
@@ -521,9 +510,9 @@ def process_automatic_dynamic(
 
 def get_cache_key() -> Optional[str]:
     # TODO: info versions of these logs that log only once
-    if torch.compiler.config.force_disable_caches:
+    if torch._inductor.config.force_disable_caches:
         warn_once(
-            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
         )
         return None
 
@@ -566,7 +555,7 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
-    if torch.compiler.config.force_disable_caches:
+    if torch._inductor.config.force_disable_caches:
         return False
 
     if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
@@ -602,47 +591,27 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
-    dynamic_sources: OrderedSet[str] = OrderedSet()
-    for src, fs in code_state.automatic_dynamic.items():
-        dynamic = False
-        if isinstance(fs.size, tuple):
-            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
-        elif fs.scalar == auto_dynamic:
-            dynamic = True
-        if dynamic:
-            dynamic_sources.add(src)
-    return dynamic_sources
-
-
-def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
-    code_id = CodeId.make(f_code)
-    frame_state = get_code_state()[code_id]
-    frame_whitelist = ",".join(_collect_dynamic_sources(frame_state))
-    if frame_whitelist:
-        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
-            CompileEventLogger.pt2_compile(
-                name, recompile_dynamic_whitelist=frame_whitelist
-            )
-
-
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
-    code_state_str = "\n".join(
-        f"{k}:\n"
-        + "\n".join(
-            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
-        )
-        for k, v in cs.items()
-    )
+    terms: list[str] = []
     dynamic_sources: OrderedSet[str] = OrderedSet()
-    for state in cs.values():
-        dynamic_sources.update(_collect_dynamic_sources(state))
+    for k, v in cs.items():
+        cs_terms: list[str] = []
+        for src, fs in v.automatic_dynamic.items():
+            cs_terms.append(f"  {src}: {fs.render()}")
+            if isinstance(fs.size, tuple) and auto_dynamic in fs.size:  # type: ignore[operator]
+                dynamic_sources.add(src)
+        terms.append(f"{k}:\n" + "\n".join(cs_terms))
+    code_state_str = "\n".join(terms)
     if dynamic_sources:
         code_state_str += (
-            "\n\nPGO detected a recompilation due to dynamic shapes. "
-            "To reduce shape recompilations by compiling dynamically to start, "
+            "\n\nPGO detected changes a recompilation due to tensor sizes. "
+            "To potentially avoid thisTo reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name, recompile_dynamic_whitelist=",".join(dynamic_sources)
+            )
     return code_state_str
 
 
@@ -668,7 +637,7 @@ class PGOCacheArtifact(CacheArtifact):
         update the key to use the new MAST job's name and version.
         """
         if not original_key.startswith("mast:"):
-            # if original_key is overridden, then dont change it
+            # if original_key is overriden, then dont change it
             return original_key
         if (new_key := get_cache_key()) is not None:
             return new_key
@@ -694,7 +663,7 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
         trace_structured_artifact(
             f"get_{ty}_code_state",
             "string",
-            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
+            lambda: render_code_state(_CODE_STATE),
         )
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)

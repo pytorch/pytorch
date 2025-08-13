@@ -1,5 +1,4 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
 
 #include <c10/util/env.h>
 
@@ -40,24 +39,8 @@ NCCLComm::NCCLComm(NCCLComm&& other) {
   std::swap(deviceIndex_, other.deviceIndex_);
 }
 
-void NCCLComm::setUniqueHash(ncclUniqueId ncclId) {
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclId);
-
-  fmt::memory_buffer buf;
-  buf.reserve(NCCL_UNIQUE_ID_BYTES * 2); // 2 hex chars per byte
-  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
-    fmt::format_to(
-        std::back_inserter(buf), "{:02x}", static_cast<int>(bytes[i]));
-  }
-  this->uniqueHash_ = fmt::to_string(buf);
-}
-
-void NCCLComm::setUniqueHash(std::string hash) {
-  this->uniqueHash_ = std::move(hash);
-}
-
-std::string NCCLComm::getUniqueHash() {
-  return uniqueHash_;
+ncclUniqueId NCCLComm::getNcclId() {
+  return ncclId_;
 }
 
 std::shared_ptr<NCCLComm> NCCLComm::create(
@@ -70,7 +53,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   C10D_NCCL_CHECK(
       ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
       std::nullopt);
-  comm->setUniqueHash(commId);
+  comm->ncclId_ = commId;
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = true;
@@ -95,7 +78,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
       ncclCommInitRankConfig(
           &(comm->ncclComm_), numRanks, commId, rank, &config),
       std::nullopt);
-  comm->setUniqueHash(commId);
+  comm->ncclId_ = commId;
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   // Under blocking mode, comm is initialized immediately after NCCL init
@@ -129,7 +112,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   // Only the first ncclUniqueId will be used to create the
   // communicator hash id, which is used to identify the communicator
   // in the log file and in the replay tool.
-  comm->setUniqueHash(commIds[0]);
+  comm->ncclId_ = commIds[0];
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = !comm->nonBlocking_;
@@ -195,12 +178,16 @@ std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
   return commFailureReason_;
 }
 
-#if defined(NCCL_HAS_COMM_SPLIT)
+// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+// last argument to split() API is not used to support
+// multiple implementations
 std::shared_ptr<NCCLComm> NCCLComm::split(
     NCCLComm* source,
     int color_id,
     int rank,
-    ncclConfig_t& config) {
+    ncclConfig_t& config,
+    std::vector<uint64_t>& ranks_ull) {
   TORCH_CHECK(
       color_id >= NCCL_SPLIT_NOCOLOR,
       "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
@@ -250,9 +237,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   // Child comm should be on the same device as parent comm
   comm->deviceIndex_ = source->deviceIndex_;
   comm->nonBlocking_ = config.blocking == 0;
-  comm->setUniqueHash(
-      source->getUniqueHash() + ":" +
-      std::to_string(source->ncclCommSplitCounter_));
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
   return comm;
@@ -366,8 +350,7 @@ ncclResult_t NCCLComm::checkForNcclError() {
 ncclResult_t NCCLComm::registerSegment(
     void* ptr,
     size_t size,
-    bool errorOnRereg, /*=true*/
-    bool window /*=false*/) {
+    bool errorOnRereg /*=true*/) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
@@ -388,30 +371,6 @@ ncclResult_t NCCLComm::registerSegment(
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
-#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
-  if (window) {
-    C10D_NCCL_CHECK(
-        ncclCommWindowRegister(
-            comm, ptr, size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
-        c10::str(
-            "Failed to window register segment with ptr ",
-            ptr,
-            ", size ",
-            size,
-            " on ncclComm_ ",
-            comm));
-  } else {
-    C10D_NCCL_CHECK(
-        ncclCommRegister(comm, ptr, size, &handle),
-        c10::str(
-            "Failed to register segment with ptr ",
-            ptr,
-            ", size ",
-            size,
-            " on ncclComm_ ",
-            comm));
-  }
-#else
   C10D_NCCL_CHECK(
       ncclCommRegister(comm, ptr, size, &handle),
       c10::str(
@@ -421,7 +380,6 @@ ncclResult_t NCCLComm::registerSegment(
           size,
           " on ncclComm_ ",
           comm));
-#endif
   registeredSegmentHandles_[ptr] = handle;
   return ncclSuccess;
 #else
@@ -429,7 +387,7 @@ ncclResult_t NCCLComm::registerSegment(
 #endif
 }
 
-ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
+ncclResult_t NCCLComm::deregisterSegment(void* ptr) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   TORCH_CHECK(
@@ -442,29 +400,6 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   void* handle = registeredSegmentHandles_[ptr];
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
-#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
-  if (window) {
-    C10D_NCCL_CHECK(
-        ncclCommWindowDeregister(comm, (ncclWindow_t)handle),
-        c10::str(
-            "Failed to window deregister segment handle ",
-            handle,
-            ", with ptr ",
-            ptr,
-            " on ncclComm_ ",
-            comm));
-  } else {
-    C10D_NCCL_CHECK(
-        ncclCommDeregister(comm, handle),
-        c10::str(
-            "Failed to deregister segment handle ",
-            handle,
-            ", with ptr ",
-            ptr,
-            " on ncclComm_ ",
-            comm));
-  }
-#else
   C10D_NCCL_CHECK(
       ncclCommDeregister(comm, handle),
       c10::str(
@@ -474,7 +409,6 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
           ptr,
           " on ncclComm_ ",
           comm));
-#endif
   registeredSegmentHandles_.erase(ptr);
   return ncclSuccess;
 #else
@@ -500,11 +434,21 @@ std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
 
 std::string getNcclVersion() {
   static std::string versionString = []() {
-    auto [ncclMajor, ncclMinor, ncclPatch] = getNcclVersionTuple();
+    int version = 0;
     std::string versionString;
-    if (ncclMajor == 0 && ncclMinor == 0 && ncclPatch == 0) {
+    ncclResult_t status = ncclGetVersion(&version);
+    // can't compute the version if call did not return successfully or version
+    // code < 100 (corresponding to 0.1.0)
+    if (status != ncclSuccess || version < 100) {
       versionString = "Unknown NCCL version";
     } else {
+      // NCCL changed version coding starting 2.9
+      const int majorBase = version < 2900 ? 1000 : 10000;
+      const int minorBase = 100;
+      auto ncclMajor = version / majorBase;
+      auto ncclMinor = (version % majorBase) / minorBase;
+      auto ncclPatch =
+          version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
 #ifdef NCCL_SUFFIX
@@ -518,25 +462,6 @@ std::string getNcclVersion() {
   }();
 
   return versionString;
-}
-
-std::tuple<int, int, int> getNcclVersionTuple() {
-  static std::tuple<int, int, int> versionTuple = []() {
-    int version = getNcclVersionNumber();
-    // can't compute the version if call did not return successfully or version
-    // code < 100 (corresponding to 0.1.0)
-    if (version < 100) {
-      return std::make_tuple(0, 0, 0);
-    }
-    // NCCL changed version coding starting 2.9
-    const int majorBase = version < 2900 ? 1000 : 10000;
-    const int minorBase = 100;
-    auto ncclMajor = version / majorBase;
-    auto ncclMinor = (version % majorBase) / minorBase;
-    auto ncclPatch = version % minorBase;
-    return std::make_tuple(ncclMajor, ncclMinor, ncclPatch);
-  }();
-  return versionTuple;
 }
 
 int getNcclVersionNumber() {
@@ -571,27 +496,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
     }
   }
   return hash;
-}
-
-// NCCL uses Non-negative int to represent in-group according to API
-// requirement. We take a list of ranks and generate a hash value based on the
-// list and ensure its range of 32-bit int.
-int genNcclSplitColor(const std::vector<int>& ranks) {
-  // Combine the hash values using a simple reducer (std::hash + fold)
-  std::size_t combined_hash = std::accumulate(
-      ranks.begin(),
-      ranks.end(),
-      std::size_t(0),
-      [](std::size_t acc, int rank) {
-        return acc ^
-            (std::hash<int>{}(rank) + 0x9e3779b9 + (acc << 6) + (acc >> 2));
-      });
-
-  // max positive value of int32_t
-  constexpr int32_t max_c_int = std::numeric_limits<int32_t>::max();
-  int color = static_cast<int>(
-      std::abs(static_cast<int64_t>(combined_hash)) % max_c_int);
-  return color;
 }
 
 // Default value: 30 minutes

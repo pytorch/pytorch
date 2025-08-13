@@ -34,7 +34,6 @@ from .ctx_manager import (
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
-    SetFullgraphVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -55,8 +54,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
-    CreateTMADescriptorExperimentalVariable,
-    CreateTMADescriptorStableVariable,
+    CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
@@ -65,26 +63,22 @@ from .functions import (
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
-    TMADescriptorExperimentalVariable,
-    TMADescriptorStableVariable,
+    TMADescriptorVariable,
     UserFunctionVariable,
     UserMethodVariable,
-    WrapperUserFunctionVariable,
-    WrapperUserMethodVariable,
 )
 from .higher_order_ops import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
-    ReparametrizeModuleCallVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
+    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
-    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -140,7 +134,6 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
-    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -149,7 +142,6 @@ from .user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
-    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -165,9 +157,9 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
-    "CreateTMADescriptorExperimentalVariable",
-    "CreateTMADescriptorStableVariable",
+    "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
+    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
@@ -200,15 +192,13 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
-    "SetFullgraphVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
-    "TMADescriptorExperimentalVariable",
-    "TMADescriptorStableVariable",
+    "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
     "TorchVersionVariable",

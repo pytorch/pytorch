@@ -8,6 +8,7 @@ import torch
 from torch._ops import OpOverload
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._op_schema import (
+    _is_inplace_op,
     OpSchema,
     OpStrategy,
     PlacementList,
@@ -41,7 +42,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         as the original op (except that if an arg is a :class:`torch.Tensor`, it will be
         replaced by a tensor-like object that DTensor uses internally). The function should
         return a sequence of 2-tuples, each specifying acceptable output placements and its
-        corresponding input placements.
+        corresponding intput placements.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")
@@ -77,7 +78,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
                 # take the output spec from the first strategy
                 return strategy.strategies[0].output_spec
             elif isinstance(strategy, TupleStrategy):
-                return tuple(strategy_to_spec(s) for s in strategy.children)
+                return tuple(strategy_to_spec(s) for s in strategy.childs)
             else:
                 return strategy
 
@@ -100,7 +101,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
             op_schema,
             single_mesh_dim_strategies,
             input_index=len(op_schema.op._schema.returns),
-            inplace_op=op_schema.is_inplace_op(),
+            inplace_op=_is_inplace_op(op_schema.op),
         )
 
     def wrapper(custom_sharding_fn):

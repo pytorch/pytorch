@@ -202,7 +202,9 @@ TEST(BoundsInference, _5) {
   Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr inner;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr tail;
   std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
   LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
@@ -678,6 +680,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   });
 
   LoopNest l({A});
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ForPtr inner, tail;
 
   // Splitting with tail by something offset creates a tail which also writes to

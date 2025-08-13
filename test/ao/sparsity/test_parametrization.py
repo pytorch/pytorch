@@ -1,11 +1,18 @@
 # Owner(s): ["module: unknown"]
 
 
+import logging
+
 import torch
 from torch import nn
 from torch.ao.pruning.sparsifier import utils
 from torch.nn.utils import parametrize
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import TestCase
+
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 class ModelUnderTest(nn.Module):
@@ -166,7 +173,3 @@ class TestFakeSparsity(TestCase):
         y = model(x)
         y_hat = model_trace(x)
         self.assertEqual(y_hat, y)
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_ao_sparsity.py")

@@ -59,7 +59,7 @@ class StrobelightCLIFunctionProfiler:
 
     StrobelightCLIFunctionProfiler can be used to profile a python function and
     generate a strobelight link with the results. It works on meta servers but
-    does not requires an fbcode target.
+    does not requries an fbcode target.
     When stop_at_error is false(default), error during profiling does not prevent
     the work function from running.
 
@@ -310,7 +310,7 @@ def strobelight(
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
     def strobelight_inner(
-        work_function: Callable[_P, _R],
+        work_function: Callable[_P, _R]
     ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:

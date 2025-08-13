@@ -8,12 +8,12 @@ It also provides mechanisms to compare PyTorch with other frameworks.
 Make sure you're on a machine with CUDA, torchvision, and pytorch installed. Install in the following order:
 ```
 # Install torchvision. It comes with the pytorch stable release binary
-python -m pip install torch torchvision
+pip3 install torch torchvision
 
 # Install the latest pytorch master from source.
 # It should supersede the installation from the release binary.
 cd $PYTORCH_HOME
-python -m pip install --no-build-isolation -v -e .
+python setup.py build develop
 
 # Check the pytorch installation version
 python -c "import torch; print(torch.__version__)"
@@ -31,4 +31,3 @@ Please refer to each subfolder to discover each benchmark suite. Links are provi
 * [Overrides](overrides_benchmark/README.md)
 * [Sparse](sparse/README.md)
 * [Tensor expression](tensorexpr/HowToRun.md)
-* [Data](data/README.md)

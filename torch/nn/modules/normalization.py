@@ -60,15 +60,9 @@ class LocalResponseNorm(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.local_response_norm(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self):
-        """
-        Return the extra representation of the module.
-        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -88,15 +82,9 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self) -> str:
-        """
-        Return the extra representation of the module.
-        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -249,7 +237,7 @@ class GroupNorm(Module):
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
-    separately over each group. :math:`\gamma` and :math:`\beta` are learnable
+    separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
@@ -370,7 +358,6 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
-
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
     eps: Optional[float]
@@ -409,13 +396,13 @@ class RMSNorm(Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Runs the forward pass.
+        Runs forward pass.
         """
         return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
 
     def extra_repr(self) -> str:
         """
-        Return the extra representation of the module.
+        Extra information about the module.
         """
         return (
             "{normalized_shape}, eps={eps}, "

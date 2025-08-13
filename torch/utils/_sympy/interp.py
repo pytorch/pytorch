@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 # TODO: Dedupe this with SYMPY_INTERP
 
 
-@functools.cache
+@functools.lru_cache(None)
 def handlers():
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 

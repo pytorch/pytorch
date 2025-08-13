@@ -27,7 +27,7 @@ struct ForwardGrad;
 //   - Ensure that we can keep the level that we expose to the user API simple
 //   (an integer
 //     that represents the nesting depth) while avoiding confusions when the
-//     level index is reused.
+//     level index is re-used.
 
 // The important external APIs from this file are:
 //   - ForwardADLevel::get_next_idx() that can be used to enter a new level and

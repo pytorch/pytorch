@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import copy
+import logging
 
 import torch
 import torch.nn as nn
@@ -9,10 +10,11 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
     ActivationSparsifier,
 )
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    skipIfTorchDynamo,
-    TestCase,
+from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
+
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
 
@@ -50,7 +52,7 @@ class TestActivationSparsifier(TestCase):
         sparsifier_defaults = activation_sparsifier.defaults
         combined_defaults = {**defaults, "sparse_config": sparse_config}
 
-        # more keys are populated in activation sparsifier (even though they may be None)
+        # more keys are populated in activation sparsifier (eventhough they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
 
         for key, config in sparsifier_defaults.items():
@@ -403,7 +405,3 @@ class TestActivationSparsifier(TestCase):
 
         # check state_dict() after squash_mask()
         self._check_state_dict(activation_sparsifier)
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_ao_sparsity.py")

@@ -21,14 +21,6 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_interpframe_structs.h>
-#include <internal/pycore_stackref.h>
-#endif
-#endif
-
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_code.h>
 #endif
 
 #undef Py_BUILD_CORE
@@ -38,13 +30,6 @@
 extern "C" {
 #endif
 
-#if IS_PYTHON_3_14_PLUS
-
-#define F_CODE(x) (PyCodeObject*)PyStackRef_AsPyObjectBorrow(x->f_executable)
-#define PREV_INSTR(x) (x)->instr_ptr
-
-#else
-
 #if IS_PYTHON_3_13_PLUS
 #define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
 #define PREV_INSTR(x) (x)->instr_ptr
@@ -52,8 +37,6 @@ extern "C" {
 #define F_CODE(x) ((PyCodeObject*)(x)->f_code)
 #define PREV_INSTR(x) (x)->prev_instr
 #endif
-
-#endif // IS_PYTHON_3_14_PLUS
 
 #if IS_PYTHON_3_12_PLUS
 #define FUNC(x) ((x)->f_funcobj)

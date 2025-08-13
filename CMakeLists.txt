@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
@@ -6,7 +6,6 @@ cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 # one is detected as "AppleClang".
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
-cmake_policy(SET CMP0126 OLD)
 
 # Enables CMake to set LTO on compilers other than Intel.
 cmake_policy(SET CMP0069 NEW)
@@ -17,8 +16,6 @@ cmake_policy(SET CMP0069 NEW)
 # we do this (and we don't if cmake is old), but it's nice when it's possible,
 # and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
-# Don't remove the FindCUDA module
-cmake_policy(SET CMP0146 OLD)
 
 # Prohibit in-source builds
 if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
@@ -262,7 +259,7 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_XCCL "Use XCCL" ON
+cmake_dependent_option(USE_XCCL "Use XCCL" OFF
                        "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
@@ -562,10 +559,6 @@ if(MSVC)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
-  if(MSVC_Z7_OVERRIDE)
-    # CMake set debug flags to use /Z7
-    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
-  endif()
   foreach(
     flag_var
     CMAKE_C_FLAGS
@@ -578,6 +571,12 @@ if(MSVC)
     CMAKE_CXX_FLAGS_RELEASE
     CMAKE_CXX_FLAGS_MINSIZEREL
     CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    # Replace /Zi and /ZI with /Z7
+    if(MSVC_Z7_OVERRIDE)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endif(MSVC_Z7_OVERRIDE)
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -700,7 +699,7 @@ endif()
 if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
     if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
       set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
+      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
     endif()
 endif()
 
@@ -872,14 +871,6 @@ cmake_dependent_option(
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
-cmake_dependent_option(
-  USE_FBGEMM_GENAI
-  "Whether to build FBGEMM GenAI quantized GEMM kernels.\
-  Will be disabled if not supported by the platform"
-  OFF
-  "USE_CUDA OR USE_ROCM"
-  OFF)
-
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
 cmake_dependent_option(
@@ -911,10 +902,6 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_FBGEMM_GENAI)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM_GENAI")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
@@ -997,9 +984,6 @@ endif()
 # ---[ Build flags Re-include to override append_cxx_flag_if_supported from
 # third_party/FBGEMM
 include(cmake/public/utils.cmake)
-if(USE_COLORIZE_OUTPUT)
-  set(CMAKE_COLOR_DIAGNOSTICS ON)
-endif()
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
 
@@ -1074,6 +1058,19 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
+
+  if(${USE_COLORIZE_OUTPUT})
+    # Why compiler checks are necessary even when `try_compile` is used Because
+    # of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
+    # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for
+    # older ccache) and https://github.com/ccache/ccache/issues/1275 (for newer
+    # ones)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+      append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    else()
+      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
+    endif()
+  endif()
 
   append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
 
@@ -1202,6 +1199,10 @@ if(APPLE)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 
+if(USE_XPU)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_XPU")
+endif()
+
 if(EMSCRIPTEN)
   string(
     APPEND
@@ -1253,11 +1254,10 @@ if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
-add_subdirectory(torch/headeronly)  # headeronly headers
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 
-# ---[ CMake related files Uninstall option.
+# ---[ CMake related files Uninistall option.
 if(NOT TARGET caffe2_uninstall)
   configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in

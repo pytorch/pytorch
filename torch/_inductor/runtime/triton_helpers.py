@@ -2,17 +2,9 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
-from .triton_compat import (  # noqa: F401
-    _log2,
-    builtins_use_semantic_kwarg,
-    libdevice,
-    math,
-    tl,
-    triton,
-)
+from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 _T = TypeVar("_T")
@@ -80,7 +72,7 @@ def div_floor_integer(a, b):
 def remainder_integer(a, b):
     # NOTE: a % b matches C division, not floor division
     remainder = a % b
-    return tl.where((remainder != 0) & ((a < 0) != (b < 0)), remainder + b, remainder)
+    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
 @triton.jit
@@ -131,9 +123,9 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan & (not b_isnan)
+        mask |= a_isnan and not b_isnan
         # Consider NaNs as equal
-        equal |= a_isnan & b_isnan
+        equal |= a_isnan and b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -147,9 +139,9 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask |= a_isnan & (not b_isnan)
+        mask |= a_isnan and not b_isnan
         # Consider NaNs as equal
-        equal |= a_isnan & b_isnan
+        equal |= a_isnan and b_isnan
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -202,7 +194,7 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
-    # but since rhs_sum is all 1, we can simplify it.
+    # but since rhs_sum is all 1, we can simpliy it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
     return out_max, out_sum
 
@@ -460,7 +452,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     block_value: Scalar value for this block, must be 64-bits wide
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identity of combine_fn
+    init: Scalar value equal to the identiy of combine_fn
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
@@ -565,34 +557,14 @@ def _compare_and_swap_with_index(
     # actual compare-and-swap
     ix = x.to(idtype, bitcast=True)
 
-    # sort treats nan as having the higher value. comparisons with nan always return False.
-    # to align with sort semantics, we need to update descending to check if right_isnan,
-    # and ascending to check if left_isnan.
-    left_isnan = left != left
-    right_isnan = right != right
-
     if descending:
         cond = left < right
-        if is_floating(left):
-            if not stable:
-                cond = cond | right_isnan
-            else:
-                cond = cond | (right_isnan & (~left_isnan))
-
     else:
         cond = left > right
-        if is_floating(left):
-            if not stable:
-                cond = cond | left_isnan
-            else:
-                cond = cond | (left_isnan & (~right_isnan))
 
     if stable:
         # When stable sorting, tie break by index
-        eq = left == right
-        if is_floating(left):
-            eq = eq | (left_isnan & right_isnan)
-        cond = cond | (eq & (left_idx > right_idx))
+        cond = cond | ((left == right) & (left_idx > right_idx))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
@@ -710,7 +682,7 @@ def x_grid_barrier(sem):
     tl.debug_barrier()
 
 
-def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
+def triton_builtin(f: _T) -> _T:
     """
     Decorator to mark a function as a Triton built-in function.  These functions
     are evaluated at compile time.
@@ -721,18 +693,8 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
     Returns:
         function: The same function, marked as a Triton built-in.
     """
-    if builtins_use_semantic_kwarg:
-        # support Triton before and after https://github.com/triton-lang/triton/pull/7054
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            kwargs["_builder"] = kwargs["_semantic"]
-            del kwargs["_semantic"]
-            return f(*args, **kwargs)
-    else:
-        wrapper = f  # type: ignore[assignment]
-
-    wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
-    return wrapper
+    f.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return f
 
 
 @triton_builtin
@@ -755,3 +717,107 @@ def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
     return val
+
+
+HAS_NEW_TMA_API = hasattr(tl, "make_tensor_descriptor")
+
+
+"""
+Helper function that dispatches to either `tl.make_tensor_descriptor` or
+`triton.language.extra.cuda.experimental_device_tensormap_create2d` based on `HAS_NEW_TMA_API`.
+
+Parameters:
+- base_ptr: The base pointer to the tensor data (used as `base` or `global_address`)
+- shape: The shape of the tensor (used as `shape` or `global_size`)
+- strides: The strides of the tensor (only used with `make_tensor_descriptor`)
+- block_shape: The block shape (used as `block_shape` or `load_size`)
+- desc_ptr: The descriptor pointer (only used with `experimental_device_tensormap_create2d`)
+- element_ty: The element type (only used with `experimental_device_tensormap_create2d`)
+
+Returns:
+- The tensor descriptor or None depending on the API used
+"""
+if HAS_NEW_TMA_API:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        return tl.make_tensor_descriptor(
+            base=base_ptr,
+            shape=global_shape,
+            strides=strides,
+            block_shape=block_shape,
+        )
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl.load_tensor_descriptor(desc, offsets)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl.store_tensor_descriptor(desc, offsets, value)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        pass
+
+else:
+
+    @triton.jit
+    def make_tensor_descriptor(
+        base_ptr,
+        global_shape,
+        strides,
+        block_shape,
+        desc_ptr,
+        element_ty,
+    ):
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=desc_ptr,
+            global_address=base_ptr,
+            load_size=block_shape,
+            global_size=global_shape,
+            element_ty=element_ty,
+        )
+
+        return desc_ptr
+
+    @triton.jit
+    def load_tensor_descriptor(
+        desc,
+        offsets,
+        shape,
+        dtype,
+    ):
+        return tl._experimental_descriptor_load(desc, offsets, shape, dtype)
+
+    @triton.jit
+    def store_tensor_descriptor(
+        desc,
+        value,
+        offsets,
+    ):
+        return tl._experimental_descriptor_store(desc, value, offsets)
+
+    @triton.jit
+    def tensormap_fenceproxy_acquire(
+        desc,
+    ):
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(desc)

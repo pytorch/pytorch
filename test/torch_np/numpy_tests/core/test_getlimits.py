@@ -1,7 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
-"""Test functions for limits module."""
+""" Test functions for limits module.
 
+"""
 import functools
 import warnings
 from unittest import expectedFailure as xfail, skipIf
@@ -134,9 +135,9 @@ class TestIinfo(TestCase):
         [
             np.uint8,
             # xfail: unsupported add (uint[16,32,64])
-            subtest(np.uint16, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
-            subtest(np.uint32, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
-            subtest(np.uint64, decorators=[] if TEST_WITH_TORCHDYNAMO else [xfail]),
+            subtest(np.uint16, decorators=[xfail]),
+            subtest(np.uint32, decorators=[xfail]),
+            subtest(np.uint64, decorators=[xfail]),
         ],
     )
     def test_unsigned_max(self, T):

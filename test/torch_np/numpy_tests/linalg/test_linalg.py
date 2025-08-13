@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
-"""Test functions for linalg module"""
+""" Test functions for linalg module
 
+"""
 import functools
 import itertools
 import os
@@ -488,7 +489,7 @@ class SolveCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     # kept apart from TestSolve for use for testing with matrices.
     def do(self, a, b, tags):
         x = linalg.solve(a, b)
-        assert_almost_equal(b, dot_generalized(a, x), single_decimal=5)
+        assert_almost_equal(b, dot_generalized(a, x))
         assert_(consistent_subclass(x, b))
 
 

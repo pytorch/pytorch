@@ -26,7 +26,7 @@ class Pattern:
     In subclass, define description and skip property.
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         self.prof = prof
         self.should_benchmark = should_benchmark
         self.name = "Please specify a name for pattern"
@@ -39,7 +39,7 @@ class Pattern:
             self.tid_root.setdefault(event.start_tid, []).append(event)
 
     @property
-    def skip(self) -> bool:
+    def skip(self):
         return False
 
     def report(self, event: _ProfilerEvent):
@@ -66,8 +66,8 @@ class Pattern:
             )
         return default_summary
 
-    def benchmark_summary(self, events: list[_ProfilerEvent]) -> str:
-        def format_time(time_ns: int) -> str:
+    def benchmark_summary(self, events: list[_ProfilerEvent]):
+        def format_time(time_ns: int):
             unit_lst = ["ns", "us", "ms"]
             for unit in unit_lst:
                 if time_ns < 1000:
@@ -90,7 +90,7 @@ class Pattern:
     def match(self, event: _ProfilerEvent):
         """
         Return True if the event matches the pattern.
-        This method should be overridden in subclass.
+        This method should be overriden in subclass.
         """
         raise NotImplementedError
 
@@ -135,9 +135,7 @@ class Pattern:
 
 
 class NamePattern(Pattern):
-    def __init__(
-        self, prof: profile, name: str, should_benchmark: bool = False
-    ) -> None:
+    def __init__(self, prof: profile, name: str, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.description = f"Matched Name Event: {name}"
         self.name = name
@@ -152,7 +150,7 @@ class ExtraCUDACopyPattern(Pattern):
     example: torch.zeros((100, 100)).to("cuda")
 
     Pattern:
-    built-in method                 |built-in method
+    build-in method                 |build-in method
         ...                         |    aten::to
             aten::fill_/aten::zero_ |        aten::_to_copy
 
@@ -163,7 +161,7 @@ class ExtraCUDACopyPattern(Pattern):
     If at any step we failed, it is not a match.
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Extra CUDA Copy Pattern"
         self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initialize it on GPU."
@@ -176,7 +174,7 @@ class ExtraCUDACopyPattern(Pattern):
         }
 
     @property
-    def skip(self) -> bool:
+    def skip(self):
         return not self.prof.with_stack or not self.prof.record_shapes
 
     def match(self, event):
@@ -211,7 +209,7 @@ class ExtraCUDACopyPattern(Pattern):
             return False
         while event.children:
             event = event.children[-1]
-            # aten::zero_ is a special optimization case where fill_ is not called
+            # aten::zero_ is a special optimzation case where fill_ is not called
             if event.name in self.init_ops:
                 return True
         return event.name in self.init_ops
@@ -250,7 +248,7 @@ class ForLoopIndexingPattern(Pattern):
     We also keep a dictionary to avoid duplicate match in the for loop.
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "For Loop Indexing Pattern"
         self.description = "For loop indexing detected. Vectorization recommended."
@@ -273,7 +271,7 @@ class ForLoopIndexingPattern(Pattern):
             return False
 
         # Custom event list matching
-        def same_ops(list1, list2) -> bool:
+        def same_ops(list1, list2):
             if len(list1) != len(list2):
                 return False
             for op1, op2 in zip(list1, list2):
@@ -297,7 +295,7 @@ class ForLoopIndexingPattern(Pattern):
 
 
 class FP32MatMulPattern(Pattern):
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "FP32 MatMul Pattern"
         self.description = (
@@ -312,13 +310,10 @@ class FP32MatMulPattern(Pattern):
             has_tf32 = False
         else:
             # Anything less than sm_80 is not Ampere which doesn't support TF32
-            has_tf32 = all(
-                int(re.sub("sm_|compute_", "", arch)) >= 80
-                for arch in torch.cuda.get_arch_list()
-            )
+            has_tf32 = all(int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
         return has_tf32 is False or super().skip or not self.prof.record_shapes
 
-    def match(self, event: _ProfilerEvent) -> bool:
+    def match(self, event: _ProfilerEvent):
         # If we saw this pattern once, we don't need to match it again
         if event.tag != _EventType.TorchOp:
             return False
@@ -367,17 +362,17 @@ class OptimizerSingleTensorPattern(Pattern):
     String match
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Optimizer Single Tensor Pattern"
         self.optimizers_with_foreach = ["adam", "sgd", "adamw"]
         self.description = (
-            "Detected optimizer running with single tensor implementation. "
+            "Deteced optimizer running with single tensor implementation. "
             "Please enable multi tensor implementation by passing 'foreach=True' into optimizer."
         )
         self.url = ""
 
-    def match(self, event: _ProfilerEvent) -> bool:
+    def match(self, event: _ProfilerEvent):
         for optimizer in self.optimizers_with_foreach:
             if event.name.endswith(f"_single_tensor_{optimizer}"):
                 return True
@@ -402,7 +397,7 @@ class SynchronizedDataLoaderPattern(Pattern):
 
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Synchronized DataLoader Pattern"
         self.description = (
@@ -414,7 +409,7 @@ class SynchronizedDataLoaderPattern(Pattern):
             "#enable-async-data-loading-and-augmentation"
         )
 
-    def match(self, event: _ProfilerEvent) -> bool:
+    def match(self, event: _ProfilerEvent):
         def is_dataloader_function(name: str, function_name: str):
             return name.startswith(
                 os.path.join("torch", "utils", "data", "dataloader.py")
@@ -461,7 +456,7 @@ class GradNotSetToNonePattern(Pattern):
     String match
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Gradient Set To Zero Instead of None Pattern"
         self.description = (
@@ -473,7 +468,7 @@ class GradNotSetToNonePattern(Pattern):
             "#disable-gradient-calculation-for-validation-or-inference"
         )
 
-    def match(self, event: _ProfilerEvent) -> bool:
+    def match(self, event: _ProfilerEvent):
         if not event.name.endswith(": zero_grad"):
             return False
         if not event.children:
@@ -502,7 +497,7 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
     String match
     """
 
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Enabling Bias in Conv2d Followed By BatchNorm Pattern"
         self.description = "Detected bias enabled in Conv2d that is followed by BatchNorm2d. Please set 'bias=False' in Conv2d."
@@ -533,17 +528,17 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
 
 
 class MatMulDimInFP16Pattern(Pattern):
-    def __init__(self, prof: profile, should_benchmark: bool = False) -> None:
+    def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Matrix Multiplication Dimension Not Aligned Pattern"
         self.description = "Detected matmul with dimension not aligned. Please use matmul with aligned dimension."
         self.url = "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#use-mixed-precision-and-amp"
 
     @property
-    def skip(self) -> bool:
+    def skip(self):
         return not self.prof.with_stack or not self.prof.record_shapes
 
-    def match(self, event: _ProfilerEvent) -> bool:
+    def match(self, event: _ProfilerEvent):
         def mutiple_of(shapes, multiple):
             return all(dim % multiple == 0 for shape in shapes for dim in shape[-2:])
 
@@ -586,7 +581,7 @@ class MatMulDimInFP16Pattern(Pattern):
         return shapes_factor_map
 
 
-def source_code_location(event: Optional[_ProfilerEvent]) -> str:
+def source_code_location(event: Optional[_ProfilerEvent]):
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(
@@ -613,7 +608,7 @@ def report_all_anti_patterns(
     should_benchmark: bool = False,
     print_enable: bool = True,
     json_report_dir: Optional[str] = None,
-) -> None:
+):
     report_dict: dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),

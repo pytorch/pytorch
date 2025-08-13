@@ -36,7 +36,7 @@ def _update_module_param(param_list: list[tuple[nn.Module, str, nn.Parameter]]):
 
 def _reconstruct_dtensor(module: nn.Module, _input: Any):
     """
-    Reconstruct DTensor parameters from local tensors
+    Recontruct DTensor parameters from local tensors
     """
     param_list = []
     # TODO: To add perf optimizations to this iterations

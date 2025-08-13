@@ -62,11 +62,13 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
-  TORCH_CHECK_VALUE(
-      value <= std::numeric_limits<int32_t>::max() &&
-          value >= std::numeric_limits<int32_t>::min(),
-      "Overflow when unpacking long");
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  if (value > std::numeric_limits<int32_t>::max() ||
+      value < std::numeric_limits<int32_t>::min()) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
   return (int32_t)value;
 }
 
@@ -76,7 +78,9 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
   return (int64_t)value;
 }
 
@@ -85,9 +89,9 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  TORCH_CHECK_VALUE(
-      value <= std::numeric_limits<uint32_t>::max(),
-      "Overflow when unpacking long long");
+  if (value > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error("Overflow when unpacking unsigned long");
+  }
   return (uint32_t)value;
 }
 
@@ -163,16 +167,6 @@ inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject* obj) {
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
-#ifdef USE_NUMPY
-  // Handle NumPy boolean scalars (np.bool_)
-  if (torch::utils::is_numpy_bool(obj)) {
-    int truth = PyObject_IsTrue(obj);
-    if (truth == -1) {
-      throw python_error();
-    }
-    return truth != 0;
-  }
-#endif
   if (PyFloat_Check(obj)) {
     return (bool)PyFloat_AS_DOUBLE(obj);
   }
@@ -188,7 +182,7 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  // No need to check overflow, because when overflow occurred, it should
+  // No need to check overflow, because when overflow occured, it should
   // return true in order to keep the same behavior of numpy.
   return (bool)value;
 }

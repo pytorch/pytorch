@@ -80,7 +80,8 @@ TEST(Vitals, OnAndOff) {
 
 TEST(Vitals, APIVitals) {
   std::stringstream buffer;
-  bool rvalue = false;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool rvalue;
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {

@@ -579,9 +579,9 @@ class FullyConnectedSparseOperatorTester {
 
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t c = 0; c < outputChannels(); c++) {
-              ASSERT_NEAR(
+              ASSERT_FLOAT_EQ(
                   output_dynamic[i * outputChannels() + c],
-                  accumulators_float[i * outputChannels() + c], 1e-3)
+                  accumulators_float[i * outputChannels() + c])
                   << "at " << i << ", " << c
                   << ": reference = " <<
                   accumulators_float[i * outputChannels() + c]

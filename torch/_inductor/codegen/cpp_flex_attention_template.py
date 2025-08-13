@@ -311,7 +311,7 @@ extern "C"
   }
   if (need_pack) {
     // When the number of gemm is greater than the number of pack,
-    // the pack overhead can be overlapped.
+    // the pack overhead can be overlaped.
     int64_t thresh_size = 64;
     need_pack = kvSize >= thresh_size && qSize >= thresh_size;
     if (need_pack) {
@@ -814,7 +814,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         from ..loop_body import LoopBody
         from ..utils import sympy_index_symbol_with_prefix, SymT
         from ..virtualized import V
-        from .cpp import CppKernelProxy, KernelGroup, ParallelDepth
+        from .cpp import CppKernelProxy, KernelGroup
 
         kernel_group = KernelGroup()
         kernel_input_args = {
@@ -883,15 +883,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         var_sizes_list.append((var_sizes, ()))
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-
-        def max_parallel_depth():
-            return ParallelDepth(parallel_depth=0, start_depth=0)
-
-        # This loop is not parallelized since it is not the outermost loop.
-        with patch.object(
-            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
-        ):
-            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         output_code = kernel_group.loops_code.getvalue()
 
         var_q_symbol, var_kv_symbol = self.block_vars
@@ -985,8 +977,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        assert isinstance(self.output_node, ir.IRNode)
-        buf_out: ir.IRNode = TensorBox.create(self.output_node)
+        buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(

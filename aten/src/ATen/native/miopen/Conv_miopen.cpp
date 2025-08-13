@@ -724,7 +724,8 @@ void raw_miopen_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -832,7 +833,8 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -987,7 +989,8 @@ void raw_miopen_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1031,7 +1034,8 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1236,7 +1240,8 @@ void raw_miopen_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1345,7 +1350,8 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (at::globalContext().immediateMiopen()) {
+  if (deterministic && !benchmark) {
+      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 

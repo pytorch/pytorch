@@ -156,9 +156,9 @@ class CommitClassifier(nn.Module):
         elif isinstance(most_likely_index, torch.Tensor):
             return [self.categories[i] for i in most_likely_index]
 
-    def get_most_likely_category_name(self, input):
+    def get_most_likely_category_name(self, inpt):
         # Input will be a dict with title and author keys
-        logits = self.forward(input)
+        logits = self.forward(inpt)
         most_likely_index = torch.argmax(logits, dim=1)
         return self.convert_index_to_category_name(most_likely_index)
 
@@ -264,9 +264,9 @@ def generate_batch(batch):
 
 
 def train_step(batch, model, optimizer, loss):
-    input, targets = batch
+    inpt, targets = batch
     optimizer.zero_grad()
-    output = model(input)
+    output = model(inpt)
     l = loss(output, targets)
     l.backward()
     optimizer.step()
@@ -275,8 +275,8 @@ def train_step(batch, model, optimizer, loss):
 
 @torch.no_grad()
 def eval_step(batch, model, loss):
-    input, targets = batch
-    output = model(input)
+    inpt, targets = batch
+    output = model(inpt)
     l = loss(output, targets)
     return l
 

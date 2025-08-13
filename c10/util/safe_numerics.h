@@ -1,7 +1,6 @@
 #pragma once
 #include <c10/macros/Macros.h>
 
-#include <cstddef>
 #include <cstdint>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
@@ -32,36 +31,28 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #endif
 }
 
-template <typename T>
-C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
+C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
 #else
-  static_assert(
-      std::is_integral_v<T>, "mul_overflows only supports integral types");
-
-  if constexpr (std::is_signed_v<T>) {
-    // For signed types, use the division-based check
-    volatile T tmp = a * b;
-    *out = tmp;
-    if (a == 0 || b == 0) {
-      return false;
-    }
-    return !(a == tmp / b);
-  } else {
-    // For unsigned types, use leading zeros approach
-    // This test isn't exact, but avoids doing integer division
-    *out = a * b;
-    constexpr int bits = sizeof(T) * 8;
-    return (
-        (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
-        bits);
-  }
+  *out = a * b;
+  // This test isnt exact, but avoids doing integer division
+  return (
+      (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
 #endif
 }
 
-C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
-  return mul_overflows<uint64_t>(a, b, out);
+C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_mul_overflow(a, b, out);
+#else
+  volatile int64_t tmp = a * b;
+  *out = tmp;
+  if (a == 0 || b == 0) {
+    return false;
+  }
+  return !(a == tmp / b);
+#endif
 }
 
 template <typename It>
@@ -86,7 +77,7 @@ bool safe_multiplies_u64(It first, It last, uint64_t* out) {
     prod_log2 += c10::llvm::Log2_64_Ceil(x);
   }
   *out = prod;
-  // This test isn't exact, but avoids doing integer division
+  // This test isnt exact, but avoids doing integer division
   return !is_zero && (prod_log2 >= 64);
 #endif
 }

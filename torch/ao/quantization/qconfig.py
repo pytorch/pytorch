@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import copy
-import sys
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Union
@@ -99,8 +98,7 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
 
       my_qconfig = QConfig(
           activation=MinMaxObserver.with_args(dtype=torch.qint8),
-          weight=default_observer.with_args(dtype=torch.qint8),
-      )
+          weight=default_observer.with_args(dtype=torch.qint8))
 
     """
 
@@ -563,18 +561,13 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
                 torch.ao.quantization.MovingAveragePerChannelMinMaxObserver,
             ),
         )
-        assert not is_per_channel, (
-            "Per channel weight observer is not supported yet for ConvTranspose{n}d."
-        )
+        assert (
+            not is_per_channel
+        ), "Per channel weight observer is not supported yet for ConvTranspose{n}d."
 
 
-if sys.version_info < (3, 12):
-    QConfigAny = Optional[QConfig]
-    QConfigAny.__module__ = "torch.ao.quantization.qconfig"
-else:
-    from typing import TypeAliasType
-
-    QConfigAny = TypeAliasType("QConfigAny", Optional[QConfig])
+QConfigAny = Optional[QConfig]
+QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
 
 def _add_module_to_qconfig_obs_ctr(

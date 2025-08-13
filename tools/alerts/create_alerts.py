@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 import requests
-from setuptools import distutils  # type: ignore[import,attr-defined]
+from setuptools import distutils  # type: ignore[import]
 
 
 ALL_SKIPPED_THRESHOLD = 100

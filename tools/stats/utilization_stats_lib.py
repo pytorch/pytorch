@@ -5,7 +5,7 @@ from typing import Optional
 from dataclasses_json import DataClassJsonMixin
 
 
-_DATA_MODEL_VERSION = 1.5
+_DATA_MODEL_VERSION = 1.0
 
 
 # data model for test log usage
@@ -13,7 +13,6 @@ _DATA_MODEL_VERSION = 1.5
 class UtilizationStats:
     avg: Optional[float] = None
     max: Optional[float] = None
-    raw: Optional[list[float]] = None
 
 
 @dataclass
@@ -37,9 +36,6 @@ class GpuUsage(DataClassJsonMixin):
     uuid: Optional[str] = None
     util_percent: Optional[UtilizationStats] = None
     mem_util_percent: Optional[UtilizationStats] = None
-    allocated_mem_percent: Optional[UtilizationStats] = None
-    allocated_mem_value: Optional[UtilizationStats] = None
-    total_mem_value: Optional[float] = None
 
 
 @dataclass

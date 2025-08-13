@@ -150,7 +150,7 @@ class ErasedTensor(torch.Tensor):
         self.owning_mod_ref = weakref.ref(mod)
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
             for e in pytree.arg_tree_leaves(*args, **kwargs)

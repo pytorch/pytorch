@@ -7,31 +7,36 @@ using namespace metal;
 constant uint TILE_DIM = 16;
 
 template <typename T>
-inline c10::metal::opmath_t<T> matmul_inner(
-    constant T* mat1Data,
-    constant T* mat2Data,
-    constant array<ulong2, 3>& strides,
-    constant uint3& sizes,
-    threadgroup T A_tile[TILE_DIM][TILE_DIM],
-    threadgroup T B_tile[TILE_DIM][TILE_DIM],
-    uint2 tid,
-    uint2 thread_id) {
+kernel void matmul(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant array<ulong2, 3>& strides [[buffer(3)]],
+    constant uint3& sizes [[buffer(4)]],
+    uint2 tid [[thread_position_in_threadgroup]],
+    uint2 group_id [[threadgroup_position_in_grid]]) {
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
   c10::metal::opmath_t<T> sum = 0;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
   uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
   for (uint t = 0; t < numTiles; t++) {
     uint tiledCol = t * TILE_DIM + tid.x;
-    if (thread_id.y < sizes.x && tiledCol < sizes.y) {
+    if (row < sizes.x && tiledCol < sizes.y) {
       A_tile[tid.y][tid.x] =
-          mat1Data[thread_id.y * strides[0].x + tiledCol * strides[0].y];
+          mat1Data[row * strides[0].x + tiledCol * strides[0].y];
     } else {
       A_tile[tid.y][tid.x] = 0;
     }
 
     uint tiledRow = t * TILE_DIM + tid.y;
-    if (tiledRow < sizes.y && thread_id.x < sizes.z) {
+    if (tiledRow < sizes.y && col < sizes.z) {
       B_tile[tid.y][tid.x] =
-          mat2Data[tiledRow * strides[1].x + thread_id.x * strides[1].y];
+          mat2Data[tiledRow * strides[1].x + col * strides[1].y];
     } else {
       B_tile[tid.y][tid.x] = 0;
     }
@@ -45,26 +50,8 @@ inline c10::metal::opmath_t<T> matmul_inner(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
-  return sum;
-}
-
-template <typename T>
-kernel void matmul(
-    constant T* mat1Data [[buffer(0)]],
-    constant T* mat2Data [[buffer(1)]],
-    device T* outputData [[buffer(2)]],
-    constant array<ulong2, 3>& strides [[buffer(3)]],
-    constant uint3& sizes [[buffer(4)]],
-    uint2 tid [[thread_position_in_threadgroup]],
-    uint2 thread_id [[thread_position_in_grid]]) {
-  threadgroup T A_tile[TILE_DIM][TILE_DIM];
-  threadgroup T B_tile[TILE_DIM][TILE_DIM];
-
-  auto sum = matmul_inner(
-      mat1Data, mat2Data, strides, sizes, A_tile, B_tile, tid, thread_id);
-  if (thread_id.y < sizes.x && thread_id.x < sizes.z) {
-    outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
-        static_cast<T>(sum);
+  if (row < sizes.x && col < sizes.z) {
+    outputData[row * strides[2].x + col * strides[2].y] = static_cast<T>(sum);
   }
 }
 
@@ -145,28 +132,6 @@ inline float blockReduceSum(
   return sharedScratch[0];
 }
 
-template <bool col_major>
-inline device float& get_ref(device float* A, uint row, uint col, uint N);
-
-template <>
-inline device float& get_ref<true>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
-  return A[row * N + col];
-}
-
-template <>
-inline device float& get_ref<false>(
-    device float* A,
-    uint row,
-    uint col,
-    uint N) {
-  return A[row + col * N];
-}
-
-template <bool upper>
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
     device int* info [[buffer(1)]],
@@ -193,7 +158,7 @@ kernel void factorDiagonalBlock(
   for (uint i = linear_tid; i < tileSize; i += group_size) {
     uint r = i / actSize;
     uint c = i % actSize;
-    tile[r][c] = get_ref<upper>(A + batch_offset, row0 + r, col0 + c, N);
+    tile[r][c] = A[batch_offset + (row0 + r) * N + (col0 + c)];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -266,33 +231,10 @@ kernel void factorDiagonalBlock(
   for (uint i = linear_tid; i < tileSize; i += group_size) {
     uint r = i / actSize;
     uint c = i % actSize;
-    get_ref<upper>(A + batch_offset, row0 + r, col0 + c, N) = tile[r][c];
+    A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r][c];
   }
 }
 
-template [[host_name("factorDiagonalBlockU")]]
-kernel void factorDiagonalBlock<true>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
-
-template [[host_name("factorDiagonalBlockL")]]
-kernel void factorDiagonalBlock<false>(
-    device float* A [[buffer(0)]],
-    device int* info [[buffer(1)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 bid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
-
-template <bool upper>
 kernel void applyTRSM(
     device float* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
@@ -328,12 +270,12 @@ kernel void applyTRSM(
   for (uint i = linear_tid; i < actSize_k * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    diag[i] = get_ref<upper>(A + batch_offset, k * NB + r, k * NB + c, N);
+    diag[i] = A[batch_offset + (k * NB + r) * N + (k * NB + c)];
   }
   for (uint i = linear_tid; i < actSize_j * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    target[i] = get_ref<upper>(A + batch_offset, row0 + r, col0 + c, N);
+    target[i] = A[batch_offset + (row0 + r) * N + (col0 + c)];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -377,31 +319,10 @@ kernel void applyTRSM(
   for (uint i = linear_tid; i < actSize_j * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    get_ref<upper>(A + batch_offset, row0 + r, col0 + c, N) = target[i];
+    A[batch_offset + (row0 + r) * N + (col0 + c)] = target[i];
   }
 }
 
-template [[host_name("applyTRSMU")]]
-kernel void applyTRSM<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
-
-template [[host_name("applyTRSML")]]
-kernel void applyTRSM<false>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]]);
-
-template <bool upper>
 kernel void applySYRK(
     device float* A [[buffer(0)]],
     constant uint& N [[buffer(2)]],
@@ -469,25 +390,17 @@ kernel void applySYRK(
       // Same logic to load/store Cfrag, Afrag, Bfrag...
       simdgroup_matrix<float, 8, 8> Cfrag;
       simdgroup_load(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
+          Cfrag, &A[batch_offset + (row0 + sb_y) * N + (col0 + sb_x)], N);
 
       for (uint kk = 0; kk < actSize_k; kk += 8) {
         simdgroup_load(
-            Afrag,
-            &get_ref<upper>(A + batch_offset, row0 + sb_y, k * NB + kk, N),
-            N,
-            0,
-            !upper);
+            Afrag, &A[batch_offset + (row0 + sb_y) * N + (k * NB + kk)], N);
         simdgroup_load(
             Bfrag,
-            &get_ref<upper>(A + batch_offset, col0 + sb_x, k * NB + kk, N),
+            &A[batch_offset + (col0 + sb_x) * N + (k * NB + kk)],
             N,
             /* matrix_origin = */ 0,
-            /* transpose = */ upper);
+            /* transpose = */ true);
 
         simdgroup_multiply(Prod, Afrag, Bfrag);
         simdgroup_multiply(Prod, Prod, negative_identity);
@@ -495,11 +408,7 @@ kernel void applySYRK(
       }
 
       simdgroup_store(
-          Cfrag,
-          &get_ref<upper>(A + batch_offset, row0 + sb_y, col0 + sb_x, N),
-          N,
-          0,
-          !upper);
+          Cfrag, &A[batch_offset + (row0 + sb_y) * N + (col0 + sb_x)], N);
     }
   } else {
     // Fallback for non-multiple-of-8 dimensions
@@ -520,10 +429,8 @@ kernel void applySYRK(
 
         float sum = 0.0f;
         for (uint i = 0; i < actSize_k; i++) {
-          float a_val =
-              get_ref<upper>(A + batch_offset, row0 + y, k * NB + i, N);
-          float b_val =
-              get_ref<upper>(A + batch_offset, col0 + x, k * NB + i, N);
+          float a_val = A[batch_offset + (row0 + y) * N + k * NB + i];
+          float b_val = A[batch_offset + (col0 + x) * N + k * NB + i];
           sum = fma(a_val, b_val, sum);
         }
         sum_accumulator[y * tpg.x + x] += sum;
@@ -532,34 +439,12 @@ kernel void applySYRK(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint y = ty; y < actSize_j; y += tpg.y) {
       for (uint x = tx; x < actSize_h; x += tpg.x) {
-        get_ref<upper>(A + batch_offset, row0 + y, col0 + x, N) -=
+        A[batch_offset + (row0 + y) * N + col0 + x] -=
             sum_accumulator[y * tpg.x + x];
       }
     }
   }
 }
-
-template [[host_name("applySYRKU")]]
-kernel void applySYRK<true>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
-
-template [[host_name("applySYRKL")]]
-kernel void applySYRK<false>(
-    device float* A [[buffer(0)]],
-    constant uint& N [[buffer(2)]],
-    constant uint& NB [[buffer(3)]],
-    constant uint& k [[buffer(4)]],
-    uint3 tid [[thread_position_in_threadgroup]],
-    uint3 tgid [[threadgroup_position_in_grid]],
-    uint3 tpg [[threads_per_threadgroup]],
-    uint sgitg [[simdgroup_index_in_threadgroup]]);
 
 kernel void applyPivots(
     device float* P [[buffer(0)]],
@@ -635,7 +520,9 @@ kernel void applyPivots(
 
 INSTANTIATE_NAIVE_MM(float);
 INSTANTIATE_NAIVE_MM(half);
+#if __METAL_VERSION__ >= 310
 INSTANTIATE_NAIVE_MM(bfloat);
+#endif
 
 // Integral MM
 INSTANTIATE_NAIVE_MM(short);

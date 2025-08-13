@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfHpu,
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_HPU,
@@ -220,7 +219,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
             group1 = x.get_group(mesh_dim=1)
             return size, coord, group0, group1
 
-        # Can't be fullgraph=True because ProcessGroup is not reconstructible in dynamo
+        # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
@@ -256,7 +255,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -273,26 +271,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         ref = fn(x)
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertEqual(res, ref)
-
-    @skipIfHpu
-    def test_dtensor_dynamic_slice(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        # test passing in DTensor as inputs/outputs and run some tensor computation
-        def fn(x):
-            return [
-                t.redistribute(
-                    device_mesh=x.device_mesh, placements=[Replicate()]
-                ).to_local()[0]
-                for t in torch.tensor_split(x, 2)
-            ]
-
-        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
-        ref = fn(x)
-
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -503,7 +481,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(fn(x3), opt_fn(x3))
         self.assertEqual(cnt.frame_count, 2)
 
-    @skipIfHpu
     def test_dtensor_partial_placement_redistribute_unbalanced_correct_strides(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -673,7 +650,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
-    @skipIfHpu
     def test_dynamo_dtensor_from_local_redistribute_async(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -745,7 +721,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x_dt)
         self.assertEqual(ref, res)
 
-    @skipIfHpu
     def test_graph_input_is_async(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
@@ -892,7 +867,9 @@ def forward(self, primals_1):
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
             "extern_kernels.mm(buf0,"
-        ).run(code)
+        ).run(
+            code
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)
@@ -997,7 +974,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         twod_mesh = init_device_mesh(
-            self.device_type,
+            "cuda",
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -1050,9 +1027,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # 2-D mesh is [dp, tp]
         mesh_2d = init_device_mesh(
-            self.device_type,
-            mesh_shape=(dp_degree, tp_degree),
-            mesh_dim_names=("dp", "tp"),
+            "cuda", mesh_shape=(dp_degree, tp_degree), mesh_dim_names=("dp", "tp")
         )
 
         inp = torch.rand(20, 10, device=self.device_type)
@@ -1098,9 +1073,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("use_ca", [True, False])
     def test_compile_dtensor_redistribute_backward(self, use_ca):
-        mesh = DeviceMesh(
-            device_type=self.device_type, mesh=torch.arange(self.world_size)
-        )
+        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
 
         def fn(x, y):
             dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)

@@ -97,7 +97,6 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
-    test_build_separate=False,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -106,12 +105,8 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
-    new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
-    @config.patch(
-        cpp_wrapper=True,
-        cpp_wrapper_build_separate=test_build_separate,
-    )
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -128,8 +123,6 @@ def make_test_case(
                 # happen for tests validating build-dependent features (e.g. datatypes
                 # that are available on some platforms and not others).
                 if code:
-                    if test_build_separate:
-                        self.assertIn("kernel_src", code)
                     self.assertIn("CppWrapperCodeCache", code)
                     self.assertTrue(
                         all(
@@ -141,14 +134,14 @@ def make_test_case(
             tests.tearDown()
             tests.tearDownClass()
 
-    fn.__name__ = new_test_name
+    fn.__name__ = test_name
     import copy
 
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
             CppWrapperTemplate,
-            new_test_name,
+            test_name,
             fn,
         )
 
@@ -163,18 +156,14 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
-        test_build_separate: bool = False
 
     for item in [
         BaseTest("test_add_complex"),
-        BaseTest("test_add_complex", test_build_separate=True),
         BaseTest("test_add_complex4"),
-        BaseTest("test_add_complex4", test_build_separate=True),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
-        BaseTest("test_bmm1", test_build_separate=True),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest(
@@ -231,9 +220,9 @@ if RUN_CPU:
         ],
         BaseTest("test_polar"),
         BaseTest(
-            "test_linear_binary",
+            "test_linear_binary_cpu",
             "",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
@@ -383,7 +372,6 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
-            item.test_build_separate,
         )
 
     test_torchinductor.copy_tests(

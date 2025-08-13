@@ -70,4 +70,6 @@ kernel void unfold_backward(
 
 INSTANTIATE_UNFOLD_BACKWARD(float);
 INSTANTIATE_UNFOLD_BACKWARD(half);
+#if __METAL_VERSION__ >= 310
 INSTANTIATE_UNFOLD_BACKWARD(bfloat);
+#endif
