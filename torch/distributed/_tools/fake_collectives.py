@@ -65,7 +65,6 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-
 lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
 for op, meta_func in _META_FUNCTIONS.items():
     lib_impl.impl(op, meta_func, "Meta")
@@ -96,7 +95,6 @@ non_functional_collectives: set[torch._ops.OpOverload] = {
     c10d.barrier.default,
     c10d.monitored_barrier_.default,
 }
-
 functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.broadcast.default,
     _c10d_functional.all_reduce.default,
