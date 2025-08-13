@@ -1973,7 +1973,6 @@ make_fx_failures = {
     skip('item'),
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
