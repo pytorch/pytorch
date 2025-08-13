@@ -24,6 +24,7 @@ from tools.flight_recorder.components.types import (
     Traceback,
 )
 from tools.flight_recorder.components.utils import (
+    add_stack_id_in_entries,
     align_trace_from_beginning,
     check_current_entry_match,
     check_no_missing_dump_files,
@@ -391,6 +392,9 @@ def build_db(
     # Ensure version is consistent across all ranks.
     check_version(version_by_ranks, version)
     entries = align_trace_from_beginning(entries)
+    stack_id_trace_map: dict[str, int] = {}
+    if args.just_print_entries:
+        entries, stack_id_trace_map = add_stack_id_in_entries(entries)
 
     # flattened database
     groups, _groups, memberships, _memberships, _pg_guids = build_groups_memberships(
@@ -402,7 +406,9 @@ def build_db(
         check_no_missing_dump_files(entries, memberships)
 
     if args.just_print_entries:
-        just_print_entries(entries, _groups, _memberships, _pg_guids, args)
+        just_print_entries(
+            entries, _groups, _memberships, _pg_guids, args, stack_id_trace_map
+        )
         sys.exit(0)
 
     tracebacks, collectives, nccl_calls = build_collectives(

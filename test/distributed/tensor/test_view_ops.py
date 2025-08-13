@@ -27,7 +27,7 @@ from torch.distributed.tensor._ops._view_ops import (
     view_groups,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -170,8 +170,34 @@ class TestViewOps(DTensorTestBase):
             *(device_mesh.ndim * [sharding_choices])
         )
 
-        for in_shard in all_sharding_choices:
-            in_dt = distribute_tensor(args[0], device_mesh, in_shard)
+        outer_mesh = device_mesh["outer"]
+        inner_mesh = device_mesh["inner"]
+        inner_mesh_size = inner_mesh.size()
+        strided_sharding_choices = [
+            (_StridedShard(i, split_factor=inner_mesh_size), Shard(i))
+            for i, s in enumerate(in_shape)
+            if s > 1 and i not in no_shard_dims
+        ]
+
+        for in_shard in itertools.chain(all_sharding_choices, strided_sharding_choices):
+            if isinstance(in_shard[0], _StridedShard):
+                if op != Tensor.view:
+                    continue
+                # cannot produce DTensor using ``distribute_tensor()``
+                # with ``_StridedShard``. Need to distribute the input
+                # over inner mesh dim first, then distribute the
+                # _local_tensor over the outer mesh dim.
+                in_dt = distribute_tensor(args[0], inner_mesh, (in_shard[1],))
+                in_dt = distribute_tensor(
+                    in_dt._local_tensor, outer_mesh, (Shard(in_shard[0].dim),)
+                )
+                in_dt = DTensor.from_local(
+                    in_dt._local_tensor,
+                    device_mesh,
+                    in_shard,
+                )
+            else:
+                in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
             comm_mode = CommDebugMode()
             with comm_mode:
@@ -218,8 +244,9 @@ class TestViewOps(DTensorTestBase):
 
     @with_comms
     def test_view_ops(self):
-        self.device_mesh = DeviceMesh(
-            self.device_type, torch.arange(dist.get_world_size()).view(-1, 2)
+        mesh_shape = (dist.get_world_size() // 2, 2)
+        self.device_mesh = init_device_mesh(
+            self.device_type, mesh_shape=mesh_shape, mesh_dim_names=("outer", "inner")
         )
         self.dimmap_test(torch.atleast_1d, (randn(()),), (Singleton(),))
         self.dimmap_test(torch.atleast_1d, (randn(24),), (InputDim(0),))
@@ -444,7 +471,6 @@ class TestViewOps(DTensorTestBase):
             (randn(42, 24, 36), 1),
             (InputDim(0), Singleton(), InputDim(1), InputDim(2)),
         )
-
         self.dimmap_test(
             Tensor.view,
             (randn(6, 12, 24), 72, 24),
@@ -627,12 +653,9 @@ class TestViewOps(DTensorTestBase):
             dist_x,
             0,
         )
+        # check DTensor subclass metadata as well as placements
         self.assertEqual(dist_x.shape, torch.Size([8]))
-        # TODO: change to ``assertEqual`` once https://github.com/pytorch/pytorch/pull/158954 is merged
-        # ``dist_x.stride()`` is (8, 1) due to the current discrepancy between DTensor metadata and
-        # ``DTensor._spec.tensor_meta``. Adding ``return_and_correct_aliasing`` in DTensor dispatch
-        # should ensure the outer aliasing matches the inner aliasing.
-        self.assertNotEqual(
+        self.assertEqual(
             dist_x.stride(),
             (1,),
         )
