@@ -1648,7 +1648,9 @@ class OutputGraph(OutputGraphGuardsState):
             assert self.should_exit
 
             self.run_compiler_collective()
-
+            if count_calls(self.graph) == 0 and len(rv) == 0:
+                return []
+            
             name = unique_id("__compiled_fn", with_uuid=True)
 
             assert isinstance(rv, list)
