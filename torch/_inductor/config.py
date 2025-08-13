@@ -387,7 +387,10 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
-reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_memory_recompute: bool = True
+
+reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
+sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
