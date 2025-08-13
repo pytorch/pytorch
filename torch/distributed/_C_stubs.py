@@ -9,7 +9,8 @@ stubs for backend-specific functionality that may not be available in all builds
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, TYPE_CHECKING
+
 
 if TYPE_CHECKING:
     from datetime import timedelta
