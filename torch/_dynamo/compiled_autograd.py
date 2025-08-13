@@ -22,6 +22,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Generator, Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeGuard
 
 import torch
 import torch.utils._pytree as pytree
@@ -950,7 +951,7 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node: Any) -> bool:
+    def is_sym_node(self, node: Any) -> TypeGuard[torch.fx.Node]:
         return (
             isinstance(node, torch.fx.Node)
             and node.op == "call_function"

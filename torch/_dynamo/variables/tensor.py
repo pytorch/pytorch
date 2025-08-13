@@ -114,7 +114,7 @@ supported_const_comparison_op_values = dict.fromkeys(
 )
 
 
-def is_bound_tensor_method(value):
+def is_bound_tensor_method(value) -> bool:
     return (
         callable(value)
         and not torch._dynamo.utils.object_has_getattribute(value)
@@ -560,7 +560,7 @@ class TensorVariable(VariableTracker):
         id_value = id(_input_associated_real_value)
         return ConstantVariable.create(id_value)
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         return self.ndim > 0
 
     def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):

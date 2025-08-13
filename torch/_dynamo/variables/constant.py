@@ -91,7 +91,7 @@ its type to `common_constant_types`.
     def as_python_constant(self):
         return self.value
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         return True
 
     @property
@@ -108,11 +108,11 @@ its type to `common_constant_types`.
         )
 
     @staticmethod
-    def is_base_literal(obj):
+    def is_base_literal(obj) -> bool:
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj):
+    def is_literal(obj) -> bool:
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return ConstantVariable.is_base_literal(obj)

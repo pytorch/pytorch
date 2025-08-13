@@ -45,6 +45,7 @@ import types
 import typing
 import weakref
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeGuard
 from unittest.mock import patch
 
 import torch
@@ -444,7 +445,7 @@ def stack_op(fn: typing.Callable[..., object]):
     return impl
 
 
-def is_stdlib(mod):
+def is_stdlib(mod) -> TypeGuard[types.ModuleType]:
     if sys.version_info < (3, 10):
         # For < 3.10, no easy way to identify a stdlib module name.
         return False
@@ -3146,7 +3147,7 @@ class InstructionTranslatorBase(
     def FORMAT_WITH_SPEC(self, inst):
         self._format_value(self.pop(), 0)
 
-    def is_non_empty_graph(self):
+    def is_non_empty_graph(self) -> bool:
         if self.output.count_calls() > 1:
             # perf optimization only
             self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
@@ -3170,7 +3171,7 @@ class InstructionTranslatorBase(
             lookup_line=False,
         )
 
-    def is_co_filename_from_nn_modules(self):
+    def is_co_filename_from_nn_modules(self) -> bool:
         filename = getattr(self.f_code, "co_filename", "<unknown>")
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
         return nn_modules_pattern.match(filename) is not None

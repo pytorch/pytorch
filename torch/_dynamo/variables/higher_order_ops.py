@@ -190,7 +190,7 @@ def find_mismatched_vars(var, types, allow_none=False):
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
     else:
 
-        def _is_none(var):
+        def _is_none(var) -> bool:
             return var.is_python_constant() and var.as_python_constant() is None
 
         if not isinstance(var, types) and not (allow_none and _is_none(var)):
@@ -2999,7 +2999,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        def is_strict_for(v: VariableTracker):
+        def is_strict_for(v: VariableTracker) -> bool:
             if isinstance(v, variables.TensorVariable):
                 # we can be more lax for stuff from forward
                 return v.proxy.tracer is not fwd_tracer

@@ -193,7 +193,7 @@ tvm_meta_schedule = functools.partial(tvm, scheduler="meta_schedule")
 tvm_auto_scheduler = functools.partial(tvm, scheduler="auto_scheduler")
 
 
-def has_tvm():
+def has_tvm() -> bool:
     try:
         importlib.import_module("tvm")
         return True

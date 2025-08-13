@@ -72,7 +72,7 @@ def raise_unhashable(arg, tx=None):
     )
 
 
-def is_hashable(x):
+def is_hashable(x) -> bool:
     # NB - performing isinstance check on a LazVT realizes the VT, accidentally
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
     # the underlying value without realizing the VT. Consider updating the
@@ -295,7 +295,7 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def has_new_items(self):
+    def has_new_items(self) -> bool:
         if self.should_reconstruct_all:
             return True
         return any(
@@ -303,7 +303,7 @@ class ConstDictVariable(VariableTracker):
             for key, value in self.items.items()
         )
 
-    def is_new_item(self, value, other):
+    def is_new_item(self, value, other) -> bool:
         # compare the id of the realized values if both values are not lazy VTs
         if value and value.is_realized() and other.is_realized():
             return id(value.realize()) != id(other.realize())
@@ -785,7 +785,7 @@ class DefaultDictVariable(ConstDictVariable):
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         # Return false for unsupported defaults. This ensures that a bad handler
         # path is not taken in BuiltinVariable for getitem.
         if self.default_factory not in [list, tuple, dict] and not self.items:
@@ -798,7 +798,7 @@ class DefaultDictVariable(ConstDictVariable):
         )
 
     @staticmethod
-    def is_supported_arg(arg):
+    def is_supported_arg(arg) -> bool:
         if isinstance(arg, variables.BuiltinVariable):
             return arg.fn in (list, tuple, dict, set)
         else:

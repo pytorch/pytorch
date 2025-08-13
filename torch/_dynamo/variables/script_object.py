@@ -49,7 +49,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     _fake_script_object_cache: dict[int, "TorchScriptObjectVariable"] = {}
 
     @classmethod
-    def is_matching_cls(cls, user_cls: type):
+    def is_matching_cls(cls, user_cls: type) -> bool:
         return issubclass(user_cls, torch.ScriptObject)
 
     @staticmethod

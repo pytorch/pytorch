@@ -418,7 +418,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self):
         return types.FunctionType
 
-    def has_self(self):
+    def has_self(self) -> bool:
         return getattr(self.fn, "__self__", None) is not None
 
     def get_globals(self):
@@ -603,7 +603,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    def is_supported_builtin_method(obj):
+    def is_supported_builtin_method(obj) -> bool:
         method_self = obj.__self__
         method_name = obj.__name__
 
@@ -651,7 +651,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def get_function(self):
         raise NotImplementedError
 
-    def has_self(self):
+    def has_self(self) -> bool:
         return False
 
     def __name__(self):
@@ -728,7 +728,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         return False
 
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
@@ -756,10 +756,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # exception is raised again.
             tracer.exception_handler(e)
 
-    def _is_generator_just_started(self):
+    def _is_generator_just_started(self) -> bool:
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
 
-    def _is_generator_exhausted(self):
+    def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)
 
     def call_method(
@@ -1312,7 +1312,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
 
-    def has_closure(self):
+    def has_closure(self) -> bool:
         return self.closure is not None
 
     def const_getattr(self, tx, name):
@@ -1320,7 +1320,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return self.fn_name.as_python_constant()
         return super().const_getattr(tx, name)
 
-    def has_self(self):
+    def has_self(self) -> bool:
         return False
 
     def get_globals(self):

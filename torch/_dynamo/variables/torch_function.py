@@ -284,7 +284,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
             cls.offset -= 1
 
     @staticmethod
-    def is_device_context(var):
+    def is_device_context(var) -> bool:
         return isinstance(var.value, DeviceContext) or var.value is None
 
     @classmethod
@@ -294,7 +294,7 @@ class TorchFunctionModeStackVariable(VariableTracker):
 
 class TorchFunctionModeVariable(GenericContextWrappingVariable):
     @staticmethod
-    def is_supported_torch_function_mode(ty):
+    def is_supported_torch_function_mode(ty) -> bool:
         # Supported in this sense means we can support graph breaks under the
         # context.
         # We are able to trace custom modes but if there are graph breaks under them
@@ -421,7 +421,7 @@ def _get_subclass_type_var(tx: "InstructionTranslator", var):
         return VariableTracker.build(tx, var.python_type(), source)
 
 
-def _is_attr_overridden(tx: "InstructionTranslator", var, name):
+def _is_attr_overridden(tx: "InstructionTranslator", var, name) -> bool:
     import torch
 
     overridden = False
