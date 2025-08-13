@@ -35,6 +35,10 @@ namespace py = pybind11;
 
 namespace torch::impl::dispatch {
 
+// Global storage for leaked Python filenames to ensure they remain valid
+// for the lifetime of Library objects
+static std::vector<std::string> leaked_python_filenames_;
+
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
 // the other interpreters start banging on it
@@ -499,10 +503,10 @@ void initDispatchBindings(PyObject* module) {
          const char* file,
          uint32_t linenum) {
         HANDLE_TH_ERRORS
-        // Malloc and leak the file string to ensure it remains valid
+        // Store the file string in global storage to ensure it remains valid
         // for the lifetime of the Library object
-        char* leaked_file = static_cast<char*>(malloc(strlen(file) + 1));
-        strcpy(leaked_file, file);
+        leaked_python_filenames_.emplace_back(file);
+        const char* leaked_file = leaked_python_filenames_.back().c_str();
 
         return std::make_unique<torch::Library>(
             parseKind(kind),
@@ -520,6 +524,12 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch"),
       py::arg("file") = "/dev/null",
       py::arg("linenum") = 0);
+
+  m.def(
+      "_dispatch_clear_leaked_python_filenames",
+      []() { leaked_python_filenames_.clear(); },
+      "Clear the global storage of leaked Python filenames. "
+      "WARNING: Only call this if you're sure no Library objects are still using the filenames.");
 
   m.def(
       "_dispatch_find_schema_or_throw",
