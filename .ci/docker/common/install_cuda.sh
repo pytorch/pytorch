@@ -10,7 +10,7 @@ else
   arch_path='sbsa'
 fi
 
-NVSHMEM_VERSION=3.3.9
+NVSHMEM_VERSION=3.3.20
 
 function install_cuda {
   version=$1
@@ -62,8 +62,8 @@ function install_nvshmem {
   mkdir -p "${tmpdir}" && cd "${tmpdir}"
 
   # nvSHMEM license: https://docs.nvidia.com/nvshmem/api/sla.html
-  filename="libnvshmem_cuda${cuda_major_version}-linux-${arch_path}-${nvshmem_version}"
-  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}.tar.gz"
+  filename="libnvshmem-linux-${arch_path}-${nvshmem_version}_cuda${cuda_major_version}-archive"
+  url="https://developer.download.nvidia.com/compute/nvshmem/redist/libnvshmem/linux-${arch_path}/${filename}.tar.xz"
 
   # download, unpack, install
   wget -q "${url}"
@@ -77,6 +77,20 @@ function install_nvshmem {
 
   echo "nvSHMEM ${nvshmem_version} for CUDA ${cuda_major_version} (${arch_path}) installed."
 }
+
+function install_124 {
+  CUDNN_VERSION=9.1.0.70	
+  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.2"	
+  install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux	
+
+  install_cudnn 12 $CUDNN_VERSION	
+
+  CUDA_VERSION=12.4 bash install_nccl.sh	
+
+  CUDA_VERSION=12.4 bash install_cusparselt.sh	
+
+  ldconfig	
+}	
 
 function install_126 {
   CUDNN_VERSION=9.10.2.21
@@ -140,8 +154,7 @@ function install_130 {
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
 
-  # TODO: nvSHMEM 3.3.20 install link is not available for CUDA 13.0.0 yet
-  # install_nvshmem 13 $NVSHMEM_VERSION
+  install_nvshmem 13 $NVSHMEM_VERSION
 
   CUDA_VERSION=13.0 bash install_nccl.sh
 
@@ -155,6 +168,8 @@ function install_130 {
 while test $# -gt 0
 do
     case "$1" in
+    12.4) install_124;
+        ;;
     12.6|12.6.*) install_126;
         ;;
     12.8|12.8.*) install_128;
