@@ -1,3 +1,5 @@
+# mypy: disable-error-code=possibly-undefined
+
 import math
 from collections.abc import Sequence
 from itertools import chain
@@ -473,10 +475,6 @@ def foreach_reduce(
     autograd, so clearing the list frees the gradients.
     """
 
-    # currently have this to avoid mypy error, should I just include the appropriate
-    # mypy ignore above?
-
-    reduce_output = torch.empty(0, device=device)
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
         # Check this at runtime since it could be a real runtime error if e.g.
@@ -537,7 +535,6 @@ def foreach_reduce(
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
-    # still need to wait for reduce_output to be set
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
