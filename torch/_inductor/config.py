@@ -1834,15 +1834,15 @@ class trace:
 
     # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
     # Levels:
-    #   0 - disabled (default)
+    #   0 - disabled
     #   1 - normal
-    #   2 - basic
+    #   2 - basic (default)
     # Backward compatibility:
     #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
     #   If INDUCTOR_PROVENANCE is set, use its integer value.
     provenance_tracking_level: int = int(
         os.environ.get(
-            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "2")
         )
     )
 
