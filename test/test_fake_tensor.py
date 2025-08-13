@@ -1521,6 +1521,7 @@ class FakeTensorOperatorInvariants(TestCase):
 
         cpu_tensor = torch.ones(2, device="cpu")
         meta_tensor = torch.ones(2, device="meta")
+        linear = torch.nn.Linear(2, 2, device="cpu")
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             self.assertEqual(torch.empty(10, device=GPU_TYPE).device.type, GPU_TYPE)
@@ -1534,6 +1535,9 @@ class FakeTensorOperatorInvariants(TestCase):
 
             self.assertEqual(cpu_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
             self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+            linear.to(device=GPU_TYPE)
+            for _, param in linear.named_parameters():
+                self.assertEqual(param.device, gpu_device)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
