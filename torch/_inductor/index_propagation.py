@@ -43,7 +43,7 @@ from .virtualized import V
 _ExprType = Union[sympy.Expr, float, int, bool]
 
 
-def _is_constant(val: _ExprType):
+def _is_constant(val: _ExprType) -> bool:
     if isinstance(val, sympy.Basic):
         return val.is_number
     return isinstance(val, (int, float, bool))
@@ -60,7 +60,7 @@ class TypedExpr:
     expr: _ExprType
     dtype: torch.dtype
 
-    def is_constant(self):
+    def is_constant(self) -> bool:
         return _is_constant(self.expr)
 
     def __post_init__(self):

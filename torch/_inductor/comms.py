@@ -184,7 +184,7 @@ def _group_name(snode, with_bufs=False) -> str:
     return ret
 
 
-def _is_fake_dep(d):
+def _is_fake_dep(d) -> bool:
     return isinstance(d, WeakDep) and d.is_fake
 
 
@@ -314,7 +314,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if data_dep is not None:
 
-                    def is_groupable(candidate):
+                    def is_groupable(candidate) -> tuple[bool, Optional[str]]:
                         # preserve ordering
                         if contains_collective(candidate):
                             return False, "contains_collective"
@@ -735,7 +735,7 @@ def _sink_waits_iterative_internal(
                     )
                 ):
 
-                    def is_groupable(snode):
+                    def is_groupable(snode) -> tuple[bool, Optional[str]]:
                         # We do not want to group with collectives to not reorder them forward.
                         if contains_collective(snode):
                             return (
@@ -1077,13 +1077,13 @@ Offending node: {unsharded_param}. Graph: {graph}
             if check_resize_pattern(unsharded_param):
                 unsharded_param_to_fsdp_copy_node_idxes[unsharded_param].append(idx)
 
-    def is_allowed_mutation(node):
+    def is_allowed_mutation(node) -> bool:
         return (
             node.target == torch.ops.fsdp.copy_.default
             or node.target == torch.ops.inductor.resize_storage_bytes_.default
         )
 
-    def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params):
+    def is_node_mutating_unsharded_param_or_its_alias(node, unsharded_params) -> bool:
         # Check whether the node is mutating any of the unsharded params or their aliases.
         mutated_arg_idxes = (
             [

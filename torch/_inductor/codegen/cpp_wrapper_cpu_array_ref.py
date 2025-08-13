@@ -665,7 +665,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             "stack allocation on! (see comment above this assertion)"
         )
 
-    def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
+    def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self) -> bool:
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(

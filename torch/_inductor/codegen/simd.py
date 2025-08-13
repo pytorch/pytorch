@@ -2588,7 +2588,7 @@ class CandidateTiling:
     name: Optional[str] = None
 
     @staticmethod
-    def is_good_size(s):
+    def is_good_size(s) -> bool:
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
         s = V.graph.sizevars.size_hint(s)
         return s >= 32 and (s % 32 == 0)

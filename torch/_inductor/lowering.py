@@ -260,7 +260,7 @@ def decode_dtype(dtype: int):
     return dtype
 
 
-def is_integer_type(x):
+def is_integer_type(x) -> bool:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -269,7 +269,7 @@ def is_integer_type(x):
         return isinstance(x, int)
 
 
-def is_boolean_type(x):
+def is_boolean_type(x) -> bool:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
@@ -949,7 +949,7 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
+        def is_length_one(size: sympy.Expr) -> Any:
             return V.graph.sizevars.shape_env.evaluate_expr(
                 sympy.Eq(size, 1), fallback_value=False
             )
@@ -1593,7 +1593,7 @@ def cat(inputs, dim=0):
 
         return x
 
-    def is_reduction(t):
+    def is_reduction(t) -> bool:
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
     def can_fuse_reduction(t):
@@ -2651,7 +2651,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
 
-        def is_aligned(x):
+        def is_aligned(x) -> bool:
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         if isinstance(arg.data, ir.BaseView):

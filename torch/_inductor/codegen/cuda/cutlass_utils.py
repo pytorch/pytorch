@@ -22,6 +22,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cpp_utils import DTYPE_TO_CPP
+from ..triton_utils import is_static_int
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -419,9 +420,6 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     dtype = inductor_layout.dtype
     size = inductor_layout.size
     offset = inductor_layout.offset
-
-    def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):

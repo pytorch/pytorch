@@ -3344,7 +3344,7 @@ class PythonWrapperCodegen(CodeGen):
         return result
 
     @staticmethod
-    def is_statically_known_list_of_ints(lst):
+    def is_statically_known_list_of_ints(lst) -> bool:
         return (
             PythonWrapperCodegen.statically_known_list_of_ints_or_none(lst) is not None
         )

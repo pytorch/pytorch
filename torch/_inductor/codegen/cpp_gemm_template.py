@@ -372,7 +372,7 @@ SMALL_M_GEMM_TEMPLATE = r"""
 """
 
 
-def _is_int8_gemm(inputs):
+def _is_int8_gemm(inputs) -> bool:
     return (
         isinstance(inputs[0], ir.IRNode)
         and inputs[0].get_dtype() in [torch.uint8, torch.int8]
@@ -1675,7 +1675,7 @@ class CppGemmTemplate(CppTemplate):
         return self._template_from_string(GEMM_TEMPLATE_N_LOOP_PARAMS).render()
 
     @classmethod
-    def is_woq_int4(cls):
+    def is_woq_int4(cls) -> bool:
         return False
 
     @classmethod
@@ -1697,7 +1697,7 @@ class CppWoqInt4GemmTemplateMeta(type):
                 )
 
             @classmethod
-            def is_woq_int4(cls):
+            def is_woq_int4(cls) -> bool:
                 return True
 
             @classmethod

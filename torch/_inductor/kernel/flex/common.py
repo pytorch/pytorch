@@ -314,11 +314,11 @@ def set_head_dim_values(
     )
 
 
-def is_power_of_2(n):
-    return n != 0 and ((n & (n - 1)) == 0)
+def is_power_of_2(n: int) -> bool:
+    return n != 0 and (n & (n - 1)) == 0
 
 
-def next_power_of_two(n):
+def next_power_of_two(n: int) -> int:
     if n <= 0:
         return 1
     return 2 ** math.ceil(math.log2(n))

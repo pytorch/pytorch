@@ -137,13 +137,13 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             mat2 = L.unsqueeze(mat2, 1)
             return L.sum_(L.mul(mat1, mat2), axis=2)
 
-        def is_valid_to_require_contiguous(t):
+        def is_valid_to_require_contiguous(t) -> bool:
             if not ir.is_storage_and_layout(t):
                 return True
             _, layout = ir.as_storage_and_layout(t, freeze=False)
             return isinstance(layout, ir.FlexibleLayout)
 
-        def is_preferred_layout_as_bmm_input(sizes, strides):
+        def is_preferred_layout_as_bmm_input(sizes, strides) -> bool:
             # contiguous on one of the last two dims
             return (
                 strides[-1] == 1 and (sizes[-2] == 1 or strides[-2] >= sizes[-1])
