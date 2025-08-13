@@ -50,14 +50,11 @@ int64_t cus_lower_bound(int64_t start, int64_t end, const input_t val, const inp
   // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
   // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
   const int64_t orig_start = start;
+  // NumPy-like: for left, NaN query inserts at first NaN in boundaries.
   while (start < end) {
     const int64_t mid = start + ((end - start) >> 1);
     const input_t mid_val = sort ? bd[sort[mid] + orig_start] : bd[mid];
-    if (std::isnan(val)) {
-      start = end; // insert NaN at the end
-    } else if (std::isnan(mid_val)) {
-      end = mid;  // NaN is greatest, search left
-    } else if (mid_val < val) {
+    if (!std::isnan(mid_val) && !(mid_val >= val)) {
       start = mid + 1;
     } else {
       end = mid;
@@ -74,20 +71,21 @@ int64_t cus_upper_bound(int64_t start, int64_t end, const input_t val, const inp
   // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
   // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
   const int64_t orig_start = start;
-  while (start < end) {
-    const int64_t mid = start + ((end - start) >> 1);
-    const input_t mid_val = sort ? bd[sort[mid] + orig_start] : bd[mid];
-    if (std::isnan(val)) {
-      start = end;  // insert NaN at the end
-    } else if (std::isnan(mid_val)) {
-      end = mid;  // NaN is greatest, search left
-    } else if (mid_val <= val) {
-      start = mid + 1;
-    } else {
-      end = mid;
+  // Numpy-like: for right, NaN query inserts at end (after all NaNs)
+  if (std::isnan(val)) {
+    return end;
+  } else {
+    while (start < end) {
+      const int64_t mid = start + ((end - start) >> 1);
+      const input_t mid_val = sort ? bd[sort[mid] + orig_start] : bd[mid];
+      if (!std::isnan(mid_val) && !(mid_val > val)) {
+        start = mid + 1;
+      } else {
+        end = mid;
+      }
     }
+    return start;
   }
-  return start;
 }
 
 template<typename input_t, typename output_t>
