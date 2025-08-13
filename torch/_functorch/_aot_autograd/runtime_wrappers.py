@@ -680,6 +680,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]):
+            # torch.distributed.breakpoint()
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
@@ -688,9 +689,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
+            torch.distributed.breakpoint()
             wrapped_outs = wrap_tensor_subclasses(
                 unwrapped_outs,
-                subclass_metas=subclass_metas,
+                subclass_metas=subclass_metas,  # where does subclass meta come from, it shouldn't stash a fake tensor
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
                 included_subclass_symints=True,

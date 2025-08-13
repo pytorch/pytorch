@@ -25,6 +25,9 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -37,6 +40,11 @@ def to_fun(t):
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
+            # If DTensor, placement may be _MaskPartial which contains a tensor to transform as well
+            if isinstance(out, DTensor):
+                for placement in out.placements:
+                    if isinstance(placement, _MaskPartial) and placement.mask_buffer.data is not None:
+                        placement.mask_buffer.data = to_fun(placement.mask_buffer.data)
             torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
             return out
         else:
@@ -63,6 +71,12 @@ def from_fun(t):
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
         out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
+        # If DTensor, placement may be _MaskPartial which contains a tensor to transform as well
+        if isinstance(out, DTensor):
+            for placement in out.placements:
+                if isinstance(placement, _MaskPartial) and placement.mask_buffer.data is not None:
+                    placement.mask_buffer.data = from_fun(placement.mask_buffer.data)
+
         torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
         return out
 
