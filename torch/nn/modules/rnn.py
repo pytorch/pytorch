@@ -254,14 +254,24 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         try:
-            _ = {
+            unique_storage_refs = {
                 StorageWeakRef(p.untyped_storage())
                 for p in self._flat_weights  # type: ignore[union-attr]
                 if p is not None
             }
-        except Exception as e:
-            if isinstance(e, RuntimeError) and "share storage" in str(e):
-                raise  # Re-raise actual aliasing errors
+            if len(unique_storage_refs) != len(self._flat_weights):
+                return
+        except Exception:
+            try:
+                unique_data_ptrs = {
+                    p.data_ptr()  # type: ignore[union-attr]
+                    for p in self._flat_weights
+                    if p is not None
+                }
+                if len(unique_data_ptrs) != len(self._flat_weights):
+                    return
+            except (RuntimeError, AttributeError):
+                pass
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
