@@ -331,22 +331,20 @@ partition& find_or_create_graph_partition(
     bool is_causal,
     bool compute_logsumexp,
     const SDPALogicalParams& params) {
-  thread_local static PartitionCache cache;
+  thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
 
   // cache key creation
   // patternID is determined on the basis of the arguments provided
   std::bitset<32> patternID;
   if (dtype == data_type::f32) {
-    // bit 3 corresponds to float32 dtype
-    patternID.set(3, 1);
+    patternID.set(PartitionCache::kBitFloat32, 1);
   }
   if (dtype == data_type::bf16) {
-    // bit 2 corresponds to fp16/bf16 dtype
-    patternID.set(2, 1);
+    patternID.set(PartitionCache::kBitBfloat16, 1);
   }
   // sdp pattern
-  patternID.set(4, 1);
+  patternID.set(PartitionCache::kBitSdpaPattern, 1);
 
   // Refer to comments in Utils.h. The first 8 bits are reserved
   int pos = 8;
@@ -448,7 +446,7 @@ struct SDPABackwardLogicalParams {
             !at::native::onednn::is_broadcast(value_) &&
             !at::native::onednn::is_broadcast(out_) &&
             !at::native::onednn::is_broadcast(logsumexp_),
-        "scaled_dot_product_attention_backward_xpu: tensors grad_out, q, k, v, out and logsumexp should not be broadcasted tensor.");
+        "scaled_dot_product_attention_backward_xpu: tensors q, k, v, out and logsumexp should not be broadcasted tensor.");
 
     const dims scalar_shape = {1};
 
@@ -782,22 +780,20 @@ partition create_sdpa_backward_graph_partition(
 partition& find_or_create_backward_graph_partition(
     bool is_causal,
     const SDPABackwardLogicalParams& params) {
-  thread_local static PartitionCache cache;
+  thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
 
   // cache key creation
   // patternID is determined on the basis of the arguments provided
   std::bitset<32> patternID;
   if (dtype == data_type::f32) {
-    // bit 3 corresponds to float32 dtype
-    patternID.set(3, 1);
+    patternID.set(PartitionCache::kBitFloat32, 1);
   }
   if (dtype == data_type::bf16) {
-    // bit 2 corresponds to fp16/bf16 dtype
-    patternID.set(2, 1);
+    patternID.set(PartitionCache::kBitBfloat16, 1);
   }
   // sdpa backward pattern
-  patternID.set(5, 1);
+  patternID.set(PartitionCache::kBitSdpaBwdPattern, 1);
 
   // Refer to comments in Utils.h. The first 8 bits are reserved
   int pos = 8;
@@ -820,7 +816,7 @@ partition& find_or_create_backward_graph_partition(
 } // namespace
 
 namespace at::native::onednn {
-void gpu_float_sdpa(
+void sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_kv,
@@ -883,10 +879,10 @@ void gpu_float_sdpa(
         is_causal, compute_logsumexp, logical_params);
     auto i = logical_params.get_input();
     auto o = logical_params.get_output();
-    auto compiled_partition = partition_.compile(i, o, eng);
+    auto compiled_partition_ = partition_.compile(i, o, eng);
     l_inputs = std::move(i);
     l_outputs = std::move(o);
-    return compiled_partition;
+    return compiled_partition_;
   };
 
   compiled_partition = get_compiled_partition();
@@ -899,7 +895,7 @@ void gpu_float_sdpa(
   if (is_causal) {
     neg_inf = at::full(
         {},
-        -INFINITY,
+        -std::numeric_limits<float>::infinity(),
         query.options().dtype(at::toOpMathType(query.scalar_type())));
   }
 
@@ -913,20 +909,24 @@ void gpu_float_sdpa(
   size_t i = 0;
   std::vector<dnnl::graph::tensor> inputs;
   inputs.reserve(l_inputs.size());
-  inputs.emplace_back(l_inputs[i++], eng, query.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, key.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, softmax_scale1.data_ptr());
+
+#define ADD_INPUT(variable) \
+  inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+  ADD_INPUT(query);
+  ADD_INPUT(key);
+  ADD_INPUT(softmax_scale1);
   if (neg_inf.has_value()) {
-    inputs.emplace_back(l_inputs[i++], eng, neg_inf->data_ptr());
+    ADD_INPUT((*neg_inf));
   }
   if (attn_mask.has_value()) {
-    inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
+    ADD_INPUT((*attn_mask));
   }
-  inputs.emplace_back(l_inputs[i++], eng, value.data_ptr());
+  ADD_INPUT(value);
+#undef ADD_INPUT
   compiled_partition->execute(strm, inputs, outputs);
 }
 
-void gpu_float_sdpa_backward(
+void sdpa_backward(
     int batch_size,
     int num_head_q,
     int num_head_kv,
@@ -995,10 +995,10 @@ void gpu_float_sdpa_backward(
         is_causal, logical_params);
     auto i = logical_params.get_input();
     auto o = logical_params.get_output();
-    auto compiled_partition = partition_.compile(i, o, eng);
+    auto compiled_partition_ = partition_.compile(i, o, eng);
     l_inputs = std::move(i);
     l_outputs = std::move(o);
-    return compiled_partition;
+    return compiled_partition_;
   };
 
   compiled_partition = get_compiled_partition();
@@ -1009,7 +1009,7 @@ void gpu_float_sdpa_backward(
   if (is_causal) {
     neg_inf = at::full(
         {},
-        -INFINITY,
+        -std::numeric_limits<float>::infinity(),
         query.options().dtype(at::toOpMathType(query.scalar_type())));
   }
 
@@ -1022,19 +1022,22 @@ void gpu_float_sdpa_backward(
   size_t i = 0;
   std::vector<dnnl::graph::tensor> inputs;
   inputs.reserve(l_inputs.size());
-  inputs.emplace_back(l_inputs[i++], eng, grad_out.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, query.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, key.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, value.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, out.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, logsumexp.data_ptr());
-  inputs.emplace_back(l_inputs[i++], eng, softmax_scale.data_ptr());
+#define ADD_INPUT(variable) \
+  inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+  ADD_INPUT(grad_out);
+  ADD_INPUT(query);
+  ADD_INPUT(key);
+  ADD_INPUT(value);
+  ADD_INPUT(out);
+  ADD_INPUT(logsumexp);
+  ADD_INPUT(softmax_scale);
   if (neg_inf.has_value()) {
-    inputs.emplace_back(l_inputs[i++], eng, neg_inf->data_ptr());
+    ADD_INPUT((*neg_inf));
   }
   if (attn_mask.has_value()) {
-    inputs.emplace_back(l_inputs[i++], eng, attn_mask->data_ptr());
+    ADD_INPUT((*attn_mask));
   }
+#undef ADD_INPUT
   compiled_partition->execute(strm, inputs, outputs);
 }
 } // namespace at::native::onednn
