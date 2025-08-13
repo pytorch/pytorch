@@ -200,6 +200,11 @@ class DeferredTritonCallWrapper:
         prefix.writeline("}")
 
     def generate_launch_kernel(self, prefix, wrapper, kernel_var_name, params):
+        """
+        Generate the GPU kernel launching code.
+        This is where all the call args being sorted out and generated.
+        If enable_kernel_profile is enabled, all args related information would be packed in this function.
+        """
         triton_meta = params["triton_meta"]
         assert len(self.arg_types) == len(params["def_args"]), (
             self.arg_types,
