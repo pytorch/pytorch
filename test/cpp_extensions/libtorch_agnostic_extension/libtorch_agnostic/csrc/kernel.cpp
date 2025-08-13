@@ -1,8 +1,13 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/util/Exception.h>
+
+#ifdef LAE_USE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 #include <optional>
 
@@ -397,3 +402,78 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
 }
+
+// Test functions for torch::stable::accelerator APIs
+
+#ifdef LAE_USE_CUDA
+int64_t test_device_guard(int64_t device_index) {
+  using torch::stable::accelerator::DeviceGuard;
+
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
+      "Device index is out of range of DeviceIndex (int32_t).");
+
+  DeviceGuard guard(device_index);
+  int currentDevice;
+  cudaError_t err = cudaGetDevice(&currentDevice);
+  STD_TORCH_CHECK(err == cudaSuccess);
+  return currentDevice;
+}
+
+void boxed_test_device_guard(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int res = test_device_guard(static_cast<int64_t>(to<int64_t>(stack[0])));
+  stack[0] = from(res);
+}
+
+int64_t test_device_guard_set_index() {
+  using torch::stable::accelerator::DeviceGuard;
+
+  DeviceGuard guard(1);
+  guard.set_index(0);
+  int currentDevice;
+  cudaError_t err = cudaGetDevice(&currentDevice);
+  STD_TORCH_CHECK(err == cudaSuccess);
+  return currentDevice;
+}
+
+void boxed_test_device_guard_set_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_device_guard_set_index();
+  stack[0] = from(res);
+}
+
+int64_t test_stream(int32_t device_index) {
+  STD_TORCH_CHECK(
+      device_index >= std::numeric_limits<int32_t>::min() &&
+          device_index <= std::numeric_limits<int32_t>::max(),
+      "Device index is out of range of DeviceIndex (int32_t).");
+
+  return torch::stable::accelerator::getCurrentStream(device_index).id();
+}
+
+void boxed_test_stream(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_stream(static_cast<int64_t>(to<int64_t>(stack[0])));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_device_guard(int device_index) -> int");
+  m.def("test_device_guard_set_index() -> int");
+  m.def("test_stream(int device_index) -> int");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_device_guard", &boxed_test_device_guard);
+  m.impl("test_device_guard_set_index", &boxed_test_device_guard_set_index);
+  m.impl("test_stream", &boxed_test_stream);
+}
+#endif // LAE_USE_CUDA

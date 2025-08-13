@@ -496,6 +496,36 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack);
 
+// Device-generic guard for managing device context
+struct DeviceGuardOpaque;
+using DeviceGuardHandle = DeviceGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_device_guard(
+    int32_t device_index,
+    DeviceGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_device_guard(DeviceGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_device_guard_set_index(
+    DeviceGuardHandle guard,
+    int32_t device_index);
+
+// Device-generic stream for managing stream objects
+struct StreamOpaque;
+using StreamHandle = StreamOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_delete_stream(StreamHandle stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_stream_id(StreamHandle stream, int64_t* ret_stream_id);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
+    int32_t device_index,
+    StreamHandle* ret_stream // returns new reference
+);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
