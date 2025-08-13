@@ -63,6 +63,7 @@ struct TORCH_API ExperimentalConfig {
       bool profile_all_threads = false,
       bool capture_overload_names = false,
       bool record_python_gc_info = false,
+      bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
       bool adjust_timestamps = false);
   explicit operator bool() const;
@@ -102,6 +103,10 @@ struct TORCH_API ExperimentalConfig {
   /* controls whether overload names are queried from an ATen
    * function schema and stored in the profile  */
   bool capture_overload_names;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
 
   /*
    * Controls whether or not python gc info is recorded. This is used to
