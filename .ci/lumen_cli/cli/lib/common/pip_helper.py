@@ -55,6 +55,7 @@ def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=
         raise FileNotFoundError(f"No files match: {pattern}")
     wheel = matches[0]
     target = f"{wheel}[{extras}]" if extras else wheel
+    logger.info("Installing wheel: %s", target)
     pip_install_packages([target], prefer_uv=pref_uv)
 
 
