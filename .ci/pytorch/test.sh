@@ -1638,7 +1638,7 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     else
       export TORCH_CUDA_ARCH_LIST="8.9"
     fi
-    python -m cli.run test external vllm --test-name "$TEST_CONFIG"
+    python -m cli.run test external vllm --test-plan "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
