@@ -1194,16 +1194,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
-        # in system CFLAGS
-        c_flags = os.getenv("CFLAGS", "")
-        if (
-            IS_LINUX
-            and "-fstack-clash-protection" in c_flags
-            and "clang" in os.getenv("CC", "")
-        ):
-            os.environ["CC"] = str(os.environ["CC"])
-
         super().run()
 
         if IS_DARWIN:
