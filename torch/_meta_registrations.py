@@ -5861,6 +5861,61 @@ def meta__scaled_dot_product_flash_attention_for_cpu_backward(
     return grad_q, grad_k, grad_v
 
 
+@register_meta([aten._scaled_dot_product_attention_math_for_mps])
+def meta__scaled_dot_product_attention_math_for_mps(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    dropout_mask: Optional[Tensor] = None,
+    scale: Optional[float] = None,
+) -> tuple[Tensor, Tensor]:
+    def ensure_4d(x):
+        if x.dim() == 3:
+            return x.unsqueeze(0), True
+        elif x.dim() > 4:
+            batch_size = 1
+            for i in range(x.dim() - 3):
+                batch_size *= x.shape[i]
+            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
+        else:
+            return x, False
+
+    q_, unsqueezed = ensure_4d(query)
+    k_, _ = ensure_4d(key)
+    v_, _ = ensure_4d(value)
+
+    batch_size, num_head, q_size, head_size = q_.shape
+    _, k_size, max_seq_length, _ = k_.shape
+
+    def sdpa_vector_fast_mps():
+        out = q_.new_empty(q_.shape)
+        if unsqueezed:
+            out = out.view_as(query)
+
+        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
+        if unsqueezed:
+            if query.dim() == 3:
+                attn = attn.squeeze(0)
+            else:
+                shape = list(query.shape[:-3]) + attn.shape[1:4]
+                attn = attn.view(shape)
+        return out, attn
+
+    def sdpa_vector_2pass_mps():
+        blocks = 32
+        out = q_.new_empty(q_.shape)
+        intermediate = q_.new_empty((batch_size, num_head, q_size, blocks, head_size))
+        return out, intermediate
+
+    if (max_seq_length >= 1024) or (k_size < q_size and max_seq_length >= 4096):
+        return sdpa_vector_2pass_mps()
+    else:
+        return sdpa_vector_fast_mps()
+
+
 @register_meta([aten._scaled_dot_product_efficient_attention])
 def meta__scaled_dot_product_efficient_attention(
     query: Tensor,

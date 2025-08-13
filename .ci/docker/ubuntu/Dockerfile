@@ -98,8 +98,9 @@ COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface.txt huggingface.txt
 COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt torchbench.txt
 
 ARG TRITON
 ARG TRITON_CPU
