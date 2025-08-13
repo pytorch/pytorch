@@ -1906,9 +1906,6 @@ class ScanTests(TestCase):
 
 class MapModels:
     class Simple(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, map_op, x):
             a = torch.ones(3, 4, device=x.device)
 
