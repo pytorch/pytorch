@@ -594,11 +594,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     )
 
         if len(ops) == 0:
-            input_layouts = [node.get_layout() for node in input_nodes]
-            input_strides = [node.get_stride() for node in input_nodes]
-            output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=} )"  # noqa: B950
-            log.warning(warning_msg)
+            log.info(
+                "No suitable Cutlass GEMM configs found, fallbacks used "
+                "( len(ops)=%d, output_layout=%s, input_layouts=%s, input_strides=%s )",
+                len(ops),
+                layout,
+                [node.get_layout() for node in input_nodes],
+                [node.get_stride() for node in input_nodes],
+            )
         log.debug(
             "Added %d Cutlass gemm configs.",
             len(ops),
@@ -1317,7 +1320,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, B, lda, ldb, ldc, ldd, 0, 0, 0, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
     def _render_evt(
         self,
