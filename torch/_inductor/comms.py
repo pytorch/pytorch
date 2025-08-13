@@ -735,7 +735,7 @@ def _sink_waits_iterative_internal(
                     )
                 ):
 
-                    def is_groupable(snode) -> tuple[bool, str]:
+                    def is_groupable(snode) -> tuple[bool, Optional[str]]:
                         # We do not want to group with collectives to not reorder them forward.
                         if contains_collective(snode):
                             return (
