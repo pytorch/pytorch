@@ -69,6 +69,7 @@ from torch.library import _scoped_library
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
+    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
@@ -137,7 +138,7 @@ from torch.testing._internal.inductor_utils import (
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _T = TypeVar("_T")
@@ -9569,7 +9570,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9591,7 +9591,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps_unimplemented
     @skip_if_halide  # compiles for 5+ minutes
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
@@ -9614,7 +9613,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward3(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9638,7 +9636,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @xfail_if_mps_unimplemented
     def test_avg_pool3d_backward4(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -9840,6 +9837,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -9851,6 +9849,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (
@@ -9872,6 +9871,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
+    @skipIfXpu(msg="# Incorrect XPU reference ")
     @xfail_if_mps  # eager nan is wrong, see https://github.com/pytorch/pytorch/issues/130295
     @skip_if_halide  # nan behavior
     def test_argmax_argmin_with_nan(self):
@@ -9972,6 +9972,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 [rank4_inps, rank3_inps, rank5_inps],
             )
 
+    @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin3(self):
         def fn(x):
             return (
@@ -13154,7 +13155,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "assert_size_stride(buf2, (16, 32), (32, 1)"
             ).run(code)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @config.patch(use_fast_math=True)
     def test_prepare_softmax_with_fast_math(self):
         """
@@ -13563,7 +13564,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @config.patch("min_num_split", 256)
-    @xfail_if_mps  # TypeError: cannot determine truth value of Relational
     def test_split_reduction_dynamic_shape(self):
         from torch._dynamo.decorators import mark_dynamic
 
@@ -13654,6 +13654,49 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    @requires_cuda_and_triton
+    @parametrize("use_cat", [True, False])
+    def test_copy_non_blocking_is_pinned(self, use_cat):
+        def f(a_list):
+            a_cpu_list = []
+            a_to_cpu_event_list = []
+
+            for a in a_list:
+                a_cpu = a.to(device="cpu", non_blocking=True)
+                a_to_cpu_event = torch.Event()
+                a_to_cpu_event.record()
+                a_cpu_list.append(a_cpu)
+                a_to_cpu_event_list.append(a_to_cpu_event)
+
+            for e in a_to_cpu_event_list:
+                e.synchronize()
+
+            if use_cat:
+                return torch.cat(a_cpu_list)
+            else:
+                return a_cpu_list
+
+        f_compiled = torch.compile(f)
+        inputs = [
+            torch.rand(1000, dtype=torch.float16, device=GPU_TYPE) for _ in range(100)
+        ]
+        outputs = f(inputs)
+
+        with torch.profiler.profile(
+            activities=[
+                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
+            ],
+        ) as p:
+            outputs_compiled = f_compiled(inputs)
+
+        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
+        # self.assertTrue("pinned" in code)
+
+        self.assertEqual(outputs, outputs_compiled)
+        profile_output = str(p.key_averages())
+        print(profile_output)
+        self.assertFalse("Pageable" in profile_output)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -13695,6 +13738,25 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
     # Special case convenience routine
     if hasattr(my_cls, "is_dtype_supported"):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
+
+
+def add_test_failures(
+    test_failures: dict[str, TestFailure], added_test_failures: dict[str, TestFailure]
+):
+    """
+    In-place modifies the given dictionary of `test_failures` to add the
+    contents of `added_test_failures` by unioning the test_failure.suffixes, and
+    or-ing the the is_skip value.
+    """
+    for name, new_failure in added_test_failures.items():
+        if name in test_failures:
+            orig_failure = test_failures[name]
+            orig_failure.suffixes = tuple(
+                set(orig_failure.suffixes).union(set(new_failure.suffixes))
+            )
+            orig_failure.is_skip = orig_failure.is_skip or new_failure.is_skip
+        else:
+            test_failures[name] = new_failure
 
 
 if RUN_CPU:
@@ -14009,7 +14071,7 @@ if RUN_GPU:
                 torch._inductor.aot_compile(traced, inputs)
 
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
-        @requires_cuda
+        @requires_cuda_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
         @config.patch(implicit_fallbacks=True)
         def test_grouped_mm(self):
@@ -14523,11 +14585,11 @@ if RUN_GPU:
             else:
                 self.assertTrue("Graph fragment" in code)
                 self.assertTrue(
-                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                    f'%sin : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default]'
                     in code
                 )
                 self.assertTrue(
-                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                    f'%relu : Tensor "f32[4, 4][4, 1]{GPU_TYPE}:0"[num_users=1] = call_function[target=torch.ops.aten.relu.default]'
                     in code
                 )
 
@@ -15277,6 +15339,61 @@ if RUN_GPU:
 
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").run(code[0])
+
+        @unittest.skipIf(TEST_WITH_ROCM or not IS_SM90, "no scaled_grouped_mm support")
+        def test_respect_scaled_grouped_mm_layout_tag(self):
+            # scaled_grouped_mm needs `mat2` to be column-major
+            M, K, N = 128, 64, 32  # K and N must be divisible by 16
+            num_groups = 2
+            E = num_groups  # B_t batch size must match number of groups
+            group_size = M // num_groups
+
+            A = torch.randn(
+                M, K, dtype=torch.bfloat16, device=GPU_TYPE
+            )  # Row-major by default
+
+            # Create B_t with proper column-major layout
+            B_t_transposed = torch.randn(
+                E, N, K, dtype=torch.bfloat16, device=GPU_TYPE
+            ).contiguous()
+            B_t = B_t_transposed.transpose(-2, -1)  # (E, K, N)
+            B_t = B_t.transpose(-2, -1).contiguous().transpose(-2, -1)
+
+            # Verify column-major layout
+            def _is_column_major(x: torch.Tensor) -> bool:
+                """Check if tensor is column-major (stride(-2) == 1 and stride(-1) > 1)"""
+                assert x.ndim == 2 or x.ndim == 3, "input tensor must be 2D or 3D"
+                return x.stride(-2) == 1 and x.stride(-1) > 1
+
+            self.assertTrue(_is_column_major(B_t))
+
+            offs = torch.tensor([group_size, M], dtype=torch.int32, device=GPU_TYPE)
+            out_dtype = torch.bfloat16
+
+            @torch.compile
+            def fn():
+                A_scales = torch.ones(M, dtype=torch.float32, device=GPU_TYPE)
+                A_scaled = A.to(torch.float32) * A_scales.unsqueeze(-1)
+                A_fp8_row_major = A_scaled.to(torch.float8_e4m3fn)
+
+                B_t_scales = torch.ones(E, N, dtype=torch.float32, device=GPU_TYPE)
+                B_t_scaled = B_t.to(torch.float32) * B_t_scales.unsqueeze(1)
+                B_t_fp8_col_major = B_t_scaled.to(torch.float8_e4m3fn)
+
+                A_scales_reciprocal = A_scales.reciprocal()
+                B_t_scales_reciprocal = B_t_scales.reciprocal()
+
+                return torch.ops.aten._scaled_grouped_mm(
+                    A_fp8_row_major,
+                    B_t_fp8_col_major,
+                    A_scales_reciprocal,
+                    B_t_scales_reciprocal,
+                    offs,
+                    out_dtype=out_dtype,
+                    use_fast_accum=True,
+                )
+
+            fn()
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

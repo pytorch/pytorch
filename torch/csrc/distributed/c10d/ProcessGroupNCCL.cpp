@@ -5430,6 +5430,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
 
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto inputTensor = inputTensors.back();
+  check_gpu_single_tensor(inputTensor);
 
   std::vector<at::Tensor> outputs;
 
