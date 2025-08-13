@@ -3,7 +3,6 @@
 # To run:
 # python test/distributed/test_cupy_as_tensor.py
 
-import os
 from dataclasses import dataclass
 
 import torch
