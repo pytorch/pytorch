@@ -11,4 +11,4 @@ class TestForeachMapMatmul(unittest.TestCase):
         expected = [torch.mm(a, b) for a, b in zip(a_list, b_list)]
 
         for r, e in zip(result, expected):
-            self.assertTrue(torch.allclose(r, e), msg=f"Expected {e}, got {r}")
+            self.assertEqual(r, e)
