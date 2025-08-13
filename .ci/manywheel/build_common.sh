@@ -138,6 +138,32 @@ fi
 
 echo "Calling setup.py bdist at $(date)"
 
+setup_ccache() {
+    CCACHE_DIR=/opt/ccache/bin
+    CCACHE_LIB_DIR=/opt/ccache/lib
+    echo "Installing ccache"
+    retry dnf install -y ccache
+
+    mkdir -p "${CCACHE_DIR}"
+    mkdir -p "${CCACHE_LIB_DIR}"
+
+    # Regular compilers go in PATH
+    COMPILERS=("gcc" "g++" "cc" "c++" "clang" "clang++" "icx" "icpx")
+    ccache_path=$(which ccache)
+    for compiler in "${COMPILERS[@]}"; do
+        ln -sf "${ccache_path}" "${CCACHE_DIR}/${compiler}"
+    done
+
+    # Special handling for nvcc: create wrapper but move it outside PATH
+    # This prevents CMake CUDA detection issues while still enabling caching
+    ln -sf "${ccache_path}" "${CCACHE_DIR}/nvcc"
+    mv "${CCACHE_DIR}/nvcc" "${CCACHE_LIB_DIR}/"
+
+    # Set CUDA_NVCC_EXECUTABLE so CMake uses our cached nvcc
+    export CUDA_NVCC_EXECUTABLE="${CCACHE_LIB_DIR}/nvcc"
+    export PATH="${CCACHE_DIR}:${PATH}"
+}
+
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
     time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
@@ -153,6 +179,19 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
+    setup_ccache
+
+    # NOTE: We log directly to PYTORCH_FINAL_PACKAGE_DIR to ensure logs upload
+    # as part of the artifacts
+    time CMAKE_ARGS=${CMAKE_ARGS[@]} \
+        EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
+        BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
+        USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
+        python3 tools/packaging/build_wheel.py \
+          --find-python manylinux \
+          --log-destination "${PYTORCH_FINAL_PACKAGE_DIR}" \
+          -d "/tmp/${WHEELHOUSE_DIR}"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
@@ -251,20 +290,24 @@ make_wheel_record() {
 }
 
 replace_needed_sofiles() {
-    find $1 -name '*.so*' | while read sofile; do
-        origname=$2
-        patchedname=$3
-        if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
+  (
+      # use +x here to limit command output spam
+      set +x
+      find $1 -name '*.so*' | while read sofile; do
+          origname=$2
+          patchedname=$3
+          if [[ "$origname" != "$patchedname" ]] || [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
             set +e
             origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
             ERRCODE=$?
             set -e
             if [ "$ERRCODE" -eq "0" ]; then
-                echo "patching $sofile entry $origname to $patchedname"
-                $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
+              echo "patching $sofile entry $origname to $patchedname"
+              $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
             fi
-        fi
-    done
+          fi
+      done
+  )
 }
 
 echo 'Built this wheel:'
@@ -352,19 +395,27 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         done
     fi
 
-    # set RPATH of _C.so and similar to $ORIGIN, $ORIGIN/lib
-    find $PREFIX -maxdepth 1 -type f -name "*.so*" | while read sofile; do
-        echo "Setting rpath of $sofile to ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'}"
-        $PATCHELF_BIN --set-rpath ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile
-    done
+    (
+        # use +x here to limit command output spam
+        set +x
+        # set RPATH of _C.so and similar to $ORIGIN, $ORIGIN/lib
+        find $PREFIX -maxdepth 1 -type f -name "*.so*" | while read sofile; do
+            echo "Setting rpath of $sofile to ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'}"
+            $PATCHELF_BIN --set-rpath ${C_SO_RPATH:-'$ORIGIN:$ORIGIN/lib'} ${FORCE_RPATH:-} $sofile
+            $PATCHELF_BIN --print-rpath $sofile
+        done
+    )
 
-    # set RPATH of lib/ files to $ORIGIN
-    find $PREFIX/lib -maxdepth 1 -type f -name "*.so*" | while read sofile; do
-        echo "Setting rpath of $sofile to ${LIB_SO_RPATH:-'$ORIGIN'}"
-        $PATCHELF_BIN --set-rpath ${LIB_SO_RPATH:-'$ORIGIN'} ${FORCE_RPATH:-} $sofile
-        $PATCHELF_BIN --print-rpath $sofile
-    done
+    (
+        # use +x here to limit command output spam
+        set +x
+        # set RPATH of lib/ files to $ORIGIN
+        find $PREFIX/lib -maxdepth 1 -type f -name "*.so*" | while read sofile; do
+            echo "Setting rpath of $sofile to ${LIB_SO_RPATH:-'$ORIGIN'}"
+            $PATCHELF_BIN --set-rpath ${LIB_SO_RPATH:-'$ORIGIN'} ${FORCE_RPATH:-} $sofile
+            $PATCHELF_BIN --print-rpath $sofile
+        done
+    )
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
@@ -378,9 +429,12 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         echo "Generating new record file $record_file"
         : > "$record_file"
         # generate records for folders in wheel
-        find * -type f | while read fname; do
-            make_wheel_record "$fname" >>"$record_file"
-        done
+        (
+            set +x
+            find * -type f | while read fname; do
+              make_wheel_record "$fname" >>"$record_file"
+            done
+        )
     fi
 
     if [[ $BUILD_DEBUG_INFO == "1" ]]; then
