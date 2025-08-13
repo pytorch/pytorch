@@ -179,13 +179,9 @@ def {{kernel_name}}_kernel():
         from torch._inductor.lowering import lowerings
         from torch._inductor.utils import run_and_get_code
 
-        def cutedsl_grid(M, N, meta):
-            return (1,)
-
         template = CuteDSLTemplate(
             name="test_add_e2e",
             source=CUTEDSL_ADD_TEMPLATE,
-            grid=cutedsl_grid,
         )
 
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
@@ -237,13 +233,9 @@ def {{kernel_name}}_kernel():
         from torch._inductor.lowering import lowerings
         from torch._inductor.select_algorithm import autotune_select_algorithm
 
-        def cutedsl_grid(M, N, meta):
-            return (1,)
-
         template = CuteDSLTemplate(
             name="test_add_autotune",
             source=CUTEDSL_ADD_TEMPLATE,
-            grid=cutedsl_grid,
         )
 
         def cutedsl_add_lowering(a: TensorBox, b: TensorBox) -> TensorBox:
