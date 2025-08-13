@@ -227,6 +227,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_is_contiguous(AtenTensorHandle tensor, bool* ret_is_contiguous);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_is_defined(AtenTensorHandle tensor, bool* ret_is_defined);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,
     AtenTensorHandle* new_handle);
@@ -524,7 +527,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
 );
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_get_current_device(int32_t* ret_device_index);
+aoti_torch_get_current_device_index(int32_t* ret_device_index);
 
 #ifdef USE_CUDA
 
