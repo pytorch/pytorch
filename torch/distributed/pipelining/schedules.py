@@ -1797,17 +1797,24 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
-    def _dump_csv(self, filename: str):
-        """Dump a CSV representation of the compute + comms schedule into a file with the provided filename."""
-        # TODO should there be an option to dump the compute_only schedule from PipelineScheduleRuntime? It's possible
-        # that it does not exist if it was created from a compute_comms schedule.
-        assert self.pipeline_order_with_comms is not None, (
-            "Must initialize compute_comms schedule before dump_csv"
-        )
-        with open(filename, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for rank in self.pipeline_order_with_comms:
-                writer.writerow(self.pipeline_order_with_comms[rank])
+    def _dump_csv(self, filename: str, format: str = "compute_comms"):
+        """Dump a CSV representation of the schedule into a file with the provided filename."""
+        if format == "compute_only":
+            assert self.pipeline_order is not None, (
+                "Compute only schedule must be available"
+            )
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in self.pipeline_order:
+                    writer.writerow(self.pipeline_order[rank])
+        elif format == "compute_comms":
+            assert self.pipeline_order_with_comms is not None, (
+                "Must initialize compute_comms schedule before dump_csv"
+            )
+            with open(filename, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                for rank in self.pipeline_order_with_comms:
+                    writer.writerow(self.pipeline_order_with_comms[rank])
 
     def _simulate(self):
         return _simulate_comms_compute(
