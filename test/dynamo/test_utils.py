@@ -272,6 +272,18 @@ class TestDynamoTimed(TestCase):
             "Log file does not contain the expected string: 'test_stack_trace'",
         )
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_graph_node_shape(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        self.assertEqual(compilation_events[0].graph_node_shape, "{'l_self_modules_linear_parameters_weight_': [1, 3], 'l_self_modules_linear_parameters_bias_': [1], 'l_x_': [3], 'linear': [1]}")
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -422,7 +434,8 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
-            e.stack_trace = None
+            e.stack_trace = 
+            e.graph_node_shape = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -469,6 +482,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
+ 'graph_node_shape': None,
  'graph_op_count': 1,
  'guard_count': 9,
  'has_guarded_code': True,
@@ -551,6 +565,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
+ 'graph_node_shape': None,
  'graph_op_count': 1,
  'guard_count': 9,
  'has_guarded_code': True,
@@ -644,6 +659,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
+ 'graph_node_shape': None,
  'graph_op_count': None,
  'guard_count': None,
  'has_guarded_code': None,
@@ -726,6 +742,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
+ 'graph_node_shape': None,
  'graph_op_count': None,
  'guard_count': None,
  'has_guarded_code': None,
