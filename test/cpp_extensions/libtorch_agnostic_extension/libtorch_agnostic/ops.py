@@ -50,6 +50,7 @@ def my_abs(t) -> Tensor:
     """
     return torch.ops.libtorch_agnostic.my_abs.default(t)
 
+
 def my_is_cpu(t) -> bool:
     """
     Returns is_cpu on the input tensor.
@@ -61,6 +62,7 @@ def my_is_cpu(t) -> bool:
         a bool
     """
     return torch.ops.libtorch_agnostic.my_is_cpu.default(t)
+
 
 def my_ones_like(tensor, device) -> Tensor:
     """

@@ -215,7 +215,6 @@ if not IS_WINDOWS:
             out = libtorch_agnostic.ops.my_is_cpu(t)
             self.assertEqual(out, t.is_cpu)
 
-
         def test_fill_infinity(self, device):
             import libtorch_agnostic
 
