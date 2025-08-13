@@ -553,9 +553,6 @@ class IRNode:
     # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
-    # trace backs to user model code
-    # a single IRNode could correspond to multiple lines of code
-    stack_traces: dict[str, str] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -594,34 +591,6 @@ class IRNode:
         )
         self._post_init_setattr("origin_node", None)
 
-        # Group nodes by their stack traces to deduplicate
-        nodes_to_stack_trace = {}
-        if config.trace.provenance_tracking:
-            for node in origins:
-                if node.stack_trace:
-                    # nodes in the backward graph don't have mapping to pre_grad_graph
-                    nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
-                else:
-                    if (
-                        "postToPre"
-                        not in torch._inductor.debug._inductor_post_to_pre_grad_nodes
-                    ):
-                        continue
-                    node_names = torch._inductor.debug._inductor_post_to_pre_grad_nodes[
-                        "postToPre"
-                    ].get(node.name, None)
-                    if node_names:
-                        for node_name in node_names:
-                            stack_trace = torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
-                                node_name, None
-                            )
-                            if stack_trace:
-                                nodes_to_stack_trace["pre_grad+" + node_name] = (
-                                    stack_trace
-                                )
-
-        self._post_init_setattr("stack_traces", nodes_to_stack_trace)
-
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
 
@@ -634,16 +603,50 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
+    def get_stack_traces(self) -> dict[str, str]:
+        # Return stack traces to user model code
+        # A single IRNode could correspond to multiple lines of code
+
+        # Group nodes by their stack traces to deduplicate
+        nodes_to_stack_trace = {}
+        origins = self.origins
+        if isinstance(self, ExternKernel):
+            origin_node = self.get_origin_node()
+            if self.origin_node:
+                origins = OrderedSet([origin_node])
+        for node in origins:
+            if hasattr(node, "stack_trace") and node.stack_trace:
+                # nodes in the backward graph don't have mapping to pre_grad_graph
+                nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+            else:
+                pre_grad_nodes = (
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes.get(
+                        "postToPre", {}
+                    ).get(node.name, [])
+                )
+                if not isinstance(pre_grad_nodes, list):
+                    continue
+                for node_name in pre_grad_nodes:
+                    stack_trace = (
+                        torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
+                            node_name, None
+                        )
+                    )
+                    if stack_trace:
+                        nodes_to_stack_trace["pre_grad+" + node_name] = stack_trace
+
+        return nodes_to_stack_trace
+
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
-        if not self.stack_traces:
+        if not self.get_stack_traces():
             return [origins]
 
         stack_trace_str = []
-        for stack_trace in self.stack_traces.values():
+        for stack_trace in self.get_stack_traces().values():
             stack_trace_str.append("stack_traces = {{")
             stack_trace_str += stack_trace.split("\n")
             stack_trace_str.append("}")
