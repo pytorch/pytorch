@@ -71,7 +71,7 @@ def mock_query(
         return mocked_queries[key]
 
     # TODO: Remove me once https://github.com/pytorch/pytorch/issues/160489 is resolved
-    raise RuntimeError(f"Key {key} could not be found in gql_mocks")
+    raise ValueError(f"Key {key} could not be found in gql_mocks")
 
     try:
         rc = fallback_function(*args)
