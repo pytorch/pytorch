@@ -2414,6 +2414,8 @@ class Scheduler:
             log.debug("scheduling %s", node.node)
 
             if has_non_input_unbacked_defs:
+                assert node.node is not None
+
                 unbacked_symbol_uses = sorted(
                     node.node.get_free_symbol_uses(unbacked_only=True),
                     key=lambda x: x.name,
