@@ -479,12 +479,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::svd(
 // back to the inputs.
 at::Tensor& LazyNativeFunctions::logsumexp_out(
     const at::Tensor& self,
-    at::IntArrayRef dim,
-    bool keepdim,
     at::Tensor& out) {
   auto self_wrapped = at::functionalization::impl::to_functional_tensor(self);
   auto out_wrapped = at::functionalization::impl::to_functional_tensor(out);
-  // directly call the composite kernel from core.
+  // directly call the composite kernel from core (no-dim version).
   // Make sure to re-enable functionalization first.
   auto curr_tls = c10::impl::tls_local_dispatch_key_set();
   auto tls_reenable_functionalize = c10::impl::PODLocalDispatchKeySet();
@@ -492,7 +490,7 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   tls_reenable_functionalize.set_excluded(
       curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
   c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
-  at::native::logsumexp_out(self_wrapped, dim, keepdim, out_wrapped);
+  at::native::logsumexp_out(self_wrapped, out_wrapped);
   auto out_unwrapped =
       at::functionalization::impl::from_functional_tensor(out_wrapped);
   // propagate mutations back to the inputs (including resizing)
