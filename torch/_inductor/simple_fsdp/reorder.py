@@ -143,12 +143,16 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
     if isinstance(node, scheduler.GroupedSchedulerNode):
         # [Only for bucketing]: newly created AG and RS are grouped as GroupedSchedulerNode
         child_nodes_type = [
-            _get_ir_node_type(n) for n in [node.snodes[0].node, node.snodes[-2].node]
+            _get_ir_node_type(n.node) for n in node.snodes
         ]
-        if child_nodes_type[0] in [NodeType.AG_WAIT, NodeType.RS_WAIT]:
-            return child_nodes_type[0]
-        elif child_nodes_type[1] in [NodeType.ALL_GATHER, NodeType.REDUCE_SCATTER]:
-            return child_nodes_type[1]
+        if NodeType.AG_WAIT in child_nodes_type:
+            return NodeType.AG_WAIT
+        elif NodeType.RS_WAIT in child_nodes_type:
+            return NodeType.AG_WAIT
+        elif NodeType.ALL_GATHER in child_nodes_type:
+            return NodeType.ALL_GATHER
+        elif NodeType.REDUCE_SCATTER in child_nodes_type:
+            return NodeType.REDUCE_SCATTER
         else:
             return NodeType.COMPUTE
 

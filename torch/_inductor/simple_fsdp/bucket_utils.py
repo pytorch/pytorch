@@ -3,6 +3,7 @@ import math
 from typing import Any, Callable, cast, Dict, Union
 
 import torch
+import torch.distributed as c10d
 import torch.utils._pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
@@ -11,6 +12,39 @@ from ..dependencies import StarDep, WeakDep
 from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
 from .reorder import _check_ir_node_fsdp
+
+
+def get_ag_node_pg_info(snode, change):
+    ag_fx_node = get_fx_node(
+        snode,
+        expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
+    )
+    group_size, group_name = ag_fx_node.args[1], ag_fx_node.args[2]
+    ag_input_dtype = snode.node.inputs[0].layout.dtype
+    if change:
+        ag_input_dtype = torch.float32
+    return group_size, group_name, ag_input_dtype
+
+
+def get_rs_node_pg_info(snode, change):
+    rs_fx_node = get_fx_node(
+        snode,
+        expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+    )
+    group_size, group_name = rs_fx_node.args[2], rs_fx_node.args[3]
+    rs_input_dtype = snode.node.inputs[0].layout.dtype
+    if change:
+        rs_input_dtype = torch.bfloat16
+    return group_size, group_name, rs_input_dtype
+
+
+def sync_dict_across_ranks(runtime_dict, world_size):
+    gathered_lists = [None for _ in range(world_size)]
+    c10d.all_gather_object(gathered_lists, list(runtime_dict.values()))
+    median_gathered_time = torch.median(torch.tensor(gathered_lists), dim=0).values
+    for idx, (key, value) in enumerate(runtime_dict.items()):
+        runtime_dict[key] = median_gathered_time[idx]
+    return runtime_dict
 
 
 def get_fx_node(

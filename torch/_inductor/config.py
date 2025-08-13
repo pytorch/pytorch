@@ -369,7 +369,6 @@ class simplefsdp:
     enable_bucket_ir = False
     enable_reorder_ir = False
     simplefsdp_only = False
-    world_mesh = None
     bucketing_type = "manual"
     bucketing_plan = []
     relax_ratio = 0.01

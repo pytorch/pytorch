@@ -37,6 +37,24 @@ OpType = Union[
 ]
 
 
+def get_sample_list(input_size_list, cali_num_samples):
+    input_size_min, input_size_max = (
+        min(input_size_list),
+        int(0.3 * sum(input_size_list)),
+    )
+    # ensure the min transmitted data volume is not 0
+    input_size_min = max(100, input_size_min)
+    sample_list = [
+        int(
+            input_size_min
+            + i * (input_size_max - input_size_min) / (cali_num_samples - 1)
+        )
+        for i in range(cali_num_samples)
+    ]
+    sample_list = [s // 100 * 100 for s in sample_list]
+    return sample_list
+
+
 def _convert_str_to_op(full_name: str) -> OpType:
     module_names = full_name.split(".")
     target_kernel = torch
@@ -97,7 +115,7 @@ class CommPerfCache:
                     self.all_reduce_max_input_size, get_data_size(list(k[0]))
                 )
 
-    def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, value):
+    def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, process_group, value):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
         self.cache[key] = value
         if comm_func == "torch.ops._c10d_functional.all_gather_into_tensor.default":
@@ -114,7 +132,7 @@ class CommPerfCache:
             )
 
     def get_comm_time(
-        self, tensor_input_size, tensor_output_size, comm_func, calibrated=False
+        self, tensor_input_size, tensor_output_size, comm_func, process_group, calibrated=False
     ):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
         if key in self.cache:
@@ -129,19 +147,6 @@ class CommPerfCache:
 
         for k in self.cache.keys():
             if k[2] == comm_func:
-                if comm_func in [
-                    "torch.ops._c10d_functional.all_gather_into_tensor.default",
-                    "torch.ops._c10d_functional.all_reduce_.default",
-                ] and get_data_size(k[1]) // get_data_size(k[0]) != get_data_size(
-                    tensor_output_size
-                ) // get_data_size(tensor_input_size):
-                    continue
-                if comm_func in [
-                    "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-                ] and get_data_size(k[0]) // get_data_size(k[1]) != get_data_size(
-                    tensor_input_size
-                ) // get_data_size(tensor_output_size):
-                    continue
                 input_distance = self._calculate_distance(tensor_input_size, k[0])
                 output_distance = self._calculate_distance(tensor_output_size, k[1])
                 total_distance = input_distance + output_distance
@@ -291,6 +296,8 @@ def estimate_comm_time(
         estimate,
         verbose=verbose,
     )
+    del tensor_input
+    del tensor_output
     return comm_time
 
 
@@ -306,10 +313,6 @@ def benchmark_comm_func(
 ):
     rank = c10d.distributed_c10d.get_rank()
     device = torch.device(f"cuda:{rank:d}")
-    # process_group = c10d.distributed_c10d._get_default_group()
-    # from torch.distributed.device_mesh import init_device_mesh
-    # mesh = init_device_mesh("cuda", mesh_shape=(2, 2, 2), mesh_dim_names=("fsdp", "tp", "cp"))
-    # process_group = mesh.get_group("tp")
 
     if comm_func_name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
         input_args = {"input_tensor": tensor_input, "output_tensor": tensor_output}
@@ -320,7 +323,7 @@ def benchmark_comm_func(
 
     if comm_cache is not None:
         comm_time = comm_cache.get_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name
+            tensor_input.size(), tensor_output.size(), comm_func_name, process_group
         )
         if comm_time is not None:
             return comm_time
@@ -361,7 +364,7 @@ def benchmark_comm_func(
         )
     if comm_cache is not None:
         comm_cache.add_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name, comm_time
+            tensor_input.size(), tensor_output.size(), comm_func_name, process_group, comm_time
         )
     del tensor_input, tensor_output
     return comm_time

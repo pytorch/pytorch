@@ -8,6 +8,7 @@ from collections import defaultdict
 import torch
 import torch.distributed as c10d
 from torch.utils._ordered_set import OrderedSet
+from torch.distributed.distributed_c10d import _resolve_process_group
 
 from .. import config, memory
 from ..utils import is_collective
@@ -17,40 +18,27 @@ from .bucket_utils import (
     bucket_all_gathers,
     bucket_reduce_scatters,
     get_fx_node,
+    sync_dict_across_ranks,
+    get_ag_node_pg_info,
+    get_rs_node_pg_info,
 )
 from .estimator import (
     _create_real_tensor,
     benchmark_comm_func,
     estimate_comp_time,
     get_data_size,
+    get_sample_list,
 )
 from .reorder import _check_ir_node_fsdp
 
 
-def get_sample_list(input_size_list, cali_num_samples):
-    input_size_min, input_size_max = (
-        min(input_size_list),
-        int(0.3 * sum(input_size_list)),
-    )
-    # ensure the min transmitted data volume is not 0
-    input_size_min = max(100, input_size_min)
-    sample_list = [
-        int(
-            input_size_min
-            + i * (input_size_max - input_size_min) / (cali_num_samples - 1)
-        )
-        for i in range(cali_num_samples)
-    ]
-    sample_list = [s // 100 * 100 for s in sample_list]
-    return sample_list
-
-
 def benchmark_and_cache_comm(
-    size_list, cali_num_samples, tensor_info, comm_cache, comm_func_name, process_group
+    size_list, cali_num_samples, tensor_info, comm_cache, comm_func_name
 ):
     samples = get_sample_list(size_list, cali_num_samples)
-    input_dtype, input_device, output_dtype, output_device, group_size = tensor_info
+    input_dtype, input_device, output_dtype, output_device, group_size, process_group = tensor_info
     aggregated_samples = [s * group_size for s in samples]
+
     for sample, agg_sample in zip(samples, aggregated_samples):
         if (
             comm_func_name
@@ -66,6 +54,7 @@ def benchmark_and_cache_comm(
         elif comm_func_name == "torch.ops._c10d_functional.all_reduce_.default":
             inp = sample
             out = sample
+
         inp = _create_real_tensor(torch.Size((inp,)), input_dtype, input_device)
         out = _create_real_tensor(torch.Size((out,)), output_dtype, output_device)
         time = benchmark_comm_func(
@@ -78,15 +67,8 @@ def benchmark_and_cache_comm(
             estimate=False,
         )
         print(comm_func_name, "inp", inp.size(), "out", out.size(), "time", time)
-
-
-def sync_dict_across_ranks(runtime_dict, world_size):
-    gathered_lists = [None for _ in range(world_size)]
-    c10d.all_gather_object(gathered_lists, list(runtime_dict.values()))
-    median_gathered_time = torch.median(torch.tensor(gathered_lists), dim=0).values
-    for idx, (key, value) in enumerate(runtime_dict.items()):
-        runtime_dict[key] = median_gathered_time[idx]
-    return runtime_dict
+        del inp
+        del out
 
 
 def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatter):
@@ -114,6 +96,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                     expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
                 )
                 fsdp_ag_group_size = example_ag_fx_node.args[1]
+                fsdp_ag_process_group = _resolve_process_group(example_ag_fx_node.args[2])
                 fsdp_ag_input_dtype, fsdp_ag_input_device = (
                     snode.node.inputs[0].layout.dtype,
                     snode.node.inputs[0].layout.device,
@@ -130,6 +113,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                     expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
                 )
                 group_size = ag_fx_node.args[1]
+                process_group = _resolve_process_group(ag_fx_node.args[2])
                 input_size = get_data_size(snode.node.inputs[0].data.get_size())
                 tensor_info = tuple(
                     [
@@ -138,6 +122,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                         snode.node.layout.dtype,
                         snode.node.layout.device,
                         group_size,
+                        process_group,
                     ]
                 )
                 non_fsdp_ag_input_size_dict[tensor_info].append(input_size)
@@ -146,12 +131,12 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
         ):
             if _check_ir_node_fsdp(snode.node):
                 # For FSDP, we assume they have all have the same group size
-                if len(fsdp_rs_output_size_list) == 0:
-                    example_rs_fx_node = get_fx_node(
-                        snode,
-                        expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
-                    )
-                    fsdp_rs_group_size = example_rs_fx_node.args[2]
+                example_rs_fx_node = get_fx_node(
+                    snode,
+                    expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                )
+                fsdp_rs_group_size = example_rs_fx_node.args[2]
+                fsdp_rs_process_group = _resolve_process_group(example_rs_fx_node.args[3])
                 fsdp_rs_input_dtype, fsdp_rs_input_device = (
                     snode.node.inputs[0].layout.dtype,
                     snode.node.inputs[0].layout.device,
@@ -168,6 +153,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                     expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
                 )
                 group_size = rs_fx_node.args[2]
+                process_group = _resolve_process_group(rs_fx_node.args[3])
                 input_size = get_data_size(snode.node.layout.size)
                 tensor_info = tuple(
                     [
@@ -176,6 +162,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                         snode.node.layout.dtype,
                         snode.node.layout.device,
                         group_size,
+                        process_group,
                     ]
                 )
                 non_fsdp_rs_input_size_dict[tensor_info].append(input_size)
@@ -186,13 +173,17 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                 snode,
                 expected_op=torch.ops._c10d_functional.all_reduce_.default,
             )
+            all_reduce_process_group = _resolve_process_group(all_reduce_fx_node.args[2])
             group_size = all_reduce_fx_node.args[1]
             input_size = get_data_size(snode.node.inputs[0].layout.size)
             tensor_info = tuple(
                 [
                     snode.node.inputs[0].layout.dtype,
                     snode.node.inputs[0].layout.device,
+                    snode.node.inputs[0].layout.dtype,
+                    snode.node.inputs[0].layout.device,
                     group_size,
+                    all_reduce_process_group,
                 ]
             )
             all_reduce_input_size_dict[tensor_info].append(input_size)
@@ -203,7 +194,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                 )
                 total_comp_time += comp_time
             else:
-                print("[Relaxed Setting] untracked communication", snode.node)
+                print("[Relaxed Setting] untracked communication", snode.node.python_kernel_name)
 
     et_time = time.time()
     print("computation time estimation take", et_time - st_time)
@@ -231,7 +222,6 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
 
     # benchmark only in fwd to improve efficiency
     st_time = time.time()
-    world_mesh = config.simplefsdp.world_mesh
     if len(fsdp_ag_input_size_list) > 0 and not has_reduce_scatter:
         tensor_info = [
             fsdp_ag_input_dtype,
@@ -239,6 +229,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
             fsdp_ag_output_dtype,
             fsdp_ag_output_device,
             fsdp_ag_group_size,
+            fsdp_ag_process_group,
         ]
         benchmark_and_cache_comm(
             fsdp_ag_input_size_list,
@@ -246,7 +237,6 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
             tensor_info,
             comm_cache,
             "torch.ops._c10d_functional.all_gather_into_tensor.default",
-            world_mesh.get_group("dp_shard"),
         )
 
     if len(fsdp_rs_output_size_list) > 0:
@@ -256,6 +246,7 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
             fsdp_rs_output_dtype,
             fsdp_rs_output_device,
             fsdp_rs_group_size,
+            fsdp_rs_process_group,
         ]
         benchmark_and_cache_comm(
             fsdp_rs_output_size_list,
@@ -263,7 +254,6 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
             tensor_info,
             comm_cache,
             "torch.ops._c10d_functional.reduce_scatter_tensor.default",
-            world_mesh.get_group("dp_shard"),
         )
 
     if not config.simplefsdp.simplefsdp_only:
@@ -275,7 +265,6 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                     list(tensor_info),
                     comm_cache,
                     "torch.ops._c10d_functional.all_gather_into_tensor.default",
-                    world_mesh.get_group("tp"),
                 )
 
         if len(non_fsdp_rs_input_size_dict) > 0:
@@ -286,24 +275,22 @@ def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatt
                     list(tensor_info),
                     comm_cache,
                     "torch.ops._c10d_functional.reduce_scatter_tensor.default",
-                    world_mesh.get_group("tp"),
                 )
 
         if len(all_reduce_input_size_dict) > 0:
-            for tensor_info, comm_list in non_fsdp_rs_input_size_dict.items():
+            for tensor_info, comm_list in all_reduce_input_size_dict.items():
                 benchmark_and_cache_comm(
                     comm_list,
                     3,
                     list(tensor_info),
                     comm_cache,
                     "torch.ops._c10d_functional.all_reduce_.default",
-                    c10d.distributed_c10d._get_default_group(),
                 )
 
     et_time = time.time()
 
     print("communication time estimation takes", et_time - st_time)
-
+    print("comm_cache.cache", len(comm_cache.cache))
     median_runtimes = sync_dict_across_ranks(comm_cache.cache, world_size)
     comm_cache.cache = median_runtimes
     comm_cache._update_max_size()
@@ -330,11 +317,12 @@ def get_dynamic_memory_threshold(
     return peak_memory - current_peak_memory, current_peak_memory
 
 
-def estimate_bucketed_node(
+def estimate_bucketed_node_list(
     current_node_bucket,
     schedule_fallback_operation,
     group_size,
     group_name,
+    process_group,
     name_to_buf,
     comm_func,
     comm_cache,
@@ -352,6 +340,7 @@ def estimate_bucketed_node(
             comm_size_inp,
             comm_size_out,
             comm_func,
+            process_group,
             calibrated=True,
         )
         return estimated_comm, comm_size_inp, comm_size_out
@@ -385,8 +374,38 @@ def estimate_bucketed_node(
         bucked_node[0].layout.size,
         bucked_node[1].layout.size,
         comm_func,
+        process_group,
         calibrated=True,
     )
+    return estimated_comm, comm_size_inp, comm_size_out
+
+
+def estimate_hetero_bucketed_node(
+    current_node_bucket_dict,
+    schedule_fallback_operation,
+    process_group,
+    name_to_buf,
+    comm_func,
+    comm_cache,
+    reduce_op=None,
+):
+    estimated_comm, comm_size_inp, comm_size_out = 0, 0, 0
+    for node_info, node_list in current_node_bucket_dict.items():
+        group_size, group_name, input_dtype = node_info
+        local_comm, local_comm_size_inp, local_comm_size_out = estimate_bucketed_node_list(
+            node_list,
+            schedule_fallback_operation,
+            group_size,
+            group_name,
+            process_group,
+            name_to_buf,
+            comm_func,
+            comm_cache,
+            reduce_op,
+        )
+        estimated_comm += local_comm
+        comm_size_inp += get_data_size(local_comm_size_inp)
+        comm_size_out += get_data_size(local_comm_size_out)
     return estimated_comm, comm_size_inp, comm_size_out
 
 
@@ -402,8 +421,8 @@ def get_bucketing_plan(
 ) -> list[list["scheduler.BaseSchedulerNode"]]:
     all_gather_plan = []
     reduce_scatter_plan = []
-    current_ag_bucket = []
-    current_rs_bucket = []
+    current_ag_bucket = defaultdict(list)
+    current_rs_bucket = defaultdict(list)
     heuristic_info = {
         "last_step_rs_comm": 0,
         "last_step_rs_comm_size": 0,
@@ -445,6 +464,7 @@ def get_bucketing_plan(
                 expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
             _, group_size, group_name = example_ag_fx_node.args
+            fsdp_process_group = _resolve_process_group(example_ag_fx_node.args[2])
             if not has_reduce_scatter:
                 break
         elif is_collective(
@@ -455,6 +475,7 @@ def get_bucketing_plan(
                 expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             _, reduce_op, group_size, group_name = example_rs_fx_node.args
+            fsdp_process_group = _resolve_process_group(example_rs_fx_node.args[3])
             break
 
     # if there is no collective comm., return dummy plan
@@ -464,6 +485,7 @@ def get_bucketing_plan(
     total_comp_time = calibrate_with_cache(
         sched, snodes, comm_cache, comp_cache, has_reduce_scatter
     )
+    print("comm_cache", comm_cache.cache)
     schedule_fallback_operation = functools.partial(
         _schedule_fallback_operation,
         scheduler=sched,
@@ -474,17 +496,25 @@ def get_bucketing_plan(
 
     # auto-bucketing plan
     st_time = time.time()
+    test_time = 0
+    change = True
     for idx, snode in enumerate(snodes):
         # we only bucket on FSDP comm
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
-            current_ag_bucket.append(snode)
-            estimated_comm, comm_size_inp, comm_size_out = estimate_bucketed_node(
+            if test_time in [10,11,15,20,30,31,32,33,34]:
+                change=True
+            else:
+                change=False
+            node_info = get_ag_node_pg_info(snode, change)
+            current_ag_bucket[node_info].append(snode)
+            test_time = test_time +1
+
+            estimated_comm, comm_size_inp, comm_size_out = estimate_hetero_bucketed_node(
                 current_ag_bucket,
                 schedule_fallback_operation,
-                group_size,
-                group_name,
+                fsdp_process_group,
                 name_to_buf,
                 "torch.ops._c10d_functional.all_gather_into_tensor.default",
                 comm_cache,
@@ -495,12 +525,10 @@ def get_bucketing_plan(
                 * (1 + config.simplefsdp.relax_ratio)
             )
             if not has_reduce_scatter:
-                break_comm_size_criteria = comm_cache.ag_max_inp_size < get_data_size(
-                    comm_size_inp
-                )
+                break_comm_size_criteria = comm_cache.ag_max_inp_size < comm_size_inp
             else:
                 break_comm_size_criteria = (
-                    comm_cache.ag_max_inp_size < get_data_size(comm_size_inp)
+                    comm_cache.ag_max_inp_size < comm_size_inp
                     or comm_cache.rs_max_out_size
                     < heuristic_info["this_step_rs_comm_size"]
                 )
@@ -515,11 +543,8 @@ def get_bucketing_plan(
                 not has_reduce_scatter,
             )
             accumulated_comm_memory = (
-                2
-                * get_data_size(
-                    comm_size_inp
-                )  # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
-                + 2 * get_data_size(comm_size_out)
+                2 * comm_size_inp # copy-in (comm_size_inp) & copy-out (comm_size_out) memory created for AG
+                + 2 * comm_size_out
                 + heuristic_info[
                     "rs_comm_size_accumulated"
                 ]  # accumulated gradient from reduce scatter
@@ -543,14 +568,14 @@ def get_bucketing_plan(
                 or break_memory_criteria
                 or break_comm_size_criteria
             ):
-                print("this_step_comp", heuristic_info["this_step_comp"])
                 if heuristic_info["this_step_comp"] > 0:
-                    overflow_ag = current_ag_bucket.pop()
+                    overflow_ag = current_ag_bucket[node_info].pop()
                     all_gather_plan.append(current_ag_bucket)
-                    current_ag_bucket = [overflow_ag]
+                    current_ag_bucket = defaultdict(list)
+                    current_ag_bucket[node_info].append(overflow_ag)
                 else:
                     all_gather_plan.append(current_ag_bucket)
-                    current_ag_bucket = []
+                    current_ag_bucket = defaultdict(list)
                 if verbose:
                     print("********************")
                     print(
@@ -578,11 +603,10 @@ def get_bucketing_plan(
                 release_steps.append(idx + 1)
                 if len(current_rs_bucket) > 0:
                     current_estimated_rs, rs_comm_size_inp, rs_comm_size_out = (
-                        estimate_bucketed_node(
+                        estimate_hetero_bucketed_node(
                             current_rs_bucket,
                             schedule_fallback_operation,
-                            group_size,
-                            group_name,
+                            fsdp_process_group,
                             name_to_buf,
                             "torch.ops._c10d_functional.reduce_scatter_tensor.default",
                             comm_cache,
@@ -592,10 +616,9 @@ def get_bucketing_plan(
                     heuristic_info["last_step_rs_comm"] = current_estimated_rs
                     reduce_scatter_plan.append(current_rs_bucket)
                     heuristic_info["last_step_rs_comm_size"] = 2 * (
-                        get_data_size(rs_comm_size_inp)
-                        + get_data_size(rs_comm_size_out)
+                        rs_comm_size_inp + rs_comm_size_out
                     )  # rs copy-in + rs data
-                    current_rs_bucket = []
+                    current_rs_bucket = defaultdict(list)
 
                 (
                     heuristic_info["this_step_comp"],
@@ -611,20 +634,21 @@ def get_bucketing_plan(
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
-            current_rs_bucket.append(snode)
+            node_info = get_rs_node_pg_info(snode, change)
+            current_rs_bucket[node_info].append(snode)
+
             heuristic_info["this_step_rs_comm"], _, rs_comm_size_out = (
-                estimate_bucketed_node(
+                estimate_hetero_bucketed_node(
                     current_rs_bucket,
                     schedule_fallback_operation,
-                    group_size,
-                    group_name,
+                    fsdp_process_group,
                     name_to_buf,
                     "torch.ops._c10d_functional.reduce_scatter_tensor.default",
                     comm_cache,
                     reduce_op,
                 )
             )
-            heuristic_info["this_step_rs_comm_size"] = get_data_size(rs_comm_size_out)
+            heuristic_info["this_step_rs_comm_size"] = rs_comm_size_out
             # accumulated gradient from rs
             heuristic_info["rs_comm_size_accumulated"] += get_data_size(
                 snode.node.layout.size
@@ -638,16 +662,22 @@ def get_bucketing_plan(
                 ]
                 heuristic_info["this_step_rs_comm"] = 0
                 reduce_scatter_plan.append(current_rs_bucket)
-                current_rs_bucket = []
+                current_rs_bucket = defaultdict(list)
         else:
             # [TODO]ruisizhang: for now, we only consider TP and CP, whose comm are AG & RS & All_Reduce
             # For TP and CP, we consider the node as a "COMP" node with exposed communication as Comp time
             # the memory is the data fetched by the communication.
-            if is_collective(snode.node):
+            if is_collective(snode.node, op=torch.ops._c10d_functional.all_reduce_.default):
+                all_reduce_fx_node = get_fx_node(
+                    snode,
+                    expected_op=torch.ops._c10d_functional.all_reduce_.default,
+                )
+                process_group =  _resolve_process_group(all_reduce_fx_node.args[2])
                 current_comp = comm_cache.get_comm_time(
                     snode.node.inputs[0].data.get_size(),
                     snode.node.layout.size,
                     getattr(snode.node, "python_kernel_name", ""),
+                    process_group,
                     calibrated=True,
                 )
                 current_memory = get_data_size(snode.node.layout.size)
@@ -673,6 +703,5 @@ def get_bucketing_plan(
     if len(current_rs_bucket) > 0 or len(reduce_scatter_plan) == 0:
         reduce_scatter_plan.append(current_rs_bucket)
     et_time = time.time()
-
     print("algorithm takes", et_time - st_time)
     return all_gather_plan, reduce_scatter_plan

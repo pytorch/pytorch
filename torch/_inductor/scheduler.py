@@ -2235,8 +2235,8 @@ class Scheduler:
                 print("all_gather_plan", len(all_gather_plan))
                 print("reduce_scatter_plan", len(reduce_scatter_plan))
             else:
-                all_gather_plan = [[]]
-                reduce_scatter_plan = [[]]
+                all_gather_plan = [{}]
+                reduce_scatter_plan = [{}]
 
             print("start bucketing")
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
@@ -2270,6 +2270,9 @@ class Scheduler:
                     assert node_length == len(self.nodes), (
                         "missed nodes in reordering reduce scatter"
                     )
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
 
         self.process_grouped_nodes()
 
