@@ -12556,8 +12556,8 @@ Returns:
 add_docstr(
     torch.hamming_window,
     """
-hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, *, dtype=None, \
-layout=torch.strided, device=None, requires_grad=False) -> Tensor
+hamming_window(window_length, *, dtype=None, layout=None, device=None, pin_memory=False, \
+requires_grad=False) -> Tensor
 """
     + r"""
 Hamming window function.
@@ -12585,16 +12585,82 @@ above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
     + r"""
 Arguments:
     window_length (int): the size of returned window
-    periodic (bool, optional): If True, returns a window to be used as periodic
-        function. If False, return a symmetric window.
-    alpha (float, optional): The coefficient :math:`\alpha` in the equation above
-    beta (float, optional): The coefficient :math:`\beta` in the equation above
 
 Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
     {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, *, dtype=None, layout=None, device=None, \
+    pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, float alpha, *, dtype=None, layout=None, device=None, \
+    pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic and alpha specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    alpha (float): The coefficient :math:`\alpha` in the equation above
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
+
+.. function:: hamming_window(window_length, periodic, float alpha, float beta, *, dtype=None, layout=None, \
+    device=None, pin_memory=False, requires_grad=False) -> Tensor
+   :noindex:
+
+Hamming window function with periodic, alpha and beta specified.
+
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    alpha (float): The coefficient :math:`\alpha` in the equation above
+    beta (float): The coefficient :math:`\beta` in the equation above
+
+Keyword args:
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {pin_memory}
     {requires_grad}
 
 Returns:

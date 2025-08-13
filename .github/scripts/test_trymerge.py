@@ -70,6 +70,9 @@ def mock_query(
     if key in mocked_queries:
         return mocked_queries[key]
 
+    # TODO: Remove me once https://github.com/pytorch/pytorch/issues/160489 is resolved
+    raise ValueError(f"Key {key} could not be found in gql_mocks")
+
     try:
         rc = fallback_function(*args)
     except HTTPError as err:

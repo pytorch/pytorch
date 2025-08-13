@@ -32,7 +32,6 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
-from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -254,9 +253,9 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert (
-        actual in logging_err
-    ), f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    assert actual in logging_err, (
+        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    )
 
 
 def with_nccl_blocking_wait(func):
@@ -295,9 +294,9 @@ def with_nccl_blocking_wait(func):
         finally:
             # restore old values.
             if cached_nccl_async_error_handling is not None:
-                os.environ[
-                    "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-                ] = cached_nccl_async_error_handling
+                os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                    cached_nccl_async_error_handling
+                )
 
             if cached_nccl_blocking_wait is not None:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
@@ -672,7 +671,6 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        self.seed = None
         try:
             fn = getattr(self, method_name)
             setattr(self, method_name, self.join_or_run(fn))
@@ -717,20 +715,13 @@ class MultiProcessTestCase(TestCase):
 
     def _start_processes(self, proc) -> None:
         self.processes = []
-        assert common_utils.SEED is not None
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(
-                    rank,
-                    self._current_test_name(),
-                    self.file_name,
-                    child_conn,
-                ),
+                args=(rank, self._current_test_name(), self.file_name, child_conn),
                 kwargs={
-                    "seed": common_utils.SEED,
                     "fake_pg": getattr(self, "fake_pg", False),
                 },
             )
@@ -784,12 +775,11 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(
-        cls, rank: int, test_name: str, file_name: str, parent_pipe, seed: int, **kwargs
+        cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
-        self.seed = seed
         self.run_test(test_name, parent_pipe)
 
     def run_test(self, test_name: str, parent_pipe) -> None:
@@ -808,9 +798,6 @@ class MultiProcessTestCase(TestCase):
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
 
-        if self.seed is not None:
-            common_utils.set_rng_seed(self.seed)
-
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
@@ -825,7 +812,7 @@ class MultiProcessTestCase(TestCase):
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
             logger.error(
-                "Caught exception: \n%s exiting " "process %s with exit code: %s",
+                "Caught exception: \n%s exiting process %s with exit code: %s",
                 traceback.format_exc(),
                 self.rank,
                 MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
@@ -1548,7 +1535,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
 
     @classmethod
     def _run(
-        cls, rank: int, test_name: str, file_name: str, parent_pipe, seed: int, **kwargs
+        cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
         trace_log.addHandler(logging.NullHandler())
 
@@ -1556,7 +1543,6 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
-        self.seed = seed
         self.run_test(test_name, parent_pipe)
 
 
@@ -1619,7 +1605,7 @@ class MultiProcContinousTest(TestCase):
     @classmethod
     def _run_test_given_id(cls, test_id: str, **kwargs) -> None:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        test_name = test_id.split(".")[-1]
+        test_name = test_id.rsplit(".", maxsplit=1)[-1]
         # Get the test function from the test class
         self = cls(test_name)
         self.rank = cls.rank
@@ -1703,9 +1689,7 @@ class MultiProcContinousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.info(
-                "Started process %s with pid %s", rank, process.pid
-            )  # noqa: UP031
+            logger.info("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
     def setUpClass(cls):
