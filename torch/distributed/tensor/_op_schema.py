@@ -359,6 +359,15 @@ class OpSchema:
                 args_schema.append(str(arg))
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
+
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
@@ -440,6 +449,12 @@ class OpSchema:
         # if this is an out variant, it might not
         # be entirely correct, but it's good enough for now.
         return "out" in self.op._schema.overload_name
+
+    def is_view_op(self) -> bool:
+        return any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in self.op._schema.arguments
+        )
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
@@ -559,9 +574,14 @@ class OutputSharding:
     exactly the same as the operator OpSchema, except the DTensorSpecs
     """
 
+    # specifies the output sharding pattern
     output_spec: OutputSpecType
+    # schema for redistribution if needed
     redistribute_schema: Optional[OpSchema] = None
+    # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
+    # flag to use values from `redistribute_schema`
+    use_val_from_redistribute_schema: bool = False
 
     @cached_property
     def mesh(self):
