@@ -524,7 +524,7 @@ BatchNormBackend _select_batch_norm_backend(
   // See https://github.com/pytorch/pytorch/issues/64427.
   // non static variable is used to be able to change environment variable in runtime for testing
   // enabled by default for ROCm >= 7.0.0 with miopen 3.5
-  int miopen_version = detail::getCUDAHooks().versionMIOpen();
+  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
   bool is_miopen_3_4 = miopen_version >= 30400;  // ROCm 6.4
   bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
   bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(is_miopen_3_5);
