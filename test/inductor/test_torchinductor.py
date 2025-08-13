@@ -82,9 +82,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
-    onlyNativeDeviceTypes,
-    onlyCUDA,
-    skipMetaIf,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -108,8 +105,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfS390X,
-    runOnRocmArch,
-    MI300_ARCH,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -2598,7 +2593,6 @@ class CommonTemplate:
 
         self.common(fn, (a, q_group, in_features, out_features))
 
-
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
@@ -2618,7 +2612,9 @@ class CommonTemplate:
         a = a.to(torch.bfloat16)
         b = b.to(torch.bfloat16)
         if not self.is_dtype_supported(torch.bfloat16):
-            raise unittest.SkipTest(f"torch.bfloat16 not supported for device {self.device}")
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
 
         def dyn_quant_pack_4bit_weight(b, in_features, out_features):
             b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
