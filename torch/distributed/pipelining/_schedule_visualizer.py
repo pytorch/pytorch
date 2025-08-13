@@ -147,7 +147,7 @@ def add_schedule_op_spacing(
     # Track completion times: (stage_index, action_type, microbatch_index) -> completion_time
     scheduled_ops: dict[tuple[int, _ComputationType, int], int] = {}
     current_timestep = 0
-    progress_counter = 0
+    timesteps_without_progress = 0
     rank_completion_times = dict.fromkeys(range(num_ranks), 0)
 
     def is_dependency_ready(
@@ -266,7 +266,7 @@ def add_schedule_op_spacing(
 
     # Main scheduling loop
     while rank_ops:
-        print(f"Current timestep: {current_timestep}, {progress_counter=}")
+        print(f"Current timestep: {current_timestep}")
         # Process all operations during timestep until we run out of ready operations
         for rank, op_queue in enumerate(rank_ops):
             if not op_queue:
@@ -278,13 +278,13 @@ def add_schedule_op_spacing(
             if action is None:
                 spaced_schedule[rank].append(None)
                 op_queue.popleft()
-                progress_counter = 0
+                timesteps_without_progress = 0
             elif current_timestep >= rank_completion_times[rank] and is_action_ready(
                 action, current_timestep
             ):
                 schedule_action(action, rank, current_timestep)
                 op_queue.popleft()
-                progress_counter = 0
+                timesteps_without_progress = 0
 
         # Add None for ranks that are waiting
         for rank in range(num_ranks):
@@ -294,9 +294,9 @@ def add_schedule_op_spacing(
         # Remove empty queues and advance timestep
         rank_ops = [op_queue for op_queue in rank_ops if op_queue]
         current_timestep += 1
-        progress_counter += 1
+        timesteps_without_progress += 1
 
-        if progress_counter >= 3:
+        if timesteps_without_progress >= 10:
             raise RuntimeError("No progress made in scheduling - possible deadlock")
 
     return spaced_schedule
