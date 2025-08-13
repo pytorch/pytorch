@@ -298,4 +298,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    best_config_future = None
+    if torch._inductor.config.remote_gemm_autotune_cache:
+        best_config_future = gen_best_config("baddbmm", (inp, mat1, mat2))
+    return autotune_select_algorithm(
+        name,
+        choices,
+        kernel_inputs.nodes(),
+        layout,
+        best_config_future=best_config_future,
+    )
