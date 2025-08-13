@@ -8,9 +8,9 @@
 
 #include <torch/csrc/stable/accelerator.h>
 
-namespace torch::stable {
-
 using DeviceIndex = torch::stable::accelerator::DeviceIndex;
+
+namespace torch::stable {
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
 // the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
