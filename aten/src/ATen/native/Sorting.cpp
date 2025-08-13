@@ -77,7 +77,6 @@ TORCH_META_FUNC2(sort, stable)
   maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!self.is_complex(), " Sort does not support complex dtypes on CPU");
-  TORCH_CHECK(!(self.scalar_type() == kBool), "Sort does not support bool dtypes on CPU");
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
