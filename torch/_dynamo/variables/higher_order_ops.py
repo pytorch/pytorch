@@ -280,7 +280,7 @@ def _call_while_loop(
     tx: "InstructionTranslator",
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
-    with_checkpoint,
+    with_checkpoint: bool,
 ) -> VariableTracker:
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
