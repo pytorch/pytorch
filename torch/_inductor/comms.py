@@ -385,12 +385,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             n = _next[n]
         return ret
 
-    num_collectives_to_reorder_env_str = os.getenv(
-        "PYTORCH_REORDER_COLLECTIVES_LIMIT", None
-    )
-    debug_num_collectives_to_reorder: Optional[int] = None
-    if num_collectives_to_reorder_env_str is not None:
-        debug_num_collectives_to_reorder = int(num_collectives_to_reorder_env_str)
+    debug_num_collectives_to_reorder: Optional[int] = config.reorder_iterative_debug_limit_to_reorder
 
     num_processed_collectives: int = 0
     curr = _head
@@ -403,7 +398,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         if iterative_recompute_error:
             break
         if contains_collective(curr):
-            if debug_num_collectives_to_reorder and (
+            if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
             ):
                 break
@@ -969,10 +964,7 @@ def _sink_waits_iterative_internal(
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
-    num_sink_waits_to_reorder_env_str = os.getenv("PYTORCH_SINK_WAITS_LIMIT", None)
-    debug_num_sink_waits_to_reorder: Optional[int] = None
-    if num_sink_waits_to_reorder_env_str is not None:
-        debug_num_sink_waits_to_reorder = int(num_sink_waits_to_reorder_env_str)
+    debug_num_sink_waits_to_reorder: Optional[int] = sink_waits_iterative_debug_limit_to_sink
 
     iterative_recompute_error = False
     num_swapped_gemm_like_limit = config.sink_waits_iterative_swapped_gemm_like_limit

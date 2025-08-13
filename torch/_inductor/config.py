@@ -387,7 +387,9 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
-reorder_iterative_debug_memory_recompute: bool = True
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder Optional[int] = None if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None else int(env_str)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 
 reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
 sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
