@@ -29,8 +29,9 @@ class BoolTest(__TestCase):
 
     def test_subclass(self):
         try:
-            class C(bool):
-                pass
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                class C(bool):
+                    pass
         except TypeError:
             pass
         else:
@@ -327,40 +328,46 @@ class BoolTest(__TestCase):
         # from __bool__().  This isn't really a bool test, but
         # it's related.
         check = lambda o: self.assertRaises(TypeError, bool, o)
-        class Foo(object):
-            def __bool__(self):
-                return self
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Foo(object):
+                def __bool__(self):
+                    return self
         check(Foo())
 
-        class Bar(object):
-            def __bool__(self):
-                return "Yes"
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Bar(object):
+                def __bool__(self):
+                    return "Yes"
         check(Bar())
 
-        class Baz(int):
-            def __bool__(self):
-                return self
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Baz(int):
+                def __bool__(self):
+                    return self
         check(Baz())
 
         # __bool__() must return a bool not an int
-        class Spam(int):
-            def __bool__(self):
-                return 1
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Spam(int):
+                def __bool__(self):
+                    return 1
         check(Spam())
 
-        class Eggs:
-            def __len__(self):
-                return -1
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class Eggs:
+                def __len__(self):
+                    return -1
         self.assertRaises(ValueError, bool, Eggs())
 
     def test_interpreter_convert_to_bool_raises(self):
-        class SymbolicBool:
-            def __bool__(self):
-                raise TypeError
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class SymbolicBool:
+                def __bool__(self):
+                    raise TypeError
 
-        class Symbol:
-            def __gt__(self, other):
-                return SymbolicBool()
+            class Symbol:
+                def __gt__(self, other):
+                    return SymbolicBool()
 
         x = Symbol()
 
@@ -381,9 +388,10 @@ class BoolTest(__TestCase):
         # this test just tests our assumptions about __len__
         # this will start failing if __len__ changes assertions
         for badval in ['illegal', -1, 1 << 32]:
-            class A:
-                def __len__(self):
-                    return badval
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                class A:
+                    def __len__(self):
+                        return badval
             try:
                 bool(A())
             except (Exception) as e_bool:
@@ -393,14 +401,16 @@ class BoolTest(__TestCase):
                     self.assertEqual(str(e_bool), str(e_len))
 
     def test_blocked(self):
-        class A:
-            __bool__ = None
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class A:
+                __bool__ = None
         self.assertRaises(TypeError, bool, A())
 
-        class B:
-            def __len__(self):
-                return 10
-            __bool__ = None
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class B:
+                def __len__(self):
+                    return 10
+                __bool__ = None
         self.assertRaises(TypeError, bool, B())
 
     def test_real_and_imag(self):
@@ -414,12 +424,13 @@ class BoolTest(__TestCase):
         self.assertIs(type(False.imag), int)
 
     def test_bool_called_at_least_once(self):
-        class X:
-            def __init__(self):
-                self.count = 0
-            def __bool__(self):
-                self.count += 1
-                return True
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class X:
+                def __init__(self):
+                    self.count = 0
+                def __bool__(self):
+                    self.count += 1
+                    return True
 
         def f(x):
             if x or True:
