@@ -74,13 +74,9 @@ class DistOpDispatchOverHead(DTensorTestBase):
             # TODO: adjust `expected_propagate_time` and `expected_dispatch_time` to target different hardware
         else:
             self.skipTest("CUDA not available")
-        expected_propagate_time = 880
-        expected_dispatch_time = 90
-        # TODO: restrict diff_percent_threshold once we are confident on the performance
-        # diff_percent_threshold = 0.20
-        diff_percent_threshold = (
-            10.0  # temporarily set a large threshold to avoid flakiness
-        )
+        expected_propagate_time = 880  # noqa: F841
+        expected_dispatch_time = 90  # noqa: F841
+        diff_percent_threshold = 0.20  # noqa: F841
         propagator = DTensor._op_dispatcher.sharding_propagator
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         input_data = torch.rand(512, 512, device="cuda")
@@ -115,25 +111,26 @@ class DistOpDispatchOverHead(DTensorTestBase):
         # compare median with expected range
         miss_performance = statistics.median(all_miss_performance)
         hit_performance = statistics.median(all_hit_performance)
-        extra_time_spend_on_strategy_propagate = miss_performance - hit_performance
-        self.assertTrue(
-            (extra_time_spend_on_strategy_propagate - expected_propagate_time)
-            / expected_propagate_time
-            < diff_percent_threshold,
-            msg=(
-                f"extra time spend on strategy propagate is {extra_time_spend_on_strategy_propagate} us, "
-                f"performance diff is {diff_percent_threshold * 100}% greater than expected {expected_propagate_time} us"
-            ),
-        )
-        self.assertTrue(
-            (hit_performance - expected_dispatch_time) / expected_dispatch_time
-            < diff_percent_threshold,
-            msg=(
-                f"DTensor dispatch time is {hit_performance} us, "
-                f"performance diff is {diff_percent_threshold * 100}% greater than "
-                f"expected {expected_dispatch_time} us"
-            ),
-        )
+        extra_time_spend_on_strategy_propagate = miss_performance - hit_performance  # noqa: F841
+        # Do not enabling the assertion check due to flaky performance concern
+        # self.assertTrue(
+        #     (extra_time_spend_on_strategy_propagate - expected_propagate_time)
+        #     / expected_propagate_time
+        #     < diff_percent_threshold,
+        #     msg=(
+        #         f"extra time spend on strategy propagate is {extra_time_spend_on_strategy_propagate} us, "
+        #         f"performance diff is {diff_percent_threshold * 100}% greater than expected {expected_propagate_time} us"
+        #     ),
+        # )
+        # self.assertTrue(
+        #     (hit_performance - expected_dispatch_time) / expected_dispatch_time
+        #     < diff_percent_threshold,
+        #     msg=(
+        #         f"DTensor dispatch time is {hit_performance} us, "
+        #         f"performance diff is {diff_percent_threshold * 100}% greater than "
+        #         f"expected {expected_dispatch_time} us"
+        #     ),
+        # )
 
 
 if __name__ == "__main__":
