@@ -516,10 +516,9 @@ def sample_tests():
     """
     Simple sample to unblock the vllm ci development, next step is read those tests from a yaml file
     which is mimic to https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
-    This function represents how the test plan fetched as dict in python at runtime.
+    This function represents how the test plan looks like as dict in python at runtime.
     """
     # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
-    # source is from vllm test file: https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
     return {
         "basic_correctness_test": {
             # test plan:
