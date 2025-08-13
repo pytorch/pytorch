@@ -49,6 +49,63 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
+import numpy as np
+
+
+class Debugging:
+    def __init__(self):
+        self.recompute = 0
+        self.results = []
+
+    def add_result(self, *args, tag="forward"):
+        # self.results.append(args)  # this list holding reference resolves the nan issue
+        self.recompute += 1
+
+        rank = dist.get_rank()
+        hash_out = self.calculate_hash(args[0].detach().cpu().float().numpy())
+        hash_les = self.calculate_hash(args[1].detach().cpu().float().numpy())
+        print(
+            f"rank {rank} tag={tag} recompute={self.recompute} out={hash_out} logexpsum={hash_les}"
+        )
+
+    def check_result(self):
+        rank = dist.get_rank()
+
+        """
+        assert (
+            len(self.results) == 2
+        ), f"rank {rank} result length={len(self.results)}, recompute={self.recompute}"
+        """
+        print(
+            f"rank {rank} result length={len(self.results)}, recompute={self.recompute}"
+        )
+        # print(self.results[0], self.results[1])
+        """
+        for i, (r1, r2) in enumerate(zip(self.results[0], self.results[1])):
+            if isinstance(r1, torch.Tensor):
+                hash_r1 = self.calculate_hash(r1.detach().cpu().float().numpy())
+                hash_r2 = self.calculate_hash(r2.detach().cpu().float().numpy())
+                if i < 2:
+                    assert (
+                        hash_r1 == hash_r2
+                    ), f"rank {rank} index {i} {hash_r1} != {hash_r2}"
+                else:
+                    print(f"rank {rank} index {i} {hash_r1} != {hash_r2}")
+            else:
+                assert r1 == r2, f"rank {rank} index {i} {r1} != {r2}"
+        """
+
+    def calculate_hash(self, tensor_data: np.ndarray) -> str:
+        import hashlib
+
+        """Calculate SHA-256 hash of a tensor."""
+        tensor_bytes = tensor_data.tobytes()
+        return hashlib.sha256(tensor_bytes).hexdigest()
+
+
+_debug = Debugging()
+
+
 def _need_scaling() -> bool:
     if hasattr(torch.version, "hip") and torch.version.hip is not None:
         gcn_arch_name = torch.cuda.get_device_properties("cuda").gcnArchName
@@ -414,9 +471,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -493,7 +550,10 @@ def _templated_ring_attention(
             logsumexp *= 0.6931471805599453
         sdpa_merger.step(out, logsumexp, partial)
 
-    return *sdpa_merger.results(), *rest
+    output = sdpa_merger.results()
+    _debug.add_result(*output, *rest)
+
+    return *output, *rest
 
 
 def _templated_ring_attention_backward(
@@ -513,6 +573,9 @@ def _templated_ring_attention_backward(
     """This API implements the backward of the ring attention."""
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
+
+    _debug.add_result(out, logsumexp, tag="backward")
+
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
     next_kv = None
@@ -655,6 +718,8 @@ def _templated_ring_attention_backward(
     next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
     grad_value = next_grad_kv[grad_key.numel() :].reshape(grad_value.shape)
+
+    _debug.check_result()
     return (
         grad_query,
         grad_key,
