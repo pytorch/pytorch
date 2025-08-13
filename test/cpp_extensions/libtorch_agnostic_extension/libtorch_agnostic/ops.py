@@ -237,3 +237,12 @@ def test_stream(device_index) -> int:
     Returns: Stream ID as an integer
     """
     return torch.ops.libtorch_agnostic.test_stream.default(device_index)
+
+
+def test_get_current_device_index() -> int:
+    """
+    Tests the getCurrentDeviceIndex functionality by getting the current device index.
+
+    Returns: Current device index as an integer
+    """
+    return torch.ops.libtorch_agnostic.test_get_current_device_index.default()

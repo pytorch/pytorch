@@ -285,6 +285,22 @@ if not IS_WINDOWS:
 
             self.assertEqual(stream_id, expected_stream_id)
 
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_get_current_device_index(self, device):
+            import libtorch_agnostic
+
+            prev_device = torch.cuda.current_device()
+
+            try:
+                expected_device = 1
+                torch.cuda.set_device(expected_device)
+
+                current_device = libtorch_agnostic.ops.test_get_current_device_index()
+                self.assertEqual(current_device, expected_device)
+            finally:
+                torch.cuda.set_device(prev_device)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":

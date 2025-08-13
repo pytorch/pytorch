@@ -465,15 +465,29 @@ void boxed_test_stream(
   stack[0] = from(res);
 }
 
+int64_t test_get_current_device_index() {
+  return torch::stable::accelerator::getCurrentDeviceIndex();
+}
+
+void boxed_test_get_current_device_index(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  int64_t res = test_get_current_device_index();
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("test_device_guard(int device_index) -> int");
   m.def("test_device_guard_set_index() -> int");
   m.def("test_stream(int device_index) -> int");
+  m.def("test_get_current_device_index() -> int");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_device_guard", &boxed_test_device_guard);
   m.impl("test_device_guard_set_index", &boxed_test_device_guard_set_index);
   m.impl("test_stream", &boxed_test_stream);
+  m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
 #endif // LAE_USE_CUDA
