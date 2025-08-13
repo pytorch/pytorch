@@ -164,7 +164,7 @@ void quantized_matmul(
     std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
-void gpu_float_sdpa(
+void sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_kv,
@@ -182,7 +182,7 @@ void gpu_float_sdpa(
     bool compute_logsumexp,
     const Tensor& logsumexp);
 
-void gpu_float_sdpa_backward(
+void sdpa_backward(
     int batch_size,
     int num_head_q,
     int num_head_kv,

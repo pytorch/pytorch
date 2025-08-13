@@ -194,14 +194,14 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     const at::Tensor& key,
     const at::Tensor& value,
     const std::optional<at::Tensor>& attn_bias,
-    bool compute_logsumexp,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool compute_logsumexp) {
   TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-      "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
+      "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
   TORCH_INTERNAL_ASSERT(
       (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
           (key.size(2) == value.size(2)),
@@ -239,7 +239,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   at::Tensor logsumexp =
       at::empty({batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
 
-  at::native::onednn::gpu_float_sdpa(
+  at::native::onednn::sdpa(
       batch_size,
       seq_len_q,
       seq_len_kv,
@@ -295,10 +295,10 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
       grad_out.dim() == 4 && out.dim() == 4 &&
           grad_out.size(0) == out.size(0) && grad_out.size(1) == out.size(1) &&
           grad_out.size(2) == out.size(2) && grad_out.size(3) == out.size(3),
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {(B), H, T, K}");
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: grad_out and out should have the same shape of {B, H, T, K}");
   TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
   TORCH_INTERNAL_ASSERT(
       (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
           (key.size(2) == value.size(2)),
@@ -323,7 +323,7 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
       logsumexp.dim() == 3 && logsumexp.size(0) == query.size(0) &&
       logsumexp.size(1) == query.size(1) &&
       logsumexp.size(2) == query.size(2) &&
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {(B), H, T}");
+      "scaled_dot_product_fused_attention_overrideable_backward_xpu: logsumexp should have the shape of {B, H, T}");
 
   std::optional<Tensor> attn_bias_opt;
   if (attn_bias.defined()) {
@@ -344,7 +344,7 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   auto grad_attn_bias = attn_bias_opt.has_value()
       ? at::empty_like(attn_bias_opt.value())
       : at::Tensor();
-  at::native::onednn::gpu_float_sdpa_backward(
+  at::native::onednn::sdpa_backward(
       batch_size,
       num_head_q,
       num_head_kv,
