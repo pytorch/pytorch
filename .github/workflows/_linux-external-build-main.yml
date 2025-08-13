@@ -41,7 +41,6 @@ on:
         type: number
         description:
           Maximum number of jobs to run the external build
-        default: 16
       runner_prefix:
         required: false
         default: ""
