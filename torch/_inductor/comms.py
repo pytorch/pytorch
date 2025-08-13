@@ -7,7 +7,6 @@ import importlib
 import itertools
 import logging
 import operator
-import os
 import sys
 import time
 from collections import defaultdict
@@ -385,7 +384,9 @@ def _reorder_communication_preserving_peak_memory_internal(
             n = _next[n]
         return ret
 
-    debug_num_collectives_to_reorder: Optional[int] = config.reorder_iterative_debug_limit_to_reorder
+    debug_num_collectives_to_reorder: Optional[int] = (
+        config.reorder_iterative_debug_limit_to_reorder
+    )
 
     num_processed_collectives: int = 0
     curr = _head
@@ -964,7 +965,9 @@ def _sink_waits_iterative_internal(
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
-    debug_num_sink_waits_to_reorder: Optional[int] = sink_waits_iterative_debug_limit_to_sink
+    debug_num_sink_waits_to_reorder: Optional[int] = (
+        config.sink_waits_iterative_debug_limit_to_sink
+    )
 
     iterative_recompute_error = False
     num_swapped_gemm_like_limit = config.sink_waits_iterative_swapped_gemm_like_limit
