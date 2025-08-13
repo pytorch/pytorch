@@ -21,7 +21,7 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf)
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -368,6 +368,7 @@ class TestSparse(TestSparseBase):
             _test_coalesce(t)  # this tests correctness
 
     @onlyCUDA
+    @largeTensorTest("30GB", "cuda")
     @skipCUDAIf(not SM80OrLater and not TEST_WITH_ROCM, "CUDA capability < SM80 and not ROCM")
     @dtypes(torch.float)
     def test_coalesce_accepts_large_tensor(self, device, dtype):
