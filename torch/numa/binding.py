@@ -1,28 +1,31 @@
 import os
 import shutil
+import stat
 import subprocess
 import traceback
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
+from logging import getLogger
+from subprocess import run
+from tempfile import mkstemp
 from typing import Callable, Optional, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event
-from torch.distributed.elastic.utils.logging import get_logger
 
 
 __all__ = [
-    "maybe_wrap_with_numa_bindings",
     "AffinityMode",
+    "maybe_get_temporary_python_executable_with_numa_bindings",
+    "maybe_wrap_command_with_numa_bindings",
     "NumaOptions",
 ]
 
-
 _NUMACTL_COMMAND = "numactl"
 
-logger = get_logger(__file__)
+logger = getLogger(__name__)
 
 
 class AffinityMode(str, Enum):
@@ -40,10 +43,10 @@ class AffinityMode(str, Enum):
 @dataclass(frozen=True)
 class NumaOptions:
     affinity_mode: AffinityMode
+
     """
-    If true, we will silently return the original command if any of the following occur:
-    - An exception is raised as we compute the wrapped command.
-    - During a dry run of the wrapped command, numactl fails for any reason.
+    If true, we will fall back to using the original command/entrypoint if we fail to compute
+    or apply NUMA bindings.
 
     You should avoid using this option! It is only intended as a safety mechanism for facilitating
     mass rollouts of numa binding.
@@ -51,52 +54,156 @@ class NumaOptions:
     should_fall_back_if_binding_fails: bool = False
 
 
-def maybe_wrap_with_numa_bindings(
-    *,
-    entrypoint: str,
-    local_rank_to_args: dict[int, tuple],
-    numa_options: Optional[NumaOptions],
-) -> tuple[str, dict[int, tuple]]:
+def maybe_get_temporary_python_executable_with_numa_bindings(
+    *, python_executable_path: str, gpu_index: int, numa_options: Optional[NumaOptions]
+) -> Optional[str]:
     """
     Args:
-        entrypoint: The entrypoint to the program, such as might be input to Popen.
-            Example: "python"
-        local_rank_to_args: A mapping from local rank to args for the entrypoint.
-            Example: {0: ("trainer.py",)}
-        numa_options: See NumaOptions for details.
-
+        python_executable_path: E.g., "/usr/local/bin/python"
     Returns:
-        A tuple of (entrypoint, local_rank_to_args), basically transforming the inputs,
-        where the entrypoint and args may now involve numa binding.
-        Example: ("numactl", {"0": ("--cpunodebind=0", "--preferred=0", "python", "trainer.py")})
+        Path to a temporary file. This file can be executed just like the original python
+        executable, except it will first apply NUMA bindings.
     """
     if numa_options is None:
-        return (entrypoint, local_rank_to_args)
+        logger.info("Received numa_options=None, not creating numa executable.")
+        return None
 
-    wrapped_local_rank_to_args = {}
-    for local_rank, args in local_rank_to_args.items():
-        try:
-            numactl_command_options = _maybe_get_numactl_options(
-                command_args=(entrypoint, *[str(arg) for arg in args]),
-                gpu_index=local_rank,
-                numa_options=numa_options,
-            )
-        except Exception:
-            if numa_options.should_fall_back_if_binding_fails:
-                # NOTE: If any element of the batch fails to apply NUMA bindings
-                # for any reason, we do not apply NUMA bindings to any element of the batch,
-                # for maximum safety. This only applies if fallback is enabled.
-                return (entrypoint, local_rank_to_args)
-            raise
-        wrapped_local_rank_to_args[local_rank] = (
-            *numactl_command_options,
-            entrypoint,
-            *args,
+    if isinstance(python_executable_path, bytes):
+        python_executable_path = python_executable_path.decode()
+
+    full_numactl_command = maybe_wrap_command_with_numa_bindings(
+        # "$@", i.e. pass through any args the python executable would have
+        # received.
+        command_args=(python_executable_path, '"$@"'),
+        gpu_index=gpu_index,
+        numa_options=numa_options,
+    )
+
+    if full_numactl_command is None:
+        return None
+
+    executable_path = _get_temporary_executable_for_command(
+        command_args=full_numactl_command
+    )
+    logger.info("Returning python executable with NUMA bindings %s", executable_path)
+
+    return executable_path
+
+
+def maybe_wrap_command_with_numa_bindings(
+    *,
+    command_args: tuple[str, ...],
+    gpu_index: int,
+    numa_options: Optional[NumaOptions],
+) -> Optional[tuple[str, ...]]:
+    """
+    Args:
+        command_args: Full shell command, like ("/usr/local/bin/python", "train.py")
+        gpu_index: The index of the GPU which command_args should bind to
+
+    Returns:
+        command_args, but wrapped so that it runs with NUMA bindings corresponding to
+        gpu_index and numa_options.
+        E.g., ("numactl", "--cpunodebind=0", "/usr/local/bin/python", "train.py")
+    """
+    if not numa_options:
+        logger.info("Received numa_options=None, not applying bindings.")
+        return None
+
+    kwargs = {
+        "command_args": command_args,
+        "gpu_index": gpu_index,
+        "numa_options": numa_options,
+    }
+    logger.info("Attempting to wrap command with NUMA bindings, given input %r", kwargs)
+
+    try:
+        _raise_if_numactl_not_available()
+
+        numactl_options = _get_numactl_cli_options(
+            command_args=command_args, gpu_index=gpu_index, numa_options=numa_options
         )
-    return (_NUMACTL_COMMAND, wrapped_local_rank_to_args)
+        logger.info("Computed numactl_options=%r", numactl_options)
+
+        _raise_if_numactl_fails_dry_run(numactl_options=numactl_options)
+        logger.info("Validated numactl_options=%r", numactl_options)
+
+        full_numactl_command = _get_assembled_command_from_pieces(
+            command_args=command_args, numactl_options=numactl_options
+        )
+        logger.info(
+            "Successfully wrapped command with numa_bindings. Returning %r",
+            full_numactl_command,
+        )
+        signpost_event(
+            category="numa_binding",
+            name="wrap_command_success",
+            parameters={**kwargs, "result": full_numactl_command},
+        )
+        return full_numactl_command
+    except Exception:
+        signpost_event(
+            category="numa_binding",
+            name="wrap_command_exception",
+            parameters={
+                **kwargs,
+                "traceback": traceback.format_exc(),
+            },
+        )
+        logger.exception(
+            "Failed to wrap command with NUMA bindings for input = %r", kwargs
+        )
+        if numa_options.should_fall_back_if_binding_fails:
+            logger.warning("Falling back to original command without NUMA bindings.")
+            return None
+        raise
 
 
-def _maybe_get_numactl_options(
+def _get_temporary_executable_for_command(
+    *,
+    command_args: tuple[str, ...],
+) -> str:
+    """
+    Returns:
+        Path to a temporary file which executes the specified command. The executable
+        deletes itself the first time it runs, so do not try to run it multiple times.
+    """
+    fd, path = mkstemp(
+        prefix="pytorch-numa-bind",
+        suffix=".sh",
+    )
+
+    # We do rm first to guarantee the file deletes itself. The rest of the file
+    # will still run as intended.
+    contents = f"""#!/bin/bash
+
+# If this file is more than a few minutes old and still exists on your machine,
+# that is NOT expected. It should have deleted itself. If you are seeing an accumulation of such
+# files, that could suggest a bug in pytorch. See https://github.com/pytorch/pytorch/pull/160163.
+
+rm -- "$0"
+{" ".join(command_args)}
+"""
+
+    with os.fdopen(fd, "w") as file:
+        file.write(contents)
+
+        # Ensure the file is fully synced, in order to avoid race condition
+        # from trying to execute it too early.
+        file.flush()
+        os.fsync(fd)
+
+    # Make the script executable
+    os.chmod(path, stat.S_IRWXU)
+
+    logger.info(
+        "Created temporary executable at path %s, with contents\n%s", path, contents
+    )
+
+    return path
+
+
+def _get_numactl_cli_options(
     *,
     command_args: tuple[str, ...],
     gpu_index: int,
@@ -112,63 +219,20 @@ def _maybe_get_numactl_options(
 
     Returns:
         Depending on numa_options, something like
-            ("--cpunodebind=0", "--preferred=0")
+            ("--cpunodebind=0")
     """
-    try:
-        _raise_if_numactl_not_available()
-        if numa_options.affinity_mode == AffinityMode.NODE:
-            numactl_command_options = _get_node_numactl_options(gpu_index=gpu_index)
-        elif numa_options.affinity_mode == AffinityMode.SOCKET:
-            numactl_command_options = _get_socket_numactl_options(gpu_index=gpu_index)
-        elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
-            numactl_command_options = _get_exclusive_numactl_options(
-                gpu_index=gpu_index
-            )
-        elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
-            numactl_command_options = _get_core_complex_numactl_options(
-                gpu_index=gpu_index
-            )
-        else:
-            raise ValueError(
-                f"Affinity mode {numa_options.affinity_mode} not supported."
-            )
+    if numa_options.affinity_mode == AffinityMode.NODE:
+        numactl_command_options = _get_node_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.SOCKET:
+        numactl_command_options = _get_socket_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
+        numactl_command_options = _get_exclusive_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
+        numactl_command_options = _get_core_complex_numactl_options(gpu_index=gpu_index)
+    else:
+        raise ValueError(f"Affinity mode {numa_options.affinity_mode} not supported.")
 
-        if numa_options.should_fall_back_if_binding_fails:
-            _raise_if_numactl_fails_dry_run(numactl_options=numactl_command_options)
-        signpost_event(
-            category="numa_binding",
-            name="wrap_command_success",
-            parameters={
-                "original_command_args": command_args,
-                "gpu_index": gpu_index,
-                "numa_options": numa_options,
-                "numactl_command_options": numactl_command_options,
-            },
-        )
-        return numactl_command_options
-    except Exception:
-        signpost_event(
-            category="numa_binding",
-            name="wrap_command_exception",
-            parameters={
-                "traceback": traceback.format_exc(),
-                "original_command_args": command_args,
-                "gpu_index": gpu_index,
-                "numa_options": numa_options,
-            },
-        )
-        logger.exception(
-            """Failed to wrap command with NUMA bindings.
-            Input:
-                command_args=%r,
-                gpu_index=%d,
-                numa_options=%r,
-        """,
-            command_args,
-            gpu_index,
-            numa_options,
-        )
-        raise
+    return numactl_command_options
 
 
 def _raise_if_numactl_fails_dry_run(*, numactl_options: tuple[str, ...]) -> None:
@@ -177,9 +241,14 @@ def _raise_if_numactl_fails_dry_run(*, numactl_options: tuple[str, ...]) -> None
         command_args=("true",),
         numactl_options=numactl_options,
     )
+
+    temporary_executable_path = _get_temporary_executable_for_command(
+        command_args=noop_args
+    )
+
     try:
-        subprocess.run(
-            noop_args,
+        run(
+            (temporary_executable_path,),
             stdout=subprocess.DEVNULL,
             # These allow us to capture the stderr as text
             stderr=subprocess.PIPE,
@@ -219,14 +288,11 @@ def _get_node_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
     Core logic of 'node' numa strategy.
 
     Returns options to be used with numactl. E.g.,
-    ("--cpunodebind=0", "--preferred=0").
+    ("--cpunodebind=0").
     """
     numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
 
-    return (
-        f"--cpunodebind={numa_node_index}",
-        f"--preferred={numa_node_index}",
-    )
+    return (f"--cpunodebind={numa_node_index}",)
 
 
 def _get_socket_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
@@ -242,14 +308,7 @@ def _get_socket_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
     )
     numa_node_indices_str = _get_ranges_str_from_ints(numa_node_indices)
 
-    return (
-        f"--cpunodebind={numa_node_indices_str}",
-        (
-            f"--preferred-many={numa_node_indices_str}"
-            if len(numa_node_indices) > 1
-            else f"--preferred={numa_node_indices_str}"
-        ),
-    )
+    return (f"--cpunodebind={numa_node_indices_str}",)
 
 
 def _get_exclusive_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
@@ -321,7 +380,6 @@ def _get_exclusive_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
 
     return (
         f"--physcpubind={_get_ranges_str_from_ints(logical_cpu_indices_for_original_gpu)}",
-        f"--preferred={numa_node_index}",
     )
 
 
@@ -371,7 +429,6 @@ def _get_core_complex_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
 
     return (
         f"--physcpubind={_get_ranges_str_from_ints(logical_cpu_indices_for_original_gpu)}",
-        f"--preferred={numa_node_index}",
     )
 
 
