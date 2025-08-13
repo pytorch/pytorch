@@ -1,27 +1,25 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Union
 
+import torch
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.ir import ShapeAsConstantBuffer
+from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.utils import Placeholder
 from torch._logging import getArtifactLogger
 
-from ...autotune_process import BenchmarkRequest, TensorMeta
+from ...autotune_process import BenchmarkRequest, GPUDeviceBenchmarkMixin, TensorMeta
 from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, Layout, TensorBox
 from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
 
 
-if TYPE_CHECKING:
-    from ...scheduler import BaseSchedulerNode
-else:
-    BaseSchedulerNode = Any
-
 log = getArtifactLogger(__name__, "output_code")
 
 
-class CuteDSLBenchmarkRequest(BenchmarkRequest):
+class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """Benchmark request for CuteDSL (CUTLASS Python DSL) kernels."""
 
     def __init__(
@@ -30,10 +28,42 @@ class CuteDSLBenchmarkRequest(BenchmarkRequest):
         input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: tuple[Any, ...],
-        source_code: str,
+        source_code: PartialRender,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
-        self.source_code = source_code
+
+        finalized_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        """
+        Create a function to run the CuteDSL kernel with the given input and output tensors.
+        Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
+        """
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+
+        # Logic replicated async_compile
+        from .cutedsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            return kernel_func(*input_tensors, out)
+
+        return run_kernel
+
+    def cleanup_run_fn(self) -> None:
+        """Clean up any resources used by the kernel."""
 
 
 class CuteDSLTemplate(KernelTemplate):
@@ -47,13 +77,11 @@ class CuteDSLTemplate(KernelTemplate):
         self,
         name: str,
         source: str,
-        grid: Any = None,
         subgraph_fn: Optional[Any] = None,
         mask_fn: Optional[Any] = None,
     ) -> None:
         super().__init__(name)
         self.source = source
-        self.grid = grid
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
@@ -104,7 +132,6 @@ class CuteDSLTemplate(KernelTemplate):
 
         log.debug("Generated CuteDSL Code:\n%s", code)
 
-        # Create benchmark request
         bmreq = CuteDSLBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
@@ -185,10 +212,12 @@ class CuteDSLTemplateCaller(ChoiceCaller):
 
     def hash_key(self) -> str:
         """Return unique hash key for this choice."""
-        # Create a hash from template name and input shapes
-        input_shapes = [str(node.get_size()) for node in self.input_nodes]
-        key_parts = [self.name, str(self.layout), *input_shapes]
-        return "|".join(key_parts)
+        return "-".join(
+            [
+                self.name.rsplit("_", 1)[0],
+                self.bmreq.module_cache_key,
+            ]
+        )
 
     def info_dict(self) -> dict[str, Any]:
         """Return information about this kernel."""
