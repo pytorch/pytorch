@@ -520,6 +520,41 @@ class TestReductions(TestCase):
         self.assertEqual(expected, actual)
 
     @skipIfNoSciPy
+    @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
+    def test_logsumexp_all_dims(self, device, dtype):
+        from scipy.special import logsumexp
+        # Test logsumexp without dim parameter (reduce over all dimensions)
+        a = torch.randn(3, 4, 5, device=device, dtype=dtype)
+        # torch.exp(complex(inf, 0)) yields inf+nan*j instead of inf+0*j on CPU which disagrees with CUDA, C++ std::exp,
+        # numpy and scipy. Skip inf testing on CPU. Related to https://github.com/pytorch/pytorch/issues/95740
+        if torch.device(device) != torch.device('cpu'):
+            a[0, 0, 0] = inf
+        a[1, :, :] = -inf
+
+        # Test the new logsumexp() without dim parameter
+        actual = a.logsumexp()
+        expected = logsumexp(a.cpu().numpy().flatten())
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected, actual)
+
+        # Also test torch.logsumexp function call
+        actual_func = torch.logsumexp(a)
+        self.assertEqual(expected, actual_func)
+
+        # Test that it's equivalent to logsumexp with all dims specified
+        all_dims = list(range(a.ndim))
+        actual_explicit = a.logsumexp(all_dims)
+        self.assertEqual(actual, actual_explicit)
+
+        # Test explicit dim=None syntax
+        actual_dim_none = torch.logsumexp(a, dim=None)
+        self.assertEqual(expected, actual_dim_none)
+
+        # Test explicit dim=None with method syntax
+        actual_method_dim_none = a.logsumexp(dim=None)
+        self.assertEqual(expected, actual_method_dim_none)
+
+    @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
