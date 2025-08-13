@@ -29,7 +29,7 @@ def run_shell(
     if log_cmd:
         logger.info("[shell] %s", cmd)
 
-    run_env = {**os.environ, **env} if env else None
+    run_env = {**os.environ, **(env or {})}
 
     proc = subprocess.run(
         cmd,
@@ -73,7 +73,7 @@ def run_cmd(
     if log_cmd:
         logger.info("[cmd] %s", " ".join(args))
 
-    run_env = {**os.environ, **env} if env else None
+    run_env = {**os.environ, **(env or {})}
 
     proc = subprocess.run(
         args,
