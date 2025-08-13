@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
 logger = logging.getLogger(__name__)
 
 d_hid = 512
-batch_size = 32
+batch_size = 64
 torch.manual_seed(0)
 device_type = "cuda"
 
