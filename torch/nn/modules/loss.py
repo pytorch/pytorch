@@ -1352,7 +1352,7 @@ class LinearCrossEntropyLoss(Module):
     __constants__ = [
         *Linear.__constants__,  # type: ignore[has-type]
         "chunking_strategy",
-        *CrossEntropyLoss.__constants__
+        *CrossEntropyLoss.__constants__,
     ]
 
     def __init__(
