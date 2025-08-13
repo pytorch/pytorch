@@ -1230,6 +1230,9 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
+        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = [
+            FlexConfig(64, 64, 1, 4),
+        ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
             FlexDecodeConfig(32, 1, 2),
             FlexDecodeConfig(32, 1, 1),

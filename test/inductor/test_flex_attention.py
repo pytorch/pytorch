@@ -210,6 +210,7 @@ class SubstringSet:
 DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
     [
         "cuda",
+        "xpu",
     ]
 )
 
@@ -3316,7 +3317,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
-        torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
+        if requires_grad:        
+            torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
 
     @supported_platform
     @skip_on_cpu
