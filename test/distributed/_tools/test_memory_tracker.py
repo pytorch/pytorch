@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests,TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMemoryTracker(TestCase):
