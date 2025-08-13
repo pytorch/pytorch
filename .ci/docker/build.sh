@@ -76,9 +76,6 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
-elif [[ "$image" == *riscv* ]]; then
-  # Use RISC-V specific Dockerfile
-  DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
@@ -306,9 +303,6 @@ case "$tag" in
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-noble-riscv64-py3.12-gcc14)
-    GCC_VERSION=14
-    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     VISION=yes
@@ -429,14 +423,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 fi
 
 if [ -n "$GCC_VERSION" ]; then
-  if [[ "$image" == *riscv* ]]; then
-    # Check RISC-V cross-compilation toolchain version
-    if !(drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
-      echo "RISC-V GCC_VERSION=$GCC_VERSION, but:"
-      drun riscv64-linux-gnu-gcc-${GCC_VERSION} --version
-      exit 1
-    fi
-  elif !(drun gcc --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
+  if !(drun gcc --version 2>&1 | grep -q " $GCC_VERSION\\W"); then
     echo "GCC_VERSION=$GCC_VERSION, but:"
     drun gcc --version
     exit 1
