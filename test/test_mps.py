@@ -199,6 +199,13 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    def test_conv_transpose3d_autocast_fp32(self):
+        m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
+        x = torch.randn(20, 16, 10, 50, 100, device="mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = m(x)
+        self.assertEqual(y.dtype, torch.float32)
+
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
         class Model(nn.Module):
@@ -7736,6 +7743,8 @@ class TestMPS(TestCaseMPS):
         y = torch.arange(32, device='mps', dtype=torch.int32)
         self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
         self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+        # Regression test for https://github.com/pytorch/pytorch/issues/160208
+        self.assertEqual(torch.add(y, x, alpha=2).cpu(), torch.add(y.cpu(), x.cpu(), alpha=2))
 
     # Test add
     def test_add_scalars(self):
