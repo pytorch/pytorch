@@ -558,7 +558,7 @@ def sample_tests():
                     "command": "pytest -v -s basic_correctness/test_cpu_offload.py",
                 },
                 {
-                    "command": "pytest -v -s basic_correct",
+                    "command": "pytest -v -s basic_correctness/test_preemption.py",
                     "env_var": {
                         "VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT": "1",
                     },
