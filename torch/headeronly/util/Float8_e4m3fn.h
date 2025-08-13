@@ -209,7 +209,7 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    */
   f_bits ^= sign;
 
-  if(f_bits >= fp32_inf){
+  if(f_bits > fp32_inf){
     // NaN - all exponent and mantissa bits set to 1
     result = 0x7F;
   } else if (f_bits >= fp8_inf){
