@@ -5,6 +5,7 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
+import copy
 import os
 import queue
 import random
@@ -72,6 +73,7 @@ else:
 
 
 _worker_info: Optional["WorkerInfo"] = None
+_thread_local_worker_info = threading.local()
 
 
 class WorkerInfo:
@@ -83,7 +85,8 @@ class WorkerInfo:
 
     def __init__(self, **kwargs) -> None:
         for k, v in kwargs.items():
-            setattr(self, k, v)
+            if v is not None:
+                setattr(self, k, v)
         self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
@@ -101,7 +104,7 @@ class WorkerInfo:
 
 def get_worker_info() -> WorkerInfo | None:
     r"""Returns the information about the current
-    :class:`~torch.utils.data.DataLoader` iterator worker process.
+    :class:`~torch.utils.data.DataLoader` iterator worker process or thread.
 
     When called in a worker, this returns an object guaranteed to have the
     following attributes:
@@ -111,8 +114,8 @@ def get_worker_info() -> WorkerInfo | None:
     * :attr:`seed`: the random seed set for the current worker. This value is
       determined by main process RNG and the worker id. See
       :class:`~torch.utils.data.DataLoader`'s documentation for more details.
-    * :attr:`dataset`: the copy of the dataset object in **this** process. Note
-      that this will be a different object in a different process than the one
+    * :attr:`dataset`: the copy of the dataset object in **this** process/thread. Note
+      that this will be a different object in a different process/thread than the one
       in the main process.
 
     When called in the main process, this returns ``None``.
@@ -120,27 +123,30 @@ def get_worker_info() -> WorkerInfo | None:
     .. note::
        When used in a :attr:`worker_init_fn` passed over to
        :class:`~torch.utils.data.DataLoader`, this method can be useful to
-       set up each worker process differently, for instance, using ``worker_id``
+       set up each worker process/thread differently, for instance, using ``worker_id``
        to configure the ``dataset`` object to only read a specific fraction of a
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
        code.
     """
+    # Try thread-local storage first, fall back to _worker_info
+    thread_local_worker_info = getattr(_thread_local_worker_info, "worker_info", None)
+    if thread_local_worker_info is not None:
+        return thread_local_worker_info
+
     return _worker_info
-
-
-r"""Dummy class used to signal the end of an IterableDataset"""
 
 
 @dataclass(frozen=True)
 class _IterableDatasetStopIteration:
+    """Dummy class used to signal the end of an IterableDataset"""
+
     worker_id: int
-
-
-r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
 @dataclass(frozen=True)
 class _ResumeIteration:
+    """Dummy class used to resume the fetching when worker reuse is enabled"""
+
     seed: int | None = None
 
 
@@ -226,6 +232,33 @@ def _generate_state(base_seed, worker_id):
     return state
 
 
+def deep_copy_transforms(dataset, worker_id=None):
+    # Create a shallow copy of the dataset, then deep copy transforms
+    thread_dataset = copy.copy(dataset)
+
+    # Common transform attribute names to deep copy
+    transform_attrs = ["transform", "target_transform"]
+
+    try:
+        for attr_name in transform_attrs:
+            if hasattr(dataset, attr_name):
+                original_transform = getattr(dataset, attr_name)
+                if original_transform is not None:
+                    copied_transform = copy.deepcopy(original_transform)
+                    setattr(thread_dataset, attr_name, copied_transform)
+    except Exception as e:
+        import warnings
+
+        worker_prefix = f"Thread {worker_id}: " if worker_id is not None else ""
+        warnings.warn(
+            f"{worker_prefix}Failed to deep copy transform attributes ({e}). "
+            "Transforms may not be thread-safe. Consider implementing custom __deepcopy__ "
+            "method for your transform objects.",
+            RuntimeWarning,
+        )
+    return thread_dataset
+
+
 def _base_worker_loop(
     dataset_kind,
     dataset,
@@ -249,14 +282,7 @@ def _base_worker_loop(
     Base worker loop with common functionality for both process and thread workers.
     """
     try:
-        # Common initialization for both process and thread workers
         torch.set_num_threads(1)
-
-        # TODO: Does this make sense for thread ?
-        global _worker_info
-        _worker_info = WorkerInfo(
-            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
-        )
 
         from torch.utils.data import _DatasetKind
 
@@ -391,7 +417,6 @@ def _worker_loop(
     signal_handling._set_worker_signal_handlers()
     torch.multiprocessing._set_thread_name("pt_data_worker")
 
-    # RNG setup
     seed = base_seed + worker_id
     random.seed(seed)
     torch.manual_seed(seed)
@@ -409,6 +434,16 @@ def _worker_loop(
         assert shared_seed is not None
         shared_rng.manual_seed(shared_seed)
         dataset = apply_random_seed(dataset, shared_rng)
+
+    worker_info = WorkerInfo(
+        id=worker_id,
+        num_workers=num_workers,
+        seed=seed,
+        dataset=dataset,
+    )
+
+    global _worker_info
+    _worker_info = worker_info
 
     _base_worker_loop(
         dataset_kind=dataset_kind,
@@ -448,7 +483,8 @@ def _thread_worker_loop(
 ):
     """
     Thread worker loop that uses the common base worker loop for threads.
-    Sets up thread-local RNG state to avoid race conditions.
+    Sets up thread-local RNG state and creates deep copies of dataset/transforms
+    to avoid race conditions and shared state issues.
     """
 
     # Set the thread name for better debugging
@@ -457,18 +493,31 @@ def _thread_worker_loop(
     # Thread-local RNG setup to avoid race conditions with global state
     seed = base_seed + worker_id
 
-    thread_local = threading.local()
+    thread_rng = threading.local()
 
     # Set up thread-local random generators
-    thread_local.random_state = random.Random(seed)
-    thread_local.torch_generator = torch.Generator()
-    thread_local.torch_generator.manual_seed(seed)
+    thread_rng.random_state = random.Random(seed)
+    thread_rng.torch_generator = torch.Generator()
+    thread_rng.torch_generator.manual_seed(seed)
 
     if HAS_NUMPY:
         np_seed = _generate_state(base_seed, worker_id)
         import numpy as np
 
-        thread_local.numpy_generator = np.random.default_rng(np_seed)
+        thread_rng.numpy_generator = np.random.default_rng(np_seed)
+
+    # Deep copy the dataset's transforms to avoid race conditions and shared state issues
+    dataset = deep_copy_transforms(dataset, worker_id)
+
+    worker_info = WorkerInfo(
+        id=worker_id,
+        num_workers=num_workers,
+        seed=seed,
+        dataset=dataset,
+        thread_rng=thread_rng,  # not set for process workers
+    )
+
+    _thread_local_worker_info.worker_info = worker_info
 
     # Use the common base worker loop with thread-specific settings
     _base_worker_loop(
