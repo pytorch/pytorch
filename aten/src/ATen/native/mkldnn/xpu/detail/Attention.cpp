@@ -70,11 +70,6 @@ struct SDPALogicalParams {
     TORCH_INTERNAL_ASSERT(
         query_.scalar_type() == attention_.scalar_type(),
         "scaled_dot_product_attention_xpu: query and attention tensors should have the same data type.");
-    TORCH_INTERNAL_ASSERT(
-        !at::native::onednn::is_broadcast(query_) &&
-            !at::native::onednn::is_broadcast(key_) &&
-            !at::native::onednn::is_broadcast(value_),
-        "scaled_dot_product_attention_xpu: tensors q/k/v should not be broadcasted tensor.");
     const dims scalar_shape = {1};
 
     at::Tensor reshaped_query = query_;
@@ -83,6 +78,17 @@ struct SDPALogicalParams {
     at::Tensor reshaped_attention = attention_;
     at::Tensor reshaped_logsumexp = logsumexp_.unsqueeze(-1);
     at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
+
+    // handle broadcasted input tensors for OneDNN
+    if (at::native::onednn::is_broadcast(reshaped_query)) {
+      at::native::onednn::undo_broadcast(reshaped_query);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_key)) {
+      at::native::onednn::undo_broadcast(reshaped_key);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_value)) {
+      at::native::onednn::undo_broadcast(reshaped_value);
+    }
     if (attn_mask_.has_value() &&
         at::native::onednn::is_broadcast(reshaped_attn_mask)) {
       at::native::onednn::undo_broadcast(reshaped_attn_mask);
@@ -440,14 +446,6 @@ struct SDPABackwardLogicalParams {
     TORCH_INTERNAL_ASSERT(
         logsumexp_.defined() && logsumexp_.scalar_type() == at::kFloat,
         "scaled_dot_product_attention_backward_xpu: Expected logsumexp to be defined and have FP32 data type");
-    TORCH_INTERNAL_ASSERT(
-        !at::native::onednn::is_broadcast(query_) &&
-            !at::native::onednn::is_broadcast(key_) &&
-            !at::native::onednn::is_broadcast(value_) &&
-            !at::native::onednn::is_broadcast(out_) &&
-            !at::native::onednn::is_broadcast(logsumexp_),
-        "scaled_dot_product_attention_backward_xpu: tensors q, k, v, out and logsumexp should not be broadcasted tensor.");
-
     const dims scalar_shape = {1};
 
     at::Tensor reshaped_grad_out = grad_out_;
@@ -457,8 +455,19 @@ struct SDPABackwardLogicalParams {
     at::Tensor reshaped_out = out_;
     at::Tensor reshaped_logsumexp = logsumexp_.unsqueeze(-1);
     at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
+    
+    // handle broadcasted input tensors for OneDNN
     if (at::native::onednn::is_broadcast(reshaped_grad_out)) {
       at::native::onednn::undo_broadcast(reshaped_grad_out);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_query)) {
+      at::native::onednn::undo_broadcast(reshaped_query);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_key)) {
+      at::native::onednn::undo_broadcast(reshaped_key);
+    }
+    if (at::native::onednn::is_broadcast(reshaped_value)) {
+      at::native::onednn::undo_broadcast(reshaped_value);
     }
     if (attn_mask_.has_value() &&
         at::native::onednn::is_broadcast(reshaped_attn_mask)) {
