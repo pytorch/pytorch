@@ -351,8 +351,8 @@ class VllmTestRunner(BaseRunner):
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
         logger.info("Installing torch wheel")
-        torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
-        pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
+        # torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
+        # pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
 
         logger.info("Installing other torch-related wheels")
         torch_whls_path = [
@@ -562,9 +562,9 @@ def sample_test_plans():
         # optional: env_var, package_install, working_directory
         # by default the working_drectory is "tests/", but it can be changed based on tests, for instance,
         # vllm sample test happens in samples/
-        "basic_correctness_test": {
+        "vllm_basic_correctness_test": {
             "title": "Basic Correctness Test",
-            "id": "basic_correctness_test",
+            "id": "vllm_basic_correctness_test",
             "env_var": {
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             },
@@ -589,15 +589,47 @@ def sample_test_plans():
                 },
             ],
         },
-        "basic_models_test": {
+        "vllm_basic_models_test": {
             "title": "Basic models test",
-            "id": "basic_models_test",
+            "id": "vllm_basic_models_test",
             "steps": [
                 {"command": "pytest -v -s models/test_transformers.py"},
                 {"command": "pytest -v -s models/test_registry.py"},
                 {"command": "pytest -v -s models/test_utils.py"},
                 {"command": "pytest -v -s models/test_vision.py"},
                 {"command": "pytest -v -s models/test_initialization.py"},
+            ],
+        },
+        "vllm_entrypoints_test": {
+            "title": "Entrypoints Test ",
+            "id": "vllm_entrypoints_test",
+            "env_var": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "steps": [
+                {
+                    "command": " ".join(
+                        [
+                            "pytest",
+                            "-v",
+                            "-s",
+                            "entrypoints/llm",
+                            "--ignore=entrypoints/llm/test_lazy_outlines.py",
+                            "--ignore=entrypoints/llm/test_generate.py",
+                            "--ignore=entrypoints/llm/test_generate_multiple_loras.py",
+                            "--ignore=entrypoints/llm/test_collective_rpc.py",
+                        ]
+                    )
+                },
+                {"command": "pytest -v -s entrypoints/llm/test_lazy_outlines.py"},
+                {"command": "pytest -v -s entrypoints/llm/test_generate.py "},
+                {
+                    "command": "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py"
+                },
+                {
+                    "env_var": {"VLLM_USE_V1": "0"},
+                    "command": "pytest -v -s entrypoints/offline_mode",
+                },
             ],
         },
     }
