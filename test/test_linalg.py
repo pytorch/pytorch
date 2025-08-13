@@ -8091,7 +8091,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             f"RMSE {rmse:.6f} not within expected range (~{expected_rmse})"
         )
 
-            # Avoid divide-by-zero with clamp
+        # Avoid divide-by-zero with clamp
         denominator = ref.abs().clamp(min=torch.finfo(ref.dtype).eps)
 
         # Compute elementwise relative error — always non-negative
