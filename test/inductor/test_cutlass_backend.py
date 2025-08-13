@@ -159,7 +159,7 @@ def select_no_algorithm(*args, **kwargs):
 class TestCutlassBackend(TestCase):
     def setUp(self):
         if not HAS_CUDA_AND_TRITON:
-            self.skipTest("CUDA is not available")
+            self.skipTest("CUDA and triton are not available")
         if torch.version.hip:
             self.skipTest("CUTLASS backend is not supported on HIP")
 
@@ -199,6 +199,19 @@ class TestCutlassBackend(TestCase):
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
+
+    def test_check_paths(self):
+        cutlass_mock_imports_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
+        )
+        cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
+        cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
+        cutlass_mock_scipy_path = os.path.join(cutlass_mock_imports_path, "scipy")
+        self.assertTrue(os.path.exists(cutlass_mock_imports_path))
+        self.assertTrue(os.path.exists(cutlass_mock_cuda_path))
+        self.assertTrue(os.path.exists(cutlass_mock_pydot_path))
+        self.assertTrue(os.path.exists(cutlass_mock_scipy_path))
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -281,20 +294,19 @@ class TestCutlassBackend(TestCase):
             Y = torch.mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(
-        True, "FIXME: Disabled temporarily since IMA or crashing in subprocess"
-    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_cutlass_backend_subproc_addmm(self, dtype):
         """
         Test autotune_in_subproc works for addmm.
         """
 
         M, N, K = 4096, 2048, 25728
+        dtype = torch.float16
 
-        a = torch.randn(M, K).cuda().half()
-        b = torch.randn(N, K).cuda().half().t()
+        a = torch.randn(M, K, dtype=dtype).cuda()
+        b = torch.randn(N, K, dtype=dtype).cuda().t()
 
         x_shapes = [
             (M, N),
@@ -316,7 +328,10 @@ class TestCutlassBackend(TestCase):
             }
         ):
             for x_shape in x_shapes:
-                x = torch.randn(x_shape).cuda().half()
+                torch._dynamo.reset()
+                clear_caches()
+
+                x = torch.randn(x_shape).cuda().to(dtype)
                 Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
                 torch.testing.assert_close(Y_compiled, Y)
