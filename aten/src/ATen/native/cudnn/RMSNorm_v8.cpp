@@ -116,9 +116,10 @@ struct RMSNormGraphCache {
     return &(it->second);
   }
 
-  void update(const KeyType& key, T& results) {
+  template <typename U>
+  void update(const KeyType& key, U&& results) {
     engine_cache.erase(key);
-    engine_cache.emplace(key, std::move(results));
+    engine_cache.emplace(key, std::forward<U>(results));
   }
 };
 
@@ -215,7 +216,7 @@ void raw_cudnn_rmsnorm_forward_out(
     variant_pack = std::move(variant_pack_);
     auto result =
         std::make_tuple(rmsnorm_graph, X_fe, inv_variance_fe, scale_fe, Y_fe);
-    rmsnorm_forward_graph_cache.update(key, result);
+    rmsnorm_forward_graph_cache.update(key, std::move(result));
   }
   cudnnHandle_t handle = getCudnnHandle();
   size_t workspace_size = rmsnorm_graph->get_workspace_size();
@@ -329,7 +330,7 @@ void raw_cudnn_rmsnorm_backward_out(
         scale_fe,
         dscale_fe,
         DX_fe);
-    rmsnorm_backward_graph_cache.update(key, result);
+    rmsnorm_backward_graph_cache.update(key, std::move(result));
   }
   cudnnHandle_t handle = getCudnnHandle();
   size_t workspace_size = rmsnorm_graph->get_workspace_size();
