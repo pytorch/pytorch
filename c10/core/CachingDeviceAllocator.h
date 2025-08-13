@@ -884,7 +884,7 @@ struct AllocParams {
   size_t alloc_size; // Size of the allocation in bytes
   BlockT* block{nullptr}; // Pointer to the allocated block, if found/created
   StatTypes stat_types{}; // Types of statistics to track for this allocation
-  Status status{Ok}; // Status of the allocation attempt
+  Status status{Status::Ok}; // Status of the allocation attempt
 
  private:
   BlockT search_key; // Key used to search for an existing block in the pool
@@ -1188,7 +1188,7 @@ struct CachingDeviceAllocatorImpl {
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
-    std::string_view key = "pytorch." +
+    static const std::string key = "pytorch." +
         c10::DeviceTypeName(static_device_type) +
         "CachingAllocator.reserved_bytes";
     auto reserved_bytes_gauge = STATIC_GAUGE_STR(key);
@@ -1326,8 +1326,8 @@ struct CachingDeviceAllocatorImpl {
     while (gc_reclaimed < target_size && block_freed == true &&
            freeable_block_count > 0) {
       // Free blocks exceeding this age threshold first.
-      double age_threshold =
-          static_cast<double>(total_age) / freeable_block_count;
+      double age_threshold = static_cast<double>(total_age) /
+          static_cast<double>(freeable_block_count);
       // Stop iteration if we can no longer free a block.
       block_freed = false;
 

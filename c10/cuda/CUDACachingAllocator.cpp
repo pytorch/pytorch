@@ -2624,9 +2624,9 @@ class DeviceCachingAllocator {
 
   bool trigger_free_memory_callbacks(AllocParams& p) {
     bool freed_memory = false;
-    for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
+    for (const auto& name : FreeMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
-          FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+          FreeMemoryCallbacksRegistry()->Create(name)->Execute();
     }
     return freed_memory;
   }
