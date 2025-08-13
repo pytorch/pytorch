@@ -91,7 +91,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     for (torch::jit::Value* output : root_tuple_) {
       graph_->block()->registerOutput(output);
     }
-    return std::shared_ptr<Computation>(new TSComputation(graph_));
+    return std::make_shared<TSComputation>(graph_);
   }
 
   // Retrieves the lowered operation for an output. If the requested output is
