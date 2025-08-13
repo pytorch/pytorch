@@ -605,7 +605,7 @@ class BaseSchedulerNode:
             out_lines.append(op_info_str)
             if "stack_trace" in o.meta:
                 stack_trace = f"{o.meta['stack_trace']}"
-                stack_trace_last_line = stack_trace.split("|")[-1]
+                stack_trace_last_line = stack_trace.rsplit("|", maxsplit=1)[-1]
                 out_lines.append(
                     "#pragma CMT "
                     + stack_trace_last_line.replace("{", "{{")
@@ -2179,7 +2179,10 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
-        if torch._inductor.config.graph_partition:
+        if (
+            torch._inductor.config.graph_partition
+            and torch._inductor.config.triton.cudagraphs
+        ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
@@ -2393,11 +2396,11 @@ class Scheduler:
                     for fs in s.free_symbols:
                         unbacked_symbol_to_origin_node[fs] = None
 
+        has_non_input_unbacked_defs = False
         for node in self.nodes:
-            log.debug("scheduling %s", node.node)
+            assert node.node is not None
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            assert node.node is not None
             unbacked_symbol_defs = sorted(
                 node.node.get_unbacked_symbol_defs(), key=lambda x: x.name
             )
@@ -2406,20 +2409,28 @@ class Scheduler:
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
+                has_non_input_unbacked_defs = True
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
-            unbacked_symbol_uses = sorted(
-                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
-            )
-            # if a kernel takes unbacked symints, register dependencies
-            for s in unbacked_symbol_uses:
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node}"
+        for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
+            if has_non_input_unbacked_defs:
+                assert node.node is not None
+
+                unbacked_symbol_uses = sorted(
+                    node.node.get_free_symbol_uses(unbacked_only=True),
+                    key=lambda x: x.name,
                 )
-                if (r := unbacked_symbol_to_origin_node[s]) is not None:
-                    for buf in self.name_to_node[r].get_outputs():
-                        node.add_fake_dep(StarDep(buf.get_name()))
+                # if a kernel takes unbacked symints, register dependencies
+                for s in unbacked_symbol_uses:
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node}"
+                    )
+                    if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                        for buf in self.name_to_node[r].get_outputs():
+                            node.add_fake_dep(StarDep(buf.get_name()))
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2474,17 +2485,20 @@ class Scheduler:
             add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure unbacked symints aren't dead-code-eliminated
-        for out in V.graph.graph_outputs:
-            for s in out.get_free_symbol_uses(unbacked_only=True):
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                )
-                if r := unbacked_symbol_to_origin_node[s]:
-                    for buf_name in self.name_to_node[r].get_buffer_names():
-                        log.debug(
-                            "scheduling output %s for unbacked symint %s", buf_name, s
-                        )
-                        add_user(buf_name, OutputNode(StarDep(buf_name)))
+        if has_non_input_unbacked_defs:
+            for out in V.graph.graph_outputs:
+                for s in out.get_free_symbol_uses(unbacked_only=True):
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                    )
+                    if r := unbacked_symbol_to_origin_node[s]:
+                        for buf_name in self.name_to_node[r].get_buffer_names():
+                            log.debug(
+                                "scheduling output %s for unbacked symint %s",
+                                buf_name,
+                                s,
+                            )
+                            add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -4311,6 +4325,12 @@ class Scheduler:
         self, node: BaseSchedulerNode, should_log: bool = False
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # When not using cudagraphs, keep all kernels in the `call` function
+        # instead of graph partition functions, since graph partition only brings
+        # benefit to cudagraph
+        if not torch._inductor.config.triton.cudagraphs:
+            return True
 
         # avoid duplicating logs when should_partition is called multiple times
         # on the same node
