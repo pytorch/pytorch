@@ -34,7 +34,7 @@ if which sccache > /dev/null; then
 fi
 
 # Install build-system requirements before running setup.py commands
-# We need manage the build environment manually because we are not using build isolation
+# We need to manage the build environment manually because we are not using build isolation
 python -m pip install -r requirements-build.txt
 
 print_cmake_info
