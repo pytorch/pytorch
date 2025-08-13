@@ -251,9 +251,9 @@ class SuperVariable(VariableTracker):
                     tx, self.objvar.value_type, cls_source
                 )
 
-            return variables.UserMethodVariable(
-                inner_fn.__func__, cls_variable, source=source
-            ).call_function(tx, args, kwargs)
+            return variables.UserFunctionVariable(
+                inner_fn.__func__, source=AttrSource(source, "__func__")
+            ).call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
