@@ -3,7 +3,7 @@
 import importlib
 import math
 import warnings
-from enum import Enum
+from enum import Enum as _Enum
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -3597,7 +3597,7 @@ def binary_cross_entropy_with_logits(
 
 
 # TODO: works for now but inconsistent with existing code base.
-class CrossEntropyChunkingStrategy(Enum):
+class CrossEntropyChunkingStrategy(_Enum):
     # Naive, unfused computation
     none = "none"
 

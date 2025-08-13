@@ -1401,6 +1401,7 @@ class LinearCrossEntropyLoss(Module):
         )
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert isinstance(self.cross_entropy.reduction, (Tensor, type(None)))
         return F.linear_cross_entropy(
             input,
             target,
