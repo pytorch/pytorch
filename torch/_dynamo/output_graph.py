@@ -319,7 +319,10 @@ class OutputGraphGuardsState:
     _guards: torch._guards.GuardsSet
     _aotautograd_guards: list[torch._guards.GuardEnvExpr]
 
+    # Whether or not the guards should be checked for correctness
+
     export: bool = False
+    skip_guards_check: bool = False
     export_constraints: bool = False
     name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
@@ -334,13 +337,6 @@ class OutputGraphGuardsState:
     @property
     def aotautograd_guards(self) -> list[torch._guards.GuardEnvExpr]:
         return self._aotautograd_guards
-
-    def load_guards(self) -> None:
-        """
-        Iterate through guards and run any deserialization steps
-        """
-        assert self._guards is not None
-        breakpoint()
 
 
 @dataclass
@@ -712,6 +708,7 @@ class OutputGraph(OutputGraphGuardsState):
             export_constraints=self.export_constraints,
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
+            skip_guards_check=self.skip_guards_check,
         )
 
     def synthetic_graph_input(

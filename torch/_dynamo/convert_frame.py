@@ -1018,7 +1018,7 @@ def _compile(
                 cache_entry,
                 hooks.guard_fail_fn if hooks else None,
                 hooks.guard_filter_fn if hooks else None,
-                guards_serialization_mode="save" if package else None,
+                save_guards=True if package else False,
             )
 
         if package is not None:
