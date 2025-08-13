@@ -1245,7 +1245,7 @@ def explain(f: Callable[..., Any], *extra_args: Any, **extra_kwargs: Any) -> Any
         graphs: list[torch.fx.GraphModule] = []
         break_reasons: list[Any] = []
         op_count: int = 0
-        ops_per_graph: list[torch.fx.Node] = []
+        ops_per_graph: list[list[Target]] = []
         out_guards: list[_guards.Guard] = []
 
         def dynamo_graph_accumulating_compiler(
