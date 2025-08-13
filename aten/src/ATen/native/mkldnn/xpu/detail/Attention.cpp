@@ -359,25 +359,6 @@ void gpu_float_sdpa(
   auto& eng = GpuEngineManager::Instance().get_engine();
   auto& strm = GpuStreamManager::Instance().get_stream();
 
-  const auto get_tril_mask = [&]() {
-    auto opts = query.options();
-    auto bool_tril =
-        at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
-    return at::where(
-        bool_tril,
-        0.f,
-        at::scalar_tensor(-std::numeric_limits<float>::infinity(), opts));
-  };
-
-  // OneDNN doesn't support fp32 ukernel for implicit causal mask,
-  // and the reference implementation is worse than aten math + explict causal
-  // mask. Fall back to explict causal mask until OneDNN v3.9 which has fp32
-  // ukernel for implicit causal mask.
-  if (is_causal && query.dtype() == at::kFloat) {
-    attn_mask = get_tril_mask();
-    is_causal = false;
-  }
-
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
