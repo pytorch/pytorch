@@ -402,7 +402,7 @@ class TestScheduleCsv(TestCase):
             (ScheduleDualPipeV, "dualpipev_4rank_10mb"),
         ],
     )
-    def test_schedule_csv_compare(self, ScheduleClass, csv_name):
+    def test_csv_compare(self, ScheduleClass, csv_name):
         """
         Test that schedules matches the expected CSV.  This is a regression test to ensure that the schedule
         is not changed unintentionally.
@@ -428,9 +428,7 @@ class TestScheduleCsv(TestCase):
                 sch_ref[rank] = [_Action.from_str(s) for s in row]
 
         for rank in sch_ref:
-            for timestep, (a, b) in enumerate(
-                zip(sch[rank], sch_ref[rank], strict=True)
-            ):
+            for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
                 self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
 
@@ -806,7 +804,7 @@ class TestScheduleLowering(TestCase):
             loss_fn=loss_fn,
             scale_grads=False,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
@@ -917,7 +915,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
