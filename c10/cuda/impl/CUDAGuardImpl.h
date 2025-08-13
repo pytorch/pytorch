@@ -40,6 +40,13 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device getDevice() const override {
     DeviceIndex device = 0;
+
+    // For supporting tracing cuda model on cuda-less environment,
+    // if device is not available, use cuda:0 by default
+    if (c10::cuda::device_count() == 0) {
+      return Device(DeviceType::CUDA, 0);
+    }
+
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }

@@ -1518,13 +1518,22 @@ class FakeTensorOperatorInvariants(TestCase):
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             return
-        with FakeTensorMode():
-            torch.empty(10, device=GPU_TYPE)
-            torch.ones(10, device=GPU_TYPE)
-            torch.zeros(10, device=GPU_TYPE)
-            torch.rand(10, device=GPU_TYPE)
-            torch.tensor(3.14, device=GPU_TYPE)
-            torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
+
+        cpu_tensor = torch.ones(2, device="cpu")
+        meta_tensor = torch.ones(2, device="meta")
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            self.assertEqual(torch.empty(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.ones(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.zeros(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.rand(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.tensor(3.14, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(
+                torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
+            )
+
+            self.assertEqual(cpu_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
