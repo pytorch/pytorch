@@ -434,7 +434,7 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
-            e.stack_trace = 
+            e.stack_trace = None
             e.graph_node_shape = None
 
         # First event is for the forward. Formatting makes reading diffs
