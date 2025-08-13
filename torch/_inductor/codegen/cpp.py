@@ -3220,8 +3220,9 @@ class CppVecKernel(CppKernel):
             tmpvar = acc_vec
             if is_welford_reduction(reduction_type):
                 masked_tmpvar = f"masked_{tmpvar}"
+                use_helper = "true" if use_acc_helper else "false"
                 self.reduction_suffix.writeline(
-                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
+                    f"{tmpvar} = welford_combine({tmpvar}, {masked_tmpvar}, false, {use_helper}, true);"
                 )
             elif use_acc_helper:
                 assert reduction_type == "sum"
