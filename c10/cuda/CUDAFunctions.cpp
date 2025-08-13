@@ -53,12 +53,13 @@ int device_count_impl(bool fail_if_no_driver) {
             "https://pytorch.org to install a PyTorch version that has been "
             "compiled with your version of the CUDA driver.");
       }
-    }
+    } break;
     case cudaErrorInitializationError:
       TORCH_CHECK(
           false,
           "CUDA driver initialization failed, you might not "
           "have a CUDA gpu.");
+      break;
     case cudaErrorUnknown:
       TORCH_CHECK(
           false,
@@ -66,6 +67,7 @@ int device_count_impl(bool fail_if_no_driver) {
           "incorrectly set up environment, e.g. changing env "
           "variable CUDA_VISIBLE_DEVICES after program start. "
           "Setting the available devices to be zero.");
+      break;
 #if C10_ASAN_ENABLED
     case cudaErrorMemoryAllocation:
       // In ASAN mode, we know that a cudaErrorMemoryAllocation error will

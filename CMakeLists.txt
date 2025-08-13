@@ -181,19 +181,11 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
-# tested and likely won't work without additional changes.
-if(NOT LINUX AND NOT WIN32)
-  set(USE_DISTRIBUTED
-      OFF
-      CACHE STRING "Use distributed")
-  # On macOS, if USE_DISTRIBUTED is enabled (specified by the user), then make
-  # Gloo build with the libuv transport.
-  if(APPLE AND USE_DISTRIBUTED)
-    set(USE_LIBUV
-        ON
-        CACHE STRING "")
-  endif()
+# On macOS, make Gloo build with the libuv transport.
+if(APPLE AND USE_DISTRIBUTED)
+set(USE_LIBUV
+    ON
+    CACHE STRING "")
 endif()
 
 # ---[ Options. Note to developers: if you add an option below, make sure you
@@ -239,7 +231,7 @@ option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
   "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX OR WIN32" OFF)
+cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" ON "USE_ROCM;NOT WIN32" OFF)
 option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -253,6 +245,7 @@ cmake_dependent_option(USE_CUFILE "Use cuFile" ON "USE_CUDA AND NOT WIN32" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
+option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
@@ -261,13 +254,12 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
+set(USE_DISTRIBUTED ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
-cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
@@ -336,7 +328,7 @@ cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+    "USE_DISTRIBUTED AND NOT APPLE" OFF)
 cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
@@ -429,11 +421,10 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
-      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
           "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
       )
     else()
@@ -836,11 +827,10 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-  message(WARNING
-    "x64 operating system is required for FBGEMM. "
-    "Not compiling with FBGEMM. "
-    "Turn this warning off by USE_FBGEMM=OFF.")
+if(USE_FBGEMM
+   AND((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL
+                                                      4)
+        OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86"))
   set(USE_FBGEMM OFF)
 endif()
 
