@@ -860,8 +860,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # "some_mlps": disable reduce-scatter for some MLPs
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
-                # will set to true when HSDP fix has been implemented for
-                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy(pin_memory=False)],
+                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
                 # For HSDP only:
                 # `True`: reduce-scatter only (no all-reduce) each microbatch
                 # until the last microbatch
