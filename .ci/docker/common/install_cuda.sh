@@ -79,18 +79,18 @@ function install_nvshmem {
 }
 
 function install_124 {
-  CUDNN_VERSION=9.1.0.70	
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.2"	
+  CUDNN_VERSION=9.1.0.70
+  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL and cuSparseLt-0.6.2"
   install_cuda 12.4.1 cuda_12.4.1_550.54.15_linux	
 
-  install_cudnn 12 $CUDNN_VERSION	
+  install_cudnn 12 $CUDNN_VERSION
 
-  CUDA_VERSION=12.4 bash install_nccl.sh	
+  CUDA_VERSION=12.4 bash install_nccl.sh
 
-  CUDA_VERSION=12.4 bash install_cusparselt.sh	
+  CUDA_VERSION=12.4 bash install_cusparselt.sh
 
-  ldconfig	
-}	
+  ldconfig
+}
 
 function install_126 {
   CUDNN_VERSION=9.10.2.21
