@@ -105,8 +105,8 @@ bool _compute_channels_last_contiguous_2d(
       T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
+        if (size_d != 1) {
+          if (strides[d] != expected) {
             return false;
           }
           expected *= size_d;
@@ -123,6 +123,55 @@ bool _compute_channels_last_contiguous_2d(
   }
 }
 
+inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  switch (sizes.size()) {
+    case 4: {
+      auto guard_or_false = [&]() {
+        c10::SymInt expected = 1;
+        for (auto& d : {1, 3, 2, 0}) {
+          const auto& size_d = sizes[d];
+          // Not taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+            continue;
+          }
+          // Taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+            return false;
+          }
+          expected *= size_d;
+        }
+        return true;
+      };
+
+      if (guard_or_false()) {
+        return c10::SymBool(true);
+      }
+
+      // Result is either false, or data dependent.
+      c10::SymInt expected_stride = 1;
+      c10::SymBool cond = true;
+
+      for (auto& d : {1, 3, 2, 0}) {
+        const auto& size_d = sizes[d];
+        cond = cond.sym_and(
+            size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+        expected_stride *= size_d;
+      }
+      return cond;
+    }
+      // NOLINTNEXTLINE(bugprone-branch-clone)
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return c10::SymBool(false);
+    default:
+      return c10::SymBool(false);
+  }
+}
+
 template <typename T>
 bool _compute_channels_last_contiguous_3d(
     ArrayRef<T> sizes,
@@ -134,8 +183,8 @@ bool _compute_channels_last_contiguous_3d(
       T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
+        if (size_d != 1) {
+          if (strides[d] != expected) {
             return false;
           }
           expected *= size_d;
@@ -149,6 +198,55 @@ bool _compute_channels_last_contiguous_3d(
       return false;
     default:
       return false;
+  }
+}
+
+inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  switch (sizes.size()) {
+    case 5: {
+      auto guard_or_false = [&]() {
+        c10::SymInt expected = 1;
+        for (auto& d : {1, 4, 3, 2, 0}) {
+          const auto& size_d = sizes[d];
+          // Not taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+            continue;
+          }
+          // Taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+            return false;
+          }
+          expected *= size_d;
+        }
+        return true;
+      };
+
+      if (guard_or_false()) {
+        return c10::SymBool(true);
+      }
+
+      // Result is either false, or data dependent.
+      c10::SymInt expected_stride = 1;
+      c10::SymBool cond = true;
+
+      for (auto& d : {1, 4, 3, 2, 0}) {
+        const auto& size_d = sizes[d];
+        cond = cond.sym_and(
+            size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+        expected_stride *= size_d;
+      }
+      return cond;
+    }
+      // NOLINTNEXTLINE(bugprone-branch-clone)
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return c10::SymBool(false);
+    default:
+      return c10::SymBool(false);
   }
 }
 
