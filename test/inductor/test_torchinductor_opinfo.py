@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
-    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
@@ -46,11 +45,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
     has_triton,
-    HAS_XPU,
+    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -293,6 +292,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
+    # [Begin] Incorrect XPU reference due to new driver.
+    "masked.prod": {b8, i32, i64},
+    "masked.amin": {i64},
+    "masked.amax": {i64},
+    "amax": {i64},
+    "amin": {i64},
+    "std": {f64},
+    "var": {f64},
+    "std_mean": {f64},
+    "var_mean": {f64},
+    # [End]
 }
 
 
@@ -1115,8 +1125,10 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
+    @requires_cuda_and_triton
+    @skipXPUIf(
+        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
+    )
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
