@@ -10,6 +10,7 @@ import itertools
 import math
 import operator
 import os
+import random
 import signal
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -41,7 +43,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    instantiate_parametrized_tests,
 )
 from torch.utils.data import (
     _utils,
@@ -3718,15 +3719,14 @@ class TestSlowIndexDataset(Dataset):
     def __init__(self, end: int, slow_index: int):
         self.end = end
         self.slow_index = slow_index
-        self._worker_id = None
 
     def __getitem__(self, idx):
-        if not self._worker_id:
-            worker_info = torch.utils.data.get_worker_info()
-            self._worker_id = worker_info.id
+        # Every idx will have a unique worker id associated with it
+        worker_info = torch.utils.data.get_worker_info()
+        _worker_id = worker_info.id
         if idx == self.slow_index:
             time.sleep(1.0)
-        return (self._worker_id, idx)
+        return (_worker_id, idx)
 
     def __len__(self):
         return self.end
@@ -3842,6 +3842,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
+
 @instantiate_parametrized_tests
 class TestThreadingDataLoader(TestCase):
     def setUp(self):
@@ -3956,11 +3957,11 @@ class TestThreadingDataLoader(TestCase):
             self.assertTrue(torch.equal(samples1, samples2))
             self.assertTrue(torch.equal(targets1, targets2))
 
-
     @parametrize("multiprocessing_workers", [1, 3, 5])
     @parametrize("threading_workers", [0, 2, 4])
     def test_threading_shuffle(self, multiprocessing_workers, threading_workers):
         """Test that threading DataLoader with shuffle produces deterministic results when given the same seed."""
+
         def create_loader(num_workers, worker_method):
             return DataLoader(
                 self.dataset,
@@ -3985,6 +3986,7 @@ class TestThreadingDataLoader(TestCase):
     def test_threading_shuffle_generator(self):
         """Test that threading DataLoader with shuffle produces deterministic results when given explicit generator."""
         for num_workers in [1, 2, 4]:
+
             def create_loader():
                 return DataLoader(
                     self.dataset,
@@ -4053,7 +4055,7 @@ class TestThreadingDataLoader(TestCase):
             all_data.append(batch)
 
         all_data = torch.cat(all_data, 0)
-        self.assertEqual(len(all_data), 60) # len(dataset) * num_workers
+        self.assertEqual(len(all_data), 60)  # len(dataset) * num_workers
 
     def test_threading_with_drop_last(self):
         # Test with drop_last=True
@@ -4100,9 +4102,7 @@ class TestThreadingDataLoader(TestCase):
         from torch.utils.data import BatchSampler, SequentialSampler
 
         batch_sampler = BatchSampler(
-            SequentialSampler(self.dataset),
-            batch_size=4,
-            drop_last=True
+            SequentialSampler(self.dataset), batch_size=4, drop_last=True
         )
 
         loader = DataLoader(
@@ -4151,13 +4151,75 @@ class TestThreadingDataLoader(TestCase):
             batch_size=2,
             num_workers=2,
             worker_method="thread",
-            worker_init_fn=init_fn
+            worker_init_fn=init_fn,
         )
 
         # init_fn sets the seed to 12345, so all workers should return this value
         for batch in loader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
+
+    def test_threading_worker_info_thread_rng(self):
+        # Test that WorkerInfo now includes thread_rng for thread workers
+        worker_info_data = []
+
+        def worker_init_with_thread_rng_check(worker_id):
+            worker_info = torch.utils.data.get_worker_info()
+            self.assertIsNotNone(worker_info)
+
+            self.assertTrue(hasattr(worker_info, "thread_rng"))
+            self.assertIsNotNone(worker_info.thread_rng)
+
+            self.assertTrue(hasattr(worker_info.thread_rng, "random_state"))
+            self.assertTrue(hasattr(worker_info.thread_rng, "torch_generator"))
+
+            self.assertIsInstance(worker_info.thread_rng.random_state, random.Random)
+            self.assertIsInstance(
+                worker_info.thread_rng.torch_generator, torch.Generator
+            )
+
+            # Store worker info data for verification
+            worker_info_data.append(
+                {
+                    "worker_id": worker_id,
+                    "has_thread_rng": hasattr(worker_info, "thread_rng"),
+                    "thread_rng_is_not_none": worker_info.thread_rng is not None
+                    if hasattr(worker_info, "thread_rng")
+                    else False,
+                    "random_state_id": id(worker_info.thread_rng.random_state)
+                    if hasattr(worker_info, "thread_rng")
+                    else None,
+                    "torch_generator_id": id(worker_info.thread_rng.torch_generator)
+                    if hasattr(worker_info, "thread_rng")
+                    else None,
+                }
+            )
+
+        dataset = SeedDataset(4)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            worker_init_fn=worker_init_with_thread_rng_check,
+        )
+
+        list(loader)
+
+        self.assertEqual(len(worker_info_data), 2)
+        for i, worker_data in enumerate(worker_info_data):
+            self.assertTrue(worker_data["worker_id"] == i)
+            self.assertTrue(worker_data["has_thread_rng"])
+            self.assertTrue(worker_data["thread_rng_is_not_none"])
+
+        self.assertNotEqual(
+            worker_info_data[0]["random_state_id"],
+            worker_info_data[1]["random_state_id"],
+        )
+        self.assertNotEqual(
+            worker_info_data[0]["torch_generator_id"],
+            worker_info_data[1]["torch_generator_id"],
+        )
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
