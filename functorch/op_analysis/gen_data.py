@@ -33,7 +33,6 @@ def gen_data(special_op_lists, analysis_name):
     annotated_ops = {
         a.strip(): b.strip() for a, b in list(csv.reader(open("annotated_ops")))
     }
-    from collections import defaultdict
 
     uniq_ops = []
     uniq_names = set()
