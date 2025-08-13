@@ -11,11 +11,6 @@ on:
         required: true
         type: string
         description: target library to build
-      use-gha:
-        required: false
-        type: string
-        default: ""
-        description: If set to any value, upload to GHA. Otherwise upload to S3.
       build-generates-artifacts:
         required: false
         type: boolean
@@ -57,6 +52,11 @@ on:
         required: false
         type: string
         default: "gha-artifacts"
+      use-gha:
+        required: false
+        type: string
+        default: ""
+        description: f set to any value, use GHA to download the artifact. Otherwise use s3.
       aws-role-to-assume:
         description: Role to assume for downloading artifacts
         required: false
