@@ -8,6 +8,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
+#include <cmath>
 #include <c10/util/Unroll.h>
 #include <c10/util/irange.h>
 
@@ -861,7 +862,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel_bf16(
             // quantize
             for (size_t j = 0; j < K; ++j) {
                 float v = cast_bf16_to_f32(row_ptr[j]);
-                int32_t q = static_cast<int32_t>(round(v * scale)) + zp;
+                int32_t q = static_cast<int32_t>(std::round(v * scale)) + zp;
                 q = std::clamp(q, static_cast<int32_t>(INT8_MIN), static_cast<int32_t>(INT8_MAX));
                 *out_ptr++ = static_cast<int8_t>(q);
             }
@@ -1337,7 +1338,7 @@ void dyn_quant_matmul_4bit_kernel(
         TORCH_CHECK(false, "Unsupported output dtype for int4mm kernel");
     }
 
-    constexpr float BF16_MAX = std::ldexp(254.0f, 120);  // ≈ 3.38953139e+38
+    constexpr float BF16_MAX = 3.38953139e+38f;
     constexpr float BF16_MIN = -BF16_MAX;
 
     // Dispatch to reference kernels
