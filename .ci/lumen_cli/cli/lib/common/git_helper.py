@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from cli.lib.common.path_helper import remove_dir
+from cli.lib.common.utils import run_cmd
 from git import GitCommandError, RemoteProgress, Repo
 
 
@@ -80,6 +81,20 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
         return r
     except GitCommandError as e:
         logger.error("Git operation failed: %v", e)
+
+
+def clone_vllm_pure(commit: str):
+    """
+    cloning vllm and checkout pinned commit
+    """
+    print("clonening vllm....", flush=True)
+    cwd = "vllm"
+    # delete the directory if it exists
+    remove_dir(cwd)
+    # Clone the repo & checkout commit
+    run_cmd("git clone https://github.com/vllm-project/vllm.git")
+    run_cmd(f"git checkout {commit}", cwd=cwd)
+    run_cmd("git submodule update --init --recursive", cwd=cwd)
 
 
 def get_post_build_pinned_commit(name: str, prefix=".github/ci_commit_pins") -> str:

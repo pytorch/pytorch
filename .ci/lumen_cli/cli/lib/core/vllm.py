@@ -19,7 +19,7 @@ from cli.lib.common.envs_helper import (
     get_env,
     with_params_help,
 )
-from cli.lib.common.git_helper import clone_external_repo
+from cli.lib.common.git_helper import clone_vllm_pure, get_post_build_pinned_commit
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
@@ -501,12 +501,15 @@ class VllmTestRunner(BaseRunner):
 
 
 def clone_vllm(dst: str = "vllm"):
+    clone_vllm_pure(get_post_build_pinned_commit(dst))
+    """
     clone_external_repo(
-        target="vllm",
+       target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
-        dst=dst,
+       dst=dst,
         update_submodules=True,
     )
+    """
 
 
 def preprocess_test_in(
