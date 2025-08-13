@@ -272,6 +272,8 @@ class IndexPropagation(DefaultHandler):
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
+            if isinstance(a, sympy.Expr):
+                return a.expand(identity=True)
             if not isinstance(a, IndexPropVar):
                 return a
             return a.value
