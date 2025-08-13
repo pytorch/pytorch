@@ -1463,9 +1463,14 @@ def module_inputs_torch_nn_BCELoss(module_info, device, dtype, requires_grad, tr
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
         ('weights', {'weight': make_weight((10,))}),
+        ('label_smoothing', {'label_smoothing': 0.15}),
     ]
 
-    def bce_loss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+    def bce_loss_reference_fn(m, p, i, t, reduction='mean', weight=None, label_smoothing=0.0):
+        assert 0 <= label_smoothing <= 1
+        if label_smoothing > 0:
+            t = t * (1 - label_smoothing) + (1 - t) * label_smoothing
+
         result = -(t * i.log() + (1 - t) * (1 - i).log())
 
         if weight is not None:
@@ -1511,10 +1516,15 @@ def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, require
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
         ('weights', {'weight': make_weight((10,))}),
-        ('scalar_weights', {'weight': make_weight(())})
+        ('scalar_weights', {'weight': make_weight(())}),
+        ('label_smoothing', {'label_smoothing': 0.15}),
     ]
 
-    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None, label_smoothing=0.0):
+        assert 0 <= label_smoothing <= 1
+        if label_smoothing > 0:
+            t = t * (1 - label_smoothing) + (1 - t) * label_smoothing
+
         # TODO: add pos_weight to the definition here and corresponding SampleInputs
         max_val = (-i).clamp(min=0)
         result = (1 - t).mul_(i).add_(max_val).add_((-max_val).exp_().add_((-i - max_val).exp_()).log_())
@@ -3424,8 +3434,8 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   # backward not supported on MPS backend
+                   DecorateInfo(skipMPS, 'TestModule', 'test_non_contiguous_tensors'),)
                ),
     ModuleInfo(torch.nn.BatchNorm1d,
                train_and_eval_differ=True,
@@ -4064,14 +4074,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LocalResponseNorm,
                module_inputs_func=module_inputs_torch_nn_LocalResponseNorm,
-               skips=(
-                   # uses avg_pool3d which is not supported on MPS backend
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous_tensors'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_forward'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_if_train_and_eval_modes_differ'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous'),
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_save_load'),)
                ),
     ModuleInfo(torch.nn.LayerNorm,
                module_inputs_func=module_inputs_torch_nn_LayerNorm,

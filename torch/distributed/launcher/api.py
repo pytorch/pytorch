@@ -26,7 +26,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa.binding import NumaOptions
+from torch.numa.binding import NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -107,7 +107,13 @@ class LaunchConfig:
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
 
-        if self.numa_options is None and torch.cuda.is_available():
+        if (
+            self.numa_options is None
+            # NOTE: This filter isn't relevant for str entrypoints,
+            # but it's the default anyway.
+            and self.start_method == "spawn"
+            and torch.cuda.is_available()
+        ):
             self.numa_options = get_default_numa_options()
             logger.info("Using default numa options = %r", self.numa_options)
 
