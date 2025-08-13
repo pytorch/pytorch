@@ -555,13 +555,13 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 Wait_Group_node = scheduler.GroupedSchedulerNode.create(Wait_Group_node_list)
                 RS_Group_node.temp_grouping = True
                 Wait_Group_node.temp_grouping = True
-                new_order.append(RS_Group_node)
-                new_order.append(Wait_Group_node)
                 for orig_wait_snode_recursive_users in all_orig_wait_snode_recursive_users:
                     for user in sorted(
                         orig_wait_snode_recursive_users, key=lambda x: order[x]
                     ):
                         schedule_snode(user)
+                new_order.append(RS_Group_node)
+                new_order.append(Wait_Group_node)
                 bucket_id_is_scheduled[coarsen_bucket_id] = True
             else:
                 continue

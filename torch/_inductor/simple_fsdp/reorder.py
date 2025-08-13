@@ -148,7 +148,7 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
         if NodeType.AG_WAIT in child_nodes_type:
             return NodeType.AG_WAIT
         elif NodeType.RS_WAIT in child_nodes_type:
-            return NodeType.AG_WAIT
+            return NodeType.RS_WAIT
         elif NodeType.ALL_GATHER in child_nodes_type:
             return NodeType.ALL_GATHER
         elif NodeType.REDUCE_SCATTER in child_nodes_type:

@@ -14,27 +14,23 @@ from ..virtualized import V
 from .reorder import _check_ir_node_fsdp
 
 
-def get_ag_node_pg_info(snode, change):
+def get_ag_node_pg_info(snode):
     ag_fx_node = get_fx_node(
         snode,
         expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
     )
     group_size, group_name = ag_fx_node.args[1], ag_fx_node.args[2]
     ag_input_dtype = snode.node.inputs[0].layout.dtype
-    if change:
-        ag_input_dtype = torch.float32
     return group_size, group_name, ag_input_dtype
 
 
-def get_rs_node_pg_info(snode, change):
+def get_rs_node_pg_info(snode):
     rs_fx_node = get_fx_node(
         snode,
         expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
     )
     group_size, group_name = rs_fx_node.args[2], rs_fx_node.args[3]
     rs_input_dtype = snode.node.inputs[0].layout.dtype
-    if change:
-        rs_input_dtype = torch.bfloat16
     return group_size, group_name, rs_input_dtype
 
 

@@ -496,20 +496,13 @@ def get_bucketing_plan(
 
     # auto-bucketing plan
     st_time = time.time()
-    test_time = 0
-    change = True
     for idx, snode in enumerate(snodes):
         # we only bucket on FSDP comm
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
-            if test_time in [10,11,15,20,30,31,32,33,34]:
-                change=True
-            else:
-                change=False
-            node_info = get_ag_node_pg_info(snode, change)
+            node_info = get_ag_node_pg_info(snode)
             current_ag_bucket[node_info].append(snode)
-            test_time = test_time +1
 
             estimated_comm, comm_size_inp, comm_size_out = estimate_hetero_bucketed_node(
                 current_ag_bucket,
@@ -634,7 +627,7 @@ def get_bucketing_plan(
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
-            node_info = get_rs_node_pg_info(snode, change)
+            node_info = get_rs_node_pg_info(snode)
             current_rs_bucket[node_info].append(snode)
 
             heuristic_info["this_step_rs_comm"], _, rs_comm_size_out = (
