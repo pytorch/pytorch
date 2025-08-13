@@ -80,13 +80,6 @@ on:
         required: false
         type: number
         default: 1
-      build-additional-packages:
-        description: |
-          If set, the build job will also builds these packages and saves their
-          wheels as artifacts
-        required: false
-        type: string
-        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
