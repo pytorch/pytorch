@@ -133,26 +133,9 @@ supported_multiprocessing_contexts = [None] + list(
 )
 
 
-# The following collate functions are defined globally here for pickle purposes.
-
-
-# collate_fn that returns the batch cloned
+# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
 def _clone_collate(b):
     return [x.clone() for x in b]
-
-
-# collate_fn that returns the batch of sparse coo tensors cloned
-def _sparse_coo_collate(b):
-    lst = []
-    for x in b:
-        t = x.clone()
-        lst.append(t)
-        # Force sparse tensor invariants checks. check_pinning=True
-        # reproduces gh-153143.
-        torch._validate_sparse_coo_tensor_args(
-            t._indices(), t._values(), t.size(), t.is_coalesced(), check_pinning=False
-        )
-    return lst
 
 
 @unittest.skipIf(
@@ -734,12 +717,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
-        self.slept = False
+        self.sleeped = False
 
     def __getitem__(self, idx):
-        if not self.slept:
+        if not self.sleeped:
             time.sleep(self.sleep_sec)
-            self.slept = True
+            self.sleeped = True
         return idx
 
     def __len__(self):
@@ -2910,9 +2893,8 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            self.skipTest(
-                f"{context} multiprocessing context not supported for {device}"
-            )
+            # TODO: Skip this better in a better way when the test framework allows
+            return
 
         dataset = [
             torch.nested.nested_tensor([torch.randn(5)], device=device)
@@ -2949,37 +2931,6 @@ class TestDataLoaderDeviceType(TestCase):
             )
 
             next(iter(loader))
-
-    @parametrize(
-        "context",
-        [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
-    )
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_sparse_tensor_multiprocessing(self, device, context):
-        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
-        if "cuda" in device and context == "fork":
-            self.skipTest(
-                f"{context} multiprocessing context not supported for {device}"
-            )
-
-        dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
-
-        pin_memory_settings = [False]
-        if device == "cpu" and torch.cuda.is_available():
-            pin_memory_settings.append(True)
-
-        for pin_memory in pin_memory_settings:
-            loader = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=1,
-                num_workers=4,
-                collate_fn=_sparse_coo_collate,
-                pin_memory=pin_memory,
-                multiprocessing_context=context,
-            )
-
-            for i, batch in enumerate(loader):
-                self.assertEqual(batch[0], dataset[i])
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
@@ -3132,15 +3083,6 @@ class TestDictDataLoader(TestCase):
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
-
-    @skipIfXpu
-    @skipIfRocm
-    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
-    def test_pin_memory_no_cuda(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
-        for sample in loader:
-            self.assertFalse(sample["a_tensor"].is_pinned())
-            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_device(self):

@@ -71,8 +71,6 @@
 #include <ATen/ops/exp.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/gradient_native.h>
-#include <ATen/ops/hash_tensor.h>
-#include <ATen/ops/hash_tensor_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/isnan_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -400,19 +398,6 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-TORCH_META_FUNC(hash_tensor)
-(const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
-  auto maybe_result = maybe_get_output();
-  if (maybe_result.defined()){
-    TORCH_CHECK(maybe_result.scalar_type() == at::kUInt64, "Expected result to be of dtype uint64, but got ", maybe_result.scalar_type());
-  }
-  if (self.sym_numel() == 0) {
-    native::zero_numel_check_dims(self, dim, "hash_tensor");
-  }
-  resize_reduction(*this, self, dim, keepdim, at::kUInt64);
-}
-
-
 } // namespace at::meta
 
 namespace at::native {
@@ -456,7 +441,6 @@ DEFINE_DISPATCH(argmin_stub);
 DEFINE_DISPATCH(cumsum_stub);
 DEFINE_DISPATCH(cumprod_stub);
 DEFINE_DISPATCH(logcumsumexp_stub);
-DEFINE_DISPATCH(xor_sum_stub);
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
@@ -1467,7 +1451,7 @@ Tensor& nanmean_out(
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
-  at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
+  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
   return result;
 }
 
@@ -2247,24 +2231,6 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor&
 
 Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
-}
-
-enum class HashMode { XOR_SUM = 0 };
-
-TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
-
-  auto iter = meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
-  switch (static_cast<HashMode>(mode)) {
-    case HashMode::XOR_SUM:
-      if (iter.numel() == 0) {
-          result.fill_(0);
-      } else {
-        xor_sum_stub(iter.device_type(), iter);
-      }
-      return;
-    default:
-      TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
-  }
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {

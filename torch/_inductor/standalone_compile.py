@@ -74,7 +74,7 @@ class CompiledArtifact:
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
-                # can't assert that it is a file since it might not exist yet
+                # cant assert that it is a file since it might not exist yet
                 assert not os.path.isdir(path)
 
                 from torch.utils._appending_byte_serializer import BytesWriter
@@ -118,7 +118,7 @@ class CompiledArtifact:
     ) -> CompiledArtifact:
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
-                # can't assert that it is a file since it might not exist yet
+                # cant assert that it is a file since it might not exist yet
                 assert not os.path.isdir(path)
                 with open(path, "rb") as file:
                     artifacts = file.read()
@@ -155,12 +155,7 @@ class CompiledArtifact:
                     )
 
                     entry = AOTAutogradCache._lookup(
-                        key,
-                        local=True,
-                        remote=False,
-                        args=[],
-                        cache_info={},
-                        aot_config=None,
+                        key, local=True, remote=False, args=[], cache_info={}
                     )
 
                 assert entry is not None
@@ -203,7 +198,6 @@ def standalone_compile(
         # Reuse fake_mode from the TracingContext.
         # NB: The TracingContext only exists if we're currently in a torch.compile backend.
         context = torch._guards.TracingContext.get()
-        assert context.fake_mode is not None
         fake_mode = context.fake_mode
     elif dynamic_shapes == "from_graph":
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
@@ -214,26 +208,11 @@ def standalone_compile(
         last_node = next(iter(reversed(gm.graph.nodes)))
         assert last_node.op == "output"
         assert len(last_node.args) == 1
-
-        def handle_node(node: torch.fx.Node) -> None:
-            nonlocal fake_mode
+        for node in last_node.args[0]:
             if "example_value" in node.meta:
                 maybe_tensor = node.meta["example_value"]
                 if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
                     fake_mode = maybe_tensor.fake_mode
-
-        # If gm came from Dynamo, then last_node.args[0] is always a list,
-        # even in single-Tensor returns.
-        #
-        # It's possible to get into a situation where last_node.args[0]
-        # is a Node (and not a list!). This happens if you call split_module
-        # on the graph. We allow for this case since it is common.
-        if isinstance(last_node.args[0], torch.fx.Node):
-            handle_node(last_node.args[0])
-        else:
-            for node in last_node.args[0]:
-                handle_node(node)
-
     else:
         raise ValueError(
             f"standalone_compile got unsupported `dynamic_shapes` value: dynamic_shapes={dynamic_shapes}."

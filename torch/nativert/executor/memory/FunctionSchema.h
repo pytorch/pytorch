@@ -17,7 +17,8 @@ class FunctionSchema {
   explicit FunctionSchema(
       const c10::FunctionSchema& schema,
       AliasingSpec&& aliasing_spec = {},
-      OpKernelKind kernel_kind = OpKernelKind::kInterpreterFallbackKernel)
+      torch::nativert::OpKernelKind kernel_kind =
+          torch::nativert::OpKernelKind::kInterpreterFallbackKernel)
       : aliasing_spec_(std::move(aliasing_spec)),
         kernel_kind_(kernel_kind),
         c10_fn_schema_(schema) {}
@@ -32,13 +33,13 @@ class FunctionSchema {
 
   bool alias(size_t input_idx, size_t output_idx) const;
 
-  C10_ALWAYS_INLINE OpKernelKind kernel_kind() const {
+  C10_ALWAYS_INLINE torch::nativert::OpKernelKind kernel_kind() const {
     return kernel_kind_;
   }
 
  private:
   AliasingSpec aliasing_spec_;
-  OpKernelKind kernel_kind_;
+  torch::nativert::OpKernelKind kernel_kind_;
   c10::FunctionSchema c10_fn_schema_;
 };
 

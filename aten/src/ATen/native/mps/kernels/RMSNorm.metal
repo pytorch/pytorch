@@ -2,13 +2,11 @@
 // https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/rms_norm.metal
 // Copyright © 2024 Apple Inc.
 
-#include <c10/metal/common.h>
 #include <metal_common>
 #include <metal_simdgroup>
 #include <metal_stdlib>
 
 using namespace metal;
-using c10::metal::simdgroup_size;
 
 template <typename T>
 [[kernel]] void rms_single_row(
@@ -22,10 +20,11 @@ template <typename T>
     uint lid [[thread_position_in_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int SIMD_SIZE = 32;
   constexpr int N_READS = 4;
 
   threadgroup float local_inv_mean[1];
-  threadgroup float local_sums[simdgroup_size];
+  threadgroup float local_sums[SIMD_SIZE];
 
   float acc = 0;
   x += gid * size_t(axis_size) + lid * N_READS;
@@ -93,9 +92,10 @@ template <typename T>
     uint lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
     uint simd_group_id [[simdgroup_index_in_threadgroup]]) {
+  constexpr int SIMD_SIZE = 32;
   constexpr int N_READS = 4;
   threadgroup float local_inv_mean[1];
-  threadgroup float local_sums[simdgroup_size];
+  threadgroup float local_sums[SIMD_SIZE];
 
   float acc = 0;
   x += gid * size_t(axis_size) + lid * N_READS;
@@ -192,4 +192,6 @@ template <typename T>
 
 instantiate_rms(float)
 instantiate_rms(half)
+#if __METAL_VERSION__ >= 310
 instantiate_rms(bfloat)
+#endif // clang-format on

@@ -136,7 +136,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversely when reading (`get`), the RemoteCache takes data from the backend,
+# Conversly when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the
@@ -170,13 +170,10 @@ class RemoteCache(Generic[_T]):
             try:
                 result = self._get(key, sample)
                 cache_stats.get(type(self).__name__, result)
-            except Exception as e:
+            except Exception:
                 cache_stats.exception(type(self).__name__)
-                if sample:
-                    sample.fail_reason = str(e)
                 raise
-            finally:
-                self._log_sample(sample)
+            self._log_sample(sample)
             return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
@@ -189,13 +186,10 @@ class RemoteCache(Generic[_T]):
             try:
                 self._put(key, value, sample)
                 cache_stats.put(type(self).__name__)
-            except Exception as e:
+            except Exception:
                 cache_stats.exception(type(self).__name__)
-                if sample:
-                    sample.fail_reason = str(e)
                 raise
-            finally:
-                self._log_sample(sample)
+            self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]

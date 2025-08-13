@@ -96,9 +96,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
-        self.out_proj = nn.Linear(
-            self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
-        )  # type: ignore[assignment]
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
         self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()
@@ -214,7 +212,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.bias_v = nn.Parameter(self.bias_v.dequantize())
 
         # Set the linear weights
-        # Note: Because the linear layers are quantized, mypy does not know how
+        # Note: Because the linear layers are quantized, mypy does not nkow how
         # to deal with them -- might need to ignore the typing checks.
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
         w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
@@ -377,9 +375,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
         head_dim = self.embed_dim // self.num_heads
-        assert head_dim * self.num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        assert (
+            head_dim * self.num_heads == self.embed_dim
+        ), "embed_dim must be divisible by num_heads"
         scaling = float(head_dim) ** -0.5
 
         q = self.linear_Q(query)
@@ -396,9 +394,9 @@ class MultiheadAttention(nn.MultiheadAttention):
                     stacklevel=3,
                 )
                 attn_mask = attn_mask.to(torch.bool)
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, (
-                f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
-            )
+            assert (
+                attn_mask.is_floating_point() or attn_mask.dtype == torch.bool
+            ), f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)

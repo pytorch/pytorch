@@ -39,8 +39,7 @@ def embed_headers(
     fname: str, include_dirs: Optional[Union[Sequence[str], Sequence[Path], str]] = None
 ) -> str:
     if include_dirs is None:
-        base_dir = Path(__file__).parent.parent.parent
-        include_dirs = [base_dir, base_dir / "aten" / "src"]
+        include_dirs = [Path(__file__).parent.parent.parent]
     elif isinstance(include_dirs, str):
         include_dirs = [Path(include_dirs)]
     else:

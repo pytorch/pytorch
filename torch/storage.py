@@ -155,10 +155,6 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        return cls._release_ipc_counter_cuda(*args, **kwargs)
-
-    @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
@@ -1523,7 +1519,7 @@ class _LegacyStorageMeta(type):
 
 class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
-    def _new_shared(cls, size):  # type: ignore[override]
+    def _new_shared(cls, size):
         """Create a new storage in shared memory with the same data type."""
         untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)

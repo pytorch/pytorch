@@ -4,15 +4,12 @@
 # ruff: noqa
 # flake8: noqa
 
-# Test copied from
-# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_int.py
-
 import sys
 import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -693,7 +690,6 @@ class IntTestCases(__TestCase):
         self.assertEqual(n, 1)
         self.assertIs(type(n), IntSubclass)
 
-    @skipIfTorchDynamo("flaky under dynamo")
     def test_error_message(self):
         def check(s, base=None):
             with self.assertRaises(ValueError,

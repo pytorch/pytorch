@@ -13,6 +13,7 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
@@ -186,9 +187,9 @@ class C10_API Scalar {
     return Tag::HAS_d == tag || Tag::HAS_sd == tag;
   }
 
-  [[deprecated(
-      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")]] bool
-  isIntegral() const {
+  C10_DEPRECATED_MESSAGE(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
+  bool isIntegral() const {
     return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
   }
   bool isIntegral(bool includeBool) const {

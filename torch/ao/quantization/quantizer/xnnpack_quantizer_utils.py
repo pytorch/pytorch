@@ -165,9 +165,9 @@ def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_config.bias is None:
         return None
     quantization_spec: QuantizationSpec = quantization_config.bias
-    assert quantization_spec.dtype == torch.float, (
-        "Only float dtype for bias is supported for bias right now"
-    )
+    assert (
+        quantization_spec.dtype == torch.float
+    ), "Only float dtype for bias is supported for bias right now"
     return quantization_spec
 
 
@@ -422,7 +422,7 @@ def _annotate_conv_bn(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv + batchnorm partitions
+    Find conv + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=False)
@@ -435,7 +435,7 @@ def _annotate_conv_bn_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv + batchnorm + relu partitions
+    Find conv + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(gm, quantization_config, filter_fn, has_relu=True)
@@ -448,7 +448,7 @@ def _annotate_conv_transpose_bn(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv_transpose + batchnorm partitions
+    Find conv_transpose + batchnorm parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(
@@ -463,7 +463,7 @@ def _annotate_conv_transpose_bn_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[list[list[Node]]]:
     """
-    Find conv_transpose + batchnorm + relu partitions
+    Find conv_transpose + batchnorm + relu parititions
     Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     """
     return _do_annotate_conv_bn(

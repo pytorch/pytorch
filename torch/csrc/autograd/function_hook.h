@@ -24,10 +24,9 @@ struct TORCH_API FunctionPreHook {
   // only implemented for python hooks, registers hook with compiled autograd
   virtual void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args) const {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
+    throw std::runtime_error(
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-            typeid(*this).name());
+        typeid(*this).name());
   }
 };
 
@@ -39,10 +38,9 @@ struct TORCH_API FunctionPostHook {
   // only implemented for python hooks, registers hook with compiled autograd
   virtual void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args) const {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
+    throw std::runtime_error(
         std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-            typeid(*this).name());
+        typeid(*this).name());
   }
 };
 
@@ -53,19 +51,17 @@ struct TORCH_API PostAccumulateGradHook {
   // autograd
   virtual void compiled_args(
       torch::dynamo::autograd::CompiledNodeArgs& args) const {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-            typeid(*this).name());
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
   }
 
   virtual void apply_with_saved(
       Variable&,
       torch::dynamo::autograd::SwapSavedVariables&) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
-            typeid(*this).name());
+    throw std::runtime_error(
+        std::string("not yet implemented for compiled autograd: ") +
+        typeid(*this).name());
   }
 };
 

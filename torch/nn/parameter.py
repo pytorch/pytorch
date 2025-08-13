@@ -1,18 +1,7 @@
 from collections import OrderedDict
-from typing import Any
 
 import torch
 from torch._C import _disabled_torch_function_impl
-
-
-__all__ = [
-    "Parameter",
-    "UninitializedParameter",
-    "is_lazy",
-    "Buffer",
-    "UninitializedBuffer",
-    "UninitializedTensorMixin",
-]
 
 
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
@@ -185,13 +174,7 @@ class UninitializedTensorMixin:
         )
 
 
-def is_lazy(param: Any) -> bool:
-    """
-    Returns whether ``param`` is an ``UninitializedParameter`` or ``UninitializedBuffer``.
-
-    Args:
-        param (Any): the input to check.
-    """
+def is_lazy(param):
     return isinstance(param, UninitializedTensorMixin)
 
 

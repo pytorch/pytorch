@@ -37,7 +37,6 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.distributed.numa.binding import maybe_wrap_with_numa_bindings, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -291,7 +290,7 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
         """
         nprocs = len(envs)
-        global_env = {}  # use only to query properties that are not dependent on a rank
+        global_env = {}  # use only to query properies that are not dependent on a rank
         if nprocs > 0:
             global_env = envs[0]
         else:
@@ -453,7 +452,7 @@ class PContext(abc.ABC):
         # all local ranks are accounted for
         nprocs = len(args)
 
-        # TODO log_line_prefixes can be expanded too
+        # TODO log_line_prefixes can be exanded too
         logs_dest = logs_specs.reify(envs)
 
         _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
@@ -812,12 +811,7 @@ class SubprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
         log_line_prefixes: Optional[dict[int, str]] = None,
-        numa_options: Optional[NumaOptions] = None,
     ):
-        entrypoint, args = maybe_wrap_with_numa_bindings(
-            entrypoint=entrypoint, local_rank_to_args=args, numa_options=numa_options
-        )
-
         super().__init__(
             name,
             entrypoint,

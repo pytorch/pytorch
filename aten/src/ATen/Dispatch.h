@@ -200,7 +200,7 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
-        TORCH_CHECK_NOT_IMPLEMENTED(                                        \
+        TORCH_CHECK(                                                        \
             false,                                                          \
             '"',                                                            \
             at_dispatch_name,                                               \

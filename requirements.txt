@@ -1,19 +1,22 @@
 # Python dependencies required for development
-
-# Build System requirements
---requirement requirements-build.txt
-
-# Install / Development extra requirements
-build[uv]  # for building sdist and wheel
+astunparse
+cmake
 expecttest>=0.3.0
 filelock
-fsspec>=0.8.5
+fsspec
 hypothesis
 jinja2
 lintrunner ; platform_machine != "s390x"
-networkx>=2.5.1
+networkx
+ninja
+numpy
 optree>=0.13.0
+packaging
 psutil
+pyyaml
+requests
+# setuptools develop deprecated on 80.0
+setuptools>=62.3.0,<80.0
 sympy>=1.13.3
-typing-extensions>=4.13.2
-wheel
+types-dataclasses
+typing-extensions>=4.10.0

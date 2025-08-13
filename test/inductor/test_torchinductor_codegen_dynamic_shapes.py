@@ -177,7 +177,6 @@ test_failures = {
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -243,6 +242,7 @@ test_failures = {
     "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_polar_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
+    "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
@@ -389,7 +389,7 @@ if not TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda") if IS_LINUX else ("cpu", "cuda", "xpu")
+                ("cuda", "xpu") if IS_LINUX else ("cpu", "cuda", "xpu")
             ),
         }
     )

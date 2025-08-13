@@ -101,13 +101,7 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
         proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
         fake_args = [convert_to_fake(arg) for arg in proxy_args]
         fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
-        try:
-            mod._infer_parameters(mod, fake_args, fake_kwargs)
-        except AttributeError:
-            raise_observed_exception(
-                AttributeError,
-                tx,
-            )
+        mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
 @contextmanager
@@ -874,7 +868,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if type(value) is torch.jit._script.RecursiveScriptModule:
             raise Unsupported(
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
-                " because their .forward function isn't a static member of their type"
+                " becuase their .forward function isn't a static member of their type"
             )
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
@@ -906,7 +900,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self.nn_module_stack_source = source
 
     @staticmethod
-    @functools.cache
+    @functools.lru_cache(None)
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
         supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
@@ -989,7 +983,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward
 
         if self.source:
-            source = self.get_source_by_walking_mro(name)
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
         else:
             source = None
 
@@ -1017,7 +1011,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = self.get_source_by_walking_mro(name)
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
             else:
                 source = None
 
@@ -1032,7 +1026,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
+                source = AttrSource(
+                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
+                )
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, source=source),
                     args,
@@ -1058,7 +1054,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Record if mutations happens on parameters/buffers/modules. The
                 # mutations on these are not tracked by base class
                 # UserDefinedObject vt. This will be used later to graph break
-                # on seeing a parameters() and family calls.
+                # on seeing a paramters() and family calls.
                 # TODO(anijain2305) - This might not be needed if we let Dynamo
                 # inline both getattr and setattr. In that case, it should see
                 # the lowest level dicts - _parameters and family and
@@ -1134,7 +1130,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
-        # different nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
+        # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
         # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
         if (

@@ -13,9 +13,21 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.accelerator.is_available():
+if torch.backends.cuda.is_built() and torch.cuda.is_available():  # type: ignore[no-untyped-call]
     def timer() -> float:
-        torch.accelerator.synchronize()
+        torch.cuda.synchronize()
+        return timeit.default_timer()
+elif torch.xpu.is_available():
+    def timer() -> float:
+        torch.xpu.synchronize()
+        return timeit.default_timer()
+elif torch._C._get_privateuse1_backend_name() != "privateuseone":
+    privateuse1_device_handler = getattr(torch, torch._C._get_privateuse1_backend_name(), None) \
+        if torch._C._get_privateuse1_backend_name() != "cpu" else None
+
+    def timer() -> float:
+        if privateuse1_device_handler:
+            privateuse1_device_handler.synchronize()
         return timeit.default_timer()
 else:
     timer = timeit.default_timer
@@ -37,12 +49,12 @@ class CPPTimer:
     ) -> None:
         if timer is not timeit.default_timer:
             raise NotImplementedError(
-                "PyTorch was built with accelerators and an accelerator is present; however "
-                "Timer does not yet support accelerator measurements. If your "
+                "PyTorch was built with CUDA and a GPU is present; however "
+                "Timer does not yet support GPU measurements. If your "
                 "code is CPU only, pass `timer=timeit.default_timer` to the "
                 "Timer's constructor to indicate this. (Note that this will "
-                "produce incorrect results if an accelerator is in fact used, as "
-                "Timer will not synchronize the accelerator.)"
+                "produce incorrect results if the GPU is in fact used, as "
+                "Timer will not synchronize CUDA.)"
             )
 
         if globals:
@@ -76,7 +88,7 @@ class Timer:
     1) Runtime aware:
         Timer will perform warmups (important as some elements of PyTorch are
         lazily initialized), set threadpool size so that comparisons are
-        apples-to-apples, and synchronize asynchronous accelerator functions when
+        apples-to-apples, and synchronize asynchronous CUDA functions when
         necessary.
 
     2) Focus on replicates:
@@ -119,8 +131,8 @@ class Timer:
 
         timer:
             Callable which returns the current time. If PyTorch was built
-            without accelerators or there is no accelerator present, this defaults to
-            `timeit.default_timer`; otherwise it will synchronize accelerators before
+            without CUDA or there is no GPU present, this defaults to
+            `timeit.default_timer`; otherwise it will synchronize CUDA before
             measuring the time.
 
         globals:
@@ -347,7 +359,7 @@ class Timer:
 
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
-               important because accelerator synchronization time is non-trivial
+               important because CUDA synchronization time is non-trivial
                (order single to low double digit microseconds) and would
                otherwise bias the measurement.
 

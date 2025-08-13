@@ -3,7 +3,6 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
-#include <mha_bwd.h>
 #include <fmha_bwd.hpp>
 #include <mask.hpp>
 
@@ -27,26 +26,6 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                            has_dropout,
                            false, // s_randval
                            deterministic};
-}
-
-
-
-aiter::mha_bwd_traits get_mha_bwd_traits(fmha_bwd_traits t, mask_info mask)
-{
-    return aiter::mha_bwd_traits(t.hdim_q,
-                          t.hdim_v,
-                          t.data_type,
-                          t.is_group_mode,
-                          mask.type,
-                          t.bias_type,
-                          t.has_dbias,
-                          t.has_dropout,
-                          t.is_store_randval,
-                          t.is_deterministic,
-                          true,                  // use_ext_asm
-                          true,                  // is_v3_atomic_fp32,
-                          1);                    // how_v3_bf16_cvt
-
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -122,11 +101,11 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     ck_tile::index_t stride_dv = dv.stride(1);
     ck_tile::index_t nhead_stride_dv = dv.stride(2);
 
-    // dq_acc: (split, batch_size, nheads, seqlen_q, hdim)
+    // dq_acc: (split, batch_size, seqlen_q, nheads, hdim)
     ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
     ck_tile::index_t batch_stride_dq_acc = dq_acc.stride(1);
-    ck_tile::index_t stride_dq_acc = dq_acc.stride(3);
-    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(2);
+    ck_tile::index_t stride_dq_acc = dq_acc.stride(2);
+    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(3);
 
     // bias: (batch_size, nheads, seqlen_q, seqlen_k)
     void *attn_bias_ptr = nullptr;
@@ -372,11 +351,11 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     at::Tensor dq_accum;
 
     if (!deterministic) {
-        dq_accum = at::zeros({1, batch_size, num_heads, seqlen_q, head_size_8x}, opts.dtype(at::kFloat));
+        dq_accum = at::zeros({1, batch_size, seqlen_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
     } else {
         const ck_tile::index_t kN0 = head_size_8x <= 128 ? 128 : 64;
         const ck_tile::index_t nsplits = ck_tile::integer_divide_ceil(seqlen_k, kN0);
-        dq_accum = at::zeros({nsplits, batch_size, num_heads, seqlen_q, head_size_8x}, opts.dtype(at::kFloat));
+        dq_accum = at::zeros({nsplits, batch_size, seqlen_q, num_heads, head_size_8x}, opts.dtype(at::kFloat));
     }
 
     at::Tensor dk_expanded, dv_expanded;
@@ -397,6 +376,14 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (seqlen_q > 0) {
         ck_tile::stream_config stream_config{stream};
         dq.zero_(); // ck use atomic operation on dq
+        auto traits =
+            get_ck_fmha_bwd_traits(mask,
+                                   q_dtype_str,
+                                   head_size_8x,
+                                   is_dropout,
+                                   attn_bias_.has_value(),
+                                   deterministic,
+                                   bias_requires_grad);
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -424,23 +411,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-
-        float t = aiter::mha_bwd(args,
-                                 stream_config,
-                                 q_dtype_str,
-                                 false,             // is_group_mode
-                                 mask.type,
-                                 attn_bias_.has_value() ? bias_enum::elementwise_bias : bias_enum::no_bias,
-                                 bias_requires_grad,
-                                 false,             // is_store_randval
-                                 deterministic,
-                                 true,              // use_ext_asm
-                                 true,             // is_v3_atomic_fp32
-                                 1);                // how_v3_bf16_cvt
-
-
-
-
+        float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

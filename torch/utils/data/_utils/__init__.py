@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloder.py.
 
 A lot of multiprocessing is used in data loading, which only supports running
@@ -42,7 +43,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 
-def _set_python_exit_flag() -> None:
+def _set_python_exit_flag():
     global python_exit_status
     python_exit_status = True
 

@@ -4,7 +4,6 @@
 import os
 import shutil
 import traceback
-from concurrent.futures import Future
 
 import torch
 import torch.distributed as dist
@@ -107,7 +106,6 @@ def run(rank, world_size):
 
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
-                    assert isinstance(f, Future)
                     f.result()
                 f = dcp.state_dict_saver.async_save(
                     state_dict, checkpoint_id=CHECKPOINT_DIR
@@ -124,7 +122,6 @@ def run(rank, world_size):
 
             _print("Reloading model from last checkpoint!")
             if f is not None:
-                assert isinstance(f, Future)
                 f.result()
             dcp.load(state_dict)
 

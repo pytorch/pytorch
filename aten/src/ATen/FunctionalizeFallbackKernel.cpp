@@ -320,9 +320,11 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
 
   if (!stride.has_value()) {
-
-    TORCH_SYM_CHECK(
-        self.sym_is_contiguous(),
+    // With unbacked symints, computeStride could fail even on contiguous
+    // tensors. In this case, we can use the strides of an empty tensor of
+    // inferred_size.
+    TORCH_CHECK(
+        self.is_contiguous(),
         "View is not valid from size:",
         self.sym_sizes(),
         " stride: ",
@@ -331,9 +333,6 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
         inferred_size,
         " in case of unbacked symbols consider adding torch.check to guide computing strides.");
 
-    // With unbacked symints, computeStride could fail even on contiguous
-    // tensors. In this case, we can use the strides of an empty tensor of
-    // inferred_size.
     stride = at::detail::empty_symint_meta(
                  inferred_size,
                  std::nullopt,

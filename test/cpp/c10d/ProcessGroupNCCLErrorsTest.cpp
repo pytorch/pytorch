@@ -164,7 +164,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   // so we have this hack to manually set the desync debug flag after PG
   // creation.
   void forceSetDesyncDebugFlag() {
-    watchdog_->setDesyncDebug(true);
+    desyncDebug_ = true;
   }
 
  private:

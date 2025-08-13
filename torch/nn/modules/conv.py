@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal, Optional, Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -66,9 +66,8 @@ class _ConvNd(Module):
     ]
     __annotations__ = {"bias": Optional[torch.Tensor]}
 
-    def _conv_forward(  # type: ignore[empty-body]
-        self, input: Tensor, weight: Tensor, bias: Optional[Tensor]
-    ) -> Tensor: ...
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:  # type: ignore[empty-body]
+        ...
 
     in_channels: int
     _reversed_padding_repeated_twice: list[int]
@@ -80,7 +79,7 @@ class _ConvNd(Module):
     transposed: bool
     output_padding: tuple[int, ...]
     groups: int
-    padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
+    padding_mode: str
     weight: Tensor
     bias: Optional[Tensor]
 
@@ -96,7 +95,7 @@ class _ConvNd(Module):
         output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"],
+        padding_mode: str,
         device=None,
         dtype=None,
     ) -> None:
@@ -188,7 +187,10 @@ class _ConvNd(Module):
                 init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
-        s = "{in_channels}, {out_channels}, kernel_size={kernel_size}, stride={stride}"
+        s = (
+            "{in_channels}, {out_channels}, kernel_size={kernel_size}"
+            ", stride={stride}"
+        )
         if self.padding != (0,) * len(self.padding):
             s += ", padding={padding}"
         if self.dilation != (1,) * len(self.dilation):
@@ -277,7 +279,9 @@ class Conv1d(_ConvNd):
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
 
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -324,7 +328,7 @@ class Conv1d(_ConvNd):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -446,7 +450,9 @@ class Conv2d(_ConvNd):
             output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -503,7 +509,7 @@ class Conv2d(_ConvNd):
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -613,7 +619,9 @@ class Conv3d(_ConvNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -672,7 +680,7 @@ class Conv3d(_ConvNd):
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -875,7 +883,9 @@ class ConvTranspose1d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -917,7 +927,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1041,7 +1051,9 @@ class ConvTranspose2d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -1105,7 +1117,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_2_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1237,7 +1249,9 @@ class ConvTranspose3d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-    """.format(**reproducibility_notes, **convolution_notes)
+    """.format(
+            **reproducibility_notes, **convolution_notes
+        )
         + r"""
 
     Shape:
@@ -1296,7 +1310,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_3_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1374,7 +1388,7 @@ class _ConvTransposeMixin(_ConvTransposeNd):
         "Please consider using public APIs.",
         category=FutureWarning,
     )
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
@@ -1489,7 +1503,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1558,7 +1572,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -1628,7 +1642,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1696,7 +1710,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1765,7 +1779,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: int = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1834,7 +1848,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: _size_3_t = 1,
-        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        padding_mode: str = "zeros",
         device=None,
         dtype=None,
     ) -> None:

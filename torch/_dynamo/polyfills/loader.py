@@ -19,7 +19,6 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "operator",
     "os",
     "pytree",
-    "struct",
     "sys",
     "fx",
     "tensor",

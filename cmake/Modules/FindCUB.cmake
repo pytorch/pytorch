@@ -3,7 +3,7 @@
 #  CUB_INCLUDE_DIRS - the CUB include directory
 
 find_path(CUB_INCLUDE_DIR
-        HINTS "${CUDAToolkit_INCLUDE_DIRS}"
+        HINTS "${CUDA_TOOLKIT_INCLUDE}"
         NAMES cub/cub.cuh
         DOC "The directory where CUB includes reside"
 )

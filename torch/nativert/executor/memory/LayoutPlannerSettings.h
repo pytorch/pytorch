@@ -7,7 +7,6 @@ namespace torch::nativert {
 enum class LayoutPlannerAlgorithmType {
   Bump,
   GreedyBySize,
-  DisjointStorageGroups,
 };
 
 class LayoutManagerSettings {

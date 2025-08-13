@@ -3,10 +3,9 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
-
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
-#include <torch/csrc/jit/serialization/pickler_helper.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch::jit {
 
@@ -137,7 +136,6 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
-  void rebuildParameter();
   void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED

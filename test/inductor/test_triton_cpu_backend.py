@@ -13,10 +13,12 @@ except ImportError:
 if HAS_CPU and TRITON_HAS_CPU:
 
     @config.patch(cpu_backend="triton")
+    @config.patch("triton.coalesce_tiling_analysis", False)
     class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
         pass
 
     @config.patch(cpu_backend="triton")
+    @config.patch("triton.coalesce_tiling_analysis", False)
     class CpuTritonTests(test_torchinductor.TestCase):
         common = test_torchinductor.check_model
         device = "cpu"

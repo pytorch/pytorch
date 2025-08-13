@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Functional interface."""
-
 import math
 
 from torch import Tensor

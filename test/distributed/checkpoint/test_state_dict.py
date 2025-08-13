@@ -62,9 +62,6 @@ from torch.testing._internal.distributed.common_state_dict import (
 from torch.utils._pytree import tree_all, tree_all_only
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -82,7 +79,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.accelerator.device_count())
+        return min(4, torch.cuda.device_count())
 
     def _test_save_load(
         self,
@@ -104,7 +101,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             for d_optim in _dist_optim:
                 d_optim.zero_grad()
 
-            batch = torch.rand(8, 100, device=device_type)
+            batch = torch.rand(8, 100, device="cuda")
             model(batch).sum().backward()
             dist_model(batch).sum().backward()
 
@@ -112,7 +109,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             for d_optim in _dist_optim:
                 d_optim.step()
 
-        # We need to ensure gradients don't exist, this the invariant of using DSD.
+        # We need to ensure gradients don't exist, this the invarient of using DSD.
         optim.zero_grad()
 
         # Get the state_dict, and compare the result
@@ -138,7 +135,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             # We won't be able to load the partial state_dict back.
             return
         # Since we already have the state_dict saved before, no need to call DCP.
-        # We can directly load them back. This assert is to ensure that optimizer
+        # We can directly load them back. This asser is to ensure that optimizer
         # state storage are initialized.
         # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
         set_model_state_dict(
@@ -191,9 +188,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         def init_model_optim():
             if use_dtensor:
-                device_mesh = init_device_mesh(device_type, (self.world_size,))
+                device_mesh = init_device_mesh("cuda", (self.world_size,))
 
-            orig_model = CompositeParamModel(device=torch.device(device_type))
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4, foreach=True)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-4, foreach=True)
             if wrapping:
@@ -201,7 +198,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             else:
                 strategy = {UnitModule}
             if use_dtensor:
-                device_mesh = init_device_mesh(device_type, (self.world_size,))
+                device_mesh = init_device_mesh("cuda", (self.world_size,))
                 dist_model = FSDP(
                     copy.deepcopy(orig_model),
                     auto_wrap_policy=ModuleWrapPolicy(strategy),
@@ -261,7 +258,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         foreach: bool = True,
     ):
         def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device(device_type))
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(
                 orig_model.parameters(), lr=1e-4, foreach=foreach
             )
@@ -298,7 +295,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_ddp(self, use_composable: bool, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device(device_type))
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             if use_composable:
@@ -332,7 +329,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         test_frozen: bool = False,
     ) -> None:
         def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device(device_type))
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
             if test_frozen:
                 for param in chain(
                     orig_model.u1.parameters(), orig_model.u2.parameters()
@@ -373,7 +370,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_single_gpu(self, optimizer_class: type[Optimizer]) -> None:
         def init_model_optim():
-            orig_model = CompositeParamModel(device=torch.device(device_type))
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             model_copy = copy.deepcopy(orig_model)
@@ -388,7 +385,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._test_single_gpu(torch.optim.AdamW)
 
     def _test_strict(self, parallelism: str) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         if parallelism == "DDP":
             model = DDP(model)
         else:
@@ -425,8 +422,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_cpu_offload_full_state_dict(
         self, optimizer_class: type[Optimizer]
     ) -> None:
-        orig_model = CompositeParamModel(device=torch.device(device_type))
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
+        orig_model = CompositeParamModel(device=torch.device("cuda"))
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
         dist_model = FSDP(
             copy.deepcopy(orig_model),
             auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
@@ -502,7 +499,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(1)
     def test_activation_ckpt_fqns_ddp(self) -> None:
         """Tests that activation checkpointing prefixes are removed from module names"""
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         original_keys = get_model_state_dict(model).keys()
 
         apply_activation_checkpointing(model)
@@ -521,7 +518,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_activation_ckpt_fqns_fsdp1(self, use_orig_params: bool) -> None:
         """Tests that activation checkpointing prefixes are removed from module names"""
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         original_keys = get_model_state_dict(model).keys()
 
         apply_activation_checkpointing(model)
@@ -532,7 +529,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @skip_if_lt_x_gpu(1)
     def test_extra_state(self) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
 
         def get_extra_state(self):
             return "MyState"
@@ -550,21 +547,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @skip_if_lt_x_gpu(1)
     def test_non_persistent_buffers(self) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         model.register_buffer(
-            "dont_save_me", torch.rand(100, device=device_type), persistent=False
+            "dont_save_me", torch.rand(100, device="cuda"), persistent=False
         )
         target_model = copy.deepcopy(model)
         set_model_state_dict(target_model, get_model_state_dict(target_model))
         self.assertEqual(model.state_dict(), get_model_state_dict(target_model))
 
     def _test_broadcast_from_rank0(self, wrapper) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         optim = torch.optim.Adam(model.parameters())
         fsdp_model = wrapper(copy.deepcopy(model))
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters())
 
-        batch = torch.rand(8, 100, device=device_type)
+        batch = torch.rand(8, 100, device="cuda")
         model(batch).sum().backward()
         optim.step()
         states, optim_states = get_state_dict(model, optim)
@@ -634,8 +631,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_broadcast_from_rank0(self) -> None:
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        hsdp_device_mesh = init_device_mesh(device_type, (2, self.world_size // 2))
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        hsdp_device_mesh = init_device_mesh("cuda", (2, self.world_size // 2))
         self.run_subtests(
             {
                 "wrapper": [
@@ -657,8 +654,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # This test verifies that FSDP root is not initialized but we should
         # still be able to  get the state_dict without errors because
         # fsdp_model.state_dict() will trigger the FSDP initialization.
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        model = CompositeParamModel(device=torch.device(device_type))
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
         fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters())
         get_model_state_dict(fsdp_model)
@@ -671,15 +668,18 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # "initial_lr" is added to optim_state_dict, but not to the new optim
         # We test whether "initial_lr" appear in optim after
         # set_optimizer_state_dict.
+        device = "cuda"
         torch.manual_seed(0)
         model = nn.Sequential(
-            *[nn.Linear(4, 4, device=device_type, bias=False) for _ in range(2)]
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
         )
         for layer in model:
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
+        torch.optim.lr_scheduler.LambdaLR(
+            optim, lr_lambda=[lambda epoch: 0.95**epoch]
+        )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -707,11 +707,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_flattened_osd(self) -> None:
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        model = CompositeParamModel(device=torch.device(device_type))
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
         fsdp_model = fully_shard(copy.deepcopy(model), mesh=device_mesh)
         fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
-        batch = torch.rand(8, 100, device=device_type)
+        batch = torch.rand(8, 100, device="cuda")
         fsdp_model(batch).sum().backward()
         fsdp_optim.step()
         fsdp_optim.zero_grad()
@@ -732,7 +732,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
 
     def _test_deprecate_partial(self) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
 
         model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
@@ -785,8 +785,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
     def _test_deprecate_fsdp_api(self) -> None:
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        model = CompositeParamModel(device=torch.device(device_type))
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
         fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
         with self.assertWarnsRegex(
             FutureWarning,
@@ -825,8 +825,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 return output
 
         def init_model_optim():
-            device_mesh = init_device_mesh(device_type, (self.world_size,))
-            orig_model = TiedEmbeddingModel(10000, 300).to(torch.device(device_type))
+            device_mesh = init_device_mesh("cuda", (self.world_size,))
+            orig_model = TiedEmbeddingModel(10000, 300).to(torch.device("cuda"))
             orig_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-4)
             copy_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-4)
             dist_model = FSDP(copy.deepcopy(orig_model), device_mesh=device_mesh)
@@ -907,12 +907,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self.assertEqual(cpu_model_value, meta_model_value)
         # Memory allocated and reserved are lower due to the change at _distribute_tensors
         # from view to clone. This test would fail if with view due to higher memory cost.
-        memory_allocated = (
-            torch.get_device_module(device_type).memory_allocated(0) / 1024 / 1024
-        )
-        memory_reserved = (
-            torch.get_device_module(device_type).memory_reserved(0) / 1024 / 1024
-        )
+        memory_allocated = torch.cuda.memory_allocated(0) / 1024 / 1024
+        memory_reserved = torch.cuda.memory_reserved(0) / 1024 / 1024
         self.assertTrue(memory_allocated <= 384)
         self.assertTrue(memory_reserved <= 768)
 
@@ -948,11 +944,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             meta_submodel = nn.Linear(4, 4, bias=False)
         with torch.device("cpu"):
             cpu_submodel = nn.Linear(4, 4, bias=False)
-        with torch.device(device_type):
-            acc_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cuda"):
+            cuda_submodel = nn.Linear(4, 4, bias=False)
 
-        two_device_model_with_meta = nn.Sequential(meta_submodel, acc_submodel)
-        two_device_model_without_meta = nn.Sequential(cpu_submodel, acc_submodel)
+        two_device_model_with_meta = nn.Sequential(meta_submodel, cuda_submodel)
+        two_device_model_without_meta = nn.Sequential(cpu_submodel, cuda_submodel)
 
         with torch.device("cpu"):
             model_to_set = nn.Sequential(
@@ -980,7 +976,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def test_state_dict_with_hook_on_keys(self) -> None:
         with torch.device("meta"):
             metamodel = FusionEmbedding(4, 4, 4)
-        with torch.device(device_type):
+        with torch.device("cuda"):
             gpumodel = FusionEmbeddingWithHook(4, 4, 4)
         gpumodel_state_dict = get_model_state_dict(gpumodel)
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
@@ -1001,8 +997,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             def forward(self, x):
                 return self.fc1(self.fc(x))
 
-        device_mesh = init_device_mesh(device_type, (self.world_size,))
-        model = TestModel().to(device_type)
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = TestModel().cuda()
         parallelize_module(
             model,
             device_mesh,
@@ -1020,7 +1016,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             optim = torch.optim.AdamW(**optim_kwargs)
             optim.zero_grad()
-            model(torch.randn(64, 64, device=device_type)).sum().backward()
+            model(torch.randn(64, 64).cuda()).sum().backward()
             optim.step()
             optim.zero_grad()
 
@@ -1073,7 +1069,7 @@ class TestNoComm(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(1)
     def test_no_dist(self) -> None:
-        model = CompositeParamModel(device=torch.device(device_type))
+        model = CompositeParamModel(device=torch.device("cuda"))
         optim = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
         self.assertFalse(dist.is_initialized())

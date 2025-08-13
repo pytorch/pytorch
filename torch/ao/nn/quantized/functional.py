@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-r"""Functional interface (quantized)."""
-
+r""" Functional interface (quantized)."""
 import warnings
 from typing import Optional
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Optional
 
 import torch
@@ -19,7 +20,7 @@ __MAX_ALG_ID: Optional[int] = None
 
 if _cusparselt is not None:
 
-    def _init() -> bool:
+    def _init():
         global __cusparselt_version
         global __MAX_ALG_ID
         if __cusparselt_version is None:
@@ -34,7 +35,7 @@ if _cusparselt is not None:
 
 else:
 
-    def _init() -> bool:
+    def _init():
         return False
 
 

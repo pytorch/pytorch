@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
+import torch._inductor.config
 import torch.fx
 
 from .standalone_compile import CompiledArtifact  # noqa: TC001
@@ -14,8 +15,6 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
-    from torch.export.pt2_archive._package import AOTICompiledModel
-    from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 
 __all__ = [
@@ -198,13 +197,13 @@ def _aoti_compile_and_package_inner(
         path = [
             os.path.splitext(file)[0]
             for file in aoti_files
-            if isinstance(file, str) and os.path.splitext(file)[1] == ".so"
+            if os.path.splitext(file)[1] == ".so"
         ]
         if len(path) == 0:
             path = [
                 os.path.splitext(file)[0]
                 for file in aoti_files
-                if isinstance(file, str) and os.path.splitext(file)[1] == ".cpp"
+                if os.path.splitext(file)[1] == ".cpp"
             ]
         package_path = path[0] + ".pt2"
 
@@ -223,7 +222,7 @@ def _aoti_compile_and_package_inner(
             not_strict_accuracy = check_accuracy == "accuracy"
             if not same_two_models(
                 gm,
-                compiled_model,  # type: ignore[arg-type]
+                compiled_model,
                 args,
                 only_fwd=True,
                 require_fp64=not_strict_accuracy,
@@ -238,7 +237,7 @@ def _aoti_compile_and_package_inner(
 
 def aoti_load_package(
     path: FileLike, run_single_threaded: bool = False, device_index: int = -1
-) -> AOTICompiledModel:
+) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -275,7 +274,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]]]:
+) -> Union[str, list[str]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 

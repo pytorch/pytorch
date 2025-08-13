@@ -5,7 +5,6 @@
 Things imported from here have numpy-compatible signatures but operate on
 pytorch tensors.
 """
-
 # Contents of this module ends up in the main namespace via _funcs.py
 # where type annotations are used in conjunction with the @normalizer decorator.
 from __future__ import annotations
@@ -96,7 +95,7 @@ def _concat_cast_helper(tensors, out=None, dtype=None, casting="same_kind"):
     else:
         out_dtype = _dtypes_impl.result_type_impl(*tensors)
 
-    # cast input arrays if necessary; do not broadcast them against `out`
+    # cast input arrays if necessary; do not broadcast them agains `out`
     tensors = _util.typecast_tensors(tensors, out_dtype, casting)
 
     return tensors
@@ -1290,7 +1289,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=False):
     # Have to manually normalize *operands and **kwargs, following the NumPy signature
-    # We have a local import to avoid polluting the global space, as it will be then
+    # We have a local import to avoid poluting the global space, as it will be then
     # exported in funcs.py
     from ._ndarray import ndarray
     from ._normalizations import (

@@ -1,21 +1,5 @@
 # Owner(s): ["oncall: profiler"]
 
-import gc
-import re
-import textwrap
-import unittest
-import weakref
-from typing import Any
-
-import torch
-import torch.nn as nn
-import torch.optim
-import torch.utils.data
-from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
-from torch.profiler import _utils, profile
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
@@ -27,9 +11,27 @@ try:
 
     tqdm.tqdm.monitor_interval = 0
 except ImportError:
-    pass
+    None
+
+import gc
+import re
+import textwrap
+import unittest
+import weakref
+from typing import Any
+
+import torch
+import torch.nn as nn
+import torch.optim
+import torch.utils.data
+from torch._C._profiler import _TensorMetadata
+from torch.profiler import _utils, profile
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 Json = dict[str, Any]
+
+from torch._C._profiler import _ExtraFields_PyCall
 
 
 def find_node_with_name(nodes, name):

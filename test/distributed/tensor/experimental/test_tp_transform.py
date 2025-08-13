@@ -85,7 +85,7 @@ class TensorParallelTest(DTensorTestBase):
         with torch.no_grad():
             tp_res = tp_model(*inputs)
         self.assertEqual(res, tp_res)
-        # Expect all_gather to be inserted to distributed sharded fc results
+        # Expect all_gather to be inserted to distributed sharded fc resutls
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {

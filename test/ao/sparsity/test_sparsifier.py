@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import itertools
+import logging
 import re
 
 import torch
@@ -17,7 +18,12 @@ from torch.testing._internal.common_pruning import (
     MockSparseLinear,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import TestCase
+
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 class TestBaseSparsifier(TestCase):
@@ -478,7 +484,3 @@ class TestNearlyDiagonalSparsifier(TestCase):
                         assert mask[row, col] == 1
                     else:
                         assert mask[row, col] == 0
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_ao_sparsity.py")

@@ -39,7 +39,7 @@ class CallbackTrigger(enum.Enum):
     # backward compilation can be deferred to runtime
     LAZY_BACKWARD = 2
     # some backends autotune at runtime
-    TRITON_AUTOTUNING = 3  # Temporarily disabled due to spam
+    TRITON_AUTOTUNING = 3
     # cudagraphs record at runtime
     CUDAGRAPH_RECORDING = 4
 
@@ -126,9 +126,9 @@ class CompilationCallbackHandler:
         args = CallbackArgs(trigger, compile_id)
         try:
             with self.__pending_callbacks_counter_lock:
-                self.__pending_callbacks_counter += 1
-                if self.__pending_callbacks_counter == 1:
+                if self.__pending_callbacks_counter == 0:
                     self.run_start_callbacks(args)
+                self.__pending_callbacks_counter += 1
             yield
         finally:
             with self.__pending_callbacks_counter_lock:

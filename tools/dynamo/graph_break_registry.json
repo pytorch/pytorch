@@ -1,0 +1,221 @@
+{
+  "GB0000": [
+    {
+      "Gb_type": "All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
+      "Context": "fn={fn}, args={args}, kwargs={kwargs}",
+      "Explanation": "All __torch_function__ overrides for for function {fn} returned NotImplemented",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0001": [
+    {
+      "Gb_type": "Argument of `as_subclass` must be a non-dispatcher-style tensor subclass",
+      "Context": "{self}.as_subclass({cls})",
+      "Explanation": "Currently not supported",
+      "Hints": [
+        "Avoid this call or move it outside `torch.compile` regione",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0002": [
+    {
+      "Gb_type": "Assertion failed on symbolic shapes",
+      "Context": "str(sym_expr)",
+      "Explanation": "",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0003": [
+    {
+      "Gb_type": "Attempt to trace generator",
+      "Context": "",
+      "Explanation": "Generators cannot be compiled directly with `torch.compile`.",
+      "Hints": [
+        "Call a generator from inside of a non-generator Python function and ",
+        "compile that function instead.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB0004": [
+    {
+      "Gb_type": "Attempted super().__delattr__() on an object without mutation tracking",
+      "Context": "call_method {self} {name}",
+      "Explanation": "Dynamo needs to track mutations on an object before `super().__delattr__` can be used on it. But the object ({self.objvar}) doesn't have attribute mutation tracking enabled.",
+      "Hints": [
+        "Ensure the object is tracked by Dynamo's side effect system.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0005": [
+    {
+      "Gb_type": "Attempted to a str() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based str method. This is not supported.",
+      "Hints": [
+        "Write the str method in Python"
+      ]
+    }
+  ],
+  "GB0006": [
+    {
+      "Gb_type": "Attempted to call a super() attribute that is not a function or method",
+      "Context": "call_method {self} {name}",
+      "Explanation": "Dynamo does not know how to trace the call `super().{name}()` because `super().{name}` is not a function or method attribute.",
+      "Hints": [
+        "Ensure the attribute accessed via `super()` is a standard method or function."
+      ]
+    }
+  ],
+  "GB0007": [
+    {
+      "Gb_type": "Attempted to call function marked as skipped",
+      "Context": "module: {module_name}, qualname: {qualname}, skip reason: {reason}",
+      "Explanation": "explanation",
+      "Hints": []
+    }
+  ],
+  "GB0008": [
+    {
+      "Gb_type": "Attempted to inline function marked as skipped",
+      "Context": "qualname: {fn_qualname}, name: {func.get_name()}, filename: `{func.get_filename()}`, skip reason: {result.reason}",
+      "Explanation": "Dynamo developers have intentionally marked that the function `{fn_qualname}` should not be traced.",
+      "Hints": []
+    }
+  ],
+  "GB0009": [
+    {
+      "Gb_type": "Attempted to inline function marked as skipped (SkipFunctionVariable)",
+      "Context": "Attempted to inline a SkipFunctionVariable {func}",
+      "Explanation": "Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
+      "Hints": []
+    }
+  ],
+  "GB0010": [
+    {
+      "Gb_type": "Attempted to read a deleted variable",
+      "Context": "item: {item}, name: {name}",
+      "Explanation": "",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0011": [
+    {
+      "Gb_type": "Attempted to read undefined local variable",
+      "Context": "LOAD_FAST {name}",
+      "Explanation": "Could not find a local variable with name `{name}`",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0012": [
+    {
+      "Gb_type": "Attempted to read undefined local variable (implicit)",
+      "Context": "LOAD_FAST {name}",
+      "Explanation": "Could not find an implicit local variable with name `{name}`",
+      "Hints": [
+        "This happens in dict/list comprehensions",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0013": [
+    {
+      "Gb_type": "Attempted to represent unregistered RemovableHandle",
+      "Context": "",
+      "Explanation": "Dynamo attempted to build a representation of a torch.utils.hooks.RemovableHandle, which is not supported. This happens because the RemovableHandle was created in another frame.",
+      "Hints": []
+    }
+  ],
+  "GB0014": [
+    {
+      "Gb_type": "Attempted to wrap RNN, GRU, or LSTM",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0015": [
+    {
+      "Gb_type": "Attempted to wrap sparse Tensor",
+      "Context": "",
+      "Explanation": "torch.compile does not support sparse Tensors",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0016": [
+    {
+      "Gb_type": "Attempted to wrap strided NestedTensor",
+      "Context": "",
+      "Explanation": "torch.compile does not support strided NestedTensor",
+      "Hints": []
+    }
+  ],
+  "GB0017": [
+    {
+      "Gb_type": "Attempted to wrap torch._higher_order_ops.invoke_subgraph",
+      "Context": "",
+      "Explanation": "Directly using invoke_subgraph is not supported. Use mark_compile_region",
+      "Hints": []
+    }
+  ],
+  "GB0018": [
+    {
+      "Gb_type": "Attempted to wrap unbacked SymInt",
+      "Context": "",
+      "Explanation": "Unbacked SymInt input is not supported yet.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0019": [
+    {
+      "Gb_type": "AutogradFunctionContextVariable escaped Dynamo-traced region",
+      "Context": "",
+      "Explanation": "We cannot reconstruct a torch.autograd.Function's context object.",
+      "Hints": []
+    }
+  ],
+  "GB0020": [
+    {
+      "Gb_type": "BUILD_STRING key conflict",
+      "Context": "format_string_parts: {format_string_parts}, kwargs: {kwargs}, part.sym_kwargs: {part.sym_kwargs}",
+      "Explanation": "Failed to build format string due to key conflict",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0021": [
+    {
+      "Gb_type": "BUILD_STRING type error",
+      "Context": "str(part)",
+      "Explanation": "Format string part type is not correct - expected constant or format string.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0022": [
+    {
+      "Gb_type": "Bad import result",
+      "Context": "typestr(value)",
+      "Explanation": "Import result is not a Python module.",
+      "Hints": []
+    }
+  ]
+}

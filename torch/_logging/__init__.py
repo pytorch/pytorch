@@ -12,7 +12,6 @@ from ._internal import (
     dtrace_structured,
     get_structured_logging_overhead,
     getArtifactLogger,
-    hide_warnings,
     LazyString,
     set_logs,
     trace_structured,

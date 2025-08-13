@@ -396,14 +396,14 @@ def instance_norm(
 __all__ += ["instance_norm"]
 
 def interpolate(
-    input: Tensor,
-    size: int | Sequence[int] | None = ...,
-    scale_factor: float | Sequence[float] | None = ...,
+    input: Any,
+    size: Any | None = ...,
+    scale_factor: Any | None = ...,
     mode: str = ...,
-    align_corners: bool | None = ...,
-    recompute_scale_factor: bool | None = ...,
+    align_corners: Any | None = ...,
+    recompute_scale_factor: Any | None = ...,
     antialias: bool = ...,
-) -> Tensor: ...
+): ...
 
 __all__ += ["interpolate"]
 

@@ -1,17 +1,14 @@
+# mypy: allow-untyped-defs
 import copy
 import warnings
-from collections.abc import Iterable, Iterator, Sized
-from typing import TypeVar
 
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 
 
-_T = TypeVar("_T")
-
 __all__ = ["IterableWrapperIterDataPipe"]
 
 
-class IterableWrapperIterDataPipe(IterDataPipe[_T]):
+class IterableWrapperIterDataPipe(IterDataPipe):
     r"""
     Wraps an iterable object to create an IterDataPipe.
 
@@ -33,11 +30,11 @@ class IterableWrapperIterDataPipe(IterDataPipe[_T]):
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     """
 
-    def __init__(self, iterable: Iterable[_T], deepcopy: bool = True) -> None:
+    def __init__(self, iterable, deepcopy=True):
         self.iterable = iterable
         self.deepcopy = deepcopy
 
-    def __iter__(self) -> Iterator[_T]:
+    def __iter__(self):
         source_data = self.iterable
         if self.deepcopy:
             try:
@@ -53,7 +50,5 @@ class IterableWrapperIterDataPipe(IterDataPipe[_T]):
                 )
         yield from source_data
 
-    def __len__(self) -> int:
-        if isinstance(self.iterable, Sized):
-            return len(self.iterable)
-        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
+    def __len__(self):
+        return len(self.iterable)

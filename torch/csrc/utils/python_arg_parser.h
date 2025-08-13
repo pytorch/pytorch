@@ -39,7 +39,6 @@
 //      Scalar and Tensor, UNLESS they require grad (in which case
 //      they only bind to Tensor).
 
-#include <fmt/format.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
 
@@ -491,9 +490,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   if (size != N) {
-    TORCH_CHECK_TYPE(
-        false,
-        fmt::format("expected tuple of {} elements but got {}", N, size));
+    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
   }
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -531,14 +528,12 @@ inline void throw_intlist_exception(
       ? e.what()
       : std::string("type must be ") + args->signature.params[i].type_name() +
           ",but got " + Py_TYPE(obj)->tp_name;
-  TORCH_CHECK_TYPE(
-      false,
-      fmt::format(
-          "{}(): argument '{}' failed to unpack the object at pos {} with error \"{}\"",
-          args->signature.name,
-          args->signature.params[i].name,
-          idx + 1,
-          error));
+  throw TypeError(
+      "%s(): argument '%s' failed to unpack the object at pos %zu with error \"%s\"",
+      args->signature.name.c_str(),
+      args->signature.params[i].name.c_str(),
+      idx + 1,
+      error.c_str());
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -717,15 +712,13 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
         res[idx] = THPUtils_unpackDouble(obj);
       }
     } catch (const std::exception&) {
-      TORCH_CHECK_TYPE(
-          false,
-          fmt::format(
-              "{}(): argument '{}' must be {}, but found element of type {} at pos {}",
-              signature.name,
-              signature.params[i].name,
-              signature.params[i].type_name(),
-              Py_TYPE(obj)->tp_name,
-              idx + 1));
+      throw TypeError(
+          "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
+          Py_TYPE(obj)->tp_name,
+          idx + 1);
     }
   }
   return res;
@@ -1126,10 +1119,8 @@ inline c10::Stream PythonArgs::stream(int i) {
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
   if (!THPStream_Check(args[i])) {
-    TORCH_CHECK_TYPE(
-        false,
-        fmt::format(
-            "expected Stream object. Got '{}'", Py_TYPE(args[i])->tp_name));
+    throw TypeError(
+        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
   }
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
@@ -1257,7 +1248,7 @@ auto handle_torch_function_indexing(
 /*
  * Check if the input obj is Tensor type, including its subclass, or overloaded
  * type. If the type defines __torch_function__, it also returns true.
- * Otherwise returns false. If the class is not torch.Tensor, and it defines
+ * Otherwise returns flase. If the class is not torch.Tensor, and it defines
  * __torch_function__, we append obj to overloaded_args.
  *
  * 'obj': the input argument to be checked

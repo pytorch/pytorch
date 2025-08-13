@@ -1,6 +1,8 @@
 # Owner(s): ["module: unknown"]
 
 
+import logging
+
 import torch
 import torch.ao.quantization as tq
 from torch import nn
@@ -13,12 +15,12 @@ from torch.ao.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
-from torch.testing._internal.common_utils import (
-    raise_on_run_directly,
-    TestCase,
-    xfailIfS390X,
-)
+from torch.testing._internal.common_utils import TestCase, xfailIfS390X
 
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 sparse_defaults = {
     "sparsity_level": 0.8,
@@ -640,7 +642,3 @@ class TestFxComposability(TestCase):
             sparsity_level, sparse_config[0]["sparsity_level"]
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
-
-
-if __name__ == "__main__":
-    raise_on_run_directly("test/test_ao_sparsity.py")

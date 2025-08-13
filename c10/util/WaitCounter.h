@@ -3,7 +3,6 @@
 #include <chrono>
 #include <memory>
 #include <string_view>
-#include <vector>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ScopeExit.h>

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import lru_cache as _lru_cache
 from typing import Optional, TYPE_CHECKING
 
@@ -39,7 +40,7 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
 _lib: Optional[_Library] = None
 
 
-def _init() -> None:
+def _init():
     r"""Register prims as implementation of var_mean and group_norm."""
     global _lib
 

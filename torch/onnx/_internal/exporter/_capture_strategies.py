@@ -152,11 +152,7 @@ class TorchExportStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        with (
-            _patch_dynamo_unsupported_functions(),
-            # Support the dynamism with 0/1 input dim
-            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
-        ):
+        with _patch_dynamo_unsupported_functions():
             try:
                 return torch.export.export(
                     model,
@@ -202,30 +198,22 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        with (
-            # Support the dynamism with 0/1 input dim
-            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
-        ):
+        try:
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
+            )
+        except torch._dynamo.exc.UserError as exc:
+            # Refine the dynamic shapes based on the suggested fixes.
             try:
-                return torch.export.export(
-                    model,
-                    args,
-                    kwargs=kwargs,
-                    dynamic_shapes=dynamic_shapes,
-                    strict=False,
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
                 )
-            except torch._dynamo.exc.UserError as exc:
-                # Refine the dynamic shapes based on the suggested fixes.
-                try:
-                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
-                        exc.msg, dynamic_shapes
-                    )
-                except Exception:
-                    # If the dynamic shapes cannot be refined, re-raise the exception.
-                    raise exc from None
-                return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
-                )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+            )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))

@@ -4,16 +4,15 @@
 
 import functools
 import inspect
-import sys
 import warnings
-from typing import Any, Callable, cast, TypeVar
-
+import sys
+from typing import Any, Callable, TypeVar, cast
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
 # 'no_grad' and 'enable_grad').
 # See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
 FuncType = Callable[..., Any]
-F = TypeVar("F", bound=FuncType)
+F = TypeVar('F', bound=FuncType)
 
 
 def _wrap_generator(ctx_factory, func):
@@ -23,7 +22,6 @@ def _wrap_generator(ctx_factory, func):
     The input should be a function that returns a context manager,
     not a context manager itself, to handle one-shot context managers.
     """
-
     @functools.wraps(func)
     def generator_context(*args, **kwargs):
         gen = func(*args, **kwargs)
@@ -48,7 +46,7 @@ def _wrap_generator(ctx_factory, func):
                         gen.close()
                     raise
 
-                except BaseException:  # noqa: B036
+                except BaseException:
                     # Propagate the exception thrown at us by the caller
                     with ctx_factory():
                         response = gen.throw(*sys.exc_info())
@@ -85,7 +83,7 @@ def context_decorator(ctx, func):
     be a multi-shot context manager that can be directly invoked multiple times)
     or a callable that produces a context manager.
     """
-    assert not (callable(ctx) and hasattr(ctx, "__enter__")), (
+    assert not (callable(ctx) and hasattr(ctx, '__enter__')), (
         f"Passed in {ctx} is both callable and also a valid context manager "
         "(has __enter__), making it ambiguous which interface to use.  If you "
         "intended to pass a context manager factory, rewrite your call as "
@@ -94,10 +92,8 @@ def context_decorator(ctx, func):
     )
 
     if not callable(ctx):
-
         def ctx_factory():
             return ctx
-
     else:
         ctx_factory = ctx
 

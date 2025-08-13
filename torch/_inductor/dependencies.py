@@ -11,7 +11,6 @@ from unittest.mock import patch
 import sympy
 
 import torch
-from torch._inductor.utils import get_free_symbols
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
@@ -38,12 +37,6 @@ is_indirect = re.compile(r"indirect|tmp").search
 class Dep(abc.ABC):
     name: str
     index: sympy.Expr
-
-    @abc.abstractmethod
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        pass
 
     @abc.abstractmethod
     def rename(self, renames: dict[str, str]) -> Self:
@@ -76,15 +69,6 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return (
-            get_free_symbols(self.index, unbacked_only)
-            | get_free_symbols(self.size, unbacked_only)
-            | get_free_symbols(self.var_names, unbacked_only)
-        )
 
     def __repr__(self) -> str:
         maybe_mode = ""
@@ -141,7 +125,7 @@ class MemoryDep(Dep):
             )
             return None
 
-        # May happen if self and other are as follows
+        # May hanppen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
         # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
         if OrderedSet(self_strides) != OrderedSet(other_strides):
@@ -323,11 +307,6 @@ class StarDep(Dep):
             return StarDep(renames[self.name], self.mode)
         return self
 
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
     def numbytes_hint(self) -> int:
         try:
             return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
@@ -363,17 +342,6 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
-    # WeakDep's are also used to add dependencies to prevent some specific reordering,
-    # E.g. collectives global ordering.
-    # But if other pass guarantees proper ordering by its logic,
-    # This additional "fake" deps will be holding optimizations.
-    # This flag is used to identify those additional deps.
-    is_fake: bool = False
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
 
     @property
     def index(self) -> sympy.Expr:
@@ -384,7 +352,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf, self.is_fake)
+            return WeakDep(renames[self.name], self.mutating_buf)
         return self
 
     def numbytes_hint(self) -> int:
@@ -471,15 +439,6 @@ class ReadWrites:
             ):
                 names.add(dep.name)
         return names
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        result: OrderedSet[sympy.Symbol] = OrderedSet()
-
-        for dep in self.reads_and_writes():
-            result |= dep.get_free_symbol_uses(unbacked_only)
-        return result
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
@@ -622,12 +581,12 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> tuple[list[Sequence[sympy.Expr]], VarRanges]:
+) -> tuple[list[list[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: list[Sequence[sympy.Expr]] = []
-    new_sizes: list[Sequence[sympy.Expr]] = []
+    args: list[list[sympy.Expr]] = []
+    new_sizes: list[list[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -648,10 +607,7 @@ def extract_read_writes(
 
     if isinstance(fn, LoopBody):
         inner = extract_loop_body_with_args(
-            fn,
-            [*args, *hidden_args],  # type: ignore[list-item]
-            var_ranges,
-            normalize,
+            fn, [*args, *hidden_args], var_ranges, normalize
         )
     else:
         # Slow path tracing the function
@@ -752,7 +708,7 @@ def extract_input_node_reduction_ranges(
 
     # There is one issue: what if there are views / permutations between the input node and its dependent realized nodes?
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
-    # Is there a way to check whether there are permutations in between?
+    # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
     reduction_size: Optional[list[sympy.Expr]] = None
     size: Optional[list[sympy.Expr]] = None

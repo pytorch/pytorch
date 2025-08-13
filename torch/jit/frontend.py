@@ -73,6 +73,14 @@ from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
 
 
+_IS_ASTUNPARSE_INSTALLED = False
+try:
+    import astunparse  # type: ignore[import]
+
+    _IS_ASTUNPARSE_INSTALLED = True
+except ImportError:
+    pass
+
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
@@ -430,11 +438,7 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(
-            decl,  # type: ignore[arg-type]
-            type_comment_decl,
-            is_method,  # type: ignore[assignment]
-        )
+        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -583,7 +587,7 @@ def build_ignore_context_manager(ctx, stmt):
 from typing import List, Dict, Tuple
 
 @torch.jit.ignore
-{ast.unparse(ignore_function)}
+{astunparse.unparse(ignore_function)}
 """
     g = copy.copy(globals())
     exec(ignore_func_str, g)  # noqa: P204
@@ -838,6 +842,11 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
+            if not _IS_ASTUNPARSE_INSTALLED:
+                raise RuntimeError(
+                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`, \
+                                   please install it in your Python environment"
+                )
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
@@ -1046,12 +1055,12 @@ class ExprBuilder(Builder):
                 in_expr = BinOp("in", lhs, rhs)
                 cmp_expr = UnaryOp(r, "not", in_expr)
             else:
-                cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
+                cmp_expr = BinOp(op_token, lhs, rhs)
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp("and", result, cmp_expr)  # type: ignore[assignment]
+                result = BinOp("and", result, cmp_expr)
         return result
 
     @staticmethod
@@ -1126,7 +1135,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        else:  # In Python3.9 array indices are not wrapped in ast.Index
+        else:  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []

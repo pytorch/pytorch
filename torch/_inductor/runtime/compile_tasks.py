@@ -34,7 +34,7 @@ def _reload_python_module(
         return mod
 
 
-@functools.cache
+@functools.lru_cache(None)
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return

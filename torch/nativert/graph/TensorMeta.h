@@ -10,7 +10,6 @@
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/utils/generated_serialization_types.h>
-#include <torch/nativert/executor/Placement.h>
 
 namespace torch::nativert {
 
@@ -26,12 +25,12 @@ class TensorMeta {
   explicit TensorMeta(const torch::_export::TensorMeta& tensorMeta);
 
   c10::IntArrayRef sizes() const {
-    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
+    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
     return sizes_;
   }
 
   c10::IntArrayRef strides() const {
-    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
+    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
     return strides_;
   }
 
@@ -56,7 +55,7 @@ class TensorMeta {
   }
 
   int64_t numel() const {
-    TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
+    CHECK(!hasSymbolicShape_) << "TensorMeta has symbolic shape";
     return numel_;
   }
 
@@ -67,11 +66,6 @@ class TensorMeta {
   c10::TensorOptions asTensorOptions() const {
     return c10::TensorOptions().dtype(dtype_).layout(layout_).requires_grad(
         requiresGrad_);
-  }
-
-  // override device according to placement
-  void applyDevicePlacement(const Placement& placement) {
-    device_ = placement.getMappedDevice(device_);
   }
 
   // NYI

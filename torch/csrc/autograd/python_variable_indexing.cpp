@@ -29,7 +29,6 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <fmt/format.h>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -124,12 +123,10 @@ inline Variable valueToTensor(
   } else if (torch::is_symbool(value)) {
     scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
-    TORCH_CHECK_TYPE(
-        false,
-        "can't assign a ",
+    throw TypeError(
+        "can't assign a %s to a %s",
         Py_TYPE(value)->tp_name,
-        " to a ",
-        torch::utils::options_to_string(options));
+        torch::utils::options_to_string(options).c_str());
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -296,6 +293,13 @@ static bool treatSequenceAsTuple(PyObject* index) {
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
+    TORCH_WARN(
+        "Using a non-tuple sequence for "
+        "multidimensional indexing is deprecated and will be changed in "
+        "pytorch 2.9; use x[tuple(seq)] instead of "
+        "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+        "x[torch.tensor(seq)], which will result either in an error or a "
+        "different result");
     return false;
   }
   for (Py_ssize_t i = 0; i < n; i++) {
@@ -306,23 +310,9 @@ static bool treatSequenceAsTuple(PyObject* index) {
     }
     if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
         PySlice_Check(obj.get())) {
-      TORCH_WARN(
-          "Using a non-tuple sequence for "
-          "multidimensional indexing is deprecated and will be changed in "
-          "pytorch 2.9; use x[tuple(seq)] instead of "
-          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
-          "x[torch.tensor(seq)], which will result either in an error or a "
-          "different result");
       return true;
     }
     if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
-      TORCH_WARN(
-          "Using a non-tuple sequence for "
-          "multidimensional indexing is deprecated and will be changed in "
-          "pytorch 2.9; use x[tuple(seq)] instead of "
-          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
-          "x[torch.tensor(seq)], which will result either in an error or a "
-          "different result");
       return true;
     }
   }
@@ -446,7 +436,7 @@ static void dispatch_set_item(
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   if (py_value == nullptr) {
-    TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
+    throw TypeError("Tensor does not support deleting items");
   }
   if ((check_has_torch_function(self)) ||
       (check_has_torch_function(py_value))) {
@@ -459,7 +449,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
       self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
       self_.layout() == kSparseBsc) {
-    TORCH_CHECK_TYPE(false, "Cannot assign to a sparse tensor");
+    throw TypeError("Cannot assign to a sparse tensor");
   }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();

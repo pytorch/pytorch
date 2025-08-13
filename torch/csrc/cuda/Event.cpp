@@ -23,21 +23,19 @@ static PyObject* THCPEvent_pynew(
   unsigned char enable_timing = 0;
   unsigned char blocking = 0;
   unsigned char interprocess = 0;
-  unsigned char external = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* kwlist[] = {
-      "enable_timing", "blocking", "interprocess", "external", nullptr};
+      "enable_timing", "blocking", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|bbbb",
+          "|bbb",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &enable_timing,
           &blocking,
-          &interprocess,
-          &external)) {
+          &interprocess)) {
     return nullptr;
   }
 
@@ -49,8 +47,7 @@ static PyObject* THCPEvent_pynew(
   THCPEvent* self = (THCPEvent*)ptr.get();
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-      (interprocess ? cudaEventInterprocess : cudaEventDefault) |
-      (external ? cudaEventExternal : cudaEventDefault);
+      (interprocess ? cudaEventInterprocess : cudaEventDefault);
 
   new (&self->cuda_event) at::cuda::CUDAEvent(flags);
 
@@ -92,7 +89,8 @@ static PyObject* THCPEvent_from_ipc_handle(
   }
   THCPEvent* self = (THCPEvent*)ptr.get();
 
-  cudaIpcEventHandle_t handle{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  cudaIpcEventHandle_t handle;
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
 
@@ -174,7 +172,8 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
-  cudaIpcEventHandle_t handle{};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  cudaIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS

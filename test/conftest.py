@@ -341,5 +341,5 @@ class StepcurrentPlugin:
         self.cache.set(self.directory, self.lastrun)
 
     def pytest_sessionfinish(self, session, exitstatus):
-        if exitstatus == 0:
+        if exitstatus == 0 and not self.run_single:
             self.cache.set(self.directory, self.initial_val)

@@ -83,7 +83,7 @@ def recover_original_precision_folded_computation_ops(gm):
 _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
 
 
-@functools.cache
+@functools.lru_cache(None)
 def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _addmm_args = [Arg() for _ in range(3)]

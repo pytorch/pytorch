@@ -1,7 +1,5 @@
 # mypy: allow-untyped-decorators
-from __future__ import annotations
-
-from typing import Any
+# mypy: allow-untyped-defs
 
 import torch
 from torch.ao.quantization.fake_quantize import _is_symmetric_quant
@@ -21,15 +19,17 @@ class AdaroundFakeQuantizer(FakeQuantize):
     zero_point: torch.Tensor
     V: torch.nn.Parameter
 
+    # pyre-fixme[3]: Return type must be annotated.
     def __init__(
         self,
-        observer: type = MinMaxObserver,
-        qscheme: torch.qscheme = torch.per_tensor_symmetric,  # not used, but needed for fakequant
+        observer=MinMaxObserver,
+        qscheme=torch.per_tensor_symmetric,  # not used, but needed for fakequant
         quant_min: int = -128,
         quant_max: int = 127,
         ch_axis: int = 0,
-        **observer_kwargs: Any,
-    ) -> None:
+        # pyre-fixme[2]: Parameter must be annotated.
+        **observer_kwargs,
+    ):
         super().__init__(
             observer=observer,
             qscheme=qscheme,
@@ -40,10 +40,11 @@ class AdaroundFakeQuantizer(FakeQuantize):
         )
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
-            assert quant_min <= quant_max, (
-                "quant_min must be less than or equal to quant_max"
-            )
-        self.qscheme: torch.qscheme = qscheme
+            assert (
+                quant_min <= quant_max
+            ), "quant_min must be less than or equal to quant_max"
+        # pyre-fixme[4]: Attribute must be annotated.
+        self.qscheme = qscheme
         self.is_per_tensor: bool = is_per_tensor(qscheme)
         self.is_symmetric: bool = _is_symmetric_quant(qscheme)
         assert self.is_symmetric, "Only symmetric quantization is supported"
@@ -105,9 +106,9 @@ class AdaroundFakeQuantizer(FakeQuantize):
         X_q = X / self.scale
         X_q_floor = torch.floor(X_q)
         residual = X_q - X_q_floor  # [0,1)
-        assert torch.all(torch.ge(residual, 0)), (
-            "residual should be non-negative [0, 1)"
-        )
+        assert torch.all(
+            torch.ge(residual, 0)
+        ), "residual should be non-negative [0, 1)"
         V_init = -torch.log((self.zeta - self.gamma) / (residual - self.gamma) - 1)
         self.V.data = V_init
 
@@ -116,9 +117,8 @@ class AdaroundFakeQuantizer(FakeQuantize):
             X_detached = X.detach()
             self.activation_post_process(X_detached)
             _scale, _zero_point = self.activation_post_process.calculate_qparams()
-            _scale, _zero_point = (
-                _scale.to(self.scale.device),
-                _zero_point.to(self.zero_point.device),
+            _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(
+                self.zero_point.device
             )
             dims = list(range(X.dim()))
             if not self.is_per_tensor:

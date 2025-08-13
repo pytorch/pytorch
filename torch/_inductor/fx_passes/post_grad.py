@@ -111,21 +111,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_pre_pass
         )
 
-    if torch._C._has_mkldnn:
-        if (
-            config.cpp.enable_grouped_gemm_template
-            and config.max_autotune
-            and "CPP" in config.max_autotune_gemm_backends
-        ):
-            from .mkldnn_fusion import grouped_gemm_pass
+    if (
+        config.cpp.enable_grouped_gemm_template
+        and config.max_autotune
+        and "CPP" in config.max_autotune_gemm_backends
+        and torch._C._has_mkldnn
+    ):
+        from .mkldnn_fusion import grouped_gemm_pass
 
-            grouped_gemm_pass(gm.graph)
-
-        if config.cpp.enable_concat_linear:
-            from .quantization import concat_linear_woq_int4
-
-            # Concat linear optimization for WOQ int4
-            concat_linear_woq_int4(gm)
+        grouped_gemm_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -197,80 +191,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    collectives_bucketing: bool = False
-    if config.bucket_reduce_scatters_fx != "none":
-        from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
-
-        p = (
-            bucket_fsdp_reduce_scatter
-            if config.bucket_reduce_scatters_fx == "fsdp"
-            else bucket_reduce_scatter
-        )
-        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
-            lambda graph: p(
-                graph.owning_module,
-                config.bucket_reduce_scatters_fx_bucket_size_determinator,
-            )
-        )
-        collectives_bucketing = True
-
-    # Fx all_gather bucketing introduces mutation op
-    # Keeping it in the end to keep invariant of functional graph for previous passes.
-    if config.bucket_all_gathers_fx != "none":
-        from torch._inductor.fx_passes.bucketing import bucket_all_gather
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
-
-        p = (
-            bucket_fsdp_all_gather  # type: ignore[assignment]
-            if config.bucket_all_gathers_fx == "fsdp"
-            else bucket_all_gather
-        )
-        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
-            lambda graph: p(
-                graph.owning_module,
-                config.bucket_all_gathers_fx_bucket_size_determinator,
-            )
-        )
-        collectives_bucketing = True
-
-    if collectives_bucketing:
-        # Fx collectives bucketing passes require topological sort for the cases:
-        # when bucketed collectives have users before the last collective in the bucket
-        # AND when inputs of bucketed collective have ancestors after the first collective in the bucket.
-        #
-        # In this case we can not manually pick the place for bucketed collective insertion.
-        # But we are guaranteed by the bucketing (independent collectives in the bucket),
-        # that it is possible to reorder nodes to satisfy all ordering requirements.
-        #
-        # --- before bucketing ---
-        # in0 = ...
-        # wait_ag0 = ag(in0)
-        # user0(wait_ag0)
-        # ...
-        # pre_in1 = ...
-        # in1 = transform(pre_in1)
-        # wait_ag1 = ag(in1)
-        # user1(wait_ag1)
-        #
-        # --- after bucketing ---
-        #
-        # in0 = ...
-        # user(wait_ag0) <--- wait_ag0 is defined only after bucketed collective.
-        #
-        # pre_in1 = ...
-        # in1 = transform(pre_in1)
-        # ag_bucket(in0+in1)
-        # wait_bucket
-        # wait_ag0 = wait_bucket[0]
-        # wait_ag1 = wait_bucket[1]
-        # user1(wait_ag1)
-        stable_topological_sort(gm.graph)
-
-    # Keep these last, since they introduce mutation. Look at
+    # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+        reinplace_inplaceable_ops
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
@@ -693,7 +617,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
     # only reorder nodes before the first copy_ in the graph.
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
-    # and this reordering doesn't work well with mutation
+    # and this reordering doesnt work well with mutation
     first_copy = next(
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
@@ -729,7 +653,7 @@ def register_lowering_pattern(
 
 
 def is_valid_mm_plus_mm(match: Match):
-    if not (config.max_autotune or config.max_autotune_gemm):
+    if not torch._inductor.utils.use_max_autotune():
         return False
 
     *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
@@ -1301,44 +1225,18 @@ def decompose_auto_functionalized(graph):
 
     graph_pass.apply(graph)
 
-    # Remove unused get_attr nodes and their corresponding attributes from the graph module.
-    # When auto_functionalizing a hop, we need to clean up get_attr nodes for _constant_schema
-    # and the auto_functionalized graph module that are no longer referenced.
-    unused_get_attr_nodes = []
-    removable_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
-    protected_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
-
-    # First pass: identify unused get_attr nodes and track attribute usage
+    # We need to remove the get_attr registered for _constant_schema and the
+    # auto_functioanlized's graph module (it's replaced with original ) when auto_functionalize a hop.
+    _to_remove = []
     for node in graph.nodes:
-        if node.op != "get_attr":
-            continue
-
-        if len(node.users) == 0:
-            # Node is unused, mark for removal
-            unused_get_attr_nodes.append(node)
-
-            # Check if the attribute can be removed from the module
-            if (
-                hasattr(graph.owning_module, node.target)
-                and isinstance(
-                    getattr(graph.owning_module, node.target), torch.fx.GraphModule
-                )
-                and node.target not in protected_attrs
+        if node.op == "get_attr" and len(node.users) == 0:
+            _to_remove.append(node)
+            if hasattr(graph.owning_module, node.target) and isinstance(
+                getattr(graph.owning_module, node.target), torch.fx.GraphModule
             ):
-                removable_attrs.add(node.target)
-        else:
-            # Node is used, protect its attribute from removal
-            if node.target in removable_attrs:
-                removable_attrs.remove(node.target)
-            protected_attrs.add(node.target)
-
-    # Second pass: clean up unused nodes and attributes
-    for node in unused_get_attr_nodes:
+                delattr(graph.owning_module, node.target)
+    for node in _to_remove:
         graph.erase_node(node)
-
-    for attr_name in removable_attrs:
-        assert isinstance(attr_name, str)
-        delattr(graph.owning_module, attr_name)
 
     graph.lint()
 
@@ -1486,12 +1384,6 @@ def is_valid_addmm_fusion(match):
     if not matched:
         return False  # Shape mismatch
 
-    inp_dtype = inp.meta["val"].dtype
-
-    # aten cublas integration assumes equal dtypes
-    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
-        return False
-
     return not should_prefer_unfused_addmm(match)
 
 
@@ -1544,7 +1436,7 @@ def register_partial_reduction_pattern():
         def reuse_partial(match, input, reduced_dims, keepdim):
             partial_red, full_red = match.output_nodes()
 
-            # if they're small, reuse not worth it
+            # if theyre small, reuse not worth it
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 
@@ -1840,10 +1732,7 @@ class ConstructorMoverPass:
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
-                elif (
-                    self.allow_inputs
-                    and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
-                ):
+                elif self.all_inputs_are_cpu_scalar_or_on_target_device(user):
                     # this node takes only cpu scalar tensors or gpu tensors as inputs
                     # and outputs a gpu tensor. we can convert its cpu scalar inputs to gpu
                     # without making further changes

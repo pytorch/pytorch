@@ -30,7 +30,7 @@ TORCH_API bool isAccelerator(c10::DeviceType device_type);
 template <
     typename... T,
     typename = std::enable_if_t<(std::is_same_v<T, c10::DeviceType> && ...)>>
-inline bool isAcceleratorExcluded(
+TORCH_API inline bool isAcceleratorExcluded(
     c10::DeviceType device_type,
     c10::DeviceType first_excluded,
     T... rest_excluded) {

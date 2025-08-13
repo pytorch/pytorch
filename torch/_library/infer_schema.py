@@ -77,7 +77,7 @@ def infer_schema(
             )
 
     def unstringify_types(
-        tys: tuple[Union[type[object], str], ...],
+        tys: tuple[Union[type[object], str], ...]
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False
@@ -150,13 +150,13 @@ def infer_schema(
                     "the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
-                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
+                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
         elif name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
-            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
+            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
@@ -282,12 +282,8 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
 
-    # use (()) to represent tuple with single element
-    if len(args) == 1:
-        output_ty = "(" + output_ty + ")"
-    return "(" + output_ty + ")"
+    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()

@@ -43,7 +43,7 @@ TORCH_API void logSoftAssert(
     uint32_t line,
     const char* cond,
     const char* args);
-inline void logSoftAssert(
+TORCH_API inline void logSoftAssert(
     const char* func,
     const char* file,
     uint32_t line,

@@ -1,15 +1,9 @@
-from __future__ import annotations
-
-from typing import Any, TYPE_CHECKING
+# mypy: allow-untyped-defs
 
 import torch
 
 
-if TYPE_CHECKING:
-    from types import TracebackType
-
-
-def is_available() -> bool:
+def is_available():
     return hasattr(torch._C, "_dist_autograd_init")
 
 
@@ -31,8 +25,6 @@ if is_available():
         get_gradients,
     )
 
-__all__ = ["context", "is_available"]
-
 
 class context:
     """
@@ -53,14 +45,9 @@ class context:
         >>>     dist_autograd.backward(context_id, [loss])
     """
 
-    def __enter__(self) -> int:
+    def __enter__(self):
         self.autograd_context = _new_context()
         return self.autograd_context._context_id()
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
+    def __exit__(self, type, value, traceback):
         _release_context(self.autograd_context._context_id())

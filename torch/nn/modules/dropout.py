@@ -67,9 +67,6 @@ class Dropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.dropout(input, self.p, self.training, self.inplace)
 
 
@@ -115,9 +112,6 @@ class Dropout1d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.dropout1d(input, self.p, self.training, self.inplace)
 
 
@@ -170,9 +164,6 @@ class Dropout2d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
 
@@ -218,9 +209,6 @@ class Dropout3d(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
@@ -263,9 +251,6 @@ class AlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.alpha_dropout(input, self.p, self.training)
 
 
@@ -317,7 +302,4 @@ class FeatureAlphaDropout(_DropoutNd):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        """
-        Runs the forward pass.
-        """
         return F.feature_alpha_dropout(input, self.p, self.training)

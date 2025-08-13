@@ -423,14 +423,8 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
-  if (nonce != returnedNonce) {
-    C10_THROW_ERROR(
-        DistNetworkError,
-        fmt::format(
-            "Ping failed, invalid value returned from server. Expected: {}, Got: {}",
-            nonce,
-            returnedNonce));
-  }
+  TORCH_INTERNAL_ASSERT(
+      nonce == returnedNonce, "Ping failed, invalid nonce returned");
 }
 
 void TCPStore::_splitSet(

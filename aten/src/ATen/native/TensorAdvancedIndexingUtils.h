@@ -35,9 +35,7 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
   auto self_device = self.device();
   for (const std::optional<Tensor>& i : indices) {
     if (!i.has_value() || !(*i).defined()) {
-      if (!mask.defined()) {
-        num_ind++;
-      }
+      num_ind++;
     } else {
       const Tensor& index = *i;
       if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
@@ -73,7 +71,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more
   // LongTensors
-  auto indices = expandTensors(self, orig, /*ensure_same_device=*/true);
+  auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
@@ -92,6 +90,12 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   // together so that they're adjacent at the front
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
+  }
+  // Ensure indices are on the same device as self
+  for (auto& indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
+    }
   }
   for (auto& indice : indices) {
     if (indice.defined() && indice.dtype() == at::kInt) {

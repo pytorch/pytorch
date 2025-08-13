@@ -33,8 +33,7 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     return c10::fromIntArrayRefKnownNonNegative(strides_);
   }
 
-  c10::SymBool sym_is_contiguous_custom(
-      c10::MemoryFormat memory_format) const override {
+  bool is_contiguous_custom(c10::MemoryFormat memory_format) const override {
     (void)memory_format;
     return true;
   }

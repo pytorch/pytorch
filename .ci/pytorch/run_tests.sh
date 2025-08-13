@@ -74,13 +74,12 @@ else
 fi
 
 # Environment initialization
-retry pip install -qUr requirements-build.txt
 if [[ "$(uname)" == Darwin ]]; then
     # Install the testing dependencies
-    retry pip install -q future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest
+    retry pip install -q future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest setuptools six typing_extensions pyyaml
 else
     retry pip install -qr requirements.txt || true
-    retry pip install -q hypothesis protobuf pytest || true
+    retry pip install -q hypothesis protobuf pytest setuptools || true
     numpy_ver=1.15
     case "$(python --version 2>&1)" in
       *2* | *3.5* | *3.6*)
