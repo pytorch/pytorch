@@ -833,7 +833,7 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestFullyShardGradientAccumulation(FSDPTest):
+class TestReplicateGradientAccumulation(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
