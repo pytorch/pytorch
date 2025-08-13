@@ -433,7 +433,12 @@ class VllmTestRunner(BaseRunner):
             self.run_test(self.test_name)
 
     def run_test(self, test_name: str):
-        logger.info("run tests.....")
+        """
+        a method to run test based on the test plan. currently this only
+        used to run vllm tests.
+        """
+
+        logger.info("run vllm tests.....")
         tests_map = sample_tests()
         if test_name not in tests_map:
             raise RuntimeError(
@@ -471,7 +476,8 @@ def preprocess_test_in(
     target_file: str = "requirements/test.in", additional_packages: Iterable[str] = ()
 ):
     """
-    remove torch packages in target_file and replace with local torch whls
+    This modifies the target_file file in place. by default, it points to vllm's requirements/test.in
+    It removes torch packages in target_file and replace with local torch whls
     """
     additional_package_to_move = list(additional_packages or ())
     pkgs_to_remove = [
@@ -507,14 +513,25 @@ def preprocess_test_in(
 
 
 def sample_tests():
-    # TODO(elainewy): add test.yaml to handle the env and tests
+    """
+    Simple sample to unblock the vllm ci development, next step is read those tests from a yaml file
+    which is mimic to https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
+    This function represents how the test plan fetched as dict in python at runtime.
+    """
+    # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
+    # source is from vllm test file: https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
     return {
         "basic_correctness_test": {
+            # test plan:
+            # required id, title, and steps
             "title": "Basic Correctness Test",
             "id": "basic_correctness_test",
             "env_var": {
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             },
+            # test step:
+            # required: command | package_install
+            # available fields: command, env_var (env_var only set within the scope of the test step), package_install(pip package)
             "steps": [
                 {
                     "command": "pytest -v -s basic_correctness/test_cumem.py",
@@ -532,5 +549,16 @@ def sample_tests():
                     },
                 },
             ],
-        }
+        },
+        "basic_models_test": {
+            "title": "Basic models test",
+            "id": "basic_models_test",
+            "steps": [
+                {"command": "pytest -v -s models/test_transformers.py"},
+                {"command": "pytest -v -s models/test_registry.py"},
+                {"command": "pytest -v -s models/test_utils.py"},
+                {"command": "pytest -v -s models/test_vision.py"},
+                {"command": "pytest -v -s models/test_initialization.py"},
+            ],
+        },
     }
