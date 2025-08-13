@@ -1196,6 +1196,33 @@ class TestAutograd(TestCase):
                 tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
 
+    def test_gradient_edge_graph_ownership(self):
+        # Ensure we own the graph properly
+        class Clone(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gX):
+                return gX.clone()
+
+        inp = torch.rand(1, requires_grad=True).clone()
+
+        # C++ Node
+        out = inp.clone()
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
+
+        # python Node
+        out = Clone.apply(inp)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
@@ -12395,6 +12422,29 @@ class TestAutogradDeviceType(TestCase):
 
         x.resize_as_(y)
         self.assertEqual(x._version, 2)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with an accelerator device grad
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        # Keep the model on cpu as we do want to test the mixed cpu/accelerator behavior here
+        model = RegressionModel()
+        inputs = torch.randn(4, 10, device=device)
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
 
 class TestAllowMutationOnSaved(TestCase):

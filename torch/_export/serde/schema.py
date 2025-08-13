@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 9)
+SCHEMA_VERSION = (8, 10)
 TREESPEC_VERSION = 1
 
 
@@ -436,15 +436,19 @@ class ExportedProgram:
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
 
+    # key is the FQN of tensor in exported program
+    # value is the archive path of tensor payloads
+    # e.g. "L__self__linear.weight" : "/data/tensor/weight_1"
+    tensor_paths: Annotated[dict[str, str], 90] = field(default_factory=dict)
+
+    # key is the FQN of constant in exported program (constant tensor or torchbind objs)
+    # value is the archive path of serialized constants
+    constant_paths: Annotated[dict[str, str], 100] = field(default_factory=dict)
+
 
 #########################################################################
 # Container types for inference tasks, not being used directly for export.
 #########################################################################
-
-
-@dataclass
-class Program:
-    methods: Annotated[dict[str, ExportedProgram], 200]
 
 
 # This is the top-level model definition that be will serialized into the package
@@ -452,18 +456,15 @@ class Program:
 class Model:
     # unique identifier of the model in the package, e.g. local, remote, merge
     name: Annotated[str, 10]
-    # key is the FQN of tensor in exported program
-    # value is the archive path of tensor payloads
-    # e.g. "L__self__linear.weight" : "/data/tensor/L__self__linear.weight"
-    tensorPaths: Annotated[dict[str, str], 20]
-    # program exported from torch.export()
-    program: Annotated[Program, 40]
-    # Backend-specialized Lowered GraphModule
-    # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
-    delegates: Annotated[dict[str, Program], 50]
-    # key is the FQN of constant in exported program (constant tensor or torchbind objs)
-    # value is the archive path of serialized constants
-    constantPaths: Annotated[dict[str, str], 70]
+
+    # the main program exported from torch.export()
+    program: Annotated[ExportedProgram, 80]
+
+    # a collection of ExportedPrograms that are related to the same model
+    # They can be used for different purposes, e.g.
+    # - different methods such as "encode" and "decode" for the same model
+    # - different delegates such as "aoti_sm80" and "aoti_sm90"
+    variants: Annotated[dict[str, ExportedProgram], 90]
 
 
 #
