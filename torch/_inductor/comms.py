@@ -314,7 +314,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if data_dep is not None:
 
-                    def is_groupable(candidate) -> bool:
+                    def is_groupable(candidate) -> tuple[bool, str]:
                         # preserve ordering
                         if contains_collective(candidate):
                             return False, "contains_collective"
@@ -735,7 +735,7 @@ def _sink_waits_iterative_internal(
                     )
                 ):
 
-                    def is_groupable(snode) -> bool:
+                    def is_groupable(snode) -> tuple[bool, str]:
                         # We do not want to group with collectives to not reorder them forward.
                         if contains_collective(snode):
                             return (

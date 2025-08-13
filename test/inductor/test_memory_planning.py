@@ -24,6 +24,14 @@ from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 
 
+try:
+    from .test_aot_inductor import AOTIRunnerUtil
+except ImportError:
+    from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
+        AOTIRunnerUtil,
+    )
+
+
 @requires_gpu()
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
@@ -76,13 +84,6 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
-        try:
-            from .test_aot_inductor import AOTIRunnerUtil
-        except ImportError:
-            from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
-                AOTIRunnerUtil,
-            )
-
         f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
@@ -102,6 +103,54 @@ class TestMemoryPlanning(TestCase):
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
+
+    @config.patch({"triton.autotune_at_compile_time": False})
+    def test_unbacked_symint(self):
+        # when allocation's size has unbacked symints
+        # the unbacked symints are only available after computed
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                x = x + 1
+                u0 = x.item()
+                torch._check(u0 >= 1)
+                s0 = y.size(0)
+                expr = u0 * s0
+                sevens = torch.empty_strided(
+                    size=(10, expr, 32), stride=(expr * 32, 32, 1), device=x.device
+                ).fill_(7)
+                return sevens * 3
+
+        example_inputs = (
+            torch.scalar_tensor(2, dtype=torch.int, device=self.device),
+            torch.ones(8, device=self.device),
+        )
+        model = Repro().to(self.device)
+        result, code = run_and_get_cpp_code(
+            lambda: AOTIRunnerUtil.run(model, example_inputs)
+        )
+        self.assertTrue(same(model(*example_inputs), result))
+
+        # check allocation is done after the unbacked symint is computed
+        FileCheck().check("auto u0 = u0_raw;").check(
+            "const int64_t int_array_2[] = {10L, 8L*u0, 32L};"
+        ).check("AtenTensorHandle pool0_handle;").check(
+            "aoti_torch_empty_strided(3, int_array_2, int_array_3"
+        ).run(code)
+
+        # all AtenTensorHandle allocated using aoti_torch__alloc_from_pool are wrapped with RAIIAtenTensorHandle
+        # otherwise we'll have memory leak
+        FileCheck().check_count(
+            "aoti_torch__alloc_from_pool(pool1", 1, exactly=True
+        ).check_count("aoti_torch__alloc_from_pool(pool0", 1, exactly=True).run(code)
+
+        FileCheck().check(
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"  # noqa: B950
+        ).check("RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
+            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"  # noqa: B950
+        ).check("RAIIAtenTensorHandle(tmp_tensor_handle_1);").run(code)
 
 
 if __name__ == "__main__":

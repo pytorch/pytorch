@@ -1089,8 +1089,8 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_concat_linear_int8_woq_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_concat_linear_int8_woq_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if not config.cpp.enable_concat_linear:
             return False
         assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
@@ -1136,8 +1136,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern() -> bool:
     return fn
 
 
-def _is_valid_woq_optimization_pattern() -> bool:
-    def fn(match):
+def _is_valid_woq_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         if not all(
             hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
