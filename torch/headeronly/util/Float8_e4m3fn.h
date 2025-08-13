@@ -193,7 +193,7 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    *      +---+----------------------------------+
    *      | S |0000000 00000000 00000000 00000000|
    *      +---+----------------------------------+
-   * Bits  31                 0-31
+   * Bits  31                 0-30
    */
   const uint32_t sign = f_bits & UINT32_C(0x80000000);
 
@@ -202,29 +202,32 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    */
   f_bits ^= sign;
 
-  if (f_bits >= fp8_max) {
+  if (isnan(f)) {
     // NaN - all exponent and mantissa bits set to 1
-    result = 0x7f;
+    result = 0x7F;
+  } else if (f_bits > fp8_max){
+    // Input number is larger than 448, which is the largest
+    // fp8e4m3fn normal number
+    // Set all non-sign bits except the last to 1
+    result = 0x7E;
+  } else if (f_bits < (UINT32_C(121) << 23)) {
+    // Input number is smaller than 2^(-6), which is the smallest
+    // fp8e4m3fn normal number
+    f_bits =
+        fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
+    result = static_cast<uint8_t>(f_bits - denorm_mask);
   } else {
-    if (f_bits < (UINT32_C(121) << 23)) {
-      // Input number is smaller than 2^(-6), which is the smallest
-      // fp8e4m3fn normal number
-      f_bits =
-          fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
-      result = static_cast<uint8_t>(f_bits - denorm_mask);
-    } else {
-      // resulting mantissa is odd
-      uint8_t mant_odd = (f_bits >> 20) & 1;
+    // resulting mantissa is odd
+    uint8_t mant_odd = (f_bits >> 20) & 1;
 
-      // update exponent, rounding bias part 1
-      f_bits += ((uint32_t)(7 - 127) << 23) + 0x7FFFF;
+    // update exponent, rounding bias part 1
+    f_bits += ((uint32_t)(7 - 127) << 23) + 0x7FFFF;
 
-      // rounding bias part 2
-      f_bits += mant_odd;
+    // rounding bias part 2
+    f_bits += mant_odd;
 
-      // take the bits!
-      result = static_cast<uint8_t>(f_bits >> 20);
-    }
+    // take the bits!
+    result = static_cast<uint8_t>(f_bits >> 20);
   }
 
   result |= static_cast<uint8_t>(sign >> 24);
