@@ -50,7 +50,6 @@ jobs:
       torch-build-sm89
     ]
     with:
-      build-additional-packages: "vision audio"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       build-target: vllm
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
