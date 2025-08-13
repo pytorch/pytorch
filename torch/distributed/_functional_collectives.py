@@ -6,7 +6,6 @@ from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed._op_stubs
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._distributed_c10d import (
     _allow_inflight_collective_as_graph_input,

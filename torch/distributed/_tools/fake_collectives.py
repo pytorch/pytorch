@@ -7,16 +7,9 @@ import torch
 from torch.distributed._distributed_c10d import (
     _resolve_process_group,
     FakeWork,
-    HAS_DISTRIBUTED,
     ProcessGroup,
     Work,
 )
-
-
-# In distributed builds, assume operators always exist
-OPERATORS_AVAILABLE = HAS_DISTRIBUTED
-
-
 from torch.utils._pytree import tree_map_only
 
 

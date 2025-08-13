@@ -18,10 +18,7 @@ __all__ = ["init_device_mesh", "DeviceMesh"]
 
 
 if True:  # just to temporarily avoid reindentation
-    from torch.distributed._distributed_c10d import (
-        Backend as C10dBackend,
-        HAS_DISTRIBUTED,
-    )
+    from torch.distributed._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -508,7 +505,7 @@ if True:  # just to temporarily avoid reindentation
                     # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
                     num_devices_per_host = device_handle.device_count()
-                    if HAS_DISTRIBUTED and num_devices_per_host:
+                    if num_devices_per_host:
                         if (
                             world_size > num_devices_per_host
                             and world_size % num_devices_per_host != 0

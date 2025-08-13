@@ -16,7 +16,6 @@ from torch._C._autograd import DeviceType
 from torch.distributed._distributed_c10d import (
     _register_work,
     _SymmetricMemory,
-    HAS_DISTRIBUTED,
     ProcessGroup,
     Work as _Work,
 )
