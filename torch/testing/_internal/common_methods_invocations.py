@@ -6526,7 +6526,7 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
 def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
     other_dtype = torch.float16 if device.startswith("mps") else torch.float64
-    other_dtype_name  = "Half" if device.startswith("mps") else "Double"
+    other_dtype_name = "Half" if device.startswith("mps") else "Double"
 
     if is_ref:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
