@@ -18,8 +18,6 @@ def save_wrapper(
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    no_dist: bool = False,
-    use_collectives: bool = True,
 ) -> Future:
     from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -34,8 +32,6 @@ def save_wrapper(
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
-        no_dist=no_dist,
-        use_collectives=use_collectives,
     )
 
 
@@ -53,8 +49,6 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
-        no_dist: bool = False,
-        use_collectives: bool = True,
     ) -> Future:
         f: Future = self._executor.submit(
             save_wrapper,
@@ -63,8 +57,6 @@ class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             storage_writer=storage_writer,
             planner=planner,
             process_group=process_group,
-            no_dist=no_dist,
-            use_collectives=use_collectives,
         )
         f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
 
