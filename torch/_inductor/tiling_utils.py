@@ -52,7 +52,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
         out = try_solve(sympy.Eq(expr.args[0], expr.args[2]), free_symbol)
     else:
         out = try_solve(sympy.Eq(expr, 0), free_symbol)
-    if not out:  # or not out[1].is_constant():
+    if not out or not out[1].is_constant():
         return None
     return out[1]
 
@@ -77,6 +77,9 @@ def solve_for_tiling(
     free_symbol = next(iter(expr.free_symbols))
 
     def _solve_simple_expr(expr: sympy.Expr) -> Optional[sympy.Expr]:
+        assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
+        if len(expr.free_symbols) != 1:
+            return None
 
         out = try_solve(sympy.Eq(expr, 1), free_symbol)
         if not out or not out[1].is_constant():
