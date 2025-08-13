@@ -1801,21 +1801,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
-    int overflow = -1;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (value == -1 && PyErr_Occurred()) {
-      throw python_error();
-    }
-    if (overflow != 0) {
-      // try unsigned
-      unsigned long long value = PyLong_AsUnsignedLongLong(obj);
-      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
-        throw python_error();
-      }
-      scalar = at::Scalar(static_cast<uint64_t>(value));
-    } else {
-      scalar = at::Scalar(static_cast<int64_t>(value));
-    }
+    scalar = THPUtils_unpackInteger<at::Scalar>(obj);
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {

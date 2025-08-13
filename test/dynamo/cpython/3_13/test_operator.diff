@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_operator.py b/test/dynamo/cpython/3_13/test_operator.py
-index d90f820052c..c212a2d6559 100644
+index d90f820052c..5d9fdfb70a4 100644
 --- a/test/dynamo/cpython/3_13/test_operator.py
 +++ b/test/dynamo/cpython/3_13/test_operator.py
 @@ -1,3 +1,23 @@
@@ -26,7 +26,240 @@ index d90f820052c..c212a2d6559 100644
  import unittest
  import inspect
  import pickle
-@@ -628,11 +648,11 @@ class OperatorTestCase:
+@@ -84,9 +104,10 @@ class OperatorTestCase:
+ 
+     def test_eq(self):
+         operator = self.module
+-        class C(object):
+-            def __eq__(self, other):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __eq__(self, other):
++                    raise SyntaxError
+         self.assertRaises(TypeError, operator.eq)
+         self.assertRaises(SyntaxError, operator.eq, C(), C())
+         self.assertFalse(operator.eq(1, 0))
+@@ -98,9 +119,10 @@ class OperatorTestCase:
+ 
+     def test_ne(self):
+         operator = self.module
+-        class C(object):
+-            def __ne__(self, other):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __ne__(self, other):
++                    raise SyntaxError
+         self.assertRaises(TypeError, operator.ne)
+         self.assertRaises(SyntaxError, operator.ne, C(), C())
+         self.assertTrue(operator.ne(1, 0))
+@@ -245,9 +267,10 @@ class OperatorTestCase:
+         operator = self.module
+         self.assertRaises(TypeError, operator.matmul)
+         self.assertRaises(TypeError, operator.matmul, 42, 42)
+-        class M:
+-            def __matmul__(self, other):
+-                return other - 1
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class M:
++                def __matmul__(self, other):
++                    return other - 1
+         self.assertEqual(M() @ 42, 41)
+ 
+     def test_neg(self):
+@@ -315,9 +338,10 @@ class OperatorTestCase:
+ 
+     def test_truth(self):
+         operator = self.module
+-        class C(object):
+-            def __bool__(self):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __bool__(self):
++                    raise SyntaxError
+         self.assertRaises(TypeError, operator.truth)
+         self.assertRaises(SyntaxError, operator.truth, C())
+         self.assertTrue(operator.truth(5))
+@@ -349,8 +373,9 @@ class OperatorTestCase:
+ 
+     def test_attrgetter(self):
+         operator = self.module
+-        class A:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                pass
+         a = A()
+         a.name = 'arthur'
+         f = operator.attrgetter('name')
+@@ -371,9 +396,10 @@ class OperatorTestCase:
+         self.assertEqual(operator.attrgetter('x','z','y')(record), ('X', 'Z', 'Y'))
+         self.assertRaises(TypeError, operator.attrgetter, ('x', (), 'y'))
+ 
+-        class C(object):
+-            def __getattr__(self, name):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __getattr__(self, name):
++                    raise SyntaxError
+         self.assertRaises(SyntaxError, operator.attrgetter('foo'), C())
+ 
+         # recursive gets
+@@ -411,9 +437,10 @@ class OperatorTestCase:
+         f = operator.itemgetter(10)
+         self.assertRaises(IndexError, f, a)
+ 
+-        class C(object):
+-            def __getitem__(self, name):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __getitem__(self, name):
++                    raise SyntaxError
+         self.assertRaises(SyntaxError, operator.itemgetter(42), C())
+ 
+         f = operator.itemgetter('name')
+@@ -444,9 +471,10 @@ class OperatorTestCase:
+         self.assertEqual(operator.itemgetter(slice(2, 4))(t), ('c', 'd'))
+ 
+         # interesting sequences
+-        class T(tuple):
+-            'Tuple subclass'
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class T(tuple):
++                'Tuple subclass'
++                pass
+         self.assertEqual(operator.itemgetter(0)(T('abc')), 'a')
+         self.assertEqual(operator.itemgetter(0)(['a', 'b', 'c']), 'a')
+         self.assertEqual(operator.itemgetter(0)(range(100, 200)), 100)
+@@ -455,13 +483,14 @@ class OperatorTestCase:
+         operator = self.module
+         self.assertRaises(TypeError, operator.methodcaller)
+         self.assertRaises(TypeError, operator.methodcaller, 12)
+-        class A:
+-            def foo(self, *args, **kwds):
+-                return args[0] + args[1]
+-            def bar(self, f=42):
+-                return f
+-            def baz(*args, **kwds):
+-                return kwds['name'], kwds['self']
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                def foo(self, *args, **kwds):
++                    return args[0] + args[1]
++                def bar(self, f=42):
++                    return f
++                def baz(*args, **kwds):
++                    return kwds['name'], kwds['self']
+         a = A()
+         f = operator.methodcaller('foo')
+         self.assertRaises(IndexError, f, a)
+@@ -480,21 +509,22 @@ class OperatorTestCase:
+ 
+     def test_inplace(self):
+         operator = self.module
+-        class C(object):
+-            def __iadd__     (self, other): return "iadd"
+-            def __iand__     (self, other): return "iand"
+-            def __ifloordiv__(self, other): return "ifloordiv"
+-            def __ilshift__  (self, other): return "ilshift"
+-            def __imod__     (self, other): return "imod"
+-            def __imul__     (self, other): return "imul"
+-            def __imatmul__  (self, other): return "imatmul"
+-            def __ior__      (self, other): return "ior"
+-            def __ipow__     (self, other): return "ipow"
+-            def __irshift__  (self, other): return "irshift"
+-            def __isub__     (self, other): return "isub"
+-            def __itruediv__ (self, other): return "itruediv"
+-            def __ixor__     (self, other): return "ixor"
+-            def __getitem__(self, other): return 5  # so that C is a sequence
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C(object):
++                def __iadd__     (self, other): return "iadd"
++                def __iand__     (self, other): return "iand"
++                def __ifloordiv__(self, other): return "ifloordiv"
++                def __ilshift__  (self, other): return "ilshift"
++                def __imod__     (self, other): return "imod"
++                def __imul__     (self, other): return "imul"
++                def __imatmul__  (self, other): return "imatmul"
++                def __ior__      (self, other): return "ior"
++                def __ipow__     (self, other): return "ipow"
++                def __irshift__  (self, other): return "irshift"
++                def __isub__     (self, other): return "isub"
++                def __itruediv__ (self, other): return "itruediv"
++                def __ixor__     (self, other): return "ixor"
++                def __getitem__(self, other): return 5  # so that C is a sequence
+         c = C()
+         self.assertEqual(operator.iadd     (c, 5), "iadd")
+         self.assertEqual(operator.iand     (c, 5), "iand")
+@@ -520,9 +550,10 @@ class OperatorTestCase:
+ 
+     def test_index(self):
+         operator = self.module
+-        class X:
+-            def __index__(self):
+-                return 1
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X:
++                def __index__(self):
++                    return 1
+ 
+         self.assertEqual(operator.index(X()), 1)
+         self.assertEqual(operator.index(0), 0)
+@@ -539,9 +570,10 @@ class OperatorTestCase:
+ 
+     def test_not_(self):
+         operator = self.module
+-        class C:
+-            def __bool__(self):
+-                raise SyntaxError
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def __bool__(self):
++                    raise SyntaxError
+         self.assertRaises(TypeError, operator.not_)
+         self.assertRaises(SyntaxError, operator.not_, C())
+         self.assertFalse(operator.not_(5))
+@@ -551,15 +583,16 @@ class OperatorTestCase:
+ 
+     def test_length_hint(self):
+         operator = self.module
+-        class X(object):
+-            def __init__(self, value):
+-                self.value = value
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class X(object):
++                def __init__(self, value):
++                    self.value = value
+ 
+-            def __length_hint__(self):
+-                if type(self.value) is type:
+-                    raise self.value
+-                else:
+-                    return self.value
++                def __length_hint__(self):
++                    if type(self.value) is type:
++                        raise self.value
++                    else:
++                        return self.value
+ 
+         self.assertEqual(operator.length_hint([], 2), 0)
+         self.assertEqual(operator.length_hint(iter([1, 2, 3])), 3)
+@@ -574,7 +607,8 @@ class OperatorTestCase:
+         with self.assertRaises(LookupError):
+             operator.length_hint(X(LookupError))
+ 
+-        class Y: pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Y: pass
+ 
+         msg = "'str' object cannot be interpreted as an integer"
+         with self.assertRaisesRegex(TypeError, msg):
+@@ -628,11 +662,11 @@ class OperatorTestCase:
          self.assertEqual(str(sig), '(obj, /)')
  
  
@@ -40,7 +273,41 @@ index d90f820052c..c212a2d6559 100644
      module = c_operator
  
  
-@@ -717,25 +737,25 @@ class OperatorPickleTestCase:
+@@ -645,8 +679,9 @@ class OperatorPickleTestCase:
+ 
+     def test_attrgetter(self):
+         attrgetter = self.module.attrgetter
+-        class A:
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                pass
+         a = A()
+         a.x = 'X'
+         a.y = 'Y'
+@@ -688,13 +723,14 @@ class OperatorPickleTestCase:
+ 
+     def test_methodcaller(self):
+         methodcaller = self.module.methodcaller
+-        class A:
+-            def foo(self, *args, **kwds):
+-                return args[0] + args[1]
+-            def bar(self, f=42):
+-                return f
+-            def baz(*args, **kwds):
+-                return kwds['name'], kwds['self']
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class A:
++                def foo(self, *args, **kwds):
++                    return args[0] + args[1]
++                def bar(self, f=42):
++                    return f
++                def baz(*args, **kwds):
++                    return kwds['name'], kwds['self']
+         a = A()
+         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+             with self.subTest(proto=proto):
+@@ -717,25 +753,25 @@ class OperatorPickleTestCase:
                  # Can't test repr consistently with multiple keyword args
                  self.assertEqual(f2(a), f(a))
  

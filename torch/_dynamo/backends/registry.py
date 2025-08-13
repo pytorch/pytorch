@@ -86,7 +86,7 @@ def register_backend(
     compiler_fn: Optional[CompilerFn] = None,
     name: Optional[str] = None,
     tags: Sequence[str] = (),
-) -> Any:
+) -> Callable[..., Any]:
     """
     Decorator to add a given compiler to the registry to allow calling
     `torch.compile` with string shorthand.  Note: for projects not

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import multiprocessing.spawn as spawn
+import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Optional
-from unittest import skipIf, skipUnless
+from unittest import skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, start_processes
-from torch.distributed.numa.binding import (
+from torch.numa.binding import (
     _get_ranges_str_from_ints,
     _get_set_of_int_from_ranges_str,
     AffinityMode,
@@ -35,12 +38,10 @@ class MockDeviceProperties:
 
 
 _real_open = open
+_real_mkstemp = tempfile.mkstemp
 
 
-@skipIf(
-    sys.platform == "win32",
-    "Windows is missing various os module attributes like sched_getaffinity",
-)
+@skipUnless(sys.platform == "linux", "Only linux currently supported")
 @skipUnless(
     torch.distributed.is_available(), "Need access to some distributed submodules"
 )
@@ -53,25 +54,43 @@ class NumaBindingTest(TestCase):
         self._mock_num_logical_cpus = 0
         self._mock_num_numa_nodes = 0
         self._mock_num_sockets = 0
+        self._temp_file_paths = []
 
         self._context_managers_to_apply_to_all_tests = [
             patch("torch.cuda.device_count", self._mock_device_count),
             patch("torch.cuda.get_device_properties", self._mock_get_device_properties),
             patch("torch.cuda.is_available", self._mock_is_available),
+            # Implicitly used by dynamo
+            patch("torch.cuda.get_rng_state"),
             patch("builtins.open", new=self._mock_open),
             patch("os.listdir", new=self._mock_listdir),
             patch("os.sched_getaffinity", new=self._mock_sched_getaffinity),
             patch("shutil.which", return_value="/usr/bin/numactl"),
-            patch("subprocess.run"),
+            patch("torch.numa.binding.run"),
+            patch("torch.numa.binding.mkstemp", self._mock_mkstemp),
         ]
 
         for context_manager in self._context_managers_to_apply_to_all_tests:
             context_manager.__enter__()
 
     def tearDown(self) -> None:
+        # Clean up temporary files
+        for temp_file_path in self._temp_file_paths:
+            try:
+                os.unlink(temp_file_path)
+            except FileNotFoundError:
+                # File may have already been deleted or doesn't exist
+                pass
+
         for context_manager in self._context_managers_to_apply_to_all_tests:
             context_manager.__exit__(None, None, None)
         super().tearDown()
+
+    def _mock_mkstemp(self, *args, **kwargs):
+        # Just keep track of temp files so we can delete them
+        fd, path = _real_mkstemp(*args, **kwargs)
+        self._temp_file_paths.append(path)
+        return fd, path
 
     def _add_mock_hardware(
         self,
@@ -204,7 +223,7 @@ class NumaBindingTest(TestCase):
     def _mock_open(self, path: str, *args, **kwargs) -> Any:
         if path in self._mock_file_path_to_contents:
             return mock_open(read_data=self._mock_file_path_to_contents[path])()
-        if path.startswith("/sys/"):
+        if isinstance(path, str) and path.startswith("/sys/"):
             raise FileNotFoundError(f"File {path} was not mocked.")
         # Looks like CI is calling open and intending to open an actual file in some places.
         # Need this to make the CI pass.
@@ -222,8 +241,8 @@ class NumaBindingTest(TestCase):
     def _mock_sched_getaffinity(self, pid: int) -> set[int]:
         return set(range(self._mock_num_logical_cpus))
 
-    def _start_test_processes_and_get_command_args_for_local_rank(
-        self, *, numa_options: Optional[NumaOptions], local_rank: int
+    def _start_processes_for_str_entrypoint_and_get_Popen_args(
+        self, *, numa_options: Optional[NumaOptions], target_local_rank: int
     ) -> tuple[str, ...]:
         """
         Calls start_processes like elastic_launch ultimately would
@@ -250,9 +269,57 @@ class NumaBindingTest(TestCase):
             call_args = next(
                 call_args
                 for call_args in mock_popen.call_args_list
-                if call_args.kwargs.get("env", {}).get("LOCAL_RANK") == str(local_rank)
+                if call_args.kwargs.get("env", {}).get("LOCAL_RANK")
+                == str(target_local_rank)
             )
             return call_args.kwargs["args"]
+
+    def _start_processes_for_callable_entrypoint_and_get_executable_contents(
+        self, *, numa_options: Optional[NumaOptions], target_local_rank: int
+    ) -> str:
+        active_local_rank = None
+        executable_path = None
+
+        def _mock_process_start(self: Any) -> None:
+            nonlocal active_local_rank
+            active_local_rank = self._args[1]
+            spawn.get_command_line()
+            self._target(*self._args)
+
+        original_get_command_line = spawn.get_command_line
+
+        def _mock_get_command_line(*args, **kwargs) -> list[str]:
+            nonlocal executable_path
+            result = original_get_command_line(*args, **kwargs)
+            if active_local_rank == target_local_rank:
+                executable_path = result[0]
+
+            return result
+
+        with (
+            patch("multiprocessing.context.SpawnProcess.start", _mock_process_start),
+            patch("multiprocessing.spawn.get_command_line", _mock_get_command_line),
+            patch("multiprocessing.process.BaseProcess.sentinel", 1),
+            # Prevent hanging
+            patch(
+                "multiprocessing.synchronize.Event.wait",
+                lambda self, timeout=None: None,
+            ),
+        ):
+            start_processes(
+                name="test_process",
+                entrypoint=lambda x: x,
+                args=dict.fromkeys(range(self._mock_device_count()), (0,)),
+                envs={
+                    i: {"LOCAL_RANK": str(i)} for i in range(self._mock_device_count())
+                },
+                logs_specs=DefaultLogsSpecs(),
+                numa_options=numa_options,
+            )
+
+        assert executable_path is not None
+        with open(executable_path) as executable_file:
+            return executable_file.read()
 
     def test_node_numa_binding(self) -> None:
         self._add_mock_hardware(
@@ -263,8 +330,9 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=2,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.NODE), local_rank=11
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.NODE),
+            target_local_rank=11,
         )
         self.assertEqual(
             command_args,
@@ -273,7 +341,6 @@ class NumaBindingTest(TestCase):
             (
                 "numactl",
                 "--cpunodebind=5",
-                "--preferred=5",
                 "echo",
                 "Hello, world!",
             ),
@@ -288,8 +355,8 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=2,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=None, local_rank=11
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=None, target_local_rank=11
         )
         self.assertEqual(
             command_args,
@@ -340,20 +407,18 @@ class NumaBindingTest(TestCase):
         )
 
         with (
-            patch("torch.distributed.numa.binding.signpost_event") as signpost_patch,
+            patch("torch.numa.binding.signpost_event") as signpost_patch,
             patch(
-                "subprocess.run",
+                "torch.numa.binding.run",
                 side_effect=subprocess.CalledProcessError(1, "numactl"),
             ),
         ):
-            command_args = (
-                self._start_test_processes_and_get_command_args_for_local_rank(
-                    numa_options=NumaOptions(
-                        affinity_mode=AffinityMode.NODE,
-                        should_fall_back_if_binding_fails=True,
-                    ),
-                    local_rank=0,
-                )
+            command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+                numa_options=NumaOptions(
+                    affinity_mode=AffinityMode.NODE,
+                    should_fall_back_if_binding_fails=True,
+                ),
+                target_local_rank=0,
             )
         self.assertIn(
             "subprocess.CalledProcessError",
@@ -387,6 +452,25 @@ class NumaBindingTest(TestCase):
             NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
         )
 
+    def test_fork_start_method_does_not_call_get_default_numa_options(self) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.launcher.api import LaunchConfig
+
+        with patch(
+            "torch.distributed.launcher.api.get_default_numa_options"
+        ) as mock_get_default_numa_options:
+            launch_config = LaunchConfig(
+                min_nodes=1,
+                max_nodes=1,
+                nproc_per_node=1,
+                start_method="fork",
+                # Don't provide numa_options
+            )
+            # Verify get_default_numa_options was not called
+            mock_get_default_numa_options.assert_not_called()
+            # Verify numa_options is None when start_method is fork
+            self.assertIsNone(launch_config.numa_options)
+
     def test_socket_numa_binding_with_multiple_numa_per_socket(self) -> None:
         self._add_mock_hardware(
             num_sockets=4,
@@ -396,15 +480,15 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=2,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.SOCKET), local_rank=15
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.SOCKET),
+            target_local_rank=15,
         )
         self.assertEqual(
             command_args,
             (
                 "numactl",
                 "--cpunodebind=6-7",
-                "--preferred-many=6-7",
                 "echo",
                 "Hello, world!",
             ),
@@ -419,15 +503,15 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=2,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.SOCKET), local_rank=7
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.SOCKET),
+            target_local_rank=7,
         )
         self.assertEqual(
             command_args,
             (
                 "numactl",
                 "--cpunodebind=3",
-                "--preferred=3",
                 "echo",
                 "Hello, world!",
             ),
@@ -442,8 +526,9 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=3,
         )
 
-        command_args_0 = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE), local_rank=0
+        command_args_0 = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
+            target_local_rank=0,
         )
         self.assertEqual(
             command_args_0,
@@ -451,14 +536,14 @@ class NumaBindingTest(TestCase):
                 "numactl",
                 # Gets an extra physical core due to odd number of physical cores on numa node
                 "--physcpubind=0-3",
-                "--preferred=0",
                 "echo",
                 "Hello, world!",
             ),
         )
 
-        command_args_1 = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE), local_rank=1
+        command_args_1 = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
+            target_local_rank=1,
         )
         self.assertEqual(
             command_args_1,
@@ -466,7 +551,6 @@ class NumaBindingTest(TestCase):
                 "numactl",
                 # Does not get an extra physical core, since the 1st GPU already took the extra.
                 "--physcpubind=4-5",
-                "--preferred=0",
                 "echo",
                 "Hello, world!",
             ),
@@ -485,9 +569,9 @@ class NumaBindingTest(TestCase):
             RuntimeError,
             "There are only 1 physical cores on numa_node_index=0, but there are 2 GPUs associated with this NUMA node.",
         ):
-            self._start_test_processes_and_get_command_args_for_local_rank(
+            self._start_processes_for_str_entrypoint_and_get_Popen_args(
                 numa_options=NumaOptions(affinity_mode=AffinityMode.EXCLUSIVE),
-                local_rank=1,
+                target_local_rank=1,
             )
 
     def test_core_complex_numa_binding_with_extra_l3(self) -> None:
@@ -499,9 +583,9 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=3,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
             numa_options=NumaOptions(affinity_mode=AffinityMode.CORE_COMPLEX),
-            local_rank=3,
+            target_local_rank=3,
         )
         self.assertEqual(
             command_args,
@@ -509,7 +593,6 @@ class NumaBindingTest(TestCase):
                 "numactl",
                 # The second L3 on the second numa node
                 "--physcpubind=24-29",
-                "--preferred=1",
                 "echo",
                 "Hello, world!",
             ),
@@ -524,9 +607,9 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=3,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
             numa_options=NumaOptions(affinity_mode=AffinityMode.CORE_COMPLEX),
-            local_rank=3,
+            target_local_rank=3,
         )
         self.assertEqual(
             command_args,
@@ -535,7 +618,6 @@ class NumaBindingTest(TestCase):
                 # There are only 2 L3 caches, so the 4th GPU shares the same
                 # cores as the 3rd GPU.
                 "--physcpubind=6-11",
-                "--preferred=1",
                 "echo",
                 "Hello, world!",
             ),
@@ -552,11 +634,9 @@ class NumaBindingTest(TestCase):
 
         # Only some subset of the CPUs are available this time.
         with patch("os.sched_getaffinity", return_value={0, 4, 6, 7, 9}):
-            command_args = (
-                self._start_test_processes_and_get_command_args_for_local_rank(
-                    numa_options=NumaOptions(affinity_mode=AffinityMode.CORE_COMPLEX),
-                    local_rank=0,
-                )
+            command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+                numa_options=NumaOptions(affinity_mode=AffinityMode.CORE_COMPLEX),
+                target_local_rank=0,
             )
 
         self.assertEqual(
@@ -565,7 +645,6 @@ class NumaBindingTest(TestCase):
                 "numactl",
                 # Binds to the second L3 because it has the most available CPUs
                 "--physcpubind=6-7,9",
-                "--preferred=0",
                 "echo",
                 "Hello, world!",
             ),
@@ -584,41 +663,19 @@ class NumaBindingTest(TestCase):
             num_physical_core_per_l3_cache=1,
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
             numa_options=NumaOptions(affinity_mode=AffinityMode.CORE_COMPLEX),
-            local_rank=0,
+            target_local_rank=0,
         )
         self.assertEqual(
             command_args,
             (
                 "numactl",
                 "--physcpubind=0-1",
-                "--preferred=0",
                 "echo",
                 "Hello, world!",
             ),
         )
-
-    def test_raises_error_if_numa_options_provided_for_callable_entrypoint(
-        self,
-    ) -> None:
-        # Inner import to avoid crashing if not torch.distributed.is_available()
-        from torch.distributed.elastic.agent.server.api import WorkerSpec
-
-        def mock_entrypoint() -> None:
-            pass
-
-        with self.assertRaisesRegex(ValueError, r".*numa_options.*"):
-            # not relevant to test, just pass in an arbitrary value
-            mock_rdzv_handler: Any = 0
-            WorkerSpec(
-                role="trainer",
-                # Only str entrypoint (e.g. "echo") is currently supported
-                entrypoint=mock_entrypoint,
-                local_world_size=8,
-                rdzv_handler=mock_rdzv_handler,
-                numa_options=NumaOptions(affinity_mode=AffinityMode.NODE),
-            )
 
     def test_raises_error_if_numactl_unavailable(self) -> None:
         self._add_mock_hardware(
@@ -632,8 +689,9 @@ class NumaBindingTest(TestCase):
             patch("shutil.which", return_value=None),
             self.assertRaisesRegex(RuntimeError, r".*numactl.*"),
         ):
-            self._start_test_processes_and_get_command_args_for_local_rank(
-                numa_options=NumaOptions(affinity_mode=AffinityMode.NODE), local_rank=0
+            self._start_processes_for_str_entrypoint_and_get_Popen_args(
+                numa_options=NumaOptions(affinity_mode=AffinityMode.NODE),
+                target_local_rank=0,
             )
 
     def test_binds_to_node_0_if_node_stored_as_minus_one(self) -> None:
@@ -654,18 +712,48 @@ class NumaBindingTest(TestCase):
             contents="-1",
         )
 
-        command_args = self._start_test_processes_and_get_command_args_for_local_rank(
-            numa_options=NumaOptions(affinity_mode=AffinityMode.NODE), local_rank=0
+        command_args = self._start_processes_for_str_entrypoint_and_get_Popen_args(
+            numa_options=NumaOptions(affinity_mode=AffinityMode.NODE),
+            target_local_rank=0,
         )
         self.assertEqual(
             command_args,
             (
                 "numactl",
                 "--cpunodebind=0",
-                "--preferred=0",
                 "echo",
                 "Hello, world!",
             ),
+        )
+
+    def test_callable_entrypoint_basic(self) -> None:
+        self._add_mock_hardware(
+            num_sockets=4,
+            num_numa_nodes_per_socket=2,
+            num_gpus_per_numa_node=2,
+            num_l3_caches_per_numa_node=4,
+            num_physical_core_per_l3_cache=2,
+        )
+
+        executable_contents = (
+            self._start_processes_for_callable_entrypoint_and_get_executable_contents(
+                numa_options=NumaOptions(affinity_mode=AffinityMode.NODE),
+                target_local_rank=11,
+            )
+        )
+        self.assertEqual(
+            executable_contents,
+            # There are 8 numa nodes and 2 GPUs per numa node, so GPU 11 would be
+            # on numa node 11 // 2 = 5.
+            f"""#!/bin/bash
+
+# If this file is more than a few minutes old and still exists on your machine,
+# that is NOT expected. It should have deleted itself. If you are seeing an accumulation of such
+# files, that could suggest a bug in pytorch. See https://github.com/pytorch/pytorch/pull/160163.
+
+rm -- "$0"
+numactl --cpunodebind=5 {sys.executable} "$@"
+""",
         )
 
     def test_get_set_of_int_from_ranges_str(self) -> None:
