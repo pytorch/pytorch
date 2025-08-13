@@ -3576,6 +3576,11 @@ class OutputSpec:
     def storage_size(self) -> int:
         raise NotImplementedError(type(self).__name__)
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        raise NotImplementedError(type(self).__name__)
+
 
 @ir_dataclass
 class Layout(OutputSpec):
@@ -3733,10 +3738,8 @@ class Layout(OutputSpec):
         # do for dynamic shape.
         #
         # Skip padding the strides for dynamic shape for now.
-        if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
-        ):
+        # If outermost dim is dynamic, stride still can be fully static
+        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
             return in_strides
 
         stride_order = get_stride_order(in_strides)
@@ -3751,11 +3754,11 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
-            new_strides[idx] = stride
+            if isinstance(stride, (int, sympy.Integer)):
+                if stride > config.padding_stride_threshold and stride % align != 0:
+                    stride = ceildiv(stride, align) * align
+                    padded = True
+                new_strides[idx] = stride
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -3808,6 +3811,15 @@ class Layout(OutputSpec):
 
     def storage_size(self) -> Expr:
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return (
+            get_free_symbols(self.size, unbacked_only)
+            | get_free_symbols(self.stride, unbacked_only)
+            | get_free_symbols(self.offset, unbacked_only)
+        )
 
 
 class FixedLayout(Layout):
@@ -4000,6 +4012,16 @@ class NonOwningLayout(Layout):
         from .utils import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        assert isinstance(self.view, ReinterpretView)
+        box = self.view.data
+        assert isinstance(box, StorageBox), type(box)
+        input_buffer = box.data
+        assert isinstance(input_buffer, Buffer), type(box)
+        return input_buffer.layout.get_free_symbol_uses(unbacked_only)
 
 
 class CommBufferType(Enum):
@@ -4384,6 +4406,10 @@ class ShapeAsConstantBuffer(IRNode):
 
 @ir_dataclass(frozen=False)
 class ComputedBuffer(OperationBuffer):
+    """
+    Represents a buffer that is computed during kernel execution rather than being an input.
+    """
+
     data: Loops
 
     def get_computed_buffer_name(self) -> Optional[str]:
@@ -4439,21 +4465,20 @@ class ComputedBuffer(OperationBuffer):
         # those symbols that establishes a dependency).  However, we haven't
         # started codegen yet so we can't directly reuse that logic.
         #
-        # For now, I'm just yoloing with the size of the buffer.  Not sure if
-        # it is enough.
-        #
         # One thing you might wonder is if this is enough for a ComputedBuffer
         # denoting a reduction over i0.  Empirically, it is enough, but for an
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
-        return (
-            get_free_symbols(self.get_size(), unbacked_only)
-            | get_free_symbols(self.get_stride(), unbacked_only)
-            | get_free_symbols(self.get_offset(), unbacked_only)
-            | self.data.get_free_symbol_uses(unbacked_only)
-            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
-        )
+        result = self.layout.get_free_symbol_uses(
+            unbacked_only
+        ) | self.data.get_free_symbol_uses(unbacked_only)
+
+        if self.has_store_function() and isinstance(
+            self.get_store_function(), LoopBody
+        ):
+            result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
+        return result
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         if (
@@ -4464,6 +4489,9 @@ class ComputedBuffer(OperationBuffer):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
         return super().make_loader()
+
+    def has_store_function(self) -> bool:
+        return isinstance(self.data, (Reduction, Scan, Sort, Pointwise))
 
     def get_store_function(self) -> Callable[..., None]:
         indexer = self.get_layout().as_fixed().make_indexer()
@@ -5172,6 +5200,18 @@ class InputsKernel(OperationBuffer):
     def num_reads(self) -> int:
         return 1
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        r = OrderedSet[sympy.Symbol]()
+        for inp in self.inputs:
+            if isinstance(inp, IRNode):
+                r |= inp.get_free_symbol_uses(unbacked_only)
+            else:
+                for inner_inp in inp:
+                    r |= inner_inp.get_free_symbol_uses(unbacked_only)
+        return r
+
 
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
@@ -5333,6 +5373,11 @@ class ConcatKernel(NopKernel):
             and isinstance(src.data.layout, FlexibleLayout)
             and not isinstance(src.data, ExternKernelAlloc)
         )
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
@@ -6234,7 +6279,7 @@ class ExternKernel(InputsKernel):
         maybe_get_symbols = (
             maybe_free_unbacked_symbols if unbacked_only else maybe_free_symbols
         )
-        r = OrderedSet[sympy.Symbol]()
+        r = InputsKernel.get_free_symbol_uses(self, unbacked_only)
         for arg in self.constant_args:
             r |= maybe_get_symbols(arg)
         for arg in self.kwargs.values():
@@ -7078,10 +7123,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
+            x_device.type == "cuda" and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
+            x_device.type == "cpu" and device.type == "cuda" and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
@@ -8692,7 +8737,10 @@ class EffectfulKernel(FallbackKernel):
 
 
 class NonTensorObj(IRNode):
-    pass
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
 
 @ir_dataclass
