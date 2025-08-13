@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/utils.h>
 #include <array>
 #include <cstdint>
 #include <optional>
