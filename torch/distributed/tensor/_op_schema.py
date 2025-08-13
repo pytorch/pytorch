@@ -22,6 +22,7 @@ These schema definitions enable the DTensor system to:
 3. Plan and execute tensor redistributions when needed
 4. Cache sharding decisions for performance optimization
 """
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
