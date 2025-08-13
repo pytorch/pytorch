@@ -781,8 +781,6 @@ if torch.backends.mps.is_available():
             "clamp_min",
             "masked_scatter",
             # unsupported float64 dtype
-            "cat",
-            "complex",
             "multinomial",
             "nn.functional.conv1d",
             "nn.functional.conv2d",
