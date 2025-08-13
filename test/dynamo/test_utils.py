@@ -282,10 +282,12 @@ class TestDynamoTimed(TestCase):
             self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
-        self.assertEqual(
-            compilation_events[0].graph_node_shapes,
-            "{'l_self_modules_linear_parameters_weight_': [1, 3], 'l_self_modules_linear_parameters_bias_': [1], 'l_x_': [3], 'linear': [1]}",
-        )
+    self.assertEqual(
+        compilation_events[0].graph_node_shapes,
+        "{'l_self_modules_linear_parameters_weight_': [1, 3], "
+        "'l_self_modules_linear_parameters_bias_': [1], "
+        "'l_x_': [3], 'linear': [1]}"
+    )
 
     @dynamo_config.patch(
         {
