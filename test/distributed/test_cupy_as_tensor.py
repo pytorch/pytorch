@@ -105,5 +105,6 @@ class CupyAsTensorTest(MultiProcContinousTest):
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
         super().tearDownClass()
 
+
 if __name__ == "__main__":
     run_tests()
