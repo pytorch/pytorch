@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_list.py b/test/dynamo/cpython/3_13/test_list.py
-index 23ef902aa0b..f1f65647df1 100644
+index 23ef902aa0b..10528f623b1 100644
 --- a/test/dynamo/cpython/3_13/test_list.py
 +++ b/test/dynamo/cpython/3_13/test_list.py
 @@ -1,6 +1,60 @@
@@ -64,16 +64,16 @@ index 23ef902aa0b..f1f65647df1 100644
  from test.support import cpython_only
  from test.support.script_helper import assert_python_ok
  import pickle
-@@ -35,8 +89,6 @@ class ListTest(list_tests.CommonTest):
-             # Note: This test is expected to SEGV under Cygwin 1.3.12 or
+@@ -36,7 +90,7 @@ class ListTest(list_tests.CommonTest):
              # earlier due to a newlib bug.  See the following mailing list
              # thread for the details:
--
+ 
 -            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
++            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html  @lint-ignore
              self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
  
          # This code used to segfault in Py2.4a3
-@@ -49,28 +101,31 @@ class ListTest(list_tests.CommonTest):
+@@ -49,28 +103,31 @@ class ListTest(list_tests.CommonTest):
              list(sequence=[])
  
      def test_keywords_in_subclass(self):
@@ -116,7 +116,7 @@ index 23ef902aa0b..f1f65647df1 100644
          u = subclass_with_new([1, 2], newarg=3)
          self.assertIs(type(u), subclass_with_new)
          self.assertEqual(list(u), [1, 2])
-@@ -117,14 +172,15 @@ class ListTest(list_tests.CommonTest):
+@@ -117,14 +174,15 @@ class ListTest(list_tests.CommonTest):
              lst *= size
  
      def test_repr_mutate(self):
@@ -140,7 +140,7 @@ index 23ef902aa0b..f1f65647df1 100644
  
          mylist = [Obj() for _ in range(5)]
          self.assertEqual(repr(mylist), '[obj, obj, obj]')
-@@ -220,26 +276,28 @@ class ListTest(list_tests.CommonTest):
+@@ -220,26 +278,28 @@ class ListTest(list_tests.CommonTest):
          # Issue 8847: In the PGO build, the MSVC linker's COMDAT folding
          # optimization causes failures in code that relies on distinct
          # function addresses.
@@ -184,7 +184,7 @@ index 23ef902aa0b..f1f65647df1 100644
  
          list1 = [X()]
          list2 = [Y()]
-@@ -250,24 +308,26 @@ class ListTest(list_tests.CommonTest):
+@@ -250,24 +310,26 @@ class ListTest(list_tests.CommonTest):
          self.assertFalse(list3 == list4)
  
      def test_lt_operator_modifying_operand(self):
@@ -223,7 +223,7 @@ index 23ef902aa0b..f1f65647df1 100644
  
          lst = list(range(5))
          operand = evil(lst)
-@@ -286,19 +346,21 @@ class ListTest(list_tests.CommonTest):
+@@ -286,19 +348,21 @@ class ListTest(list_tests.CommonTest):
          # bpo-38610: The count(), index(), and remove() methods were not
          # holding strong references to list elements while calling
          # PyObject_RichCompareBool().
@@ -253,7 +253,7 @@ index 23ef902aa0b..f1f65647df1 100644
  
          lst = L([X()])
          lst.count(lst)
-@@ -324,6 +386,7 @@ class ListTest(list_tests.CommonTest):
+@@ -324,6 +388,7 @@ class ListTest(list_tests.CommonTest):
              a.append(4)
              self.assertEqual(list(it), [])
  
@@ -261,7 +261,7 @@ index 23ef902aa0b..f1f65647df1 100644
      def test_deopt_from_append_list(self):
          # gh-132011: it used to crash, because
          # of `CALL_LIST_APPEND` specialization failure.
-@@ -345,4 +408,4 @@ class ListTest(list_tests.CommonTest):
+@@ -345,4 +410,4 @@ class ListTest(list_tests.CommonTest):
          self.assertEqual(rc, 0)
  
  if __name__ == "__main__":
