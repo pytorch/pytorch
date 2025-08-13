@@ -89,8 +89,6 @@ class ListTest(list_tests.CommonTest):
             # Note: This test is expected to SEGV under Cygwin 1.3.12 or
             # earlier due to a newlib bug.  See the following mailing list
             # thread for the details:
-
-            # @lint-ignore http://sources.redhat.com/ml/newlib/2002/msg00369.html
             self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
 
         # This code used to segfault in Py2.4a3
@@ -103,31 +101,28 @@ class ListTest(list_tests.CommonTest):
             list(sequence=[])
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass(list):
-                pass
+        class subclass(list):
+            pass
         u = subclass([1, 2])
         self.assertIs(type(u), subclass)
         self.assertEqual(list(u), [1, 2])
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass_with_init(list):
-                def __init__(self, seq, newarg=None):
-                    super().__init__(seq)
-                    self.newarg = newarg
+        class subclass_with_init(list):
+            def __init__(self, seq, newarg=None):
+                super().__init__(seq)
+                self.newarg = newarg
         u = subclass_with_init([1, 2], newarg=3)
         self.assertIs(type(u), subclass_with_init)
         self.assertEqual(list(u), [1, 2])
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass_with_new(list):
-                def __new__(cls, seq, newarg=None):
-                    self = super().__new__(cls, seq)
-                    self.newarg = newarg
-                    return self
+        class subclass_with_new(list):
+            def __new__(cls, seq, newarg=None):
+                self = super().__new__(cls, seq)
+                self.newarg = newarg
+                return self
         u = subclass_with_new([1, 2], newarg=3)
         self.assertIs(type(u), subclass_with_new)
         self.assertEqual(list(u), [1, 2])
@@ -174,15 +169,14 @@ class ListTest(list_tests.CommonTest):
             lst *= size
 
     def test_repr_mutate(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Obj:
-                @staticmethod
-                def __repr__():
-                    try:
-                        mylist.pop()
-                    except IndexError:
-                        pass
-                    return 'obj'
+        class Obj:
+            @staticmethod
+            def __repr__():
+                try:
+                    mylist.pop()
+                except IndexError:
+                    pass
+                return 'obj'
 
         mylist = [Obj() for _ in range(5)]
         self.assertEqual(repr(mylist), '[obj, obj, obj]')
@@ -278,28 +272,26 @@ class ListTest(list_tests.CommonTest):
         # Issue 8847: In the PGO build, the MSVC linker's COMDAT folding
         # optimization causes failures in code that relies on distinct
         # function addresses.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class L(list): pass
+        class L(list): pass
         with self.assertRaises(TypeError):
             (3,) + L([1,2])
 
     def test_equal_operator_modifying_operand(self):
         # test fix for seg fault reported in bpo-38588 part 2.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class X:
-                def __eq__(self,other) :
-                    list2.clear()
-                    return NotImplemented
+        class X:
+            def __eq__(self,other) :
+                list2.clear()
+                return NotImplemented
 
-            class Y:
-                def __eq__(self, other):
-                    list1.clear()
-                    return NotImplemented
+        class Y:
+            def __eq__(self, other):
+                list1.clear()
+                return NotImplemented
 
-            class Z:
-                def __eq__(self, other):
-                    list3.clear()
-                    return NotImplemented
+        class Z:
+            def __eq__(self, other):
+                list3.clear()
+                return NotImplemented
 
         list1 = [X()]
         list2 = [Y()]
@@ -310,26 +302,24 @@ class ListTest(list_tests.CommonTest):
         self.assertFalse(list3 == list4)
 
     def test_lt_operator_modifying_operand(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            # See gh-120298
-            class evil:
-                def __lt__(self, other):
-                    other.clear()
-                    return NotImplemented
+        # See gh-120298
+        class evil:
+            def __lt__(self, other):
+                other.clear()
+                return NotImplemented
 
         a = [[evil()]]
         with self.assertRaises(TypeError):
             a[0] < a
 
     def test_list_index_modifing_operand(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            # See gh-120384
-            class evil:
-                def __init__(self, lst):
-                    self.lst = lst
-                def __iter__(self):
-                    yield from self.lst
-                    self.lst.clear()
+        # See gh-120384
+        class evil:
+            def __init__(self, lst):
+                self.lst = lst
+            def __iter__(self):
+                yield from self.lst
+                self.lst.clear()
 
         lst = list(range(5))
         operand = evil(lst)
@@ -348,21 +338,19 @@ class ListTest(list_tests.CommonTest):
         # bpo-38610: The count(), index(), and remove() methods were not
         # holding strong references to list elements while calling
         # PyObject_RichCompareBool().
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class X:
-                def __eq__(self, other):
-                    lst.clear()
-                    return NotImplemented
+        class X:
+            def __eq__(self, other):
+                lst.clear()
+                return NotImplemented
 
         lst = [X()]
         with self.assertRaises(ValueError):
             lst.index(lst)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class L(list):
-                def __eq__(self, other):
-                    str(other)
-                    return NotImplemented
+        class L(list):
+            def __eq__(self, other):
+                str(other)
+                return NotImplemented
 
         lst = L([X()])
         lst.count(lst)
