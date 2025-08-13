@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 import torch
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
+from .counter_utils import shape_wrapper, get_suffix_str, convert_to_percent_str, convert_num_with_suffix
 from typing import Any, Optional, Union, TypeVar, Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
-from functools import wraps
 import warnings
 
 __all__ = ["FlopCounterMode", "register_flop_formula"]
@@ -18,19 +17,7 @@ _P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
-def get_shape(i):
-    if isinstance(i, torch.Tensor):
-        return i.shape
-    return i
-
 flop_registry: dict[Any, Any] = {}
-
-def shape_wrapper(f):
-    @wraps(f)
-    def nf(*args, out_val=None, **kwargs):
-        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out_val))
-        return f(*args, out_shape=out_shape, **kwargs)
-    return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -575,42 +562,6 @@ flop_registry = {
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
 }
 
-def normalize_tuple(x):
-    if not isinstance(x, tuple):
-        return (x,)
-    return x
-
-
-# Define the suffixes for different orders of magnitude
-suffixes = ["", "K", "M", "B", "T"]
-# Thanks BingChat!
-def get_suffix_str(number):
-    # Find the index of the appropriate suffix based on the number of digits
-    # with some additional overflow.
-    # i.e. 1.01B should be displayed as 1001M, not 1.001B
-    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 2) // 3))
-    return suffixes[index]
-
-def convert_num_with_suffix(number, suffix):
-    index = suffixes.index(suffix)
-    # Divide the number by 1000^index and format it to two decimal places
-    value = f"{number / 1000 ** index:.3f}"
-    # Return the value and the suffix as a string
-    return value + suffixes[index]
-
-def convert_to_percent_str(num, denom):
-    if denom == 0:
-        return "0%"
-    return f"{num / denom:.2%}"
-
-def _pytreeify_preserve_structure(f):
-    @wraps(f)
-    def nf(args):
-        flat_args, spec = tree_flatten(args)
-        out = f(*flat_args)
-        return tree_unflatten(out, spec)
-
-    return nf
 
 
 class FlopCounterMode:
