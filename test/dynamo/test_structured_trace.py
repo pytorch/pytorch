@@ -1410,7 +1410,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
             self.assertParses()
 
     @requires_tlparse
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging_dynamic_shapes(self):
         """Same as test_tensor_metadata_logging, but with dynamic shapes enabled to cover to_size_hints."""
@@ -1422,7 +1421,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 w = z.to(torch.float16)
                 return w
 
-            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled = torch.compile(f, backend="inductor", dynamic=True)
             compiled(torch.ones(2, 3))
 
             # Verify artifact was logged
@@ -1462,6 +1461,15 @@ def forward(self, x_1: "f32[2][1]cpu"):
   "ops": [
     {
       "outputs": [
+        {
+          "dtype": "float32",
+          "shape": [
+            2
+          ],
+          "stride": [
+            1
+          ]
+        },
         {
           "dtype": "float16",
           "shape": [
