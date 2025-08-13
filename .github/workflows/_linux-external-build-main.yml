@@ -31,11 +31,6 @@ on:
         default: "8.9"
         description: |
           List of CUDA architectures CI build should target.
-      max_jobs:
-        required: false
-        type: number
-        description:
-          Maximum number of jobs to run the external build
       runner_prefix:
         required: false
         default: ""
@@ -221,7 +216,8 @@ jobs:
             python3 -m pip install -e .
           )
 
-          export MAX_JOBS="$(nproc --ignore=6)"
+          MAX_JOBS="$(nproc --ignore=6)"
+          export MAX_JOBS
 
           python3 -m cli.run build external "$BUILD_TARGET"
           END_TIME=$(date +%s)
