@@ -2,8 +2,8 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/tensor-struct.h>
-#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <optional>
 
@@ -20,9 +20,9 @@ T to(StableIValue val);
 //  helpers for converting between StableIValue and T
 // =============================================================================
 
-// note that the signatures for from and to are forward declared in stable/utils.h
-// but defined below to avoid circular dependencies where other headers (like
-// tensor-inl.h) will need to/from.
+// note that the signatures for from and to are forward declared in
+// stable/utils.h but defined below to avoid circular dependencies where other
+// headers (like tensor-inl.h) will need to/from.
 
 namespace detail {
 
@@ -116,7 +116,7 @@ struct FromImpl<ScalarType> {
         return from(aoti_torch_dtype_uint64());
       default:
         throw std::runtime_error(
-          "Not yet supported ScalarType, please file an issue describing your use case.");
+            "Not yet supported ScalarType, please file an issue describing your use case.");
     }
   }
 };
