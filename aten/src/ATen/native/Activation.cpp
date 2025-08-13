@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Activation.h>
 
+#include <ATen/native/LUTKernel.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
@@ -78,6 +79,7 @@
 #include <ATen/ops/threshold_native.h>
 
 #include <utility>
+#include <mutex>
 #endif
 
 namespace at::meta {
@@ -390,6 +392,23 @@ static bool use_mkldnn(const Tensor& input) {
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, std::string_view approximate, const Tensor& result
 ) {
+  if (self.scalar_type() == at::kBFloat16) {
+
+        // Build TensorIterator for elementwise op
+        auto iter = TensorIteratorConfig()
+            .add_output(result)
+            .add_input(self)
+            .build();
+
+        // Call your custom LUT-based kernel
+        gelu_bf16_lut_kernel(iter);
+        return;
+    }
+  static bool printed = false;
+  if (!printed) {
+    std::cout << "GELU math kernel used (non-LUT)" << std::endl;
+    printed = true;
+  }
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {

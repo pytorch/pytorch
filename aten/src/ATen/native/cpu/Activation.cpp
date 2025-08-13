@@ -19,6 +19,7 @@
 #include <ATen/native/cpu/Gelu.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/LUTKernel.h>
 
 #include <c10/core/Scalar.h>
 
@@ -282,7 +283,6 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
     });
   }
 }
-
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
