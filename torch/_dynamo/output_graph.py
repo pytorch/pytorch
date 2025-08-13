@@ -335,13 +335,6 @@ class OutputGraphGuardsState:
     def aotautograd_guards(self) -> list[torch._guards.GuardEnvExpr]:
         return self._aotautograd_guards
 
-    def load_guards(self) -> None:
-        """
-        Iterate through guards and run any deserialization steps
-        """
-        assert self._guards is not None
-        breakpoint()
-
 
 @dataclass
 class StackLocalsMetadata:
@@ -690,10 +683,6 @@ class OutputGraph(OutputGraphGuardsState):
         assert pack_subgraph_name == "saved_tensors_hooks_pack_0"
         assert unpack_subgraph_name == "saved_tensors_hooks_unpack_0"
         return [pack_subgraph_name, unpack_subgraph_name]
-
-    # Guards are already loaded on the OutputGraph object
-    def load_guards(self) -> None:
-        return
 
     def dump_guards_state(self) -> OutputGraphGuardsState:
         # Dump a serializable version of self without extras

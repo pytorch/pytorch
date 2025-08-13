@@ -3262,7 +3262,6 @@ class CheckFunctionManager:
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
     ):
-        output_graph.load_guards()
 
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
