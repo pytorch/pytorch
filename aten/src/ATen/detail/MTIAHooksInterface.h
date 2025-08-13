@@ -149,8 +149,6 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return;
   }
-
-  virtual bool isAvailable() const override;
 };
 
 struct TORCH_API MTIAHooksArgs {};

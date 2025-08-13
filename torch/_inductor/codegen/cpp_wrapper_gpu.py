@@ -211,17 +211,12 @@ class DeferredTritonCallWrapper:
         ]
         arg_types = [arg_type_loookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
-        scratch_spaces = {
-            name: params[name]
-            for name in ["global_scratch", "profile_scratch"]
-            if params.get(name, None) is not None
-        }
         call_args_str = wrapper.generate_args_decl(
             prefix,
             call_args,
             arg_types,
             arg_signatures,
-            scratch_spaces=scratch_spaces,
+            workspace_size=params.get("global_scratch") or 0,
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         launch_kernel_args = [
@@ -459,7 +454,7 @@ class CppWrapperGpu(CppWrapperCpu):
         arg_types,
         arg_signatures,
         is_triton_kernel=True,
-        scratch_spaces: Optional[dict[str, int]] = None,
+        workspace_size=0,
     ):
         """
         Generates any declarations of args to pass into a kernel call, and then returns the arg names.
@@ -577,26 +572,22 @@ class CppWrapperGpu(CppWrapperCpu):
         ):
             process_args(arg, arg_type, arg_signature)
 
-        for scratch_name, workspace_size in (scratch_spaces or {}).items():
-            if (
-                is_triton_kernel
-                and (
-                    scratch := self.device_codegen.cpp_scratch(
-                        next(self.arg_var_id),
-                        workspace=TritonScratchWorkspace(
-                            size=workspace_size,
-                            generate_dtype_str=(
-                                lambda: self.codegen_dtype(torch.uint8)
-                            ),
-                        ),
-                        prefix=scratch_name,
-                    )
+        if (
+            is_triton_kernel
+            and (
+                global_scratch := self.device_codegen.cpp_global_scratch(
+                    next(self.arg_var_id),
+                    workspace=TritonScratchWorkspace(
+                        size=workspace_size,
+                        generate_dtype_str=(lambda: self.codegen_dtype(torch.uint8)),
+                    ),
                 )
-                is not None
-            ):
-                scratch_def, scratch_var = scratch
-                code.writelines([maybe_hipify_code_wrapper(x) for x in scratch_def])
-                new_args.append(f"&{scratch_var}")
+            )
+            is not None
+        ):
+            global_scratch_def, global_scratch_var = global_scratch
+            code.writelines([maybe_hipify_code_wrapper(x) for x in global_scratch_def])
+            new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
 
