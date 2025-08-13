@@ -7,6 +7,8 @@
 
 #include <optional>
 
+namespace {
+
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -336,3 +338,5 @@ T to(StableIValue val) {
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
 // =============================================================================
+
+} // namespace
