@@ -314,7 +314,7 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 if data_dep is not None:
 
-                    def is_groupable(candidate) -> tuple[bool, str]:
+                    def is_groupable(candidate) -> tuple[bool, Optional[str]]:
                         # preserve ordering
                         if contains_collective(candidate):
                             return False, "contains_collective"
