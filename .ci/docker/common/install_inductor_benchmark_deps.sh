@@ -26,15 +26,15 @@ function install_torchbench() {
 
   python install.py --continue_on_fail
 
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
+  # soxr comes from https://github.com/huggingface/transformers/pull/39429
+  pip install transformers==4.54.0 soxr==0.5.0
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
 
   chown -R jenkins torchbench
+  chown -R jenkins /opt/conda
 }
 
 # Pango is needed for weasyprint which is needed for doctr

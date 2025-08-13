@@ -155,6 +155,23 @@ def triton_op(
             if custom_triton_ops_decomposition_disabled():
                 return mode.__torch_dispatch__(op, types, args, kwargs)
             else:
+                # TODO: https://github.com/pytorch/pytorch/issues/160333
+                # We should deduplicate the unrecognized_types logic.
+                import torch._subclasses
+
+                unrecognized_types = [
+                    t
+                    for t in types
+                    if not issubclass(t, torch._subclasses.FakeTensor)
+                    and t
+                    not in [
+                        torch.Tensor,
+                        torch._subclasses.functional_tensor.FunctionalTensor,
+                    ]
+                ]
+
+                if unrecognized_types:
+                    return NotImplemented
                 with mode:
                     return fn(*args, **kwargs)
 
