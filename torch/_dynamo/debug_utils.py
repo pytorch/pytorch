@@ -43,7 +43,6 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
 from torch.hub import tqdm
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 from torch.utils.weak import StorageWeakRef
