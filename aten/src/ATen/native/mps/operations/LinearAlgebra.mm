@@ -112,6 +112,61 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
   return output;
 }
 
+Tensor& do_metal_addmm(const Tensor& self,
+                       const Tensor& other,
+                       Tensor& output,
+                       const Scalar& alpha,
+                       const Scalar& beta,
+                       const Tensor& bias) {
+  if (beta.toDouble() == 0 && alpha.toDouble() == 1) {
+    return do_metal_mm(self, other, output);
+  }
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self, other});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
+                                       static_cast<uint32_t>(self.size(1)),
+                                       static_cast<uint32_t>(output.size(1))};
+      std::array<int64_t, 8> strides = {self.stride(0),
+                                        self.stride(1),
+                                        other.stride(0),
+                                        other.stride(1),
+                                        output.stride(0),
+                                        output.stride(1),
+                                        bias.stride(0),
+                                        bias.stride(1)};
+      union {
+        std::array<int64_t, 2> i64;
+        std::array<int32_t, 2> i32;
+        std::array<float, 2> f32;
+      } alpha_beta;
+      if (output.scalar_type() == kLong) {
+        alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
+      } else if (c10::isIntegralType(output.scalar_type(), true)) {
+        alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+      } else {
+        TORCH_INTERNAL_ASSERT(c10::isFloatingType(output.scalar_type()));
+        alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
+      }
+      constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
+      uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
+      mtl_setArgs(computeEncoder, self, other, output, bias, alpha_beta.i64, strides, sizes);
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
 std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* graph,
                                                                     const Tensor& self,
                                                                     const Tensor& other) {
@@ -644,7 +699,6 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
-  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support addmm for non-float input");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -669,6 +723,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   }
   if (output.numel() == 0) {
     return output;
+  }
+
+  if (use_metal_mm(self, other, output)) {
+    return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 
   bool is_beta_non_zero = beta.toDouble() != 0.0;
