@@ -146,9 +146,6 @@ merge_record.json
 torchgen/packaged/*
 !torchgen/packaged/README.md
 
-# This file is injected by ROCm build scripts to bootstrap in torch/__init__.py.
-torch/_rocm_init.py
-
 # IPython notebook checkpoints
 .ipynb_checkpoints
 
