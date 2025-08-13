@@ -71,8 +71,7 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
 // Get the current device index
 inline DeviceIndex getCurrentDeviceIndex() {
   DeviceIndex device_index;
-  TORCH_ERROR_CODE_CHECK(
-      aoti_torch_get_current_device_index(&device_index));
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_device_index(&device_index));
   return device_index;
 }
 
