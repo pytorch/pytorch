@@ -2,8 +2,8 @@
 
 #include <ATen/native/CPUFallback.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/core/VariableFallbackKernel.h>
 
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/library.h>
 
 namespace at::openreg {
@@ -158,7 +158,7 @@ TORCH_LIBRARY_IMPL(openreg, PrivateUse1, m) {
 
 // LITERALINCLUDE START: CUSTOM OPERATOR FALLBACK
 TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1, m) {
-  m.fallback(AUTOGRAD_FALLBACK);
+  m.fallback(torch::autograd::autogradNotImplementedFallback());
 }
 // LITERALINCLUDE END: CUSTOM OPERATOR FALLBACK
 
