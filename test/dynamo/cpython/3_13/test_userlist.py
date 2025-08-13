@@ -110,10 +110,9 @@ class UserListTest(list_tests.CommonTest):
 
     def test_getitemoverwriteiter(self):
         # Verify that __getitem__ overrides *are* recognized by __iter__
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class T(self.type2test):
-                def __getitem__(self, key):
-                    return str(key) + '!!!'
+        class T(self.type2test):
+            def __getitem__(self, key):
+                return str(key) + '!!!'
         self.assertEqual(next(iter(T((1,2)))), "0!!!")
 
     def test_userlist_copy(self):
