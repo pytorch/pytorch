@@ -395,6 +395,48 @@ class TestSchedulePlan(TestCase):
 instantiate_parametrized_tests(TestSchedulePlan)
 
 
+class TestScheduleCsv(TestCase):
+    @parametrize(
+        "ScheduleClass,csv_name",
+        [
+            (ScheduleDualPipeV, "dualpipev_4rank_10mb"),
+        ],
+    )
+    def test_schedule_csv_compare(self, ScheduleClass, csv_name):
+        """
+        Test that schedules matches the expected CSV.  This is a regression test to ensure that the schedule
+        is not changed unintentionally.
+        """
+        num_local_stages = 2
+        group_size = 4
+        num_stages = num_local_stages * group_size
+        stages = [
+            MockPipelineStage(group_size=group_size, num_stages=num_stages)
+            for _ in range(num_local_stages)
+        ]
+        num_microbatches = 10
+        schedule = ScheduleClass(stages, num_microbatches)
+        comms_csv = os.path.join(ARTIFACTS_DIR, f"{csv_name}.csv")
+        sch = schedule.pipeline_order
+
+        # Uncomment to regenerate reference output
+        # schedule._dump_csv("test.csv", "compute_only")
+
+        sch_ref = {}
+        with open(comms_csv, newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(
+                zip(sch[rank], sch_ref[rank], strict=True)
+            ):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
+
+instantiate_parametrized_tests(TestScheduleCsv)
+
+
 class TestScheduleLowering(TestCase):
     """Tests lowering passes that convert simple compute-only (FBW) schedules into compute+comms schedules"""
 
