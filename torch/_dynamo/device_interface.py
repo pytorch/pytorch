@@ -545,9 +545,9 @@ class MpsInterface(DeviceInterface):
 
     class Worker:
         @staticmethod
-        def get_device_properties(device: torch.types.Device = None) -> dict[str, Any]:
+        def get_device_properties(device: torch.types.Device = None) -> Any:
             return namedtuple("MPSProperties", ["multi_processor_count"])(
-                torch.backends.mps.get_core_count()
+                torch.backends.mps.get_core_count()  # type: ignore[arg-type]
             )
 
         @staticmethod
