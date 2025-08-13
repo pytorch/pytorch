@@ -834,6 +834,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
+static int dict_recursive_tag_watcher_id;
 static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
@@ -1042,7 +1043,8 @@ static void _parse_empty_strided_args(
 static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
-    c10::DeviceType device_type) {
+    c10::DeviceType device_type,
+    bool is_pinned = false) {
   HANDLE_TH_ERRORS;
   at::SmallVector<int64_t, 8> sizes;
   at::SmallVector<int64_t, 8> strides;
@@ -1050,7 +1052,7 @@ static PyObject* _empty_strided_device(
   _parse_empty_strided_args(args, sizes, strides, dtype);
   if (device_type == c10::DeviceType::CPU) {
     return THPVariable_Wrap(
-        at::detail::empty_strided_cpu(sizes, strides, dtype));
+        at::detail::empty_strided_cpu(sizes, strides, dtype, is_pinned));
   }
 #ifdef USE_CUDA
   else if (device_type == c10::DeviceType::CUDA) {
@@ -1082,6 +1084,13 @@ static PyObject* _empty_strided_cpu(PyObject* dummy, PyObject* args) {
   // at::empty_strided is surprising slow.  This is a lower-overhead
   // version that saves ~2us on every allocation.
   return _empty_strided_device(dummy, args, c10::DeviceType::CPU);
+}
+
+static PyObject* _empty_strided_cpu_pinned(PyObject* dummy, PyObject* args) {
+  // at::empty_strided is surprising slow.  This is a lower-overhead
+  // version that saves ~2us on every allocation.
+  return _empty_strided_device(
+      dummy, args, c10::DeviceType::CPU, /*is_pinned=*/true);
 }
 
 static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
@@ -1127,6 +1136,10 @@ static PyMethodDef _methods[] = {
     {"assert_alignment", assert_alignment, METH_VARARGS, nullptr},
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
+    {"_empty_strided_cpu_pinned",
+     _empty_strided_cpu_pinned,
+     METH_VARARGS,
+     nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
     {"_empty_strided_xpu", _empty_strided_xpu, METH_VARARGS, nullptr},
     {"_empty_strided_mtia", _empty_strided_mtia, METH_VARARGS, nullptr},
@@ -1544,6 +1557,37 @@ class GuardDebugInfo {
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
+
+// Global registry used by the *recursive-dict-tag* optimisation.
+//
+// Key   : `PyObject*` pointing to a watched `dict`
+// Value : list of `GuardManager*` instances that have recorded that dict
+//
+// Why is this global?
+// -------------------
+// * CPython allows only a small, fixed number of dict-watcher IDs (≈64).
+//   All `GuardManager`s therefore share a single watcher callback.
+// * Different guard managers (possibly across different frames) can end up
+//   watching the same dictionary pointer. Therefore, we have a list of guard
+//   managers for each dict pointer.
+//
+// When is watch registered?
+//  * During the recording phase of recursive dict tag matching in GuardManager.
+//
+// When are they watched?
+//  * In the dict_recursive_tag_watch_callback function.
+//
+// When are the dict pointers unwatched?
+//  * If a dict is mutated or the guard manager deallocates.
+//  * Read `unwatch_all_saved_dict_pointers` docstring for more details.
+//
+// Expected size
+// -------------
+// Every compilation frame contributes its tag-safe dicts to this registry, so
+// the container can grow large over the lifetime of the process.  That’s
+// acceptable: lookup is by pointer (hash/equals = identity) and each entry
+// stores only lightweight pointers.
+std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -2613,6 +2657,7 @@ class GuardManager {
 
   virtual ~GuardManager() {
     cleanup_tag_safe_entries();
+    disable_recursive_dict_tag_optimization();
   }
 
   void cleanup_tag_safe_entries() {
@@ -2713,6 +2758,11 @@ class GuardManager {
       PyObject* value,
       std::vector<PyObject*> tensor_pointers) {
     _tensor_pointers[value] = tensor_pointers;
+  }
+
+  void disable_recursive_dict_tag_optimization() {
+    unwatch_all_saved_dict_pointers();
+    _disable_dict_tag_matching = true;
   }
 
  public:
@@ -2821,6 +2871,10 @@ class GuardManager {
   }
 
   bool check_dict_pointer_tags(PyObject* value) {
+    if (_dict_callback_installed) {
+      // This means that for 3.12+, there are callbacks watching dict pointers.
+      return true;
+    }
     for (auto& kv : _dict_pointers[value]) {
       PyObject* dict_pointer = kv.first;
       uint64_t old_tag = kv.second;
@@ -2951,6 +3005,11 @@ class GuardManager {
           throw std::runtime_error(
               "Could not register a callback for recursive dict tag optimization");
         }
+#if IS_PYTHON_3_12_PLUS
+        // Ideally we don't need to even register a weakref callback for value.
+        // But it does not hurt to be more cautious
+        _dict_callback_installed = watch_dict_pointers(value);
+#endif
       }
     }
     if (!result) {
@@ -2967,8 +3026,9 @@ class GuardManager {
     }
     GuardManager* guard_manager = static_cast<GuardManager*>(
         PyCapsule_GetPointer(self_capsule, "GuardManager*"));
-    if (guard_manager)
-      guard_manager->_disable_dict_tag_matching = true;
+    if (guard_manager) {
+      guard_manager->disable_recursive_dict_tag_optimization();
+    }
     Py_RETURN_NONE;
   }
 
@@ -3017,6 +3077,81 @@ class GuardManager {
     // These will be decrefed in destructor
     _tag_safe_entries.push_back({wr, capsule});
     return true;
+  }
+
+  bool watch_dict_pointers(PyObject* value) {
+#if IS_PYTHON_3_12_PLUS
+    // -----------------------------------------------------------------------------
+    // CPython 3.12 dict-watcher integration
+    // -----------------------------------------------------------------------------
+    //
+    // We register a single watcher on all every dictionary pointer recorded by
+    // a tag-safe root.  The watcher callback fires *once* for any structural
+    // change to those dictionaries
+    //
+    // Fast-path benefit
+    // -----------------
+    // In steady state we no longer need to iterate over the recorded
+    // dictionaries and compare their `ma_version_tag`s (the
+    // “are-tags-unchanged” loop that used to dominate the fast-path guard
+    // evaluation).  The presence of an *active watcher* is itself a guarantee
+    // that none of the dicts has mutated; if one **does** mutate, the callback
+    // simply flips `_disable_dict_tag_matching = true`, causing the next guard
+    // evaluation to skip the recursive-dict-tag optimisation entirely.
+    for (auto& kv : _dict_pointers[value]) {
+      PyObject* dict_pointer = kv.first;
+      int rc = PyDict_Watch(dict_recursive_tag_watcher_id, dict_pointer);
+      if (rc != 0) {
+        PyErr_Clear();
+        return false;
+      }
+      dict_to_guard_managers[dict_pointer].push_back(this);
+    }
+#endif
+    return true;
+  }
+
+  void unwatch_all_saved_dict_pointers() {
+    /*
+    We may have recorded hundreds/thousands of dict pointers for the recursive
+    dict-tag optimisation. If any of those dicts mutates, we want to disable the
+    optimisation and then unwatch as many dict pointers as we can.
+
+    Be careful: the same dict pointer can be recorded by multiple GuardManagers.
+    So the flow is:
+
+      1) Remove *this* GuardManager from dict_to_guard_managers[dict_pointer].
+      2) If the list for that dict becomes empty, then:
+          - PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer)
+          - erase the dict_pointer entry from dict_to_guard_managers.
+    */
+#if IS_PYTHON_3_12_PLUS
+    if (!_disable_dict_tag_matching) {
+      for (auto& value_stashed_pointers : _dict_pointers) {
+        auto stashed_pointers = value_stashed_pointers.second;
+
+        for (auto& stashed_pointer : stashed_pointers) {
+          PyObject* dict_pointer = stashed_pointer.first;
+
+          // Delete the guard manager from the dict_to_guard_managers
+          auto it = std::find(
+              dict_to_guard_managers[dict_pointer].begin(),
+              dict_to_guard_managers[dict_pointer].end(),
+              this);
+          if (it != dict_to_guard_managers[dict_pointer].end()) {
+            dict_to_guard_managers[dict_pointer].erase(it);
+          }
+
+          // Unwatch the dict pointer if this was the last guard manager
+          // watching it.
+          if (dict_to_guard_managers[dict_pointer].empty()) {
+            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+            dict_to_guard_managers.erase(dict_pointer);
+          }
+        }
+      }
+    }
+#endif
   }
 
   virtual bool check_nopybind(FrameLocalsMapping* value) {
@@ -3257,6 +3392,9 @@ class GuardManager {
       _dict_pointers;
   std::unordered_map<PyObject*, std::vector<PyObject*>> _tensor_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+
+  // 3.12+ related helper
+  bool _dict_callback_installed = false;
 
  protected:
   // weakref to the type of guarded value
@@ -3944,6 +4082,27 @@ void add_relational_guard_resetter_to_cloned_root(
     std::shared_ptr<RelationalGuard> guard) {
   root->add_relational_guard_resetter(std::move(guard));
 }
+
+#if IS_PYTHON_3_12_PLUS
+static int dict_recursive_tag_watch_callback(
+    PyDict_WatchEvent event,
+    PyObject* dict,
+    PyObject* key,
+    PyObject* new_value) noexcept {
+  if (event != PyDict_EVENT_CLONED) {
+    auto it = dict_to_guard_managers.find(dict);
+    if (it != dict_to_guard_managers.end()) {
+      auto guard_managers = it->second;
+      for (auto& guard_manager : guard_managers) {
+        if (guard_manager) {
+          guard_manager->disable_recursive_dict_tag_optimization();
+        }
+      }
+    }
+  }
+  return 0; // keep watching
+}
+#endif
 
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
@@ -7544,6 +7703,13 @@ PyObject* torch_c_dynamo_guards_init() {
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
   if (dict_version_watcher_id == -1) {
     throw std::runtime_error("Failed to install dict_version_watch_callback");
+  }
+
+  dict_recursive_tag_watcher_id =
+      PyDict_AddWatcher(dict_recursive_tag_watch_callback);
+  if (dict_recursive_tag_watcher_id == -1) {
+    throw std::runtime_error(
+        "Failed to install dict_recursive_tag_watch_callback");
   }
 
 #endif

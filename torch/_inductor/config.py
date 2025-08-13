@@ -81,6 +81,11 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Configurable compile worker logging path for subproc_pool
+worker_log_path = (
+    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+)
+
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
@@ -90,6 +95,8 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
+
+remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -430,7 +437,11 @@ max_autotune_report_choices_stats = (
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
+    == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -741,6 +752,12 @@ worker_suppress_logging: bool = Config(
     default=True,
 )
 
+# Log per-operation runtime estimates for TLParse analysis.
+log_tlparse: bool = Config(
+    env_name_force="LOG_TLPARSE",
+    default=False,
+)
+
 # Flags to turn on all_reduce fusion. These 2 flags should be automatically turned
 # on by DDP and should not be set by the users.
 _fuse_ddp_communication = False
@@ -1001,6 +1018,24 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
+
+def get_worker_log_path() -> Optional[str]:
+    log_loc = None
+    if is_fbcode():
+        mast_job_name = os.environ.get("MAST_HPC_JOB_NAME", None)
+        global_rank = os.environ.get("ROLE_RANK", "0")
+
+        if mast_job_name is not None:
+            log_loc = f"/logs/dedicated_log_torch_compile_worker_rank{global_rank}"
+
+    return log_loc
+
+
+torchinductor_worker_logpath: str = Config(
+    env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
+    default="",
+)
 
 
 # config specific to codegen/cpp.py
@@ -1465,12 +1500,12 @@ class aot_inductor:
     precompile_headers: bool = not is_fbcode()
 
     # Embed generated kernel binary files into model.so
-    embed_kernel_binary: bool = False
+    embed_kernel_binary: Optional[bool] = None
 
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
-    emit_multi_arch_kernel: bool = False
+    emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
@@ -1860,6 +1895,12 @@ class test_configs:
     autotune_choice_desc_regex: Optional[str] = None
 
     graphsafe_rng_func_ignores_fallback_random = False
+
+    track_memory_lifecycle: Optional[Literal["assert", "log"]] = None
+
+    # If set to True, AOTI-generated CMakelists.txt will still use libtorch
+    # for unit testing
+    use_libtorch = False
 
 
 if TYPE_CHECKING:
