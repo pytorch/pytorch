@@ -11,6 +11,7 @@ from torch._higher_order_ops.utils import (
     _set_compilation_env,
     autograd_not_implemented,
     check_meta_consistency,
+    materialize_as_graph,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -519,6 +520,147 @@ class WhileLoopWithCheckpointOp(HigherOrderOperator):
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
+class WhileLoopWithCheckpointAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        cond_fn,
+        body_fn,
+        num_carried_inputs,
+        num_additional_inputs,
+        *carries_and_inputs,
+    ):
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        carries, additional_inputs = split_into_chunks(
+            carries_and_inputs, [num_carried_inputs, num_additional_inputs]
+        )
+        with torch._C._AutoDispatchBelowAutograd():
+            out, checkpoints = split_into_chunks(
+                while_loop_with_checkpoint_op(
+                    cond_fn, body_fn, carries, additional_inputs
+                ),
+                [num_carried_inputs, num_carried_inputs],
+            )
+
+        assert not hasattr(ctx, "fw_cond_fn")
+        assert not hasattr(ctx, "fw_body_fn")
+        assert not hasattr(ctx, "carries")
+        assert not hasattr(ctx, "additional_inputs")
+        assert not hasattr(ctx, "checkpoints")
+        ctx.fw_cond_fn = cond_fn
+        ctx.fw_body_fn = body_fn
+        ctx.carries = carries
+        ctx.additional_inputs = additional_inputs
+        ctx.checkpoints = checkpoints
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        assert len(checkpoints) > 0, "checkpoints shouldn't be empty"
+        return tuple(out) + tuple(checkpoints)
+
+    @staticmethod
+    def backward(ctx, *grads):
+        from torch._higher_order_ops.cond import create_bw_fn
+        from torch._higher_order_ops.scan import split_into_chunks
+
+        num_carried_inputs = len(ctx.carries)
+        grad_outs, _ = split_into_chunks(
+            grads,
+            [num_carried_inputs, num_carried_inputs],
+        )
+
+        bw_body_fn = create_bw_fn(ctx.fw_body_fn, ctx.carries + ctx.additional_inputs)
+
+        grad_additional_inputs = [
+            torch.zeros_like(a) if isinstance(a, torch.Tensor) else None
+            for a in ctx.additional_inputs
+        ]
+        init_idx = torch.zeros((), dtype=torch.int64)
+        _, spec = pytree.tree_flatten(
+            (
+                init_idx,
+                grad_outs,
+                grad_additional_inputs,
+                ctx.checkpoints,
+                ctx.additional_inputs,
+            )
+        )
+
+        def cond_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                checkpoints,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            return idx < checkpoints[0].size(0)
+
+        def body_fn(*flat_args):
+            (
+                idx,
+                grad_carries,
+                grad_additional_inputs,
+                checkpoints,
+                additional_inputs,
+            ) = pytree.tree_unflatten(flat_args, spec)
+            reversed_idx = checkpoints[0].size(0) - idx - 1
+            selected_checkpoints = [
+                ckp.select(0, reversed_idx.item()) for ckp in checkpoints
+            ]
+            cur_grad_carries, cur_grad_additional_inputs = split_into_chunks(
+                bw_body_fn(*selected_checkpoints, *additional_inputs, *grad_carries),
+                [len(ctx.carries), len(ctx.additional_inputs)],
+            )
+            return (
+                idx + 1,
+                *cur_grad_carries,
+                *(
+                    cur_grad + grad
+                    for cur_grad, grad in zip(
+                        cur_grad_additional_inputs, grad_additional_inputs
+                    )
+                ),
+            )
+
+        args_single_step_bw = (
+            init_idx,
+            *grad_outs,
+            *grad_additional_inputs,
+            *ctx.checkpoints,
+            *ctx.additional_inputs,
+        )
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint function when torch.compile torch.autograd.grad.
+        cond_gm = materialize_as_graph(
+            cond_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+        body_gm = materialize_as_graph(
+            body_fn,
+            args_single_step_bw,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+        outs = while_loop_op(
+            cond_gm,
+            body_gm,
+            (
+                init_idx,
+                *grad_outs,
+                *grad_additional_inputs,
+            ),
+            (*ctx.checkpoints, *ctx.additional_inputs),
+        )
+        return None, None, None, None, *outs[1:]
+
+
 while_loop_with_checkpoint_op = WhileLoopWithCheckpointOp()
 
 while_loop_with_checkpoint_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
@@ -537,6 +679,14 @@ while_loop_with_checkpoint_op.py_functionalize_impl(
     functools.partial(while_loop_func, with_checkpoint=True)
 )
 
-while_loop_with_checkpoint_op.py_autograd_impl(
-    autograd_not_implemented(while_loop_with_checkpoint_op, deferred_error=True)
-)
+
+@while_loop_with_checkpoint_op.py_autograd_impl
+def while_loop_with_checkpoint_autograd(cond_fn, body_fn, operands, additional_inputs):
+    return WhileLoopWithCheckpointAutogradOp.apply(
+        cond_fn,
+        body_fn,
+        len(operands),
+        len(additional_inputs),
+        *operands,
+        *additional_inputs,
+    )

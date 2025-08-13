@@ -59,7 +59,7 @@ from ..utils import proxy_args_kwargs, set_example_value
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
-from .lists import ListVariable, TupleVariable
+from .lists import ListVariable, SliceVariable, TupleVariable
 
 
 if TYPE_CHECKING:
@@ -525,6 +525,60 @@ def _call_while_loop(
         )
 
     else:
+        example_args = [
+            proxy.node.meta["example_value"]
+            for proxy in operands_proxy + additional_inputs_proxy
+        ]
+        need_grad = (
+            any(t.requires_grad for t in example_args if isinstance(t, (torch.Tensor,)))
+            and torch.is_grad_enabled()
+        )
+        # For while_loop, if any input requires_grad, we want to call while_loop_with_checkpoint directly
+        # instead of calling while_loop and letting it forward call to while_loop_with_checkpoint
+        # in autograd key.
+
+        # If we call while_loop, the autograd implementation of while_loop will save the checkpoints, whose
+        # first dimension is unbacked symint and just return the forward outputs.
+        # From dynamo's point view, the forward outputs doesn't contain any unbacked symbols, and the
+        # unbacked symint leaked out so it raises an PendingUnbackedSymbolNotFound error.
+        #
+        # In contrast, if we call while_loop_with_checkpoint, dynamo will track both the fw output and the
+        # checkpoints, and the newly allocated unbacked symints are correctly tracked.
+        # We just need to slice the output
+        if need_grad:
+            from .builder import wrap_fx_proxy
+
+            # Store the invocation as a call
+            flat_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.higher_order.while_loop_with_checkpoint,
+                    args=p_args,
+                    kwargs={},
+                ),
+                example_value=None,
+            )
+            # Transform variable back into a list (previously made into a tuple by
+            # speculate_subgraph function) so as to respect the pytree API typing.
+            flat_list_variable = BuiltinVariable(list).call_function(
+                tx, [flat_variable], {}
+            )
+            slice_obj = SliceVariable(
+                [
+                    ConstantVariable.create(None),
+                    ConstantVariable.create(len(operands_seq)),
+                    ConstantVariable.create(None),
+                ]
+            )
+            flat_list_variable = flat_list_variable.call_method(
+                tx, "__getitem__", [slice_obj], {}
+            )
+            out_var = _make_inlined(tx, pytree.tree_unflatten)(
+                flat_list_variable, body_treespec
+            )
+            return out_var
+
         return _call_function_and_unflatten_output(
             tx,
             self.value,
