@@ -351,7 +351,8 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual bool pinned_use_background_threads() {
-    return false;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        pinned_use_background_threads();
   }
 
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
