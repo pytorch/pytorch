@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import textwrap
 import traceback
 from collections.abc import Container, Generator, Iterable, Iterator, Sequence
@@ -155,6 +156,9 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
+autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -3729,10 +3733,8 @@ class Layout(OutputSpec):
         # do for dynamic shape.
         #
         # Skip padding the strides for dynamic shape for now.
-        if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
-        ):
+        # If outermost dim is dynamic, stride still can be fully static
+        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
             return in_strides
 
         stride_order = get_stride_order(in_strides)
@@ -3747,11 +3749,11 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
-            new_strides[idx] = stride
+            if isinstance(stride, (int, sympy.Integer)):
+                if stride > config.padding_stride_threshold and stride % align != 0:
+                    stride = ceildiv(stride, align) * align
+                    padded = True
+                new_strides[idx] = stride
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -4910,9 +4912,13 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        benchmark_configs = {
+            "warmup": autotune_warmup,
+            "rep": autotune_rep,
+        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
-        return benchmarker.benchmark(algo, args, {"out": out})
+            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)
+        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
 
     def call_name(self) -> str:
         raise NotImplementedError
