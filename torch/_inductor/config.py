@@ -397,6 +397,9 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
+reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
+sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
