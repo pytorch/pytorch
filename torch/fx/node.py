@@ -6,7 +6,7 @@ import operator
 import types
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, TypeAliasType, TypeVar
+from typing_extensions import ParamSpec, TypeAlias, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
@@ -46,7 +46,7 @@ BaseArgumentTypes = Union[
 ]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
-Target = TypeAliasType("Target", Union[Callable[..., Any], str])
+Target: TypeAlias = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[

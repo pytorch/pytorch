@@ -68,9 +68,16 @@ class TestOperatorReorderForPeakMemory(TestCase):
         outp_corr = self.model(self.inputs)
         compiled_model = torch.compile(self.model)
         code = run_and_get_triton_code(compiled_model, self.inputs)
+
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         (
             FileCheck()
-            .check("def call(args):")
+            .check(call_str)
             .check("buf1 = ")
             .check("buf0 = ")
             .check("buf2 = ")
@@ -105,6 +112,12 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_lpmf],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_lpmf
         ):
@@ -113,7 +126,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(compiled_model, self.inputs)
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf1 = ")
                 .check("buf0 = ")
                 .check("buf2 = ")
@@ -148,15 +161,22 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_bfs],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_bfs
         ):
             compiled_model = torch.compile(self.model)
 
             code = run_and_get_triton_code(compiled_model, self.inputs)
+
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf0 = ")
                 .check("buf1 = ")
                 .check("buf2 = ")
@@ -191,6 +211,12 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 methods=[memory.topological_sort_dfs],
             )
 
+        call_str = (
+            "def call(self, args):"
+            if torch._inductor.config.graph_partition
+            else "def call(args):"
+        )
+
         with mock.patch.object(
             memory, "reorder_for_peak_memory", reorder_with_only_dfs
         ):
@@ -199,7 +225,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             code = run_and_get_triton_code(compiled_model, self.inputs)
             (
                 FileCheck()
-                .check("def call(args):")
+                .check(call_str)
                 .check("buf0 = ")
                 .check("buf2 = ")
                 .check("buf4 = ")
@@ -379,8 +405,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
             return out, out2, inp2 @ inp2
 
-        inp = torch.rand([256, 256], device="cuda")
-        inp2 = torch.rand([256, 256], device="cuda")
+        inp = torch.rand([256, 256], device=GPU_TYPE)
+        inp2 = torch.rand([256, 256], device=GPU_TYPE)
 
         def replace_foreach(gm):
             nodes = gm.find_nodes(
