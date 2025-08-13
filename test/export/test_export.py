@@ -86,7 +86,7 @@ from torch.testing._internal.custom_tensor import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
     LeafSpec,
@@ -6349,7 +6349,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             efoo = torch.export.export(
                 foo,
                 inputs,
-                dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
+                dynamic_shapes={
+                    "kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}, None, None]
+                },
             )
             self.assertEqual(
                 [out.shape for out in efoo.module()(*inputs)],
@@ -8380,7 +8382,7 @@ def forward(self, b_a_buffer, x):
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
             )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
         device = torch.device("cuda")
@@ -8405,7 +8407,7 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
         device = torch.device("cuda")
@@ -8430,7 +8432,7 @@ def forward(self, b_a_buffer, x):
         module_out = Foo()(xs)
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_export_associative_scan_lifted_buffers(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -8913,7 +8915,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             self.assertExpectedInline(
                 str(ep_decompose_linear.graph_module.code).strip(),
                 """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_bias, c_linear_weight, x, y):
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
     permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
@@ -15915,7 +15917,7 @@ def forward(self, x):
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_assert_tensor_metadata_device_index(self):
         class N(torch.nn.Module):
             def __init__(self):
