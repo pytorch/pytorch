@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import operator
 import os
+import tempfile
 
 from torch._inductor.compile_worker.subproc_pool import (
     raise_testexc,
@@ -65,6 +66,19 @@ class TestCompileWorker(TestCase):
             self.assertEqual(b.result(), 99)
         finally:
             pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_logging(self):
+        os.environ["MAST_HPC_JOB_NAME"] = "test_job"
+        os.environ["ROLE_RANK"] = "0"
+        with tempfile.NamedTemporaryFile(delete=True) as temp_log:
+            os.environ["TORCHINDUCTOR_WORKER_LOGPATH"] = temp_log.name
+            pool = SubprocPool(2)
+            try:
+                pool.submit(operator.add, 100, 1)
+                self.assertEqual(os.path.exists(temp_log.name), True)
+            finally:
+                pool.shutdown()
 
 
 if __name__ == "__main__":

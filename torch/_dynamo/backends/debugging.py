@@ -28,7 +28,7 @@ import functools
 import logging
 from collections.abc import Iterable
 from importlib import import_module
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -36,15 +36,13 @@ from torch import _guards
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
-from torch.fx.node import Target
 
 from .common import aot_autograd
-from .registry import (
-    CompiledFn,
-    CompilerFn,
-    lookup_backend,
-    register_debug_backend as register_backend,
-)
+from .registry import CompiledFn, CompilerFn, register_debug_backend as register_backend
+
+
+if TYPE_CHECKING:
+    from torch.fx.node import Target
 
 
 log = logging.getLogger(__name__)
@@ -403,7 +401,7 @@ class ExplainOutput:
     graph_break_count: int
     break_reasons: list[GraphCompileReason]
     op_count: int
-    ops_per_graph: Optional[list[Target]] = None
+    ops_per_graph: Optional[list[list["Target"]]] = None
     out_guards: Optional[list[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
@@ -424,7 +422,7 @@ class ExplainOutput:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
                 output += f"  Ops {idx + 1}:\n"
-                for op in ops:  # type: ignore[union-attr]
+                for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
@@ -442,13 +440,13 @@ def _explain_graph_detail(
     gm: torch.fx.GraphModule,
     graphs: list[torch.fx.GraphModule],
     op_count: int,
-    ops_per_graph: list[list[Target]],
+    ops_per_graph: list[list["Target"]],
     break_reasons: list[GraphCompileReason],
 ) -> tuple[
     torch.fx.GraphModule,
     list[torch.fx.GraphModule],
     int,
-    list[list[Target]],
+    list[list["Target"]],
     list[GraphCompileReason],
 ]:
     """
@@ -504,6 +502,8 @@ class ExplainWithBackend:
     """
 
     def __init__(self, backend: Union[CompilerFn, str]) -> None:
+        from .registry import lookup_backend
+
         self.backend = lookup_backend(backend)
         self.graphs: list[torch.fx.GraphModule] = []
         self.op_count = 0
