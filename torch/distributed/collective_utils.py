@@ -9,6 +9,7 @@ Each should also handle single rank scenario.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -303,16 +304,20 @@ def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
     rank_values = [
         [_summarize_ranks(ranks), str(value)] for value, ranks in value_ranks.items()
     ]
-    from tabulate import tabulate
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
 
-    # todo do the try import tabulate thing
-    return tabulate(rank_values, headers=headers)
+        return tabulate(rank_values, headers=headers)
+    row_str = "\n".join([str(row) for row in rank_values])
+    return str(f"{headers}\n{row_str}")
 
 
-def _check_rng_sync(generator: torch.Generator, group: dist.ProcessGroup) -> None:
+def _check_rng_sync(
+    generator: torch.Generator, group: dist.ProcessGroup
+) -> Optional[str]:
     value_ranks, value_header = _check_rng_sync_internal(generator, group)
+    log_str = None
     if len(value_ranks) > 1:
-        logger.error(
-            "Generator desync detected:\n%s",
-            _desync_table_str(value_header, value_ranks),
-        )
+        log_str = f"Generator desync detected:\n{_desync_table_str(value_header, value_ranks)}"
+        logger.error(log_str)
+    return log_str
