@@ -67,8 +67,9 @@ def benchmark_and_cache_comm(
             estimate=False,
         )
         print(comm_func_name, "inp", inp.size(), "out", out.size(), "time", time)
-        del inp
-        del out
+        inp.cpu()
+        out.cpu()
+        del inp, out
 
 
 def calibrate_with_cache(sched, snodes, comm_cache, comp_cache, has_reduce_scatter):

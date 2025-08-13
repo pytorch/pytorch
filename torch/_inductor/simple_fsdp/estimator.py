@@ -296,8 +296,9 @@ def estimate_comm_time(
         estimate,
         verbose=verbose,
     )
-    del tensor_input
-    del tensor_output
+    tensor_input.cpu()
+    tensor_output.cpu()
+    del tensor_input, tensor_output
     return comm_time
 
 
@@ -366,6 +367,8 @@ def benchmark_comm_func(
         comm_cache.add_comm_time(
             tensor_input.size(), tensor_output.size(), comm_func_name, process_group, comm_time
         )
+    tensor_input.cpu()
+    tensor_output.cpu()
     del tensor_input, tensor_output
     return comm_time
 
