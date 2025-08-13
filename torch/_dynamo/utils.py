@@ -45,7 +45,6 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from collections.abc import Hashable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -96,13 +95,11 @@ from .graph_utils import _get_flat_args
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
-        Container,
         Generator,
         ItemsView,
         Iterable,
         Iterator,
         KeysView,
-        Mapping,
         Sequence,
         ValuesView,
     )
@@ -154,7 +151,6 @@ except ImportError:
 
 
 T = TypeVar("T")
-R = TypeVar("R")
 _P = ParamSpec("_P")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
@@ -953,7 +949,14 @@ def identity(x: T) -> T:
 
 
 def hashable(x: Any) -> bool:
-    return isinstance(x, Hashable)
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+    # cannot hash writable memoryview object
+    except ValueError:
+        return False
 
 
 def nothing(*args: Any, **kwargs: Any) -> None:
@@ -2215,14 +2218,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
 
 def is_jit_model(
     model0: Any,
-) -> TypeIs[
-    Union[
-        torch.jit._trace.TopLevelTracedModule,
-        torch.jit._script.RecursiveScriptModule,
-        torch.jit.ScriptFunction[Any, Any],
-        torch.jit.ScriptModule,
-    ]
-]:
+) -> bool:
     return isinstance(
         model0,
         (
@@ -2342,9 +2338,7 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     return restore
 
 
-def timed(
-    model: Any, example_inputs: Iterable[Any], times: int = 1
-) -> tuple[Any, float]:
+def timed(model: Any, example_inputs: Any, times: int = 1) -> tuple[Any, float]:
     if torch.cuda.is_available():
         synchronize = torch.cuda.synchronize
     else:
@@ -2361,7 +2355,7 @@ def timed(
     return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
-def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
+def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Any) -> bool:
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
 
 
@@ -2511,11 +2505,11 @@ def guard_if_dyn(arg: Any) -> Any:
     return arg
 
 
-def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
+def check_constant_args(args: Any, kwargs: Any) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
-def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
+def check_unspec_python_args(args: Any, kwargs: Any) -> bool:
     from .variables.constant import ConstantVariable
     from .variables.tensor import UnspecializedPythonVariable
 
@@ -2528,9 +2522,7 @@ def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> 
     return unspec_count > 0
 
 
-def check_unspec_or_constant_args(
-    args: Iterable[Any], kwargs: Mapping[Any, Any]
-) -> bool:
+def check_unspec_or_constant_args(args: Any, kwargs: Any) -> bool:
     # A fused version of:
     # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
     from .variables.tensor import UnspecializedPythonVariable
@@ -2541,7 +2533,7 @@ def check_unspec_or_constant_args(
     return True
 
 
-def check_numpy_ndarray_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
+def check_numpy_ndarray_args(args: Any, kwargs: Any) -> bool:
     from .variables.tensor import NumpyNdarrayVariable
 
     return any(
@@ -2576,17 +2568,14 @@ list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
-K = TypeVar("K")
-V = TypeVar("V")
 
-
-def builtin_dict_keys(d: dict[K, V]) -> KeysView[K]:
+def builtin_dict_keys(d: dict[Any, Any]) -> KeysView[Any]:
     # Avoids overridden keys method of the dictionary
     assert isinstance(d, dict)
     return dict.keys(d)
 
 
-def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
+def get_items_from_dict(obj: dict[Any, Any]) -> Any:
     # Get items without calling the user defined __getitem__ or keys method.
     assert isinstance(obj, dict)
     if istype(obj, (dict, OrderedDict)):
@@ -2603,7 +2592,7 @@ def nn_module_new(cls: Any) -> Any:
     return obj
 
 
-def product(it: Iterable[T]) -> int:
+def product(it: Iterable[Any]) -> Any:
     return functools.reduce(operator.mul, it, 1)
 
 
@@ -2644,7 +2633,7 @@ def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
-def set_getitem(s: set[T], n: int) -> T:
+def set_getitem(s: set[Any], n: int) -> Any:
     # Set ordering might not be stable
     return list(s)[n]
 
@@ -2711,7 +2700,7 @@ def raise_args_mismatch(tx: InstructionTranslatorBase, name: str) -> None:
 
 
 def iter_contains(
-    items: Iterable[Any],
+    items: Any,
     search: Any,
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
@@ -2816,7 +2805,7 @@ def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> 
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
-def is_in(item: T, *containers: Container[T]) -> bool:
+def is_in(item: str, *containers: Any) -> bool:
     for container in containers:
         if item in container:
             return True
@@ -2966,7 +2955,7 @@ def same(
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
 
-        def to_tensor(t: Any) -> torch.Tensor:
+        def to_tensor(t: Any) -> Any:
             return t if isinstance(t, torch.Tensor) else torch.tensor(t)
 
         ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
@@ -3864,15 +3853,15 @@ def numpy_to_tensor(value: Any) -> Any:
         return value
 
 
-class numpy_to_tensor_wrapper(Generic[_P, R]):
-    def __init__(self, f: Callable[_P, R]) -> None:
+class numpy_to_tensor_wrapper:
+    def __init__(self, f: Any) -> None:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
     def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         out = self.f(*args, **kwargs)
         return numpy_to_tensor(out)
 
@@ -3905,7 +3894,7 @@ class numpy_method_wrapper:
         return numpy_to_tensor(out)
 
 
-class numpy_operator_wrapper(Generic[_P, R]):
+class numpy_operator_wrapper:
     """Implements dunder methods for tnp.ndarray via functions from the operator library"""
 
     def __init__(self, op: Callable[..., Any]) -> None:
@@ -3915,7 +3904,7 @@ class numpy_operator_wrapper(Generic[_P, R]):
     def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         assert not kwargs
 
         args = (
@@ -3958,8 +3947,8 @@ def defake(x: Any) -> Any:
 
 
 def _disable_side_effect_safety_checks_for_current_subtracer(
-    fn: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs
-) -> R:
+    fn: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs
+) -> Any:
     return fn(*args, **kwargs)
 
 
