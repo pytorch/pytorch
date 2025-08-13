@@ -3733,10 +3733,8 @@ class Layout(OutputSpec):
         # do for dynamic shape.
         #
         # Skip padding the strides for dynamic shape for now.
-        if not all(
-            isinstance(s, (int, sympy.Integer))
-            for s in itertools.chain(in_strides, size)
-        ):
+        # If outermost dim is dynamic, stride still can be fully static
+        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
             return in_strides
 
         stride_order = get_stride_order(in_strides)
@@ -3751,11 +3749,11 @@ class Layout(OutputSpec):
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
-
-            if stride > config.padding_stride_threshold and stride % align != 0:
-                stride = ceildiv(stride, align) * align
-                padded = True
-            new_strides[idx] = stride
+            if isinstance(stride, (int, sympy.Integer)):
+                if stride > config.padding_stride_threshold and stride % align != 0:
+                    stride = ceildiv(stride, align) * align
+                    padded = True
+                new_strides[idx] = stride
 
         if not padded:
             # Consider a tensor with shape [256, 1, 5, 5]
@@ -6630,9 +6628,6 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
-            if name in constexpr_names and triton_version_uses_attrs_dict():
-                # see #160000 - we don't pass in constexpr args to speed up runtime.
-                continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
@@ -7081,10 +7076,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
