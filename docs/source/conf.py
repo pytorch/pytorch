@@ -1793,12 +1793,6 @@ coverage_ignore_functions = [
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.swa_utils
-    "get_ema_avg_fn",
-    "get_ema_multi_avg_fn",
-    "get_swa_avg_fn",
-    "get_swa_multi_avg_fn",
-    "update_bn",
     # torch.overrides
     "enable_reentrant_dispatch",
     # torch.package.analyze.find_first_use_of_broken_modules
@@ -2909,31 +2903,6 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adamax
-    "Adamax",
-    # torch.optim.adamw
-    "AdamW",
-    # torch.optim.asgd
-    "ASGD",
-    # torch.optim.lbfgs
-    "LBFGS",
-    # torch.optim.lr_scheduler
-    "ChainedScheduler",
-    "ConstantLR",
-    "CosineAnnealingLR",
-    "CosineAnnealingWarmRestarts",
-    "CyclicLR",
-    "ExponentialLR",
-    "LRScheduler",
-    "LambdaLR",
-    "LinearLR",
-    "MultiStepLR",
-    "MultiplicativeLR",
-    "OneCycleLR",
-    "PolynomialLR",
-    "ReduceLROnPlateau",
-    "SequentialLR",
-    "StepLR",
     # torch.optim.optimizer
     "Optimizer",
     # torch.overrides
