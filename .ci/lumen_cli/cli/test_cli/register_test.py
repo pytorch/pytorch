@@ -26,13 +26,14 @@ def common_args(parser: argparse.ArgumentParser) -> None:
     """
     Add common CLI arguments to the given parser.
     """
-    parser.add_argument(
-        "-tn",
-        "--test-name",
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "-tp",
+        "--test-plan",
         type=str,
-        help="Test to run",
-        required=True,
+        help="a pre-defined test plan to run, e.g. 'basic_correctness_test'",
     )
+    # TODO(elainewy):add another common option that user can trigger a specific test with test config
 
 
 def register_test_commands(subparsers: argparse._SubParsersAction) -> None:

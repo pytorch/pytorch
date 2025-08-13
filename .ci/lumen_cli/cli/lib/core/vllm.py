@@ -6,8 +6,9 @@ import sys
 import textwrap
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
@@ -276,9 +277,10 @@ class VllmTestParameters:
     fetch secrests directly from env variables during runtime
     """
 
-    # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
     torch_whls_path: Path = env_path_field("TORCH_WHEELS_PATH", "./dist")
+
     vllm_whls_path: Path = env_path_field("VLLM_WHEELS_PATH", "./shared")
+
     torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
     def __post_init__(self):
@@ -288,49 +290,74 @@ class VllmTestParameters:
             raise ValueError("missing vllm_whls_path")
 
 
+class TestInpuType(Enum):
+    TEST_PLAN = "test_plan"
+    UNKNOWN = "unknown"
+
+
 class VllmTestRunner(BaseRunner):
-    def __init__(self, args=None):
+    def __init__(self, args: Any):
         self.work_directory = "vllm"
-        self.test_name = args.test_name
-        self.torch_whl_path = "torch*.whl"
-        self.torch_whl_extra = "opt-einsum"
-        self.torch_whl_relatvie_path = [
+
+        self.test_plan = ""
+        self.test_type = TestInpuType.UNKNOWN
+
+        if args.test_plan:
+            self.test_plan = args.test_plan
+            self.test_type = TestInpuType.TEST_PLAN
+
+        # Matches the structeur in the artifacts.zip from torcb build
+        self.TORCH_WHL_PATH_REGEX = "torch*.whl"
+        self.TORCH_WHL_EXTRA = "opt-einsum"
+        self.TORCH_ADDITIONAL_WHLS_REGEX = [
             "vision/torchvision*.whl",
             "audio/torchaudio*.whl",
         ]
-        self.vllm_whl_relatvie_path = [
+
+        # Match the structure of the artifacts.zip from vllm external build
+        self.VLLM_TEST_WHLS_REGEX = [
             "wheels/xformers/xformers*.whl",
             "wheels/vllm/vllm*.whl",
             "wheels/flashinfer-python/flashinfer*.whl",
         ]
 
+    def prepare(self):
+        """
+        prepare test environment for vllm. This includes clone vllm repo, install all wheels, test dependencies and set env
+        """
+        params = VllmTestParameters()
+        logger.info("Display VllmTestParameters %s", params)
+        self._set_envs(params)
+
+        clone_vllm(dst=self.work_directory)
+        with working_directory(self.work_directory):
+            remove_dir(Path("vllm"))
+            self._install_wheels(params)
+            self._install_dependencies()
+        # verify the torches are not overridden by test dependencies
+        self.check_versions()
+
     def run(self):
         """
         main function to run vllm test
         """
-        inputs = VllmTestParameters()
-        self._set_envs(inputs)
-        clone_vllm()
-
+        self.prepare()
         with working_directory(self.work_directory):
-            remove_dir(Path("vllm"))
-            self._install_wheels(inputs)
-            self._install_dependencies()
-            self.check_versions()
+            if self.test_type == TestInpuType.TEST_PLAN:
+                self.run_test_plan(self.test_plan)
+            else:
+                raise ValueError(f"Unknown test type {self.test_type}")
 
-            # Must set env variables before running tests
-            self.run_test(self.test_name)
-
-    def _install_wheels(self, inputs: VllmTestParameters):
-        logger.info("Running vllm test with inputs: %s", inputs)
+    def _install_wheels(self, params: VllmTestParameters):
+        logger.info("Running vllm test with inputs: %s", params)
         logger.info("Installing torch wheel")
-        torch_p = f"{str(inputs.torch_whls_path)}/{self.torch_whl_path}"
-        pip_install_first_match(torch_p, self.torch_whl_extra)
+        torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
+        pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
 
         logger.info("Installing other torch-related wheels")
         torch_whls_path = [
-            f"{str(inputs.torch_whls_path)}/{whl_path}"
-            for whl_path in self.torch_whl_relatvie_path
+            f"{str(params.torch_whls_path)}/{whl_path}"
+            for whl_path in self.TORCH_ADDITIONAL_WHLS_REGEX
         ]
         for torch_whl in torch_whls_path:
             pip_install_first_match(torch_whl)
@@ -338,8 +365,8 @@ class VllmTestRunner(BaseRunner):
 
         logger.info("Installing vllm wheels")
         vllm_whls_path = [
-            f"{str(inputs.vllm_whls_path)}/{whl_path}"
-            for whl_path in self.vllm_whl_relatvie_path
+            f"{str(params.vllm_whls_path)}/{whl_path}"
+            for whl_path in self.VLLM_TEST_WHLS_REGEX
         ]
         for vllm_whl in vllm_whls_path:
             pip_install_first_match(vllm_whl)
@@ -440,21 +467,19 @@ class VllmTestRunner(BaseRunner):
                 "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
             )
 
-    def run_test(self, test_name: str):
+    def run_test_plan(self, test_plan: str):
         """
-        a method to run test based on the test plan. currently this only
+        a method to run list of tests based on the test plan. currently this only
         used to run vllm tests.
         """
-        # TODO(elainwy): setup data model for test plan, and test step
         logger.info("run vllm tests.....")
-        tests_map = sample_tests()
-        if test_name not in tests_map:
+        tests_map = sample_test_plans()
+        if test_plan not in tests_map:
             raise RuntimeError(
-                f"test {test_name} not found, please add it to test pool"
+                f"test {test_plan} not found, please add it to test plan pool"
             )
-        tests = tests_map[test_name]
+        tests = tests_map[test_plan]
         logger.info("Running tests: %s", tests["title"])
-
         with (
             temp_environ(tests.get("env_var", {})),
             working_directory(tests.get("working_directory", "tests")),
@@ -475,11 +500,11 @@ class VllmTestRunner(BaseRunner):
         return all(v in VALID_VALUES for v in value.split())
 
 
-def clone_vllm():
+def clone_vllm(dst: str = "vllm"):
     clone_external_repo(
         target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
-        dst="vllm",
+        dst=dst,
         update_submodules=True,
     )
 
@@ -524,11 +549,10 @@ def preprocess_test_in(
     logger.info("[INFO] Updated %s", target_file)
 
 
-def sample_tests():
+def sample_test_plans():
     """
-    Simple sample to unblock the vllm ci development, next step is read those tests from a yaml file
-    which is mimic to https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
-    This function represents how the test plan looks like as dict in python at runtime.
+    Simple sample to unblock the vllm ci development, which is mimic to
+    https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
     """
     # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
     # TODO(elainewy): implement logics to handle package_install
