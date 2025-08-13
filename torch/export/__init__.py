@@ -280,7 +280,7 @@ def export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
-            allow_complex_guards_as_runtime_asserts=prefer_deferred_runtime_asserts_over_guards,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         )
     except Exception as e:
         draft_export_msg = (
