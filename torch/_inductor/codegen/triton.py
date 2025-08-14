@@ -2001,14 +2001,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def want_no_x_dim(self):
-        if (
+        return (
             self.persistent_reduction
             and len(self.numels) == self.num_reduction_dims + 1
-        ):
-            if self.fixed_config:
-                return self.fixed_config["XBLOCK"] == 1
-            return V.choices.want_no_x_dim(self.features)
-        return False
+            and self.fixed_config
+            and self.fixed_config["XBLOCK"] == 1
+        )
 
     @property
     def assert_function(self) -> str:
@@ -2671,6 +2669,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
 
+    def _combine_masks(self, *variables: Optional[CSEVariable]):
+        masks = None
+        for elem in variables:
+            if elem is None:
+                continue
+            if hasattr(elem, "mask_vars"):
+                if masks is None:
+                    masks = elem.mask_vars
+                else:
+                    masks = masks | elem.mask_vars
+        return masks
+
     def bucketize(
         self,
         values: CSEVariable,
@@ -2719,6 +2729,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
+
+        masks = self._combine_masks(values, boundary_indices, sorter_indices)
+        result.mask_vars = masks  # type: ignore[attr-defined]
 
         return result
 
@@ -3970,8 +3983,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            # Triton will not accept an OrderedSet for autotune_hints
             "grid_type": self._get_grid_type().__name__,
+            # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
@@ -4483,6 +4496,11 @@ class TritonScheduling(SIMDScheduling):
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
             )
+            if config.aot_inductor.model_name_for_generated_files:
+                # When AOTI compiles multiple submodules, we need to use the model name to
+                # distinguish kernel related symbols.
+                kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
+
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
