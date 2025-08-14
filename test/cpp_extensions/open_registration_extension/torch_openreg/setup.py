@@ -28,6 +28,10 @@ def make_relative_rpath_args(path):
 
 
 def get_pytorch_dir():
+    # Disable autoload of device backends.
+    # This is necessary to avoid issues with the backend being loaded
+    # before the extension is built.
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
 
     return os.path.dirname(os.path.realpath(torch.__file__))
