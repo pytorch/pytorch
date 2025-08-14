@@ -1,0 +1,41 @@
+name: test-scripts-and-ci-tools
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/lumen_cli/**
+      - .github/workflows/tools-unit-tests.yml
+  pull_request:
+    paths:
+      - scripts/lumen_cli/**
+      - .github/workflows/tools-unit-tests.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  torch-cli-unit-tests:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Run tests
+        continue-on-error: true
+        run: |
+          set -ex
+          python3 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -e .ci/lumen_cli/
+          pytest -v -s .ci/lumen_cli/tests/*
