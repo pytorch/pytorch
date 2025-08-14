@@ -968,8 +968,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "size: " << size << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix()
+            << "ProcessGroupNCCL initialization options: " << "size: " << size
+            << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -3499,6 +3500,30 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   if (enqueue) {
     workEnqueue(work);
+  }
+
+  {
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
+    std::vector<at::Device> devices{device};
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()), devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
+    }
+    // Mark the future as completed since coalesced operations complete
+    // immediately
+    work->future_->markCompleted(at::IValue(std::vector<at::Tensor>{}));
   }
 
   // Reset coalescing state
