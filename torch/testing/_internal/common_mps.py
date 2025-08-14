@@ -428,15 +428,7 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            "addmmdecomposed": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             "addbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-            "addmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "baddbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             # returned output on CPU is float64
@@ -789,8 +781,6 @@ if torch.backends.mps.is_available():
             "clamp_min",
             "masked_scatter",
             # unsupported float64 dtype
-            "cat",
-            "complex",
             "multinomial",
             "nn.functional.conv1d",
             "nn.functional.conv2d",
