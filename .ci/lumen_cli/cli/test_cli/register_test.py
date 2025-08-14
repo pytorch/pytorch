@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmTestRunner,
-        "help": "test vLLM unittests",
+        "help": "test vLLM with pytorch main",
     }
     # add yours ...
 }
