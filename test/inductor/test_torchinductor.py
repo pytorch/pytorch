@@ -13697,6 +13697,57 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         print(profile_output)
         self.assertFalse("Pageable" in profile_output)
 
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "cpp_wrapper samples will lead to invalid indexing",
+    )
+    def test_inductor_triton_bucketize_respects_masking(self):
+        def fn(inp, repeats, output_size):
+            # return torch.repeat_interleave(inp, repeats, dim=0, output_size=output_size)
+            idx = torch.searchsorted(
+                repeats.cumsum(0),
+                torch.arange(0, output_size, device=repeats.device),
+                right=True,
+            )
+            return torch.index_select(inp, 0, idx)
+
+        inp = torch.arange(0, 4, device=self.device)
+        repeats = torch.tensor([1, 2, 3, 4], device=self.device)
+        output_size = repeats.sum().item()
+        args = (inp, repeats, output_size)
+        self.assertEqual(fn(*args), torch.compile(fn)(*args))
+
+    @parametrize("dtype", [torch.int32, torch.int64])
+    @parametrize("nd", [1, 2])
+    def test_repeat_interleave_Tensor_decomp(self, dtype, nd):
+        # https://github.com/pytorch/pytorch/issues/147160
+        def f(input, repeats):
+            return torch.repeat_interleave(input, repeats, dim=0, output_size=3) + 1
+
+        input = torch.tensor([[1, 2], [3, 4]], dtype=dtype, device=self.device)
+        input = torch.arange(1, 2**nd + 1, dtype=dtype, device=self.device).reshape(
+            [2] * nd
+        )
+        repeat = torch.tensor([1, 2], device=self.device)
+
+        if input.device.type == "mps" and dtype == torch.int64:
+            raise unittest.SkipTest(
+                "torch.compile fails this test with mps & int64, "
+                "see https://github.com/pytorch/pytorch/issues/159408"
+            )
+
+        f_compiled = torch.compile(f)
+        output, (code,) = run_and_get_code(f_compiled, input, repeat)
+        reference = f(input, repeat)
+        self.assertEqual(output, reference)
+        # we don't lower when the cpp_wrapper is used because it cannot generate
+        # proper examples during autotune
+        can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
+        has_lowered = not re.search(r"repeat_interleave.Tensor", code)
+        self.assertEqual(has_lowered, can_lower)
+
+    # end of class CommonTemplate - add new tests here
+
 
 @dataclasses.dataclass
 class TestFailure:
