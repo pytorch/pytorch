@@ -2222,6 +2222,7 @@ def triton_config_reduction(
     num_stages=1,
     num_warps=None,
     register_intensive=False,
+    max_num_warps=16,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2251,7 +2252,7 @@ def triton_config_reduction(
     if num_warps is None:
         num_warps = total_numel() // 128
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
@@ -2483,7 +2484,7 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False):
+    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False, max_num_warps=16):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
@@ -2505,6 +2506,7 @@ def _reduction_configs(
                 num_warps=num_warps,
                 num_stages=num_stages,
                 register_intensive=register_intensive,
+                max_num_warps=max_num_warps,
             )
 
     def make_outer_config():
@@ -2527,7 +2529,7 @@ def _reduction_configs(
             x_block = 4096 // outer_r_block
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
-        return make_config(x_block, outer_r_block, register_intensive=True)
+        return make_config(x_block, outer_r_block, register_intensive=True, max_num_warps=8)
 
     contiguous_config = make_config(
         1,
