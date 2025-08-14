@@ -8868,6 +8868,48 @@ class TestHopSchema(TestCase):
             """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
         )
 
+    def test_map_gen_schema_tensor_inputs(self):
+        def map_fn(x):
+            return x.sin()
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            map_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0) -> ((Tensor))""",
+        )
+
+    def test_map_gen_schema_with_pos_args(self):
+        def map_fn(x, scale):
+            return x * scale
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            map_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0, Tensor pos_args0) -> ((Tensor))""",
+        )
+
+    def test_map_gen_schema_multiple_inputs(self):
+        def map_fn(x1, x2, scale1, scale2):
+            return x1 * scale1, x2 + scale2
+
+        schema = torch.ops.higher_order.map_impl.gen_schema(
+            map_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (torch.tensor(2.0), torch.tensor(1.0)),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """map_impl(Any f, Tensor xs0, Tensor xs1, Tensor pos_args0, Tensor pos_args1) -> (Tensor, Tensor)""",
+        )
+
     def test_while_loop_gen_schema_with_int_carries(self):
         def cond_fn(x, y, z, c):
             return x < y
