@@ -539,7 +539,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
 #endif
 }
 
-at::Tensor all_to_all_vdev_2d(
+void all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits,
@@ -685,10 +685,9 @@ at::Tensor all_to_all_vdev_2d(
       args1,
       0,
       stream);
-  return out;
 }
 
-at::Tensor all_to_all_vdev_2d_offset(
+void all_to_all_vdev_2d_offset(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_splits_offsets,
@@ -819,7 +818,6 @@ at::Tensor all_to_all_vdev_2d_offset(
       args1,
       0,
       stream);
-  return out;
 }
 } // namespace c10d::nvshmem_extension
 
