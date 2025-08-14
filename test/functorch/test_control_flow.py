@@ -8826,6 +8826,48 @@ class TestHopSchema(TestCase):
             """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
+    def test_associative_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(x, y):
+            return x + y
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(x, y, scale):
+            return x * y * scale
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor additional_input0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(x1, x2, y1, y2):
+            return x1 + y1, x2 * y2
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
+        )
+
     def test_while_loop_gen_schema_with_int_carries(self):
         def cond_fn(x, y, z, c):
             return x < y
