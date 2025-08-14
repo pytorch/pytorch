@@ -143,7 +143,7 @@ case $desired_python in
         desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
-    3.14t)
+    3.14)
         echo "Using 3.14t deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
