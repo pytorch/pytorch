@@ -1125,6 +1125,36 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  function(clone_and_checkout REPO_URL DEST_DIR COMMIT_FILE)
+    file(READ "${COMMIT_FILE}" _commit)
+    string(REGEX REPLACE "\n$" "" _commit "${_commit}")
+
+    if(NOT EXISTS "${DEST_DIR}/.git")
+      execute_process(
+        COMMAND git clone --quiet ${REPO_URL} ${DEST_DIR}
+        RESULT_VARIABLE _exitcode)
+      if(NOT _exitcode EQUAL 0)
+        message(FATAL_ERROR "Fail to clone ${REPO_URL}")
+      endif()
+    endif()
+
+    execute_process(
+      COMMAND git fetch --quiet
+      WORKING_DIRECTORY ${DEST_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to fetch ${REPO_URL}")
+    endif()
+
+    execute_process(
+      COMMAND git checkout --quiet ${_commit}
+      WORKING_DIRECTORY ${DEST_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to checkout ${REPO_URL} to ${_commit}")
+    endif()
+  endfunction()
+
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
   list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
@@ -1135,30 +1165,7 @@ if(USE_XPU)
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
   set(TORCH_XPU_OPS_REPO_URL https://github.com/intel/torch-xpu-ops.git)
-  file(READ "${TORCH_ROOT}/third_party/xpu.txt" TORCH_XPU_OPS_COMMIT)
-  string(REGEX REPLACE "\n$" "" TORCH_XPU_OPS_COMMIT "${TORCH_XPU_OPS_COMMIT}")
-  if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
-    execute_process(
-      COMMAND git clone --quiet ${TORCH_XPU_OPS_REPO_URL} ${TORCH_XPU_OPS_DIR}
-      RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "Fail to clone ${TORCH_XPU_OPS_REPO_URL}")
-    endif()
-  endif()
-  execute_process(
-    COMMAND git fetch --quiet
-    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
-  if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
-  endif()
-  execute_process(
-    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
-    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
-  if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
-  endif()
+  clone_and_checkout(${TORCH_XPU_OPS_REPO_URL} ${TORCH_XPU_OPS_DIR} "${TORCH_ROOT}/third_party/xpu.txt")
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
       ${TORCH_SRC_DIR}/csrc/api
@@ -1192,6 +1199,13 @@ if(USE_XPU)
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
   endif()
+
+  # Clone XPU CUTLASS
+  set(TORCH_XPU_TLA_DIR ${TORCH_ROOT}/third_party/torch-xpu-tla)
+  set(TORCH_XPU_TLA_REPO_URL https://github.com/intel/cutlass-sycl.git)
+  clone_and_checkout(${TORCH_XPU_TLA_REPO_URL} ${TORCH_XPU_TLA_DIR} "${TORCH_ROOT}/third_party/xpu-tla.txt")
+
+
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
