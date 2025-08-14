@@ -371,7 +371,6 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
-          build-environment: ${{ inputs.build-environment }}
 
       - name: Move external packages to dist
         if: steps.build-external-packages.outputs.output_dir != '' && steps.build-external-packages.outcome != 'skipped'

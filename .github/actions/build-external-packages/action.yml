@@ -4,10 +4,6 @@ name: Build External packages
 description: build external packages for PyTorch
 
 inputs:
-  build-environment:
-      description: Build environment name (e.g., linux-x86_64)
-      type: string
-      required: true
   cuda-arch-list:
     description: TORCH_CUDA_ARCH_LIST (e.g., "8.0;8.9;9.0")
     type: string
@@ -46,7 +42,6 @@ runs:
     - name: Build external packages in sequence
       id: build-external
       env:
-        BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
         SCCACHE_REGION: us-east-1
         TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
