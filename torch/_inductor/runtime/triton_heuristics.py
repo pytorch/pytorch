@@ -1061,6 +1061,7 @@ class CachingAutotuner(KernelInterface):
             "def_args": launcher.def_args,
             "call_args": launcher.call_args,
             "global_scratch": launcher.global_scratch,
+            "profile_scratch": launcher.profile_scratch,
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
@@ -1754,9 +1755,23 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             launcher.def_args = def_args
             launcher.call_args = call_args
             kernel_metadata = getattr(self.kernel, "metadata", None)
-            launcher.global_scratch = getattr(
-                kernel_metadata, "global_scratch_size", None
+
+            # for the scratch arguments: None indicates that the kernel doesn't
+            # take any scratch argument; otherwise a number indicates the number
+            # of bytes of scratch that need to be provided.
+
+            # in AMD's Triton backend, the global scratch size is never provided
+            # (but for AMD it's safe to pass an extra null arg, so always include it)
+            global_scratch: Optional[int] = getattr(
+                kernel_metadata,
+                "global_scratch_size",
+                (0 if torch.version.hip else None),
             )
+            profile_scratch: Optional[int] = getattr(
+                kernel_metadata, "profile_scratch_size", None
+            )
+            launcher.global_scratch = global_scratch
+            launcher.profile_scratch = profile_scratch
         return launcher
 
 
