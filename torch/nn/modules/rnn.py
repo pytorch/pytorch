@@ -261,17 +261,8 @@ class RNNBase(Module):
             }
             if len(unique_storage_refs) != len(self._flat_weights):
                 return
-        except Exception:
-            try:
-                unique_data_ptrs = {
-                    p.data_ptr()  # type: ignore[union-attr]
-                    for p in self._flat_weights
-                    if p is not None
-                }
-                if len(unique_data_ptrs) != len(self._flat_weights):
-                    return
-            except (RuntimeError, AttributeError):
-                pass
+        except RuntimeError:
+            pass  # for fake tensors during export, StorageWeakRef creation may fail
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
