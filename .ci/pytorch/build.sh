@@ -92,6 +92,27 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export ACL_ROOT_DIR=/ComputeLibrary
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
+
+  export CMAKE_CROSSCOMPILING=TRUE
+  export CMAKE_SYSTEM_NAME=Linux
+  export CMAKE_SYSTEM_PROCESSOR=riscv64
+
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
@@ -209,7 +230,7 @@ fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -254,8 +275,7 @@ else
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
       python -mpip install numpy==2.0.2
 
@@ -392,7 +412,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-# don't do this for bazel or s390x as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+# don't do this for bazel or s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi
