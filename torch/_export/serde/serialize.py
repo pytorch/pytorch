@@ -69,6 +69,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     OutputSpec,
     OutputTokenSpec,
+    ParameterMutationSpec,
     RangeConstraint,
     ScalarType,
     SCHEMA_VERSION,
@@ -222,6 +223,31 @@ class _SerializedProgram:
     state_dict: bytes
     constants: bytes
     example_inputs: bytes
+
+
+class LazyMap(dict):
+    """
+    Dictionary class for deferred instantiation of node metadata values.
+    Purpose is to avoid creation of symbolic-shape tensors before relevant shape guards are parsed.
+    """
+
+    def __init__(self):
+        self.map = {}
+        self.evaluated = set()
+
+    def __setitem__(self, k, v):
+        self.map[k] = v
+
+    def __getitem__(self, k):
+        out = self.map[k]
+        if k in self.evaluated:
+            return out
+        self.evaluated.add(k)
+        self.map[k] = out()
+        return self.map[k]
+
+    def __repr__(self):
+        return self.map.__repr__()
 
 
 def deserialize_device(d: Device) -> torch.device:
@@ -1216,6 +1242,15 @@ class GraphModuleSerializer(metaclass=Final):
                     buffer_name=spec.target,
                 )
             )
+        elif spec.kind == ep.OutputKind.PARAMETER_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                parameter_mutation=ParameterMutationSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    parameter_name=spec.target,
+                )
+            )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_PARAMETER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
@@ -1671,7 +1706,7 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def __init__(self) -> None:
         self.serialized_name_to_node: dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: dict[str, MetaType] = {}
+        self.serialized_name_to_meta: LazyMap = LazyMap()  # str -> MetaType
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
 
@@ -1687,7 +1722,7 @@ class GraphModuleDeserializer(metaclass=Final):
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
         self.serialized_name_to_node = {}
-        self.serialized_name_to_meta = {}
+        self.serialized_name_to_meta = LazyMap()
         self.unbacked_symbols: set[sympy.Symbol] = set()
         try:
             yield
@@ -1876,32 +1911,32 @@ class GraphModuleDeserializer(metaclass=Final):
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
             log.debug("[deserialize_tensor_meta] %s (input): %s", name, tensor_value)
-            meta_val = self.deserialize_tensor_meta(tensor_value)
-            log.debug("[deserialize_tensor_meta] %s (output): %s", name, meta_val)
-            self.serialized_name_to_meta[name] = meta_val
+            self.serialized_name_to_meta[name] = (
+                lambda v=tensor_value: self.deserialize_tensor_meta(v)
+            )
 
         for name, sym_int_value in serialized_graph.sym_int_values.items():
             log.debug("[deserialize_sym_int] %s (input): %s", name, sym_int_value)
-            int_val = self.deserialize_sym_int(sym_int_value)
-            log.debug("[deserialize_sym_int] %s (output): %s", name, int_val)
-            self.serialized_name_to_meta[name] = int_val
+            self.serialized_name_to_meta[name] = (
+                lambda v=sym_int_value: self.deserialize_sym_int(v)
+            )
 
         for name, sym_float_value in serialized_graph.sym_float_values.items():
             log.debug("[deserialize_sym_float] %s (input): %s", name, sym_float_value)
-            float_val = self.deserialize_sym_float(sym_float_value)
-            log.debug("[deserialize_sym_float] %s (output): %s", name, float_val)
-            self.serialized_name_to_meta[name] = float_val
+            self.serialized_name_to_meta[name] = (
+                lambda v=sym_float_value: self.deserialize_sym_float(v)
+            )
 
         for name, sym_bool_value in serialized_graph.sym_bool_values.items():
             log.debug("[deserialize_sym_bool] %s (input): %s", name, sym_bool_value)
-            bool_val = self.deserialize_sym_bool(sym_bool_value)
-            log.debug("[deserialize_sym_bool] %s (output): %s", name, bool_val)
-            self.serialized_name_to_meta[name] = bool_val
+            self.serialized_name_to_meta[name] = (
+                lambda v=sym_bool_value: self.deserialize_sym_bool(v)
+            )
 
         for name, script_obj_meta in serialized_graph.custom_obj_values.items():
             log.debug("[deserialize_script_obj_meta] %s", script_obj_meta)
-            self.serialized_name_to_meta[name] = self.deserialize_script_obj_meta(
-                script_obj_meta
+            self.serialized_name_to_meta[name] = (
+                lambda v=script_obj_meta: self.deserialize_script_obj_meta(v)
             )
 
         log.debug("\n[deserialize graph nodes]")
@@ -2080,13 +2115,26 @@ class GraphModuleDeserializer(metaclass=Final):
             fx_node.kwargs,
             fx_node.meta.get("val"),
         )
+
+        # handle ShapeEnv asserts
+        if target == torch.ops.aten._assert_scalar.default:
+            if not isinstance((arg := fx_node.args[0]), bool):
+                expr = arg.meta["val"]  # type: ignore[union-attr]
+                if isinstance(expr, torch.SymBool):
+                    self.shape_env.guard_or_defer_runtime_assert(
+                        expr.node.expr, "", fx_node
+                    )
+        elif target == torch.ops.aten.sym_constrain_range_for_size.default:
+            sym = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
+            if isinstance(sym, torch.SymInt):
+                self.shape_env._constrain_range_for_size(sym.node.expr)
+
+        # handle nn_module_stack; serialization throws away empty dicts
         if (
             fx_node.op not in ["placeholder", "output"]
             and "nn_module_stack" not in fx_node.meta
         ):
-            fx_node.meta[
-                "nn_module_stack"
-            ] = {}  # serialization throws away empty dicts
+            fx_node.meta["nn_module_stack"] = {}
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         log.debug("[deserialize_input_spec] %s", i)
@@ -2160,6 +2208,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 kind=ep.OutputKind.BUFFER_MUTATION,
                 arg=ep.TensorArgument(name=o.buffer_mutation.arg.name),
                 target=o.buffer_mutation.buffer_name,
+            )
+        elif o.type == "parameter_mutation":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.PARAMETER_MUTATION,
+                arg=ep.TensorArgument(name=o.parameter_mutation.arg.name),
+                target=o.parameter_mutation.parameter_name,
             )
         elif o.type == "gradient_to_parameter":
             return ep.OutputSpec(
@@ -2263,8 +2317,6 @@ class GraphModuleDeserializer(metaclass=Final):
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
                     lower = vr.lower
-                    if vr.upper >= 2:  # max is >= 2, not sym bool range
-                        lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(
                         _int_to_sympy_int(lower, -int_oo), vr.upper
                     )
@@ -3341,17 +3393,19 @@ def canonicalize(
         idx, (_arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
-            return 3, None, idx
+            return 4, None, idx
         elif spec.type == "loss_output":
-            return 3, None, idx
+            return 4, None, idx
+        elif spec.type == "parameter_mutation":
+            return 1, spec.parameter_mutation.parameter_name, idx
         elif spec.type == "buffer_mutation":
-            return 1, spec.buffer_mutation.buffer_name, idx
+            return 2, spec.buffer_mutation.buffer_name, idx
         elif spec.type == "gradient_to_parameter":
-            return 4, spec.gradient_to_parameter.parameter_name, idx
+            return 5, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
-            return 5, None, idx
+            return 6, None, idx
         elif spec.type == "user_input_mutation":
-            return 2, None, idx
+            return 3, None, idx
         elif spec.type == "token":
             return 0, None, idx
         else:
@@ -3463,6 +3517,9 @@ def canonicalize(
             t.name = replace_table[t.name]
         elif spec.type == "buffer_mutation":
             t = spec.buffer_mutation.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "parameter_mutation":
+            t = spec.parameter_mutation.arg
             t.name = replace_table[t.name]
         elif spec.type == "gradient_to_parameter":
             t = spec.gradient_to_parameter.arg

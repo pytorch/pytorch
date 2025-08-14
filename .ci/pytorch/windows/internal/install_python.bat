@@ -18,5 +18,5 @@ start /wait "" python-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_t
 if errorlevel 1 exit /b 1
 
 set "PATH=%CD%\Python\Scripts;%CD%\Python;%PATH%"
-%PYTHON_EXEC% -m pip install --upgrade pip "setuptools>=77.0.0" "packaging>=24.2" wheel
+%PYTHON_EXEC% -m pip install --upgrade pip setuptools packaging wheel
 if errorlevel 1 exit /b 1

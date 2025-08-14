@@ -27,7 +27,14 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch._dynamo.utils import (
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+    identity,
+    preserve_rng_state,
+)
+from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
@@ -2274,6 +2281,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
         return_multi_template=False,
+        best_config_future=None,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -2337,22 +2345,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata={
-                    "autotune_strides": ", ".join(
-                        [str(n.get_stride()) for n in input_nodes]
-                    ),
-                    "autotune_dtypes": ", ".join(
-                        [str(n.get_dtype()) for n in input_nodes]
-                    ),
-                    "autotune_shape": ", ".join(
-                        ["x".join(map(str, n.get_size())) for n in input_nodes]
-                    ),
-                    "autotune_offset": ", ".join(
-                        [str(n.get_layout().offset) for n in input_nodes]
-                    ),
-                },
+                metadata=_autotune_metadata(input_nodes),
             ):
-                return benchmark(choices, hint_override=hint_override)
+                benchmark_results = benchmark(choices, hint_override=hint_override)
+                if config.max_autotune_report_choices_stats:
+                    _log_autotune_choices_stats(
+                        f"{name}_template_autotuning", benchmark_results
+                    )
+                return benchmark_results
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2389,6 +2389,35 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
             autotune_start_ts = time.time()
+
+            if best_config_future is not None:
+                best_config = await_sync(best_config_future)
+
+                important_keys = [
+                    "ACC_TYPE",
+                    "ALLOW_TF32",
+                    "BLOCK_K",
+                    "BLOCK_M",
+                    "BLOCK_N",
+                    "EVEN_K",
+                    "GROUP_M",
+                    "USE_FAST_ACCUM",
+                    "num_stages",
+                    "num_warps",
+                    "num_consumer_groups",
+                    "num_buffers_warp_spec",
+                ]
+                choices = [
+                    choice
+                    for choice in choices
+                    if all(
+                        f"{k}={best_config[k]}" in choice.description
+                        for k in important_keys
+                    )
+                    for k in important_keys
+                ]
+                log.info("Filtered to %d choices based on best_config", len(choices))
+
             timings = self.lookup(
                 choices,
                 name,
@@ -2652,11 +2681,13 @@ class AlgorithmSelectorCache(PersistentCache):
         def wait_on_futures():
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
+            exceptions: list[tuple[ChoiceCaller, BaseException]] = []
             for future in as_completed(
                 futures,
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
                     )
@@ -2684,6 +2715,8 @@ class AlgorithmSelectorCache(PersistentCache):
                         futures.get(future),
                         elapsed_times.get(future),
                     )
+            if exceptions:
+                _log_autotune_exceptions(exceptions)
 
             executor.shutdown(wait=True)
 
@@ -3368,6 +3401,146 @@ class SymbolicGridFn:
 
     def sympy_call(self, *args, **kwargs):
         return self.fn(*args, **kwargs, **self.kwargs_sym)
+
+
+def _autotune_metadata(input_nodes):
+    """Helper function to extract autotune metadata from input nodes."""
+    return {
+        "autotune_strides": ", ".join([str(n.get_stride()) for n in input_nodes]),
+        "autotune_dtypes": ", ".join([str(n.get_dtype()) for n in input_nodes]),
+        "autotune_shape": ", ".join(
+            ["x".join(map(str, n.get_size())) for n in input_nodes]
+        ),
+        "autotune_offset": ", ".join([str(n.get_layout().offset) for n in input_nodes]),
+        # TODO(coconutruben): replace this with taking KernelInputs as the
+        # argument, and extracting those out there directly
+        "autotune_strides_hinted": ", ".join(
+            [
+                str(
+                    V.graph.sizevars.size_hints(
+                        n.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+        "autotune_shape_hinted": ", ".join(
+            [
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
+                )
+                for n in input_nodes
+            ]
+        ),
+    }
+
+
+def _log_autotune_choices_stats(
+    event_name: str, timings: dict[ChoiceCaller, float]
+) -> None:
+    """Helper function to extract autotune metadata from benchmark results."""
+    if not timings:
+        return None
+
+    metadata: dict[str, Union[int, float, str]] = {
+        "num_choices": len(timings),
+        "num_triton_choices": len(
+            [c for c in timings if isinstance(c, TritonTemplateCaller)]
+        ),
+    }
+
+    sorted_choices = sorted(timings, key=timings.__getitem__)
+    best_choice = sorted_choices[0]
+    metadata["best_kernel"] = best_choice.name
+    if best_choice.description:
+        metadata["best_kernel_desc"] = best_choice.description
+    metadata["best_time"] = timings[best_choice]
+
+    best_triton_pos = next(
+        (
+            i
+            for i, choice in enumerate(sorted_choices)
+            if isinstance(choice, TritonTemplateCaller)
+        ),
+        None,
+    )
+    if best_triton_pos is not None:
+        metadata["best_triton_pos"] = best_triton_pos
+        best_triton_kernel = sorted_choices[best_triton_pos]
+        if best_triton_pos != 0:
+            metadata["best_triton_time"] = timings[best_triton_kernel]
+            metadata["best_triton_kernel"] = best_triton_kernel.name
+            if best_triton_kernel.description:
+                metadata["best_triton_kernel_desc"] = best_triton_kernel.description
+
+    payload = json.dumps(metadata)
+    get_chromium_event_logger().add_event_data(
+        event_name, autotune_choices_stats=payload
+    )
+    sys.stderr.write(f"Autotune Choices Stats:\n{payload}\n")
+
+
+def _log_autotune_exceptions(
+    exceptions: list[tuple[ChoiceCaller, BaseException]],
+) -> None:
+    """Log autotune exceptions to chromium event logger."""
+    if not exceptions:
+        return
+
+    try:
+        pt2_compile_substack = get_chromium_event_logger().get_pt2_compile_substack()
+        if not pt2_compile_substack:
+            return
+
+        current_event = pt2_compile_substack[-1]
+        if not current_event.endswith("_template_precompiling"):
+            return
+
+        exception_details = []
+        for choice, exc in exceptions:
+            try:
+                choice_type = (
+                    "triton" if isinstance(choice, TritonTemplateCaller) else "other"
+                )
+                data = {
+                    "choice_type": choice_type,
+                    "choice": choice.description,
+                    "exception_message": str(exc),
+                }
+
+                exc_type_match = re.search(r"(\w+):", str(exc))
+                if exc_type_match:
+                    data["exception"] = exc_type_match.group(1)
+
+                if "OutOfMemoryError" in str(exc):
+                    required_match = re.search(r"Required: (\d+)", str(exc))
+                    if required_match:
+                        data["required_memory"] = required_match.group(1)
+
+                    limit_match = re.search(r"Hardware limit:\s*(\d+)", str(exc))
+                    if limit_match:
+                        data["hardware_limit"] = limit_match.group(1)
+
+                exception_details.append(data)
+            except Exception:
+                # Don't let logging errors break the main flow
+                continue
+
+        if exception_details:
+            metadata = json.dumps({"exceptions": exception_details})
+            get_chromium_event_logger().try_add_event_data(
+                current_event, metadata=metadata
+            )
+    except Exception:
+        # Silently ignore logging errors to avoid breaking autotune
+        pass
 
 
 # ensure lowering is imported so that `extern_kernels.*` is populated

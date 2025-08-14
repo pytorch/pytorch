@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    init_device_mesh,
     Placement,
     Replicate,
     Shard,
@@ -30,6 +31,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    MultiProcContinousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -39,6 +41,8 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
+
+DEVICE_COUNT: int
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
@@ -333,6 +337,21 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
+class DTensorContinuousTestBase(MultiProcContinousTest):
+    @classmethod
+    def device_type(cls) -> str:
+        # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
+        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < cls.world_size:
+            return "cpu"
+        else:
+            return DEVICE_TYPE
+
+    @classmethod
+    def backend_str(cls) -> str:
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        return backend
+
+
 class DTensorTestBase(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -352,24 +371,28 @@ class DTensorTestBase(MultiProcessTestCase):
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return init_device_mesh(self.device_type, (self.world_size,))
 
-    def init_pg(self, eager_init) -> None:
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in [
+        if backend is None:
+            backend = self.backend
+
+        if backend not in [
             "nccl",
             "gloo",
             "mpi",
             "cpu:gloo,cuda:nccl",
             "hccl",
             "xccl",
+            "fake",
         ]:
-            raise RuntimeError(f"Backend {self.backend} not supported!")
+            raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend or "xccl" in self.backend:
+        if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
             torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
@@ -380,7 +403,7 @@ class DTensorTestBase(MultiProcessTestCase):
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
         dist.init_process_group(
-            backend=self.backend,
+            backend=backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
@@ -448,13 +471,17 @@ TestFunc = Callable[[...], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
-    def decorator(func, eager_init: bool = False):
+def with_comms(
+    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
+) -> TestFunc:
+    def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
-            self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
+            self,
+            *args: tuple[object],
+            **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
-            self.init_pg(eager_init)
+            self.init_pg(eager_init, backend)
 
             try:
                 func(self, *args, **kwargs)  # type: ignore[misc]
@@ -469,7 +496,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
     return (
         decorator(func=eager_init)
         if callable(eager_init)
-        else partial(decorator, eager_init=eager_init)
+        else partial(decorator, eager_init=eager_init, backend=backend)
     )
 
 
@@ -483,7 +510,7 @@ class DTensorOpTestBase(MultiThreadedTestCase):
         return DEVICE_TYPE
 
     def build_device_mesh(self):
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return init_device_mesh(self.device_type, (self.world_size,))
 
     def setUp(self) -> None:
         super().setUp()

@@ -145,10 +145,19 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
-        local = False
+        log_path = None
+        self.log_file = None
+
         if config.worker_suppress_logging:
+            log_path = os.devnull
             log.info("Suppressing compile worker output due to config")
-            local = True
+        else:
+            log_path = config.torchinductor_worker_logpath
+            if not log_path:
+                log_path = config.get_worker_log_path()
+
+        if log_path:
+            self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
             cmd,
@@ -164,11 +173,13 @@ class SubprocPool:
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
-            stdout=subprocess.DEVNULL if local else None,
-            stderr=subprocess.DEVNULL if local else None,
+            stdout=self.log_file,
+            stderr=self.log_file,
         )
         self.write_lock = threading.Lock()
-        self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
+        self.read_thread = threading.Thread(
+            target=self._read_thread, name="InductorSubproc", daemon=True
+        )
 
         self.futures_lock = threading.Lock()
         self.pending_futures: dict[int, Future[Any]] = {}
@@ -260,6 +271,8 @@ class SubprocPool:
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
+            if self.log_file:
+                self.log_file.close()
         except OSError as e:
             log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:

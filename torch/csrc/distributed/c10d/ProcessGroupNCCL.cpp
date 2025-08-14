@@ -1091,18 +1091,15 @@ ErrorType ProcessGroupNCCL::getError() {
 
 void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
-  auto device = at::Device(at::DeviceType::CUDA, pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
             << "MemPool: " << pool->id() << ", device index: " << key
             << ", i am " << this;
   auto ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
-    // HACK: currently we are using this function for NVLS
-    // reductions, and that's why using OpType::ALLREDUCE.
-    // If we end up using this API for zero-copy P2P, we might
-    // need to refactor and account for different OpType.
-    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+    C10_THROW_ERROR(
+        DistBackendError,
+        "NCCL communicator has not been initialized before mem pool creation. You can pass `device_id` to init_process_group -- one way of eager initialization -- to work around this issue");
   }
   TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
   {
@@ -1255,8 +1252,9 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
+    const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
-    const c10::intrusive_ptr<Backend::Options> opts) {
+    const c10::intrusive_ptr<Backend::Options>& opts) {
   auto deviceIdx = guessDeviceId();
   TORCH_CHECK(
       deviceIdx >= 0,
@@ -1288,14 +1286,14 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(), groupRank, ranks.size(), ncclOpts);
+      store->clone(), groupRank, ranks.size(), ncclOpts);
   pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const c10::intrusive_ptr<Store>& store,
-    const c10::intrusive_ptr<Backend::Options> opts,
+    const c10::intrusive_ptr<Backend::Options>& opts,
     const int& rank,
     const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
@@ -2283,6 +2281,10 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // Work status logging for desync debug
       desyncDebugger_.logWorkStart(work);
 
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
       // multiple times after the start
@@ -2293,10 +2295,6 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
         pg_->pgStatus_->lastStartedNumelIn = work.numelIn_;
         pg_->pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
-
-      // allow watchdog to do an event query on a side thread
-      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
 
       // Clean up completed work
       if (work.isCompleted()) {
@@ -5429,6 +5427,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
 
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto inputTensor = inputTensors.back();
+  check_gpu_single_tensor(inputTensor);
 
   std::vector<at::Tensor> outputs;
 

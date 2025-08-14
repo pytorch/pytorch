@@ -736,6 +736,10 @@ def _make_module_call_graph(
     return [*original, *additional]
 
 
+class _ExportModuleSpecTrackerDict(dict):
+    pass
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
@@ -788,7 +792,9 @@ def _export_to_torch_ir(
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
-            module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = {}
+            module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
+                _ExportModuleSpecTrackerDict()
+            )
             ctx = nullcontext()
             if not isinstance(f, torch.fx.GraphModule):
                 ctx = _wrap_submodules(  # type: ignore[assignment]
@@ -880,6 +886,8 @@ def _export_to_aten_ir(
             new_output_node = list(new_gm.graph.nodes)[-1]
             assert old_output_node.op == "output" and new_output_node.op == "output"
             # make sure we don't override any meta
+            if "desc" in new_output_node.meta:
+                del new_output_node.meta["desc"]
             assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
@@ -1672,7 +1680,24 @@ def _export_to_aten_ir_make_fx(
                     for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
                         k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
 
-            with ctx, override_getattribute_for_subclasses(flat_args):
+            @contextmanager
+            def _maybe_restore_grad_state():
+                """
+                When pre-dispatch export accidentally change grad state, we restore it back.
+                This can happen when we are calling torch._C._set_grad_enabled directly in the
+                forward.
+                """
+                old_state = torch.is_grad_enabled()
+                try:
+                    yield
+                finally:
+                    torch._C._set_grad_enabled(old_state)
+
+            with (
+                ctx,
+                override_getattribute_for_subclasses(flat_args),
+                _maybe_restore_grad_state(),
+            ):
                 gm = make_fx(
                     wrapped_fn,
                     record_module_stack=True,
@@ -1736,6 +1761,7 @@ def _export_to_aten_ir_make_fx(
                 zip(input_names[param_len : param_len + buffer_len], named_buffers)
             ),
             buffers_to_mutate={},
+            parameters_to_mutate={},
             user_inputs_to_mutate={},
             in_spec=in_spec,
             out_spec=out_spec.spec,
@@ -1898,6 +1924,9 @@ def _non_strict_export(
                 _strip_root, sig.inputs_to_parameters
             )
             sig.buffers_to_mutate = pytree.tree_map(_strip_root, sig.buffers_to_mutate)
+            sig.parameters_to_mutate = pytree.tree_map(
+                _strip_root, sig.parameters_to_mutate
+            )
 
             for node in gm.graph.nodes:
                 if "nn_module_stack" in node.meta:

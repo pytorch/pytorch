@@ -7,9 +7,6 @@ call "internal\install_python.bat"
 
 %PYTHON_EXEC% --version
 set "PATH=%CD%\Python\Lib\site-packages\cmake\data\bin;%CD%\Python\Scripts;%CD%\Python;%PATH%"
-
-%PYTHON_EXEC% -m pip install "setuptools>=77.0.0" "packaging>=24.2"
-
 if "%DESIRED_PYTHON%" == "3.13t" %PYTHON_EXEC% -m pip install numpy==2.2.1 cmake
 if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install numpy==2.1.2 cmake
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
@@ -19,7 +16,7 @@ if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 
 %PYTHON_EXEC% -m pip install pyyaml
 %PYTHON_EXEC% -m pip install mkl-include mkl-static
-%PYTHON_EXEC% -m pip install boto3 ninja typing-extensions
+%PYTHON_EXEC% -m pip install boto3 ninja typing_extensions setuptools==72.1.0
 
 where cmake.exe
 

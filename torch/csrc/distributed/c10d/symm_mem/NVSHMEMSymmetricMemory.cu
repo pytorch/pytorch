@@ -10,7 +10,13 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
-#include <nvshmem_host.h>
+// Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
+// include only the nvshmem host library headers:
+// #include <nvshmem_host.h>
+// It translates into the following two lines:
+#include <host/nvshmem_api.h>
+#include <host/nvshmemx_api.h>
+// For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d {
 namespace symmetric_memory {
@@ -77,6 +83,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
     // TODO: use the same allocation for signal pad
     void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
+    TORCH_CHECK(signal_pad_ptr != nullptr, "nvshmem_malloc failed");
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
@@ -149,7 +156,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset) {
+      int64_t storage_offset) override {
     // TODO: deduplicate
     const size_t numel = std::accumulate(
         sizes.begin(),
@@ -339,6 +346,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     initialize_nvshmem_with_store(store, rank, world_size);
     auto ptr = nvshmem_malloc(size);
+    // If size is 0 (which is legal allocation request) we shouldn't error out
+    TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety

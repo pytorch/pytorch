@@ -61,9 +61,10 @@ if "%USE_XPU%"=="1" (
   call "C:\Program Files (x86)\Intel\oneAPI\compiler\latest\env\vars.bat"
   call "C:\Program Files (x86)\Intel\oneAPI\ocloc\latest\env\vars.bat"
   if errorlevel 1 exit /b 1
-  :: Reduce build time. Only have MTL self-hosted runner now
-  SET TORCH_XPU_ARCH_LIST=xe-lpg
-  SET USE_KINETO=0
+  :: Reduce build time
+  SET TORCH_XPU_ARCH_LIST=bmg
+  :: Re-setup python env for build
+  call pip install -r requirements.txt
 )
 
 @echo on
@@ -125,11 +126,6 @@ if "%USE_CUDA%"=="1" (
   for /F "usebackq delims=" %%n in (`cygpath -m "%CUDA_PATH%\bin\nvcc.exe"`) do set CMAKE_CUDA_COMPILER=%%n
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
-
-:: Install build-system requirements before running setup.py commands
-python -m pip install -r requirements-build.txt
-if errorlevel 1 goto fail
-if not errorlevel 0 goto fail
 
 :: Print all existing environment variable for debugging
 set
