@@ -325,11 +325,15 @@ void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_output
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
-  m.def("is_cpu(Tensor t) -> bool");
+  m.def("my_is_cpu(Tensor t) -> bool");
 
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
+  m.impl("my_is_cpu", &boxed_my_is_cpu);
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
   m.impl("my_is_cpu", &boxed_my_is_cpu);
 }
