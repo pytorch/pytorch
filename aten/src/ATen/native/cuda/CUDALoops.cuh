@@ -679,14 +679,30 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
         arg0_t* out1 = (arg0_t*)(data[0] + offsets1[0]);
         arg0_t* out2 = (arg0_t*)(data[0] + offsets2[0]);
         arg0_t* out3 = (arg0_t*)(data[0] + offsets3[0]);
-        auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
-        auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
-        auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
-        auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
-        *out0 = tmp0;
-        *out1 = tmp1;
-        *out2 = tmp2;
-        *out3 = tmp3;
+        if constexpr((traits::arity == 2))
+        {
+          auto inp0_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets0[1])[0]);
+          auto inp0_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets0[1])[1]);
+          auto inp1_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets1[1])[0]);
+          auto inp1_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets1[1])[1]);
+          auto inp2_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets2[1])[0]);
+          auto inp2_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets2[1])[1]);
+          auto inp3_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets3[1])[0]);
+          auto inp3_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets3[1])[1]);
+          *out0 = f(inp0_0, inp0_1);
+          *out1 = f(inp1_0, inp1_1);
+          *out2 = f(inp2_0, inp2_1);
+          *out3 = f(inp3_0, inp3_1);
+	} else {
+          auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
+          auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
+          auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
+          auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
+          *out0 = tmp0;
+          *out1 = tmp1;
+          *out2 = tmp2;
+          *out3 = tmp3;
+	}
       } else {
         auto offsets0 = offset_calc.get(idx);
         auto offsets1 = offset_calc.get(idx+grp_sz);
@@ -704,22 +720,50 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
         arg0_t* out5 = (arg0_t*)(data[0] + offsets5[0]);
         arg0_t* out6 = (arg0_t*)(data[0] + offsets6[0]);
         arg0_t* out7 = (arg0_t*)(data[0] + offsets7[0]);
-        auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
-        auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
-        auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
-        auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
-        auto tmp4 = invoke(f, &data[1], &offsets4[1], 1);
-        auto tmp5 = invoke(f, &data[1], &offsets5[1], 1);
-        auto tmp6 = invoke(f, &data[1], &offsets6[1], 1);
-        auto tmp7 = invoke(f, &data[1], &offsets7[1], 1);
-        *out0 = tmp0;
-        *out1 = tmp1;
-        *out2 = tmp2;
-        *out3 = tmp3;
-        *out4 = tmp4;
-        *out5 = tmp5;
-        *out6 = tmp6;
-        *out7 = tmp7;
+        if constexpr((traits::arity == 2))
+        {
+          auto inp0_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets0[1])[0]);
+          auto inp0_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets0[1])[1]);
+          auto inp1_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets1[1])[0]);
+          auto inp1_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets1[1])[1]);
+          auto inp2_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets2[1])[0]);
+          auto inp2_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets2[1])[1]);
+          auto inp3_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets3[1])[0]);
+          auto inp3_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets3[1])[1]);
+          auto inp4_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets4[1])[0]);
+          auto inp4_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets4[1])[1]);
+          auto inp5_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets5[1])[0]);
+          auto inp5_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets5[1])[1]);
+          auto inp6_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets6[1])[0]);
+          auto inp6_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets6[1])[1]);
+          auto inp7_0 = c10::load<typename traits::template arg<0>::type>((&data[1])[0] + 1 * (&offsets7[1])[0]);
+          auto inp7_1 = c10::load<typename traits::template arg<1>::type>((&data[1])[1] + 1 * (&offsets7[1])[1]);
+          *out0 = f(inp0_0, inp0_1);
+          *out1 = f(inp1_0, inp1_1);
+          *out2 = f(inp2_0, inp2_1);
+          *out3 = f(inp3_0, inp3_1);
+          *out4 = f(inp4_0, inp4_1);
+          *out5 = f(inp5_0, inp5_1);
+          *out6 = f(inp6_0, inp6_1);
+          *out7 = f(inp7_0, inp7_1);
+	} else {
+          auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
+          auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
+          auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
+          auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
+          auto tmp4 = invoke(f, &data[1], &offsets4[1], 1);
+          auto tmp5 = invoke(f, &data[1], &offsets5[1], 1);
+          auto tmp6 = invoke(f, &data[1], &offsets6[1], 1);
+          auto tmp7 = invoke(f, &data[1], &offsets7[1], 1);
+          *out0 = tmp0;
+          *out1 = tmp1;
+          *out2 = tmp2;
+          *out3 = tmp3;
+          *out4 = tmp4;
+          *out5 = tmp5;
+          *out6 = tmp6;
+          *out7 = tmp7;
+	}
       }
     } else {
       auto offsets = offset_calc.get(idx);
