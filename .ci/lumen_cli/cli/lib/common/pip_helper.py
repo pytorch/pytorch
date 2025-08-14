@@ -4,6 +4,7 @@ import shlex
 import shutil
 import sys
 from collections.abc import Iterable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Optional, Union
 
 from cli.lib.common.utils import run_command
@@ -26,34 +27,18 @@ def pip_install_packages(
         if use_uv
         else [sys.executable, "-m", "pip", "install"]
     )
-
-    if use_uv:
-        logger.info("Installing packages using uv pip")
-
     cmd = base[:]
     if requirements:
         cmd += ["-r", requirements]
     if constraints:
         cmd += ["-c", constraints]
     cmd += list(packages)
-
     logger.info("pip installing packages: %s", " ".join(map(shlex.quote, cmd)))
     run_command(" ".join(map(shlex.quote, cmd)), env=env)
-    logger.info("Done installing packages")
 
 
 def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=False):
-    """
-    Install the first local whl that matches the given glob pattern.
-
-    Args:
-        pattern (str): Glob pattern for the wheel file(s).
-        extras (str | None): Optional extras (e.g., "opt_einsum") to install with the wheel.
-    """
-    matches = sorted(glob.glob(pattern))
-    if not matches:
-        raise FileNotFoundError(f"No files match: {pattern}")
-    wheel = matches[0]
+    wheel = first_matching_pkg(pattern)
     target = f"{wheel}[{extras}]" if extras else wheel
     logger.info("Installing wheel: %s", target)
     pip_install_packages([target], prefer_uv=pref_uv)
@@ -67,3 +52,20 @@ def run_python(args: Union[str, list[str]], env=None):
         args = shlex.split(args)
     cmd = [sys.executable] + args
     run_command(" ".join(map(shlex.quote, cmd)), env=env)
+
+
+def pkg_exists(name: str) -> bool:
+    try:
+        pkg_version = version(name)
+        logger.info("%s already exist with version: %s", name, pkg_version)
+        return True
+    except PackageNotFoundError:
+        logger.info("%s is not installed", name)
+        return False
+
+
+def first_matching_pkg(pattern: str) -> str:
+    matches = sorted(glob.glob(pattern))
+    if not matches:
+        raise FileNotFoundError(f"No wheel matching: {pattern}")
+    return matches[0]

@@ -2,7 +2,7 @@ import argparse
 import logging
 
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
-from cli.lib.core.vllm import VllmTestRunner
+from cli.lib.core.vllm.vllm_test import VllmTestRunner
 
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _TARGETS: dict[str, TargetSpec] = {
     "vllm": {
         "runner": VllmTestRunner,
-        "help": "test vLLM unittests",
+        "help": "test vLLM with pytorch main",
     }
     # add yours ...
 }
