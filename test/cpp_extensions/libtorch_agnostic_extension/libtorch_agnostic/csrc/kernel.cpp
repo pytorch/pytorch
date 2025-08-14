@@ -356,7 +356,8 @@ Tensor my_zero_(Tensor t) {
 }
 
 Tensor my_amax(Tensor t) {
-  return amax(t, (uint64_t[]){0}, 1, false);
+  int64_t dim = 0;
+  return amax(t, &dim, 1, false);
 }
 
 void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
@@ -376,6 +377,10 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
+  m.impl("my_amax", &boxed_my_amax);
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
   m.impl("my_amax", &boxed_my_amax);
 }
 

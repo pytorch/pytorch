@@ -214,7 +214,7 @@ if not IS_WINDOWS:
 
             t = torch.rand(2, 7, device=device)
             out = libtorch_agnostic.ops.my_amax(t)
-            self.assertEqual(out, torch.amax(t))
+            self.assertEqual(out, torch.amax(t, 0))
 
         def test_fill_infinity(self, device):
             import libtorch_agnostic
