@@ -30,6 +30,7 @@ from test_c10d_common import (
     ModuleForDdpCommHook,
     SparseGradientModule,
     Task,
+    FFTModel,
 )
 
 import torch.distributed as dist
@@ -2270,6 +2271,23 @@ class DistributedDataParallelTest(
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
+    @requires_gloo()
+    def test_ddp_complex_params(self):
+        process_group = self._get_process_group()
+        N, C, H, W = 1, 16, 64, 64
+        ddp_model = DistributedDataParallel(
+            FFTModel(hin=H, win=W, n_features=C),
+            process_group=process_group,
+        )
+        optimizer = torch.optim.Adam(ddp_model.parameters(), lr=0.001)
+
+        inp = torch.ones((N, C, H, W), dtype=torch.float32)
+
+        # train step
+        out = ddp_model(inp)
+        loss = torch.sum(out)
+        loss.backward()
+        optimizer.step()
 
 class ReducerModule(nn.Module):
     def __init__(self) -> None:
