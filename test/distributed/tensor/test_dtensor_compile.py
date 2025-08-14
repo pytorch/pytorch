@@ -277,6 +277,29 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
+    def test_dtensor_dynamic_cat(self):
+        # RESET COUNTS
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in tuple of DTensors as
+        def fn(x, y):
+            return (
+                torch.cat((x, y), dim=0)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()[0]
+            )
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        y = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(res, ref)
+
+    @skipIfHpu
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
