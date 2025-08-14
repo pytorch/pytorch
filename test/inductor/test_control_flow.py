@@ -41,7 +41,9 @@ def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
 # a testing loss_fn
 def loss_fn(result) -> torch.Tensor:
     flat_results, _ = pytree.tree_flatten(result)
-    total_loss = torch.tensor(0.0, device=flat_results[0].device if flat_results else torch.device('cpu'))
+    total_loss = torch.tensor(
+        0.0, device=flat_results[0].device if flat_results else torch.device("cpu")
+    )
 
     for res in flat_results:
         # Convert to float if integer tensor to avoid numerical issues
@@ -964,7 +966,10 @@ class WhileLoopModels:
             e = torch.nonzero(b).size(0)
 
             def cond_fn(c, a, b):
-                return c + d + e + a.shape[0] - b.shape[0] >= d + e + a.shape[0] - b.shape[0]
+                return (
+                    c + d + e + a.shape[0] - b.shape[0]
+                    >= d + e + a.shape[0] - b.shape[0]
+                )
 
             def body_fn(c, a, b):
                 return c - 1, a + e, b + d
@@ -1066,6 +1071,7 @@ class WhileLoopModels:
                 )
             )
             return final_c, final_x, checkpoint_c, checkpoint_x
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
