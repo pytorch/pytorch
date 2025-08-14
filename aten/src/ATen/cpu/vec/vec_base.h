@@ -523,6 +523,9 @@ struct Vectorized {
     }
     return ret;
   }
+  Vectorized<T> erf_u20() const {
+    return map(std::erf);
+  }
   Vectorized<T> erf() const {
     return map(std::erf);
   }

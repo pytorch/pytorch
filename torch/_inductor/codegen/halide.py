@@ -317,6 +317,10 @@ class HalideOverrides(OpOverrides):
         return f"hl.erf({x})"
 
     @staticmethod
+    def erf_u20(x):
+        return f"hl.erf({x})"
+
+    @staticmethod
     def cosh(x):
         return f"hl.cosh({x})"
 

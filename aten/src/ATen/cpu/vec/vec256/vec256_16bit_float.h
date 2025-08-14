@@ -459,6 +459,9 @@ class Vectorized16 {
         _mm256_and_si256(values, mask_value),
         _mm256_and_si256(sign, mask_signbit)));
   }
+  Vectorized<T> erf_u20() const {
+    return erf();
+  }
   Vectorized<T> erf() const {
     return map(Sleef_erff8_u10);
   }

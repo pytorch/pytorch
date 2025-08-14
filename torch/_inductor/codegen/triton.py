@@ -1133,6 +1133,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     @maybe_upcast_float32()
+    def erf_u20(x):
+        return f"libdevice.erf({x})"
+
+    @staticmethod
+    @maybe_upcast_float32()
     def cosh(x):
         return f"libdevice.cosh({x})"
 
