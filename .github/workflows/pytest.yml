@@ -49,7 +49,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v5
       with:
         name: pytest-results-${{ matrix.shard }}
         path: test-results/
@@ -63,7 +63,7 @@ jobs:
 
     steps:
     - name: Download test results
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v5
       with:
         path: test-results
 
