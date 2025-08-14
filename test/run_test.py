@@ -182,7 +182,6 @@ S390X_BLOCKLIST = [
     "dynamo/test_misc",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
-    "inductor/test_aot_inductor_arrayref",
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
@@ -240,7 +239,6 @@ S390X_BLOCKLIST = [
     # some false errors
     "doctests",
     # new failures to investigate and fix
-    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
     "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
@@ -1557,7 +1555,7 @@ def get_selected_tests(options) -> list[str]:
     if options.einops:
         selected_tests = list(
             filter(
-                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
                 selected_tests,
             )
         )
@@ -1584,6 +1582,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise

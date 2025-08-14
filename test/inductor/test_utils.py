@@ -207,49 +207,34 @@ instantiate_device_type_tests(TestUtils, globals())
 
 
 class TestFakeTensorUpdater(TestCase):
-    def _common_impl(self, gm: torch.fx.GraphModule) -> None:
-        """Assumes that gm is a GraphModule with a single-dimensioned tensor output
-        whose size will grow proportionally to the input size."""
-
-        def add_cat_to_inputs(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-            """Transforms input GraphModule by concatenating all inputs with
-            themselves."""
-            for node in gm.graph.find_nodes(op="placeholder"):
-                with gm.graph.inserting_after(node):
-                    cat_node = gm.graph.call_function(
-                        torch.ops.aten.cat, ([node, node],)
-                    )
-                    node.replace_all_uses_with(cat_node, lambda n: n != cat_node)
-            gm.graph.eliminate_dead_code()
-            gm.graph.lint()
-            return gm
-
-        def get_output_size(gm: torch.fx.GraphModule) -> torch.Size:
-            output_node: torch.fx.Node = gm.graph.output_node().args[0][0]  # type: ignore[arg-type]
-            if "val" in output_node.meta:
-                return output_node.meta["val"].size()
-            return output_node.meta["example_value"].size()
-
-        output_size = get_output_size(gm)
-        updater = FakeTensorUpdater(gm)
-        for _ in range(5):
-            gm = add_cat_to_inputs(gm)
-            with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
-                updater.incremental_update()
-
-            # We could check the graph more thoroughly, but it should be sufficient to
-            # check the meta for the output node alone.
-            output_size = torch.Size((output_size[0] * 2,))
-            self.assertEqual(get_output_size(gm), output_size)
-
     def test_hop_no_subgraph_inputs(self):
-        pass
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
+
+        a = torch.randn(32)
+
+        fn(a)
+        gm = backend.graphs[0]
+        updater = FakeTensorUpdater(gm)
+
+        # Swap the sum node for a median node.
+        sum_node = gm.graph.find_nodes(op="call_function", target=torch.sum)[0]
+        with gm.graph.inserting_after(sum_node):
+            median_node = gm.graph.call_function(
+                torch.median, sum_node.args, sum_node.kwargs
+            )
+            sum_node.replace_all_uses_with(median_node, lambda n: n != median_node)
+            self.assertNotIn("val", median_node.meta)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        self.assertIn("val", median_node.meta)
 
     def test_hop_subgraph_inputs(self):
-        """Test propagation of FakeTensor into the invoke_subgraph HOP.  Modifying the
-        tested subgraph itself is not supported by the current implementation of
-        invoke_subgraph FakeTensor caching."""
-
         @torch.compiler.nested_compile_region
         def nested_section(a: torch.Tensor) -> torch.Tensor:
             return torch.sin(a)
@@ -262,15 +247,45 @@ class TestFakeTensorUpdater(TestCase):
             y = nested_section(b)
             return x + y
 
-        a = torch.randn(32)
-        b = torch.randn(32)
+        a = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
+        b = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
 
         fn(a, b)
+        gm = backend.graphs[0]
+        updater = FakeTensorUpdater(gm)
 
-        # Test propagation of FakeTensor _into_ subgraph HOP.  Modifying the subgraph
-        # itself is not supported by the current implementation of invoke_subgraph
-        # FakeTensor caching.
-        self._common_impl(backend.graphs[0])
+        # Create some new nodes to shadow the inputs, which won't have FakeTensors yet.
+        new_nodes: list[torch.fx.Node] = []
+        for node in gm.graph.find_nodes(op="placeholder"):
+            with gm.graph.inserting_after(node):
+                add_node = gm.graph.call_function(torch.ops.aten.add.Scalar, (node, 1))
+                node.replace_all_uses_with(add_node, lambda n: n != add_node)
+            self.assertNotIn("val", node.meta)
+            new_nodes.append(add_node)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        for node in new_nodes:
+            self.assertIn("val", node.meta)
+
+        # Try the same thing in one of the subgraphs.
+        new_nodes = []
+        assert isinstance(gm.subgraph_0, torch.fx.GraphModule)
+        for node in gm.subgraph_0.graph.find_nodes(op="placeholder"):
+            with gm.subgraph_0.graph.inserting_after(node):
+                add_node = gm.subgraph_0.graph.call_function(
+                    torch.ops.aten.add.Scalar, (node, 1)
+                )
+                node.replace_all_uses_with(add_node, lambda n: n != add_node)
+            self.assertNotIn("val", node.meta)
+            new_nodes.append(add_node)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        for node in new_nodes:
+            self.assertIn("val", node.meta)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,8 @@
 import contextlib
 import operator
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable, Optional
 
 import sympy
@@ -58,18 +59,18 @@ def matches_module_function_pattern(
     return True
 
 
-# todo(chilli): Not a great hash function
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
+class _FakeTensorUpdaterHash:
+    updated_nodes: tuple["_FxNodeHash", ...]
+
+
+@dataclass(frozen=True)
 class _FxNodeHash:
     node: torch.fx.Node
-    target: torch.fx.node.Target = field(init=False)
-    arg_id: int = field(init=False)
-    kwarg_id: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.target = self.node.target
-        self.arg_id = id(self.node.args)
-        self.kwarg_id = id(self.node.kwargs)
+    target: torch.fx.node.Target
+    args_id: int
+    kwargs_id: int
+    subgraph_updater_hash: Optional[_FakeTensorUpdaterHash] = None
 
 
 class FakeTensorUpdater:
@@ -90,14 +91,48 @@ class FakeTensorUpdater:
     new hash, and recompute the faketensor metadata for that node. Then, we
     continue to recursively compute the faketensors for all users until the
     fake tensors stop changing.
+
+    Since this runs in the context of Inductor, we assume that the input and
+    output semantics for the graph (and any subgraphs) are not subject to change
+    after class initialization.  Any violations of this assumption may result in
+    undefined behavior.
     """
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.processed_hashes = OrderedSet[_FxNodeHash]()
         self.gm = gm
 
+        # Import here to avoid circular import issues.
+        from torch._inductor.compile_fx import _get_subgraph_names
+
+        self.subgraph_updaters = {
+            name: FakeTensorUpdater(getattr(self.gm, name))
+            for name in _get_subgraph_names(self.gm)
+        }
+
         for node in self.gm.graph.nodes:
-            self.processed_hashes.add(_FxNodeHash(node))
+            self.processed_hashes.add(self.hash_node(node))
+
+    def _is_subgraph_node(self, node: Any) -> bool:
+        return (
+            isinstance(node, torch.fx.Node)
+            and node.op == "get_attr"
+            and node.target in self.subgraph_updaters
+        )
+
+    def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
+        if self._is_subgraph_node(node):
+            assert isinstance(node.target, str)
+            return _FxNodeHash(
+                node,
+                node.target,
+                id(node.args),
+                id(node.kwargs),
+                _FakeTensorUpdaterHash(
+                    tuple(self.subgraph_updaters[node.target].processed_hashes)
+                ),
+            )
+        return _FxNodeHash(node, node.target, id(node.args), id(node.kwargs))
 
     def incremental_update(self):
         """Update FakeTensors on self.graph. We will try to do the minimum amount of work."""
@@ -168,9 +203,7 @@ class FakeTensorUpdater:
                     # If Inductor ever gets tighter invariants on OpOverloads
                     # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
                     # Then this could just be a fast schema lookup.
-                    is_valid, args, kwargs = get_fake_args_kwargs(
-                        user, getattr_context=self.gm
-                    )
+                    is_valid, args, kwargs = get_fake_args_kwargs(user)
                     if not is_valid:
                         return True
                     with (
@@ -212,6 +245,11 @@ class FakeTensorUpdater:
                 node.target, "_inductor_lowering_function"
             )
 
+        # Since subgraph I/O semantics are assumed not to change, it's safe to
+        # unconditionally update them first.
+        for updater in self.subgraph_updaters.values():
+            updater.incremental_update()
+
         to_process = OrderedSet[int]()
         for node in self.gm.graph.nodes:
             # NB: Be very careful about skipping nodes (via continues) here
@@ -219,15 +257,23 @@ class FakeTensorUpdater:
             # consequence for incorrect FakeTensor metadata is difficult-to-debug
             # silent incorrectness.
             if (
-                _FxNodeHash(node) in self.processed_hashes
+                self.hash_node(node) in self.processed_hashes
                 and id(node) not in to_process
             ):
+                continue
+
+            # If this is a subgraph node, and we're here, then the subgraph update above
+            # found new nodes.  Any users of this subgraph also need to update, but we
+            # can otherwise short-circuit the process at this point.
+            if self._is_subgraph_node(node):
+                to_process.update(id(user) for user in node.users)
+                self.processed_hashes.add(self.hash_node(node))
                 continue
 
             if not should_process_node(node):
                 continue
 
-            is_valid, args, kwargs = get_fake_args_kwargs(node, getattr_context=self.gm)
+            is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
             if not is_valid:
                 continue
 
@@ -252,7 +298,7 @@ class FakeTensorUpdater:
 
             to_process.update(id(user) for user in node.users)
 
-            self.processed_hashes.add(_FxNodeHash(node))
+            self.processed_hashes.add(self.hash_node(node))
 
 
 def get_storage(t: torch.Tensor) -> int:
@@ -269,39 +315,34 @@ def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     return get_storage(node.meta["val"])
 
 
-def get_fake(x):
+def get_fake(x: Any, getattr_context: Optional[Any]) -> Any:
+    """Return a fake tensor from the meta values of an input FX node.  If the input node
+    is a get_attr node, we attempt to resolve it as a member of getattr_context."""
     if isinstance(x, torch.fx.Node):
-        if x.op == "placeholder":
-            return x.meta["example_value"]
         if "val" in x.meta:
             return x.meta["val"]
+        if "example_value" in x.meta:
+            return x.meta["example_value"]
+        if (
+            x.op == "get_attr"
+            and isinstance(x.target, str)
+            and hasattr(getattr_context, x.target)
+        ):
+            return getattr(getattr_context, x.target)
     # If there are no example values, return x
     return x
 
 
 def get_fake_args_kwargs(
-    x: torch.fx.Node, *, getattr_context: Optional[Any] = None
+    x: torch.fx.Node, getattr_context: Optional[Any] = None
 ) -> tuple[bool, tuple[Any], dict[str, Any]]:
     """
-    First value returns a boolean if any of the input nodes don't have a faketensor.
+    First value returns a boolean if any of the input nodes don't have a faketensor and
+    weren't resolved from getattr_context.
     """
-    args, kwargs = tree_map(get_fake, (x.args, x.kwargs))
-
-    if getattr_context:
-        # Some getattr nodes may be resolvable.
-        def transform_getattr(n: Any) -> Any:
-            if (
-                isinstance(n, torch.fx.Node)
-                and n.op == "get_attr"
-                and isinstance(n.target, str)
-                and hasattr(getattr_context, n.target)
-            ):
-                return getattr(getattr_context, n.target)
-            return n
-
-        args = tuple(transform_getattr(a) for a in args)
-        kwargs = {k: transform_getattr(v) for k, v in kwargs.items()}
-
+    args, kwargs = tree_map(
+        partial(get_fake, getattr_context=getattr_context), (x.args, x.kwargs)
+    )
     if any(
         isinstance(a, torch.fx.Node) for a in pytree.arg_tree_leaves(*args, **kwargs)
     ):
