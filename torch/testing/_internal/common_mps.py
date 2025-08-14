@@ -588,8 +588,9 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
-            # grid_sampler_3d often differs greatly from CPU results for half
-            # precision, even though it matches fairly well with float32.
+            # The CPU impl of grid_sampler_3d does not use opmath_t, so it has a
+            # large amount of error compared with the MPS impl for half
+            # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
 

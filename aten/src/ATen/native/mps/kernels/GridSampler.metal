@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/GridSampler.h>
+#include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
 
@@ -118,7 +119,7 @@ T interpolate_linear_3d(
     constant int32_t* input_strides,
     int32_t left_indices[3],
     int32_t right_indices[3],
-    T scales[3]) {
+    opmath_t<T> scales[3]) {
   int32_t a_idx[3] = {left_indices[0], left_indices[1], left_indices[2]};
   int32_t b_idx[3] = {left_indices[0], left_indices[1], right_indices[2]};
   int32_t c_idx[3] = {left_indices[0], right_indices[1], left_indices[2]};
@@ -127,14 +128,22 @@ T interpolate_linear_3d(
   int32_t f_idx[3] = {right_indices[0], left_indices[1], right_indices[2]};
   int32_t g_idx[3] = {right_indices[0], right_indices[1], left_indices[2]};
   int32_t h_idx[3] = {right_indices[0], right_indices[1], right_indices[2]};
-  auto a = get_tensor_val<3>(input, input_strides, a_idx);
-  auto b = get_tensor_val<3>(input, input_strides, b_idx);
-  auto c = get_tensor_val<3>(input, input_strides, c_idx);
-  auto d = get_tensor_val<3>(input, input_strides, d_idx);
-  auto e = get_tensor_val<3>(input, input_strides, e_idx);
-  auto f = get_tensor_val<3>(input, input_strides, f_idx);
-  auto g = get_tensor_val<3>(input, input_strides, g_idx);
-  auto h = get_tensor_val<3>(input, input_strides, h_idx);
+  auto a =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, a_idx));
+  auto b =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, b_idx));
+  auto c =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, c_idx));
+  auto d =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, d_idx));
+  auto e =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, e_idx));
+  auto f =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, f_idx));
+  auto g =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, g_idx));
+  auto h =
+      static_cast<opmath_t<T>>(get_tensor_val<3>(input, input_strides, h_idx));
 
   auto scale0_right = scales[0];
   auto scale1_right = scales[1];
@@ -143,7 +152,7 @@ T interpolate_linear_3d(
   auto scale1_left = 1 - scale1_right;
   auto scale2_left = 1 - scale2_right;
 
-  return (
+  return static_cast<T>(
       scale0_left * scale1_left * scale2_left * a +
       scale0_left * scale1_left * scale2_right * b +
       scale0_left * scale1_right * scale2_left * c +
@@ -174,7 +183,7 @@ void grid_sampler_single_element(
     bool align_corners) {
   int32_t left_indices[3];
   int32_t right_indices[3];
-  T scales[3];
+  opmath_t<T> scales[3];
 
   // For each dimension, find the pair of indices in the cooresponding dimension
   // of `input` which surround the grid coordinate in that dimension. We'll do
@@ -206,20 +215,20 @@ void grid_sampler_single_element(
   for (auto coord_dim = 0; coord_dim < dims; coord_dim++) {
     auto input_dim = dims - coord_dim - 1;
     auto input_size = input_sizes[input_dim];
-    auto coord = coords[coord_dim];
+    auto coord = static_cast<opmath_t<T>>(coords[coord_dim]);
 
     // Interpret nan as -1
     coord = isnan(coord) ? -1 : coord;
 
     if (!align_corners) {
       // Map unaligned grid space to aligned grid space
-      auto corner_alignment_factor =
-          static_cast<T>(input_size) / static_cast<T>(input_size - 1);
+      auto corner_alignment_factor = static_cast<opmath_t<T>>(input_size) /
+          static_cast<opmath_t<T>>(input_size - 1);
       coord = coord * corner_alignment_factor;
     }
 
     // Map aligned grid space to input index space
-    coord = (coord + 1) * (static_cast<T>(input_size - 1) / 2);
+    coord = (coord + 1) * (static_cast<opmath_t<T>>(input_size - 1) / 2);
 
     // Get the input indices surrounding the coordinate, apply padding to them,
     // and obtain the scaling factor between the two for interpolation.
