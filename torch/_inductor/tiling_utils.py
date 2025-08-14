@@ -58,7 +58,7 @@ def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
 
 def solve_for_tiling(
-    expr: sympy.Expr, free_symbol: sympy.Symbol
+    expr: sympy.Expr
 ) -> Optional[sympy.Expr]:
     """
     Giving an expr with a single free symbol, try to find a tiling that would
@@ -721,7 +721,7 @@ def analyze_memory_coalescing(
             if len(single_var_expr.free_symbols) != 1:
                 continue
 
-            tiling_factor = solve_for_tiling(single_var_expr, v)
+            tiling_factor = solve_for_tiling(single_var_expr)
 
             if (
                 tiling_factor is None

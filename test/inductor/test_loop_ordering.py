@@ -870,7 +870,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
             result = tiling_utils.solve_for_tiling(expr)
             self.assertEqual(result, expected)
 
-    def test_induced_fused_tiling(self):
+    @parametrize("dynamic", (False, True))
+    def test_induced_fused_tiling(self, dynamic):
         from torch._inductor import tiling_utils
 
         def fn(nodes):
@@ -894,10 +895,13 @@ class MemoryCoalescingTest(MockSchedulerTest):
             YDIM = 4096
 
             arg0_1 = torch.randn([XDIM, YDIM], device=GPU_TYPE, dtype=torch.bfloat16)
+            if dynamic:
+                torch._dynamo.mark_dynamic(arg0_1, 0)
+
             permute = torch.ops.aten.permute.default(arg0_1, [1, 0])
 
             out, code = run_and_get_code(
-                torch.compile(forward, dynamic=True), (permute)
+                torch.compile(forward), (permute)
             )
 
             self.assertEqual(out, forward(permute))
