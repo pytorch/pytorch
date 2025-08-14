@@ -47,12 +47,6 @@ on:
         required: false
         type: string
         default: ""
-      additional-artifact-name:
-          description: |
-                additional artifacts needed to be downloaded for testing
-          required: false
-          type: string
-          default: ""
       disable-monitor:
         description: |
           [Experimental] Disable utilization monitoring for tests.
@@ -223,14 +217,6 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
-          s3-bucket: ${{ inputs.s3-bucket }}
-          use-gha: ${{ inputs.use-gha }}
-
-      - name: Download additional build artifacts
-        if: ${{ inputs.additional-artifact-name != ''}}
-        uses: ./.github/actions/download-build-artifacts
-        with:
-          name: ${{ inputs.additional-artifact-name }}
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ inputs.use-gha }}
 

@@ -35,9 +35,11 @@ class VllmTestParameters:
     fetch secrests directly from env variables during runtime
     """
 
-    torch_whls_path: Path = env_path_field("TORCH_WHEELS_PATH", "./dist")
+    torch_whls_path: Path = env_path_field("WHEELS_PATH", "./dist")
 
-    vllm_whls_path: Path = env_path_field("VLLM_WHEELS_PATH", "./shared")
+    vllm_whls_path: Path = env_path_field(
+        "VLLM_WHEELS_PATH", "./dist/external/vllm/wheels"
+    )
 
     torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
 
@@ -73,9 +75,9 @@ class VllmTestRunner(BaseRunner):
 
         # Match the structure of the artifacts.zip from vllm external build
         self.VLLM_TEST_WHLS_REGEX = [
-            "wheels/xformers/xformers*.whl",
-            "wheels/vllm/vllm*.whl",
-            "wheels/flashinfer-python/flashinfer*.whl",
+            "xformers/xformers*.whl",
+            "vllm/vllm*.whl",
+            "flashinfer-python/flashinfer*.whl",
         ]
 
     def prepare(self):
