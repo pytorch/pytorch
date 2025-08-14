@@ -18,21 +18,6 @@
 #include <unordered_set>
 #include <utility>
 
-namespace c10 {
-
-// Caching allocator will execute every registered callback if it unable to find
-// block inside of already allocated area.
-class C10_CUDA_API FreeMemoryCallback {
- public:
-  virtual ~FreeMemoryCallback() = default;
-  virtual bool Execute() = 0;
-};
-
-C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
-#define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__)
-} // namespace c10
-  //
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do
 // this, but it was a bit irritating to figure out how to also correctly
 // apply pimpl pattern so I didn't have to leak any internal implementation
@@ -50,10 +35,11 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
+using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
-
-typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+using c10::CachingDeviceAllocator::RecordContext;
+using c10::CachingDeviceAllocator::trace_time_;
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
@@ -85,11 +71,6 @@ struct SegmentInfo {
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
-};
-
-union trace_time_ {
-  time_t t_;
-  approx_time_t approx_t_;
 };
 
 struct TraceEntry {
@@ -180,13 +161,6 @@ struct SnapshotInfo {
 struct CheckpointDelta {
   std::vector<void*> ptrs_freed;
   std::vector<at::DataPtr> dataptrs_allocd;
-};
-
-enum struct RecordContext {
-  NEVER = 0,
-  STATE = 1, // only keep stacks for active allocations
-  ALLOC = 2, // additionally keep stacks for allocations in the trace history
-  ALL = 3, // additionally record stacks for when something is freed
 };
 
 using OutOfMemoryObserver = std::function<void(
