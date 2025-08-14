@@ -89,8 +89,6 @@ class ListTest(list_tests.CommonTest):
             # Note: This test is expected to SEGV under Cygwin 1.3.12 or
             # earlier due to a newlib bug.  See the following mailing list
             # thread for the details:
-
-            # @lint-ignore http://sources.redhat.com/ml/newlib/2002/msg00369.html
             self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
 
         # This code used to segfault in Py2.4a3
