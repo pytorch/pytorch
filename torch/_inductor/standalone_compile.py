@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
@@ -116,6 +117,7 @@ class CompiledArtifact:
     def load(
         *, path: str, format: Literal["binary", "unpacked"] = "binary"
     ) -> CompiledArtifact:
+        path = normalize_path_separator(path)
         with dynamo_timed("CompiledArtifact.load"):
             if format == "binary":
                 # can't assert that it is a file since it might not exist yet

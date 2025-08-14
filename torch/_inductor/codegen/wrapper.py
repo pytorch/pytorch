@@ -50,6 +50,7 @@ from ..utils import (
     get_benchmark_name,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_using_cudagraph_partition,
     LineContext,
     sympy_product,
     sympy_str,
@@ -1197,7 +1198,14 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
-            self.codegen_input_size_and_nan_asserts()
+
+            # avoid duplicating asserts for both partition functions and
+            # the call function when using cudagraph partition
+            if not (
+                is_using_cudagraph_partition()
+                and (not is_codegen_graph_partition_subgraph(self))
+            ):
+                self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
@@ -1757,7 +1765,9 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
         return self.codegen_python_shape_tuple(shape)
 
-    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+    def codegen_alloc_from_pool(
+        self, name, offset, dtype, shape, stride
+    ) -> tuple[str, list[str]]:
         return "alloc_from_pool({})".format(
             ", ".join(
                 [
@@ -1768,7 +1778,7 @@ class PythonWrapperCodegen(CodeGen):
                     self.codegen_python_shape_tuple(stride),
                 ]
             )
-        )
+        ), []
 
     def codegen_reinterpret_view(
         self,
