@@ -711,7 +711,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
                         : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemExportToShareableHandle(
+  C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
       hipMemHandleTypePosixFileDescriptor,
@@ -772,7 +772,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
           CU_MEM_HANDLE_TYPE_FABRIC));
     }
 #elif defined(USE_ROCM)
-    C10_HIP_CHECK(hipMemImportFromShareableHandle(
+    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
         (void*)(uintptr_t) & (imported_handles[r]),
         hipMemHandleTypePosixFileDescriptor));
