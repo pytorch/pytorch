@@ -27,6 +27,10 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
+from torch._inductor.config import (
+    parse_matmul_gemm_autotune_benchmark_space,
+    parse_matmul_gemm_autotune_search_space,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -2497,6 +2501,7 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+
 
 
 if __name__ == "__main__":

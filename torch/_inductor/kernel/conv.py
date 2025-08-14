@@ -590,6 +590,7 @@ def convolution(
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
 
         conv_configs = V.choices.get_conv_configs(device_type)
+        dtype = x.get_dtype()
 
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),

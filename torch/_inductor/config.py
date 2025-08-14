@@ -481,12 +481,31 @@ max_autotune_conv_backends = os.environ.get(
 ).upper()
 
 
+# `fast_autotune` will only slightly increase compile time for better mm performance.
+# This uses an ml model to predict the best config for a given kernel, then benchmarks this against aten.
+# The sweetspot for compile time cost vs performance somewhere between max_autotune and no max_autotune.
+# Equivalent to TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE == 1 with max autotune
+fast_autotune = os.environ.get("TORCHINDUCTOR_FAST_AUTOTUNE") == "1"
+
+# Model Path for Fast Autotune. Must be an exported AOTI model with *.pt2 ending.
+fast_autotune_model_path: Optional[str] = os.environ.get(
+    "TORCHINDUCTOR_FAST_AUTOTUNE_MODEL_DIRECTORY"
+)
+
+
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
 max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
+
+matmul_gemm_autotune_benchmark_space: Union[int, Literal["SAME", "DEFAULT"]] = (
+    os.environ.get("TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE", "SAME").upper()
+)
+
+
+
 
 # Specify the size of the search space for flex attention autotuning.
 # DEFAULT     - balance between compile time overhead and performance

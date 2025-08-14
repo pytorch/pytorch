@@ -1636,7 +1636,11 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
+        and (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.matmul_gemm_autotune_benchmark_space != "SAME"
+        )
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -3531,3 +3535,46 @@ def maybe_log_cudagraph_partition(
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)
+
+def parse_matmul_gemm_autotune_benchmark_space() -> Union[
+    int, Literal["SAME", "DEFAULT"]
+]:
+    """
+    Specify the size of the benchmarking space for GEMM autotuning with the neural network model.
+    SAME     - There should be no functional difference between this and max_autotune_gemm_search_space
+    DEFAULT  - Benchmark the same number of configs as max_autotune, but search over a larger space using the model
+    <number> - Use the top <number> configs as predicted by the model.
+    """
+    value = 
+    if value is not None:
+        value = value.upper()
+        if value in ["SAME", "DEFAULT"]:
+            return value  # type: ignore[return-value]
+        # Try to parse as an integer first
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    # Access fast_autotune through the module instead of using global
+    # This ensures it works when called from tests
+    if config.fast_autotune:
+        return 1
+    return "SAME"
+
+
+def parse_matmul_gemm_autotune_search_space() -> Literal["DEFAULT", "EXHAUSTIVE"]:
+    """
+    t
+    """
+    # The search space should be whatever it's set to, unless we're using the model,
+    # in which case we should use the exhaustive search space because it will be filtered by the model.
+    benchmarking_space = parse_matmul_gemm_autotune_benchmark_space()
+    if benchmarking_space == "SAME":
+        val = os.environ.get(
+            "TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE", "DEFAULT"
+        ).upper()
+        if val in ["DEFAULT", "EXHAUSTIVE"]:
+            return val  # type: ignore[return-value]
+        return "DEFAULT"
+    # If we are using the model, the configs we're considering should be exhaustive
+    return "EXHAUSTIVE"
