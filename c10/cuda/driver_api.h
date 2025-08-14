@@ -53,7 +53,8 @@
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuMulticastAddDevice, 12030)           \
   _(cuMulticastBindMem, 12030)             \
-  _(cuMulticastCreate, 12030)
+  _(cuMulticastCreate, 12030)              \
+  _(cuMulticastUnbind, 12030)
 #else
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_)
 #endif
