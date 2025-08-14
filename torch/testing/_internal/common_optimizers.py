@@ -854,17 +854,15 @@ def optim_inputs_func_muon(device, dtype=None):
         ),
         OptimizerInput(
             params=None,
-            kwargs={
-                "adjust_lr_fn": lambda lr, param_shape: lr,
-            },
-            desc="passing alternative adjust_lr_fn",
+            kwargs={"ns_steps": 6},
+            desc="passing alternative ns_steps",
         ),
         OptimizerInput(
             params=None,
             kwargs={
-                "msign_fn": lambda grad, _: grad,
+                "ns_coefficients": (3.4, -4.7, 2.0),
             },
-            desc="passing alternative msign_fn",
+            desc="passing alternative ns_coefficients",
         ),
     ]
 
