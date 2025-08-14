@@ -724,8 +724,7 @@ void raw_miopen_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -833,8 +832,7 @@ void raw_miopen_depthwise_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvFwdAlgorithm_t>(args, &solution_id);
 
@@ -989,8 +987,7 @@ void raw_miopen_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1034,8 +1031,7 @@ void raw_miopen_depthwise_convolution_backward_weight_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdWeightsAlgorithm_t>(args, &solution_id);
 
@@ -1200,7 +1196,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
@@ -1240,8 +1236,7 @@ void raw_miopen_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1350,8 +1345,7 @@ void raw_miopen_depthwise_convolution_backward_input_out(
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, benchmark, deterministic);
 
-  if (deterministic && !benchmark) {
-      // immediate mode is triggered for the specific combination of benchmark=off deterministic=on
+  if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
       Workspace workspace = chooseSolution<miopenConvBwdDataAlgorithm_t>(args, &solution_id);
 
@@ -1452,7 +1446,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous();
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
