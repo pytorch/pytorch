@@ -35,10 +35,10 @@ inputs:
 outputs:
   build_time:
     description: "Total build time in seconds"
-    value: ${{ steps.build.outputs.build_time }}
+    value: ${{ steps.build-external.outputs.build_time }}
   output_dir:
     description: "Directory where build artifact is stored"
-    value: ${{ steps.build.outputs.output_dir }}
+    value: ${{ steps.build-external.outputs.output_dir }}
 
 runs:
   using: composite
