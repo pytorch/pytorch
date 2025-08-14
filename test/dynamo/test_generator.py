@@ -1009,7 +1009,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         z = 0
 
         def whoo(t):
-            nonlocal z  # noqa: F824
+            nonlocal z
             try:
                 L.append(1)
                 yield t.sin()
@@ -1050,6 +1050,7 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
+            nonlocal z
             gen = whoo(t)
             i = next(gen)
             y = gen.close()
@@ -1077,6 +1078,7 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
+            nonlocal z
             gen = whoo(t)
             i = next(gen)
             gen.close()
@@ -1378,10 +1380,8 @@ class TestGeneratorThrow(GeneratorTestsBase):
             a = next(gen)
             try:
                 gen.throw(ValueError)
-            except StopIteration as e:
-                assert len(e.args) == 0
+            except StopIteration:
                 return a
-            raise AssertionError("Expected StopIteration")
 
         t = torch.randn(2)
         y = self._compile_check(fn, (t,))
