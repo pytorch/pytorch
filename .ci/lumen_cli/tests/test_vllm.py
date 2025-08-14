@@ -136,7 +136,7 @@ class TestBuildCmdAndRun(unittest.TestCase):
         self.assertIn("--target export-wheels", squashed)
         self.assertIn("-t vllm-wheels", squashed)
 
-    @patch("cli.lib.core.vllm.run_cmd")
+    @patch("cli.lib.core.vllm.run_command")
     @patch("cli.lib.core.vllm.ensure_dir_exists")
     @patch("cli.lib.core.vllm.clone_vllm")
     @patch.object(
