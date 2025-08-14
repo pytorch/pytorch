@@ -42,7 +42,7 @@ from torch.futures import Future
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-__all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
+__all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader", "QuantizedHuggingFaceStorageReader"]
 
 
 class HuggingFaceStorageWriter(FileSystemWriter):
@@ -226,8 +226,6 @@ class HuggingFaceStorageReader(FileSystemReader):
         for file_name, reqs in per_file.items():
             with safe_open(filename=file_name, framework="pt") as f:
                 for req in reqs:
-                    item_md = self.storage_data[req.storage_index]
-
                     # Create slices for each dimension based on offsets and lengths
                     slices = tuple(
                         slice(offset, offset + length)
@@ -326,3 +324,245 @@ class HuggingFaceStorageReader(FileSystemReader):
         metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
 
         return metadata
+
+
+class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
+    """
+    Extension of HuggingFaceStorageReader that handles fp8 quantized tensors.
+    
+    This reader handles the dequantization of fp8 tensors during the read process,
+    converting them from quantized blocks to full dequantized tensors before
+    copying to the target tensor.
+    """
+
+    def __init__(self, path: str, block_size: Optional[int] = None):
+        """
+        Initialize the FP8 HuggingFace storage reader.
+        
+        Args:
+            path: directory where the checkpoint will be read from
+            block_size: optional fixed block size for FP8 dequantization. If None, 
+                       block size will be calculated dynamically based on tensor shapes.
+        """
+        super().__init__(path)
+        self.checkpoint_path = path
+        self.block_size = block_size
+        self.weight_scale_mapping = {}
+        self.scale_tensor_cache = {}
+        self._load_fp8_metadata()
+
+    def _load_fp8_metadata(self):
+        """Load FP8 quantization metadata from checkpoint."""
+        try:
+            import json
+            from pathlib import Path
+            
+            checkpoint_path = Path(self.checkpoint_path)
+            
+            # Load weight mapping from index file
+            index_files = list(checkpoint_path.glob("*.index.json"))
+            if index_files:
+                with open(index_files[0], 'r') as f:
+                    index_data = json.load(f)
+                    weight_map = index_data.get('weight_map', {})
+                    self._analyze_weight_scale_mapping(weight_map)
+            
+        except Exception as e:
+            logger.warning(f"Failed to load FP8 metadata: {e}")
+
+    def _analyze_weight_scale_mapping(self, weight_map: dict[str, str]):
+        """Analyze weight-scale tensor pairs from weight mapping."""
+        for tensor_name in weight_map.keys():
+            if tensor_name.endswith('.weight_scale_inv'):
+                weight_name = tensor_name.replace('.weight_scale_inv', '.weight')
+                if weight_name in weight_map:
+                    self.weight_scale_mapping[weight_name] = tensor_name
+
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        from safetensors import safe_open  # type: ignore[import]
+
+        per_file: dict[str, list[ReadItem]] = {}
+
+        for read_item in plan.items:
+            item_md: _HFStorageInfo = self.storage_data[read_item.storage_index]
+            file_name = item_md.relative_path
+            per_file.setdefault(file_name, []).append(read_item)
+
+        for file_name, reqs in per_file.items():
+            with safe_open(filename=file_name, framework="pt") as f:
+                for req in reqs:
+                    tensor_fqn = req.storage_index.fqn
+                    
+                    # Check if this is an FP8 tensor that needs special handling
+                    if self._is_fp8_tensor(tensor_fqn, f):
+                        tensor = self._read_fp8_tensor_with_block_alignment(req, f)
+                    else:
+                        # Standard tensor reading
+                        slices = tuple(
+                            slice(offset, offset + length)
+                            for offset, length in zip(req.storage_offsets, req.lengths)
+                        )
+                        tensor = f.get_slice(tensor_fqn)[slices]
+                    
+                    target_tensor = planner.resolve_tensor(req).detach()
+
+                    assert target_tensor.size() == tensor.size(), (
+                        f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                    )
+
+                    target_tensor.copy_(tensor)
+                    planner.commit_tensor(req, target_tensor)
+
+        fut: Future = Future()
+        fut.set_result(None)
+        return fut
+
+    def _calculate_scale_shape(self, weight: torch.Tensor, block_size: int) -> tuple[int, int]:
+        """Calculate expected scale tensor shape based on weight tensor and block size."""
+        rows, cols = weight.shape
+        block_rows = (rows + block_size - 1) // block_size  # Ceiling division
+        block_cols = (cols + block_size - 1) // block_size  # Ceiling division
+        return (block_rows, block_cols)
+
+    def _dequantize_from_fp8(
+        self,
+        weight: torch.Tensor,
+        scale_inv: torch.Tensor,
+        dtype=torch.float32,
+        block_size: int = 128,
+    ) -> torch.Tensor:
+        """
+        Dequantize FP8 tensor using block-wise scaling.
+        
+        Args:
+            weight: FP8 quantized weight tensor
+            scale_inv: Scale inverse tensor for dequantization
+            dtype: Target dtype for dequantized tensor
+            block_size: Block size for dequantization
+            
+        Returns:
+            Dequantized tensor
+        """
+        # Convert to float32 for computation
+        float_weight = weight.to(torch.float32)
+        # Get original dimensions
+        orig_shape = weight.shape
+
+        # Calculate block dimensions for the local shard
+        expected_scale_shape = self._calculate_scale_shape(weight, block_size)
+        block_rows, block_cols = expected_scale_shape
+
+        # NOTE: When processing large models on-the-fly, misalignment between block boundaries
+        # and DTensor local shape partitioning can lead to silent numerical inaccuracies.
+        dequantized = float_weight.detach().clone().to(dtype=dtype)
+
+        # Apply scaling factors to each block
+        for i in range(block_rows):
+            row_start = i * block_size
+            row_end = min(row_start + block_size, orig_shape[0])
+
+            for j in range(block_cols):
+                col_start = j * block_size
+                col_end = min(col_start + block_size, orig_shape[1])
+
+                # Get the block
+                block = float_weight[row_start:row_end, col_start:col_end]
+
+                scale = scale_inv[i, j]
+                block = block * scale
+
+                # Explicitly convert block to dtype
+                block_converted = block.to(dtype=torch.float32)
+                # Store the dequantized block
+                dequantized[row_start:row_end, col_start:col_end] = block_converted
+
+        return dequantized
+
+    def _is_fp8_tensor(self, tensor_fqn: str, safetensor_file) -> bool:
+        """
+        Check if a tensor is an FP8 quantized tensor that needs dequantization.
+        
+        Args:
+            tensor_fqn: Fully qualified name of the tensor
+            safetensor_file: Open safetensors file handle
+            
+        Returns:
+            True if tensor is FP8 and has corresponding scale tensor, False otherwise
+        """
+        # Skip scale tensors themselves
+        if tensor_fqn.endswith('.weight_scale_inv'):
+            return False
+            
+        # Check if this weight tensor has a corresponding scale tensor
+        if tensor_fqn not in self.weight_scale_mapping:
+            return False
+            
+        try:
+            # Check if the tensor is actually stored in FP8 format
+            tensor_slice = safetensor_file.get_slice(tensor_fqn)
+            dtype_str = str(tensor_slice.get_dtype())
+            
+            # Check for FP8 data types
+            fp8_dtypes = ['F8_E4M3', 'F8_E5M2', 'float8_e4m3fn', 'float8_e5m2']
+            is_fp8_dtype = any(fp8_type in dtype_str for fp8_type in fp8_dtypes)
+            
+            if is_fp8_dtype:
+                logger.debug(f"Detected FP8 tensor: {tensor_fqn} with dtype {dtype_str}")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"Failed to check FP8 status for tensor {tensor_fqn}: {e}")
+            
+        return False
+
+    def _read_fp8_tensor_with_block_alignment(self, req: ReadItem, safetensor_file) -> torch.Tensor:
+        """
+        Read FP8 tensor with block alignment considerations for FSDP compatibility.
+        
+        Args:
+            req: Read request containing tensor info and required slices
+            safetensor_file: Open safetensors file handle
+            
+        Returns:
+            Dequantized tensor ready for use
+        """
+        tensor_fqn = req.storage_index.fqn
+        scale_fqn = self.weight_scale_mapping[tensor_fqn]
+        
+        try:
+            # Load the FP8 weight tensor
+            weight_slices = tuple(
+                slice(offset, offset + length)
+                for offset, length in zip(req.storage_offsets, req.lengths)
+            )
+            fp8_weight = safetensor_file.get_slice(tensor_fqn)[weight_slices]
+
+            # Load the corresponding scale inverse tensor
+            # For scale tensors, we typically need the full tensor for proper block alignment
+            if scale_fqn not in self.scale_tensor_cache:
+                scale_inv = safetensor_file.get_slice(scale_fqn)[:]  # Load full scale tensor
+                self.scale_tensor_cache[scale_fqn] = scale_inv
+            else:
+                scale_inv = self.scale_tensor_cache[scale_fqn]
+            
+            # Determine block size
+            block_size = self.block_size if self.block_size is not None else 128
+
+            # Perform dequantization
+            dequantized_tensor = self._dequantize_from_fp8(
+                weight=fp8_weight,
+                scale_inv=scale_inv,
+                dtype=torch.float32,
+                block_size=block_size
+            )
+
+            return dequantized_tensor
+
+        except Exception as e:
+            logger.error(f"Failed to read FP8 tensor {tensor_fqn}: {e}")
+            # Fallback to standard tensor reading
+            slices = tuple(
+                slice(offset, offset + length)
+                for offset, length in zip(req.storage_offsets, req.lengths)
+            )
+            return safetensor_file.get_slice(tensor_fqn)[slices]
