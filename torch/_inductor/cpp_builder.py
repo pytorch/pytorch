@@ -601,40 +601,70 @@ def _get_ffast_math_flags() -> list[str]:
     return flags
 
 
+def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+    """
+    When we turn on generate debug symbol.
+    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
+    On Linux, it should create some debug sections in binary file.
+    """
+    cflags: list[str] = []
+    ldflags: list[str] = []
+
+    if _IS_WINDOWS:
+        cflags = ["ZI", "_DEBUG"]
+        ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
+    else:
+        cflags.append("g")
+
+    return cflags, ldflags
+
+
 def _get_optimization_cflags(
     cpp_compiler: str, min_optimize: bool = False
-) -> list[str]:
-    if _IS_WINDOWS:
-        return ["O1" if min_optimize else "O2"]
+) -> tuple[list[str], list[str]]:
+    cflags: list[str] = []
+    ldflags: list[str] = []
+
+    b_debug_build = (
+        config.aot_inductor.debug_compile
+        or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+    )
+    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
+
+    if b_debug_build:
+        cflags, ldflags = _get_inductor_debug_symbol_cflags()
+        if _IS_WINDOWS:
+            cflags += ["Od", "Ob0", "Oy-"]
+        else:
+            cflags.append("O0")
     else:
-        wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
-        cflags = (
-            ["O0", "g"]
-            if config.aot_inductor.debug_compile
-            else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
-        )
-        cflags += _get_ffast_math_flags()
-        cflags.append("fno-finite-math-only")
-        if not config.cpp.enable_unsafe_math_opt_flag:
-            cflags.append("fno-unsafe-math-optimizations")
-        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+        if _IS_WINDOWS:
+            cflags = ["O1" if min_optimize else "O2"]
+        else:
+            cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
 
-        if sys.platform != "darwin":
-            # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if _is_gcc(cpp_compiler):
-                cflags.append("fno-tree-loop-vectorize")
-            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-            # `-march=native` is unrecognized option on M1
-            if not config.is_fbcode():
-                if platform.machine() == "ppc64le":
-                    cflags.append("mcpu=native")
-                else:
-                    cflags.append("march=native")
+    cflags += _get_ffast_math_flags()
+    cflags.append("fno-finite-math-only")
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        cflags.append("fno-unsafe-math-optimizations")
+    cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
-        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
-            cflags.append("flto=thin")
+    if sys.platform != "darwin":
+        # on macos, unknown argument: '-fno-tree-loop-vectorize'
+        if _is_gcc(cpp_compiler):
+            cflags.append("fno-tree-loop-vectorize")
+        # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+        # `-march=native` is unrecognized option on M1
+        if not config.is_fbcode():
+            if platform.machine() == "ppc64le":
+                cflags.append("mcpu=native")
+            else:
+                cflags.append("march=native")
 
-        return cflags
+    if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        cflags.append("flto=thin")
+
+    return cflags, ldflags
 
 
 def _get_shared_cflags(do_link: bool) -> list[str]:
@@ -652,25 +682,6 @@ def _get_shared_cflags(do_link: bool) -> list[str]:
     return ["shared", "fPIC"]
 
 
-def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
-    """
-    When we turn on generate debug symbol.
-    On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
-    On Linux, it should create some debug sections in binary file.
-    """
-    cflags: list[str] = []
-    ldflags: list[str] = []
-    b_enable_debug_symbol = os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
-    if b_enable_debug_symbol:
-        if _IS_WINDOWS:
-            cflags = ["Z7", "_DEBUG", "OD"]
-            ldflags = ["DEBUG", "OPT:REF", "OPT:ICF"]
-        else:
-            cflags.append("g")
-
-    return cflags, ldflags
-
-
 def get_cpp_options(
     cpp_compiler: str,
     do_link: bool,
@@ -686,15 +697,14 @@ def get_cpp_options(
     libraries: list[str] = []
     passthrough_args: list[str] = []
 
-    dbg_cflags, dbg_ldflags = _get_inductor_debug_symbol_cflags()
+    opt_cflags, opt_ldflags = _get_optimization_cflags(cpp_compiler, min_optimize)
 
     cflags = (
-        _get_shared_cflags(do_link)
-        + _get_optimization_cflags(cpp_compiler, min_optimize)
+        opt_cflags
+        + _get_shared_cflags(do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
-        + dbg_cflags
     )
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
@@ -707,7 +717,7 @@ def get_cpp_options(
         definitions,
         include_dirs,
         cflags,
-        ldflags + dbg_ldflags,
+        ldflags + opt_ldflags,
         libraries_dirs,
         libraries,
         passthrough_args,
@@ -900,8 +910,15 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
             str(
                 (
                     Path(sysconfig.get_path("include", scheme="nt")).parent / "libs"
-                ).absolute()
-            )
+                ).absolute()  # python[ver].lib
+            ),
+            str(
+                (
+                    Path(sysconfig.get_path("include", scheme="nt")).parent
+                    / "Library"
+                    / "lib"
+                ).absolute()  # install python librarys location, such as intel-openmp
+            ),
         ]
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
@@ -1067,11 +1084,10 @@ def _get_openmp_args(
             libs.append("libiomp5md")
             perload_icx_libomp_win(cpp_compiler)
         else:
-            # /openmp, /openmp:llvm
-            # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
-            # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
             cflags.append("openmp")
-            cflags.append("openmp:experimental")  # MSVC CL
+            cflags.append("openmp:experimental")
+            libs.append("libiomp5md")  # intel-openmp
+            ldflags.append("nodefaultlib:vcomp")
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
@@ -1621,7 +1637,8 @@ class CppBuilder:
         if isinstance(sources, str):
             sources = [sources]
 
-        if config.is_fbcode() and (not self._aot_mode or self._use_relative_path):
+        # Use relative paths only when requested (typically for remote builds)
+        if config.is_fbcode() and self._use_relative_path:
             # Will create another temp directory for building, so do NOT use the
             # absolute path.
             self._orig_source_paths = list(sources)
