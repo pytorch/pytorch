@@ -3477,6 +3477,33 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_unbacked_slice_cpp_wrapper(self):
         self.test_unbacked_slice()
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_tensor_split(self):
+        def f1(x, xs):
+            xs = torch.tensor(xs.tolist())
+            return torch.tensor_split(x, xs)
+
+        x = torch.randn(20)
+        xs = torch.tensor([5, 10, 15])
+        fn = torch.compile(f1, fullgraph=True, backend="inductor")
+
+        def compare(x, xs):
+            for i, j in zip(f1(x, xs), fn(x, xs)):
+                self.assertTrue(torch.allclose(i, j))
+
+        compare(x, xs)
+        xs = torch.tensor([-15, 9, 10, 11])
+        compare(x, xs)
+        xs = torch.tensor([-15, -10, -5, -2])
+        compare(x, xs)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_tensor_split_cpp_wrapper(self):
+        self.test_tensor_split()
+
     @unittest.skip("this test fails due to inductor/autograd issue #153041")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape_failing(self):

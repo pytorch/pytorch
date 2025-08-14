@@ -6,6 +6,7 @@ import numbers
 import operator
 import sys
 from collections.abc import Iterable
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
@@ -1435,7 +1436,18 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         assert isinstance(sections, IntLike)
         return self.tensor_split(sections, dim)
     else:
-        indices = [i.item() for i in tensor_indices_or_sections]
+        ctx = nullcontext
+        if (
+            (fake_mode := torch._guards.detect_fake_mode())
+            and (shape_env := fake_mode.shape_env)
+        ):
+            ctx = shape_env.ignore_fresh_unbacked_symbols
+        # In fake tensor prop, we end up calling slice() with these unbacked indices.
+        # Because slice has flexible semantics, the unbacked handling generates new output sizes
+        # for each slice, effectively clobbering over these index symbols.
+        # To avoid PendingUnbackedSymbolNotFound errors, we tell the compiler it's fine to not bind these.
+        with ctx():
+            indices = [i.item() for i in tensor_indices_or_sections]
         # WARNING: Tempted to torch._check_is_size on the indices here?  You
         # can't: tensor_split works with negative values in indices:
         #

@@ -1212,19 +1212,22 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             return size + idx
         return None
 
-    static_slice = not clamp
-    if not static_slice:
+    ambiguous_slice = clamp
+    if ambiguous_slice:
         start_index = handle_negative_index(start, size, 0)
         end_index = handle_negative_index(end, size, size)
         if start_index is not None and end_index is not None:
             start, end = start_index, end_index
-            static_slice = True
+            ambiguous_slice = False
 
-    # go to SliceView/ReinterpretView
-    if static_slice:
+    # ambiguous_slice=False means we know what semantics this slice call follows,
+    # and don't need to generate an extern kernel to represent the output size.
+    # This is assumed True for clamp=False
+    # (meant to follow standard indexing semantics: 0 <= index < size)
+    if not ambiguous_slice:
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
-        )
+        )  # go to SliceView/ReinterpretView
 
     # unbacked territory: create DynamicSlice ExternKernel
     # clamp is True, unbacked start / end
@@ -1915,7 +1918,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
-        clamp=True,
+        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
