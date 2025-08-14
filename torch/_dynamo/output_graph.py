@@ -1431,6 +1431,11 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
 
+            # Close all generators opened while tracing. Needs to be done after
+            # pass1, as PyCodegen might try to reconstruct the generator, which
+            # sets LocalGeneratorObjectVariable.remaining_items
+            self.side_effects.close_local_generators()
+
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
             # chained source, and (b). avoids redundantly saving single-user VT
