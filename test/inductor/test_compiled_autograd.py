@@ -3880,12 +3880,12 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = cos_backward0[0];  cos_backward0 = None
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_8, unwrap_maybe_dynamic_int_9], False)]);  getitem_27 = unwrap_maybe_dynamic_int_8 = unwrap_maybe_dynamic_int_9 = None
         getitem_28 = validate_outputs_3[0];  validate_outputs_3 = None
-        add = torch.add(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
+        call_input_buffer_accumulate = torch__dynamo_external_utils_call_input_buffer_accumulate(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
 
         getitem_29 = hooks[3];  hooks = None
         getitem_30 = packed_data[3];  packed_data = None
         call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_29, getitem_30, hook_type = 'unpack_hook');  getitem_29 = getitem_30 = None
-        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
+        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([call_input_buffer_accumulate], [True], call_hook_3);  call_input_buffer_accumulate = call_hook_3 = None
         getitem_31 = sin_backward0[0];  sin_backward0 = None
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
