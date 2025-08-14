@@ -34,6 +34,8 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
+#elif defined(_M_X64) && (_MSC_VER >= 1937)
+  return _mul_overflow_i64(a, b, out);
 #else
   int64_t high{0};
   *out = _mul128(a, b, &high);
@@ -53,6 +55,9 @@ C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
 C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
+#elif defined(_M_X64) && (_MSC_VER >= 1937)
+  uint64_t high{0};
+  return _mul_full_overflow_u64(a, b, out, &high);
 #else
   uint64_t high{0};
   *out = _umul128(a, b, &high);
