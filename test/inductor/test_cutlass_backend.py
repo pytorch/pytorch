@@ -1674,7 +1674,7 @@ class TestCutlassBackend(TestCase):
 
         # Check render call count: render is called uniquely for each codegen
         # and for each finalized codegen.
-        self.assertEqual(render_call_count, NUM_ITERATIONS + 2)
+        self.assertEqual(render_call_count, NUM_ITERATIONS + 3)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
