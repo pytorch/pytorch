@@ -38,6 +38,22 @@ def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
     return _prepend_product_of_values(inputs, counter_values, num_counters)
 
 
+# a testing loss_fn
+def loss_fn(result) -> torch.Tensor:
+    flat_results, _ = pytree.tree_flatten(result)
+    total_loss = torch.tensor(0.0, device=flat_results[0].device if flat_results else torch.device('cpu'))
+
+    for res in flat_results:
+        # Convert to float if integer tensor to avoid numerical issues
+        if not res.dtype.is_floating_point:
+            res = res.float()
+
+        # Simple robust loss: abs values + small constant to avoid inf/nan
+        total_loss = total_loss + (torch.abs(res) / (1.0 + torch.abs(res))).sum()
+
+    return total_loss
+
+
 class CondModels:
     class Simple(torch.nn.Module):
         def forward(self, p, a, b):
