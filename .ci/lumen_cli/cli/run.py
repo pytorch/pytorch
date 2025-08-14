@@ -14,10 +14,6 @@ def main():
     # Define top-level parser
     parser = argparse.ArgumentParser(description="Lumos CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    # Add top-level args
-    parser.add_argument(
-        "--config", required=False, help="Path to config file for build and test"
-    )
     parser.add_argument(
         "--log-level", default="INFO", help="Log level (DEBUG, INFO, WARNING, ERROR)"
     )

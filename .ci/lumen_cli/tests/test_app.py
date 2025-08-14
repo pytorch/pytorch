@@ -9,18 +9,20 @@ from cli.run import main
 
 
 class TestArgparseCLI(unittest.TestCase):
-    def test_cli_run_build_external(self):
+    @patch("cli.build_cli.register_build.VllmBuildRunner.run", return_value=None)
+    @patch("cli.build_cli.register_build.VllmBuildRunner.__init__", return_value=None)
+    def test_cli_run_build_external(self, mock_init, mock_run):
+        from cli.run import main  # import after patches if needed
+
         test_args = ["cli.run", "build", "external", "vllm"]
-
         with patch.object(sys, "argv", test_args):
-            with self.assertLogs(level="INFO") as caplog:
-                # if argparse could exit on error, wrap in try/except SystemExit if needed
+            # argparse may call sys.exit on error; capture to avoid test aborts
+            try:
                 main()
-
-        # stdout print from your CLI plumbing
-        # logs emitted inside your code (info/debug/error etc.)
-        logs_text = "\n".join(caplog.output)
-        self.assertIn("Running vllm build", logs_text)
+            except SystemExit:
+                pass
+        mock_init.assert_called_once()  # got constructed
+        mock_run.assert_called_once_with()  # run() called
 
     def test_build_help(self):
         test_args = ["cli.run", "build", "--help"]
