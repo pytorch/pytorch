@@ -304,6 +304,11 @@ class _DDPJoinHook(JoinHook):
         # are skipping gradient sync this iteration, so set
         # `require_forward_param_sync` accordingly
         ddp.require_forward_param_sync = should_sync_backwards
+        # If buffers are configured to be synchronized post-forward via a
+        # custom buffer hook or default behavior, simulate that here as well
+        # so joined ranks participate in the same collectives.
+        if ddp._check_sync_bufs_post_fwd():
+            ddp._sync_buffers()
         if not should_sync_backwards:
             return
 

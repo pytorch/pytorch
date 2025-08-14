@@ -9548,6 +9548,94 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
+        def test_ddp_uneven_inputs_with_buffer_hook_pre_forward(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            def buffer_comm_hook(ddp, named_buffers):
+                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                futs = [
+                    dist.all_reduce(
+                        buffer, group=ddp.process_group, async_op=True
+                    ).get_future()
+                    for buffer in buffers
+                ]
+                return futs
+
+            hook_pre_fwd = (
+                torch.nn.parallel.distributed._BufferCommHookLocation.PRE_FORWARD
+            )
+
+            model = NetWithBuffers().cuda(rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            ddp._register_buffer_comm_hook(ddp, buffer_comm_hook, hook_pre_fwd)
+
+            inp = torch.randn(2, 10, device=rank)
+            # Make uneven inputs
+            num_iters = 4 if rank == 0 else 2
+            with ddp.join():
+                for _ in range(num_iters):
+                    loss = ddp(inp).sum()
+                    loss.backward()
+                    self._model_step(ddp)
+                    torch.cuda.synchronize(device=rank)
+            # Ensure that all models are the same across ranks after all have joined.
+            self.validate_net_equivalence(ddp)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_uneven_inputs_with_buffer_hook_post_forward(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            def buffer_comm_hook(ddp, named_buffers):
+                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                futs = [
+                    dist.all_reduce(
+                        buffer, group=ddp.process_group, async_op=True
+                    ).get_future()
+                    for buffer in buffers
+                ]
+                return futs
+
+            hook_post_fwd = (
+                torch.nn.parallel.distributed._BufferCommHookLocation.POST_FORWARD
+            )
+
+            model = NetWithBuffers().cuda(rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            ddp._register_buffer_comm_hook(ddp, buffer_comm_hook, hook_post_fwd)
+
+            inp = torch.randn(2, 10, device=rank)
+            # Make uneven inputs
+            num_iters = 4 if rank == 0 else 2
+            with ddp.join():
+                for _ in range(num_iters):
+                    loss = ddp(inp).sum()
+                    loss.backward()
+                    self._model_step(ddp)
+                    torch.cuda.synchronize(device=rank)
+            # Ensure that all models are the same across ranks after all have joined.
+            self.validate_net_equivalence(ddp)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
         def test_ddp_broadcast_buffer_via_hook(self):
             # test that _distributed_broadcast_coalesced via registered hook is
             # equivalent to DDP's default broadcast coalesced.
