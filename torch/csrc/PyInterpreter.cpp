@@ -487,7 +487,7 @@ c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
   py::object out;
   out = torchDispatchFromTensorImpl(
       self,
-      "is_contiguous",
+      "sym_is_contiguous",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
