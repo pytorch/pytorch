@@ -1630,7 +1630,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    (cd .cli/lumen_cli && python -m pip install -e .)
+    (cd .ci/lumen_cli && python -m pip install -e .)
     if [[ "$BUILD_ENVIRONMENT" == *sm80* ]]; then
       export TORCH_CUDA_ARCH_LIST="8.0"
     elif [[ "$BUILD_ENVIRONMENT" == *sm90* ]]; then

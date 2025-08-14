@@ -36,8 +36,7 @@ def run_command(
         display_cmd = cmd if use_shell else " ".join(args)
         logger.info("%s %s", log_prefix, display_cmd)
 
-    run_env = {**os.environ, **(env or {})}
-
+    run_env = {**os.environ, **env} if env else os.environ
     proc = subprocess.run(
         args,
         shell=use_shell,
@@ -115,3 +114,79 @@ def working_directory(path: str):
         yield
     finally:
         os.chdir(prev_cwd)
+
+
+def run_shell(
+    cmd: str,
+    log_cmd: bool = True,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    check: bool = True,
+) -> int:
+    """
+    Run a shell command via /bin/bash.
+    Returns the exit code. If check=True and the exit code is non-zero,
+    raises subprocess.CalledProcessError (matching subprocess.run behavior).
+    """
+    if log_cmd:
+        logger.info("[shell] %s", cmd)
+
+    run_env = {**os.environ, **(env or {})}
+
+    proc = subprocess.run(
+        cmd,
+        shell=True,
+        executable="/bin/bash",
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        cwd=cwd,
+        env=run_env,
+        check=False,  # handle 'check' manually
+    )
+
+    if check and proc.returncode != 0:
+        logger.error("[shell] Command failed (exit %s): %s", proc.returncode, cmd)
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+    return proc.returncode
+
+
+def run_cmd(
+    cmd: str,
+    log_cmd: bool = True,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    check: bool = True,
+) -> int:
+    """
+    Run a command using subprocess.run with shell=False.
+    Args:
+        cmd[str]: Command string (split with shlex).
+        log_cmd [bool]: Log command before execution.
+        cwd [Optional[str]]: Working directory.
+        env [Optional[dict]]: Environment vars to overlay on current env.
+        check [bool]: If True, raise on non-zero exit; else return code.
+    Returns:
+        int: The process's exit code.
+    """
+    args = shlex.split(cmd)
+    if log_cmd:
+        logger.info("[cmd] %s", " ".join(args))
+
+    run_env = {**os.environ, **(env or {})}
+
+    proc = subprocess.run(
+        args,
+        shell=False,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        cwd=cwd,
+        env=run_env,
+        check=False,  # we'll handle check manually
+    )
+
+    if check and proc.returncode != 0:
+        logger.error("[cmd] Command failed (exit %s): %s", proc.returncode, cmd)
+        raise subprocess.CalledProcessError(proc.returncode, args)
+
+    return proc.returncode
