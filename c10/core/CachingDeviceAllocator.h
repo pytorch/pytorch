@@ -254,77 +254,46 @@ class RingBuffer {
 
   // Sets the maximum number of entries the buffer can hold.
   void setMaxEntries(size_t size) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    std::lock_guard<std::mutex> lock(alloc_trace_lock_);
     alloc_trace_max_entries_ = std::max(size_t(1), size);
-
-    // If reducing size, we may need to truncate existing entries
-    if (alloc_trace_->size() > alloc_trace_max_entries_) {
-      // Keep the most recent entries by adjusting the circular buffer state
-      if (alloc_trace_next_ < alloc_trace_max_entries_) {
-        // Simple case: just resize
-        alloc_trace_->resize(alloc_trace_max_entries_);
-      } else {
-        // Complex case: need to rotate and resize to preserve most recent
-        // entries
-        std::rotate(
-            alloc_trace_->begin(),
-            alloc_trace_->begin() +
-                static_cast<typename std::vector<T>::difference_type>(
-                    alloc_trace_next_),
-            alloc_trace_->end());
-        alloc_trace_->resize(alloc_trace_max_entries_);
-        alloc_trace_next_ = 0;
-      }
-    }
   }
 
   // Inserts a new entry into the buffer. If buffer is full, overwrites the
   // oldest entry.
   void insertEntries(const T& entry) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    std::lock_guard<std::mutex> lock(alloc_trace_lock_);
     if (alloc_trace_->size() < alloc_trace_max_entries_) {
       // Buffer not yet full, simply append
       alloc_trace_->emplace_back(entry);
     } else {
       // Buffer full, overwrite the oldest entry
-      (*alloc_trace_)[alloc_trace_next_] = entry;
-      alloc_trace_next_ = (alloc_trace_next_ + 1) % alloc_trace_max_entries_;
+      (*alloc_trace_)[alloc_trace_next_++] = entry;
+      if (alloc_trace_next_ == alloc_trace_max_entries_) {
+        alloc_trace_next_ = 0;
+      }
     }
   }
 
   // Retrieves all entries in insertion order (oldest to newest).
   void getEntries(std::vector<T>& result) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
-
-    result.clear();
-    if (alloc_trace_->empty()) {
-      return;
-    }
+    std::lock_guard<std::mutex> lock(alloc_trace_lock_);
     result.reserve(alloc_trace_->size());
-    if (alloc_trace_->size() < alloc_trace_max_entries_) {
-      // Buffer not yet full, entries are in natural order
-      result.insert(result.end(), alloc_trace_->begin(), alloc_trace_->end());
-    } else {
-      // Buffer is full, need to handle wraparound to maintain chronological
-      // order Step 1: entries from alloc_trace_next_ to end (oldnest entries).
-      result.insert(
-          result.end(),
-          alloc_trace_->begin() +
-              static_cast<typename std::vector<T>::difference_type>(
-                  alloc_trace_next_),
-          alloc_trace_->end());
-      // Step 2: entries from beginning to alloc_trace_next_
-      result.insert(
-          result.end(),
-          alloc_trace_->begin(),
-          alloc_trace_->begin() +
-              static_cast<typename std::vector<T>::difference_type>(
-                  alloc_trace_next_));
-    }
+    result.insert(
+        result.end(),
+        alloc_trace_->begin() +
+            static_cast<typename std::vector<T>::difference_type>(
+                alloc_trace_next_),
+        alloc_trace_->end());
+    result.insert(
+        result.end(),
+        alloc_trace_->begin(),
+        alloc_trace_->begin() +
+            static_cast<typename std::vector<T>::difference_type>(
+                alloc_trace_next_));
   }
 
   void clear() {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock_);
+    std::lock_guard<std::mutex> lock(alloc_trace_lock_);
     alloc_trace_next_ = 0;
     alloc_trace_->clear();
   }
