@@ -206,6 +206,25 @@ class TestAutocastMPS(TestCase):
             y = m(x)
         self.assertEqual(y.dtype, torch.float32)
 
+    def test_conv3d_autocast(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160415
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv3d(3, 3, 1)
+                self.c2 = nn.Conv3d(3, 3, 1)
+
+            def forward(self, x):
+                x = self.c1(x)
+                x = self.c2(x)
+                return x
+
+        x = torch.randn(2, 3, 4, 4, 4, device="mps")
+        model = Foo().to("mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = model(x)
+        self.assertEqual(y.dtype, torch.float16)
+
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
         class Model(nn.Module):

@@ -3982,7 +3982,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                args = []
+                if not (
+                    isinstance(self.symbolic_result, ConstantVariable)
+                    and self.symbolic_result.value is None
+                ):
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
             else:
                 return self.symbolic_result
         else:
