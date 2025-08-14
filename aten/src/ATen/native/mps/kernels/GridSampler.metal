@@ -113,6 +113,14 @@ T get_tensor_val(
   return found_idx_zero ? 0 : input[offset];
 }
 
+// This function performs 3D linear interpolation for one value. One way to
+// think of how this works is to imagine a unit cube where each corner of the
+// cube has one scalar value associated with it. Inside the cube, the values
+// change linearly, so the gradient is constant. The values associated with each
+// corner are given by the `input`, indexed at all eight different combinations
+// of the `left_indices` and `right_indices`. Given a 3D coordinate anywhere
+// within the cube, specified by the `scales` argument, we must calculate the
+// value associated with that position.
 template <typename T>
 T interpolate_linear_3d(
     constant T* input,
