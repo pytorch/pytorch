@@ -561,7 +561,7 @@ def sample_test_plans():
         # optional: env_var, package_install, working_directory
         # by default the working_drectory is "tests/", but it can be changed based on tests, for instance,
         # vllm sample test happens in samples/
-        "basic_correctness_test": {
+        "vllm_basic_correctness_test": {
             "title": "Basic Correctness Test",
             "id": "basic_correctness_test",
             "env_var": {
@@ -588,7 +588,7 @@ def sample_test_plans():
                 },
             ],
         },
-        "basic_models_test": {
+        "vllm_basic_models_test": {
             "title": "Basic models test",
             "id": "basic_models_test",
             "steps": [
