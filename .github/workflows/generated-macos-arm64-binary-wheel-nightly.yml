@@ -115,8 +115,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -239,8 +244,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -363,8 +373,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -487,8 +502,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -611,8 +631,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -735,8 +760,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -859,8 +889,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
@@ -983,8 +1018,13 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
+
+          if [[ $DESIRED_PYTHON == "3.14" ]]; then
+            conda create -yn "test_conda_env" python="$DESIRED_PYTHON" -c conda-forge
+            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
+          elif [[ $DESIRED_PYTHON == *"t" ]]; then
+            PYTHON_NO_SUFFIX=${DESIRED_PYTHON:0:-1}
+            conda create -yn "test_conda_env" python=$PYTHON_NO_SUFFIX python-freethreading -c conda-forge
             SMOKE_TEST_PARAMS="--torch-compile-check disabled"
           else
             conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
