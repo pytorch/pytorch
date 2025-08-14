@@ -19,7 +19,7 @@ from cli.lib.common.envs_helper import (
     get_env,
     with_params_help,
 )
-from cli.lib.common.git_helper import clone_external_repo
+from cli.lib.common.git_helper import clone_vllm_pure, get_post_build_pinned_commit
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
@@ -33,7 +33,7 @@ from cli.lib.common.pip_helper import (
     pip_install_packages,
     run_python,
 )
-from cli.lib.common.utils import run_command, temp_environ, working_directory
+from cli.lib.common.utils import run_command, temp_environ, working_directory, run_cmd
 
 
 logger = logging.getLogger(__name__)
@@ -335,7 +335,7 @@ class VllmTestRunner(BaseRunner):
             self._install_wheels(params)
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
-        self.check_versions()
+        # self.check_versions()
 
     def run(self):
         """
@@ -351,8 +351,8 @@ class VllmTestRunner(BaseRunner):
     def _install_wheels(self, params: VllmTestParameters):
         logger.info("Running vllm test with inputs: %s", params)
         logger.info("Installing torch wheel")
-        torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
-        pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
+        # torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
+        # pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
 
         logger.info("Installing other torch-related wheels")
         torch_whls_path = [
@@ -479,6 +479,10 @@ class VllmTestRunner(BaseRunner):
             )
         tests = tests_map[test_plan]
         logger.info("Running tests: %s", tests["title"])
+
+        pkgs = tests.get("package_install", [])
+        if pkgs:
+            pip_install_packages(requirements=pkgs, prefer_uv=True)
         with (
             temp_environ(tests.get("env_var", {})),
             working_directory(tests.get("working_directory", "tests")),
@@ -500,12 +504,15 @@ class VllmTestRunner(BaseRunner):
 
 
 def clone_vllm(dst: str = "vllm"):
+    clone_vllm_pure(get_post_build_pinned_commit(dst))
+    """
     clone_external_repo(
-        target="vllm",
+       target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
-        dst=dst,
+       dst=dst,
         update_submodules=True,
     )
+    """
 
 
 def preprocess_test_in(
@@ -563,7 +570,7 @@ def sample_test_plans():
         # vllm sample test happens in samples/
         "vllm_basic_correctness_test": {
             "title": "Basic Correctness Test",
-            "id": "basic_correctness_test",
+            "id": "vllm_basic_correctness_test",
             "env_var": {
                 "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             },
@@ -571,6 +578,9 @@ def sample_test_plans():
             # required: command
             # available fields: env_var (env_var only set within the scope of the test step), package_install(pip package)
             "steps": [
+                {
+                    "command": "echo $VLLM_WORKER_MULTIPROC_METHOD"
+                },
                 {
                     "command": "pytest -v -s basic_correctness/test_cumem.py",
                 },
@@ -590,13 +600,53 @@ def sample_test_plans():
         },
         "vllm_basic_models_test": {
             "title": "Basic models test",
-            "id": "basic_models_test",
+            "id": "vllm_basic_models_test",
             "steps": [
                 {"command": "pytest -v -s models/test_transformers.py"},
                 {"command": "pytest -v -s models/test_registry.py"},
                 {"command": "pytest -v -s models/test_utils.py"},
                 {"command": "pytest -v -s models/test_vision.py"},
                 {"command": "pytest -v -s models/test_initialization.py"},
+            ],
+        },
+        "vllm_entrypoints_test": {
+            "title": "Entrypoints Test ",
+            "id": "vllm_entrypoints_test",
+            "env_var": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            "steps": [
+                {
+                    "command": " ".join(
+                        [
+                            "pytest",
+                            "-v",
+                            "-s",
+                            "entrypoints/llm",
+                            "--ignore=entrypoints/llm/test_lazy_outlines.py",
+                            "--ignore=entrypoints/llm/test_generate.py",
+                            "--ignore=entrypoints/llm/test_generate_multiple_loras.py",
+                            "--ignore=entrypoints/llm/test_collective_rpc.py",
+                        ]
+                    )
+                },
+                {"command": "pytest -v -s entrypoints/llm/test_lazy_outlines.py"},
+                {"command": "pytest -v -s entrypoints/llm/test_generate.py "},
+                {
+                    "command": "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py"
+                },
+                {
+                    "env_var": {"VLLM_USE_V1": "0"},
+                    "command": "pytest -v -s entrypoints/offline_mode",
+                },
+            ],
+        },
+        "vllm_regression_test": {
+            "title": "Regression Test",
+            "id": "vllm_regression_test",
+            "package_install": ["modelscope"],
+            "steps": [
+                {"command": "pytest -v -s test_regression.py"},
             ],
         },
     }

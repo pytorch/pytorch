@@ -1639,6 +1639,16 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
   test_xla
+elif [[ "$TEST_CONFIG" == *vllm* ]]; then
+    (cd .ci/lumen_cli && python -m pip install -e .)
+    if [[ "$BUILD_ENVIRONMENT" == *sm80* ]]; then
+      export TORCH_CUDA_ARCH_LIST="8.0"
+    elif [[ "$BUILD_ENVIRONMENT" == *sm90* ]]; then
+      export TORCH_CUDA_ARCH_LIST="9.0"
+    else
+      export TORCH_CUDA_ARCH_LIST="8.9"
+    fi
+    python -m cli.run test external vllm --test-plan "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
