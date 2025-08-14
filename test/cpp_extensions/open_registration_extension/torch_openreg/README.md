@@ -139,63 +139,11 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 ### Autoload
 
-#### Background
+- Autoload Backend Machanism
 
-The **Autoload** mechanism in PyTorch is designed to enable seamless, on-demand registration and initialization of third-party device backends. Traditionally, integrating a new accelerator backend required explicit user imports or manual initialization code, which could be error-prone and inconvenient. With Autoload, PyTorch can automatically discover and initialize device backends at runtime, improving user experience and reducing integration friction.
-
-The design of Autoload leverages Python entry points (such as `torch.backends`) and dynamic module loading. When PyTorch starts, it scans for registered entry points and invokes the corresponding initialization hooks, ensuring that all available device backends are properly registered and ready for use—without requiring users to import backend-specific Python modules manually.
-
-#### How to Enable Autoload for OpenReg
-
-##### 1. Implement an Initialization Hook
-
-```python
-# torch_openreg/__init__.py
-
-import torch
-import torch_openreg._C  # type: ignore[misc]
-import torch_openreg.openreg
-
-# Loading torch_openreg module here
-torch.utils.rename_privateuse1_backend("openreg")
-torch._register_device_module("openreg", torch_openreg.openreg)
-torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
-
-# Initialization hook for autoload entry point
-def _autoload():
-    pass
-```
-
-##### 2. Register the Entry Point
-
-```python
-# torch_openreg/setup.py
-
-# Register the autoload entry point. When PyTorch starts,
-# it scans for _autoload function under torch_openreg package and invokes it.
-setup(
-    ...
-    entry_points={
-        "torch.backends": [
-            "torch_openreg = torch_openreg:_autoload",
-        ],
-    },
-    ...
-)
-```
-
-##### 3. Build and Run OpenReg with Autoload
-
-Build and install OpenReg package (see [Installation](#installation)). The entry point will be registered in the Python environment. When PyTorch starts, it will automatically discover and invoke _autoload function via the entry point. This means we can immediately use OpenReg as our device backend without any explicit import:
-
-```python
-
-import torch
-
-# No need to import torch_openreg manually!
-x = torch.tensor([1, 2, 3], device="openreg")
-print(x)
-```
+  - Registering the backend with Python entry points: See `setup`
+  - Adding an invoked function for the backend initialization: See `_autoload`
+  - Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
 
 ...
 
@@ -214,6 +162,7 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
+# import torch_openreg <- No need to import this because it is automatically loaded
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")
