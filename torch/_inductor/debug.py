@@ -315,7 +315,7 @@ def enable_aot_logging() -> Iterator[None]:
 # Used for provenance tracking
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
-_inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
@@ -758,13 +758,13 @@ save_args_cnt = itertools.count()
 def create_mapping_pre_post_grad_nodes(
     pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, list[str]]]:
     """
     Create bidirectional mappings between pre_grad graph nodes
     and post_grad graph code nodes, and vice versa.
     """
     # return a dummy dict if there's any error
-    empty_return: dict[str, dict[str, Any]] = {
+    empty_return: dict[str, dict[str, list[str]]] = {
         "preToPost": {},
         "postToPre": {},
     }
