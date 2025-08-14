@@ -4,44 +4,34 @@
 
 import math
 from collections.abc import MutableMapping
-from dataclasses import dataclass
-from typing import Callable, cast, Optional
-from typing_extensions import TypeAlias
+from typing import Optional
 
 import torch
 from torch import Tensor
 
-from .optimizer import _disable_dynamo_if_unsupported, _to_scalar, Optimizer, ParamsT
+from .optimizer import (
+    _disable_dynamo_if_unsupported,
+    _params_doc,
+    _to_scalar,
+    Optimizer,
+    ParamsT,
+)
 
 
 __all__ = ["Muon"]
 
 # Constants from Keller Jordan's Muon post: https://kellerjordan.github.io/posts/muon/
+# github permlink: https://github.com/KellerJordan/Muon/blob/f90a42b28e00b8d9d2d05865fe90d9f39abcbcbd/muon.py#L16
 EPS = 1e-7
 DEFAULT_A = 3.4445
 DEFAULT_B = -4.7750
 DEFAULT_C = 2.0315
+DEFAULT_NS_STEPS = 5
 
 
-@dataclass
-class BaseMsignFnConfig:
-    """Configuration used by :func:`msign_fn`."""
-
-
-@dataclass
-class NewtonSchulzConfig(BaseMsignFnConfig):
-    # """Configuration used by :func:`zeropower_via_newtonschulz`."""
-
-    coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C)
-    eps: float = EPS
-    ns_steps: int = 5
-
-
-AdjustLrFn: TypeAlias = Callable[[float, torch.Size], float]
-MsignFn: TypeAlias = Callable[[Tensor, BaseMsignFnConfig], Tensor]
-
-
-def zeropower_via_newtonschulz(grad: Tensor, ns_config: BaseMsignFnConfig) -> Tensor:
+def _zeropower_via_newtonschulz(
+    grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
+) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -54,23 +44,22 @@ def zeropower_via_newtonschulz(grad: Tensor, ns_config: BaseMsignFnConfig) -> Te
     Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
     with suggestions by @jxbz, @leloykun, and @YouJiacheng.
     """
-    ns_config = cast(NewtonSchulzConfig, ns_config)
-    steps = ns_config.ns_steps
-    eps = ns_config.eps
-    coefficients = ns_config.coefficients
-    assert steps < 100, (
-        "Number of steps must be less than 100 for computational efficiency"
-    )
-    assert len(grad.shape) == 2, "Input tensor gradient must be a 2D matrix"
-    assert len(coefficients) == 3, "Coefficients must be a tuple of exactly 3 values"
-    a, b, c = coefficients[0], coefficients[1], coefficients[2]
+    if ns_steps >= 100:
+        raise ValueError(
+            "Number of steps must be less than 100 for computational efficiency"
+        )
+    if len(grad.shape) != 2:
+        raise ValueError("Input tensor gradient must be a 2D matrix")
+    if len(ns_coefficients) != 3:
+        raise ValueError("Coefficients must be a tuple of exactly 3 values")
+    a, b, c = ns_coefficients[0], ns_coefficients[1], ns_coefficients[2]
     X = grad.bfloat16()
     if grad.size(0) > grad.size(1):
         X = X.T
     # Ensure spectral norm is at most 1
     X = X / (X.norm() + eps)
     # Perform the NS iterations
-    for _ in range(steps):
+    for _ in range(ns_steps):
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
@@ -80,8 +69,12 @@ def zeropower_via_newtonschulz(grad: Tensor, ns_config: BaseMsignFnConfig) -> Te
     return X
 
 
-def default_adjust_lr(lr: float, param_shape: torch.Size) -> float:
-    """Default learning rate adjustment used by Muon. Method reported in the tech report https://arxiv.org/pdf/2502.16982."""
+def _adjust_lr(lr: float, param_shape: torch.Size) -> float:
+    """Default learning rate adjustment used by Muon. Method reported in the tech report https://arxiv.org/pdf/2502.16982.
+
+    From Moonshot's experiments, with this adjustment Muon can directly reuse the learning rate and
+    weight decay tuned for AdamW.
+    """
     A, B = param_shape[:2]
     adjusted_ratio = 0.2 * math.sqrt(max(A, B))
     return lr * adjusted_ratio
@@ -92,8 +85,6 @@ class Muon(Optimizer):
 
     This optimizer performs momentum SGD followed by an optional orthogonalization
     step computed via a user provided callable.
-
-    Default parameters are taken from Moonshot reference implementation: https://github.com/MoonshotAI/Moonlight.
     """
 
     def __init__(
@@ -103,10 +94,9 @@ class Muon(Optimizer):
         weight_decay: float = 0.1,
         momentum: float = 0.95,
         nesterov: bool = True,
-        *,
-        msign_fn: MsignFn = zeropower_via_newtonschulz,
-        msign_fn_config: BaseMsignFnConfig = NewtonSchulzConfig(),
-        adjust_lr_fn: AdjustLrFn = default_adjust_lr,
+        ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
+        eps: float = EPS,
+        ns_steps: int = DEFAULT_NS_STEPS,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -122,6 +112,9 @@ class Muon(Optimizer):
             "weight_decay": weight_decay,
             "momentum": momentum,
             "nesterov": nesterov,
+            "ns_coefficients": ns_coefficients,
+            "eps": eps,
+            "ns_steps": ns_steps,
         }
         super().__init__(params, defaults)
 
@@ -131,10 +124,6 @@ class Muon(Optimizer):
                     raise ValueError(
                         f"Muon only supports 2D parameters whereas we found a parameter with size: {p.size()}"
                     )
-
-        self._msign_fn = msign_fn
-        self._msign_fn_config = msign_fn_config
-        self._adjust_lr_fn = adjust_lr_fn
 
     def _init_group(
         self,
@@ -197,12 +186,73 @@ class Muon(Optimizer):
                 weight_decay=weight_decay,
                 momentum=momentum,
                 nesterov=group["nesterov"],
-                msign_fn=self._msign_fn,
-                msign_fn_config=self._msign_fn_config,
-                adjust_lr_fn=self._adjust_lr_fn,
+                ns_coefficients=group["ns_coefficients"],
+                eps=group["eps"],
+                ns_steps=group["ns_steps"],
                 has_complex=has_complex,
             )
         return loss
+
+
+Muon.__doc__ = (
+    r"""Implements Muon algoritm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt} \\
+            &\textbf{input}      : \gamma \text{ (lr)},\ \lambda \text{ (weight decay)},\
+               \mu \text{ (momentum)},\ \textit{nesterov}\in\{True,False\},\\
+            &\hspace{13mm}(a,b,c)\ \text{ (NS coefficients)},\
+               \varepsilon \text{ (epsilon)},\ k \text{ (NS steps)},\
+               \theta_0 \text{ (params)},\ f(\theta) \text{ (objective)} \\
+            &\textbf{initialize} : B_0 \leftarrow 0 \text{ (momentum buffer)} \\[-1.ex]
+            &\rule{110mm}{0.4pt} \\
+            &\textbf{for}\ t=1\ \textbf{to}\ \ldots\ \textbf{do} \\[0.25ex]
+            &\hspace{5mm} g_t \leftarrow \nabla_{\theta} f_t(\theta_{t-1}) \\[0.25ex]
+            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma\,\lambda\,\theta_{t-1}
+               \quad\text{(decoupled weight decay)} \\[0.25ex]
+            &\hspace{5mm} B_t \leftarrow \mu B_{t-1} + g_t \\[0.25ex]
+            &\hspace{5mm} \widetilde{B}_t \leftarrow
+                \begin{cases}
+                   g_t + \mu B_t, & \text{if nesterov}=True \\
+                   B_t,           & \text{if nesterov}=False
+                \end{cases} \\[1.0ex]
+            &\hspace{5mm} O_t \leftarrow \mathrm{NS}^{(a,b,c)}_{k}\!\big(\widetilde{B}_t;\ \varepsilon\big) \\[0.5ex]
+            &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
+            &\rule{110mm}{0.4pt} \\[-1.ex]
+            &\mathbf{return}\ \theta_t \\[-1.ex]
+            &\rule{110mm}{0.4pt}
+       \end{aligned}
+
+    Here, :math:`\mathrm{NS}^{(a,b,c)}_{k}(\cdot;\varepsilon)` denotes :math:`k` iterations of the
+    Newton–Schulz orthogonalization operator parameterized by coefficients :math:`(a,b,c)`
+    with numerical stabilization :math:`\varepsilon`.
+
+    For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
+    and `Muon is Scalable for LLM Training`_.
+    """
+    + rf"""
+    Args:
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 1e-3).
+        weight_decay (float, optional): weight decay (L2 penalty). According to Moonshot's scaling law experiments, 
+            weight decay addresses the issue that model weight grew too large over time and demonstrate 
+            better scalability.  (default: 0.1)
+        momentum (float, optional): momentum factor (default: 0.95)
+        nesterov (bool, optional): enables Nesterov momentum. Only applicable
+            when momentum is non-zero
+        ns_coefficients (tuple of three floats, optional): coefficients \((a,b,c)\) for the
+            Newton–Schulz orthogonalization polynomial (default: ({DEFAULT_A}, {DEFAULT_B}, {DEFAULT_C}))
+        eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
+        ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
+
+    .. _Muon: An optimizer for hidden layers in neural networks:
+        https://kellerjordan.github.io/posts/muon/
+    .. _Muon is Scalable for LLM Training:
+        https://arxiv.org/pdf/2502.16982
+
+    """
+)
 
 
 def _single_tensor_muon(
@@ -214,27 +264,29 @@ def _single_tensor_muon(
     weight_decay: float,
     momentum: float,
     nesterov: bool,
-    msign_fn: Callable[[Tensor, BaseMsignFnConfig], Tensor],
-    msign_fn_config: BaseMsignFnConfig,
-    adjust_lr_fn: Callable[[float, torch.Size], float],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
-    assert has_complex is False, "Complex parameters are not supported"
+    if has_complex:
+        raise ValueError("Complex parameters are not supported")
 
     for i, param in enumerate(params):
         grad = grads[i]
-        assert grad.ndim == 2, "Param gradient must be a 2D matrix"
+        if grad.ndim != 2:
+            raise ValueError("Param gradient must be a 2D matrix")
 
         buf = muon_momentum_bufs[i]
         buf.mul_(momentum).add_(grad)
         if nesterov:
-            grad = grad.add(buf, alpha=momentum)
+            grad.add_(buf, alpha=momentum)
         else:
             grad = buf
 
-        update = msign_fn(grad, msign_fn_config)
-        adjusted_lr = adjust_lr_fn(lr, param.shape)
+        update = _zeropower_via_newtonschulz(grad, ns_coefficients, ns_steps, eps)
+        adjusted_lr = _adjust_lr(lr, param.shape)
         param.mul_(1 - lr * weight_decay)
         param.add_(update, alpha=-adjusted_lr)
 
@@ -250,9 +302,9 @@ def muon(
     weight_decay: float,
     momentum: float,
     nesterov: bool,
-    msign_fn: Callable[[Tensor, BaseMsignFnConfig], Tensor],
-    msign_fn_config: BaseMsignFnConfig,
-    adjust_lr_fn: Callable[[float, torch.Size], float],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
     has_complex: bool,
 ):
     r"""Functional API that performs Muon algorithm computation.
@@ -272,8 +324,8 @@ def muon(
         weight_decay=weight_decay,
         momentum=momentum,
         nesterov=nesterov,
-        msign_fn=msign_fn,
-        msign_fn_config=msign_fn_config,
-        adjust_lr_fn=adjust_lr_fn,
+        ns_coefficients=ns_coefficients,
+        ns_steps=ns_steps,
+        eps=eps,
         has_complex=has_complex,
     )
