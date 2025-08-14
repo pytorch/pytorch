@@ -6404,6 +6404,39 @@ class RandomSeeds(ExternKernelOut):
         )
 
 
+class DeviceAssert(ExternKernel):
+    def __init__(self, cond: TensorBox, msg: str, device: torch.device) -> None:
+        cond.realize()
+        super().__init__(None, NoneLayout(device=device), [cond])
+        self.msg = msg
+
+    def has_side_effects(self) -> bool:
+        return True
+
+    def is_fusible(self) -> bool:
+        return False
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        assert len(self.inputs) == 1
+        assert isinstance(self.inputs[0], TensorBox)
+        cond_ref = self.inputs[0].codegen_reference()
+        predicate = f"{self.inputs[0].get_name()}_scalar"
+        if V.graph.cpp_wrapper:
+            assert hasattr(wrapper, "codegen_tensor_item")
+            wrapper.codegen_tensor_item(
+                torch.bool,
+                cond_ref,
+                predicate,
+            )
+            wrapper.writeline(
+                f'if (!({predicate})) {{ throw std::runtime_error("{self.msg}"); }}'
+            )
+        else:
+            wrapper.writeline(f"{predicate} = {cond_ref}.item()")
+            wrapper.writeline(f"if not {predicate}:")
+            wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
+
+
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.generate_extern_kernel_alloc(self)

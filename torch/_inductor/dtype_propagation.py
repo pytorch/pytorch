@@ -373,6 +373,10 @@ class DtypePropagationOpsHandler:
             f"{type(self).__name__}: ops.placeholder should not appear here"
         )
 
+    @staticmethod
+    def device_assert(cond: DTypeArg, msg: Optional[str] = None) -> None:
+        return None
+
 
 if TYPE_CHECKING:
 
