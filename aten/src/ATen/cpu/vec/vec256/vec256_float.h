@@ -210,7 +210,7 @@ class Vectorized<float> {
   Vectorized<float> copysign(const Vectorized<float>& sign) const {
     return Vectorized<float>(Sleef_copysignf8(values, sign));
   }
-  Vectorized<float> erf_20() const {
+  Vectorized<float> erf_u20() const {
     // constants
     const auto neg_zero_vec = _mm256_set1_ps(-0.f);
     const auto one_vec = _mm256_set1_ps(1.0f);
