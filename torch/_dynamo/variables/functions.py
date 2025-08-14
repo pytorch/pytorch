@@ -56,7 +56,14 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ClosureSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    SkipGuardSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -152,24 +159,45 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw:
             if name in spec.posonly_names:
-                raise TypeError(f"{name} is positional-only")
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[ConstantVariable.create(f"{name} is positional-only")],
+                )
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
             default_source = None
-            if fn_source:
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
         else:
-            raise TypeError(f"Missing required positional argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required positional argument: {name}"
+                    )
+                ],
+            )
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise TypeError(
-            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(
+                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
+                )
+            ],
         )
 
     # 3) Keyword-only
@@ -182,13 +210,27 @@ def bind_args_cached(func, tx, fn_source, args, kwargs):
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise TypeError(f"Missing required keyword-only argument: {name}")
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    ConstantVariable.create(
+                        f"Missing required keyword-only argument: {name}"
+                    )
+                ],
+            )
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
+        raise_observed_exception(
+            TypeError,
+            tx,
+            args=[
+                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+            ],
+        )
 
     return ba
 
@@ -262,6 +304,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
@@ -375,6 +424,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
+    def get_source(self):
+        source = self.source
+
+        if source and isinstance(self, variables.UserMethodVariable):
+            source = self.source_fn
+        return source
+
     def bind_args(self, parent, args, kwargs) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
@@ -387,7 +443,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if not isinstance(fn, FunctionType):
             raise TypeError("Only supports regular Python functions.")
         root_tx = parent.output.root_tx
-        result = bind_args_cached(fn, root_tx, self.source, args, kwargs)
+
+        source = self.get_source()
+        result = bind_args_cached(fn, root_tx, source, args, kwargs)
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
@@ -400,10 +458,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if cell in side_effects:
                 cell_var = side_effects[cell]
 
-            elif self.source:
-                closure_cell = GetItemSource(
-                    AttrSource(self.source, "__closure__"), idx
-                )
+            elif source:
+                closure_cell = GetItemSource(ClosureSource(source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -433,7 +489,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
-        return fn_var_getattr(tx, self.fn, self.source, name)
+        source = self.get_source()
+        return fn_var_getattr(tx, self.fn, source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -666,6 +723,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
         finally:
             counters["unimplemented"] |= counters["inline_call"]
 
+    def call_obj_hasattr(self, tx, name):
+        if name in self.python_type().__dict__:
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(False)
+
     def has_unpack_var_sequence(self, tx):
         return False
 
@@ -885,12 +947,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
-        elif name == "__contains__":
-            # The generator needs to be lazily consumed here to avoid unintended
-            # side effects
-            return variables.UserFunctionVariable(
-                polyfills.generator___contains__
-            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 
@@ -1006,9 +1062,24 @@ class FunctionDecoratedByContextlibContextManagerVariable(
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs) -> None:
+    def __init__(self, fn, obj, source_fn=None, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
+        self.source_fn = source_fn
+        # Note on source and source_fn
+        # Be careful with `source` when delegating to UserFunctionVariable
+        # (base-class) methods. In this __init__, `source` is a *bound method*
+        # object, but the base class expects the underlying *function* object.
+        # One way is to simplly use `__func__` to unwrap it.
+        #
+        # For recursive dict-tag optimizations, it can be faster to fetch the
+        # function directly from `cls.__dict__`; that’s why we pass on
+        # `source_fn`. Whenever it is possible to access the function from
+        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
+        # operates on the unbound function, most guards should target
+        # `source_fn` rather than the original `source`.
+        if source_fn is None and kwargs.get("source") is not None:
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -1084,11 +1155,13 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
         if name == "__self__":
             return self.obj
         if name == "__func__":
-            return VariableTracker.build(tx, self.fn, source)
+            # We might have a better way to access the function object, this
+            # information is stored in self.source_fn, use that to construct the
+            # variable tracker.
+            return VariableTracker.build(tx, self.fn, self.source_fn)
         return super().var_getattr(tx, name)
 
 

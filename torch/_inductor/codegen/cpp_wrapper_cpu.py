@@ -21,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, Sy
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import config, ir
+from .. import config, cpp_builder, ir
 from ..utils import _align, DeferredLineBase, LineContext, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -117,7 +117,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # e.g. const double** is possible, but not const double* const*.  This means
         # that an array containing pointers must _already_ be properly const-qualified
         # by the c_type, and not add additional const-ness.
-        ptr_call = "data()" if force_mutable or c_type.endswith("*") else "cbegin()"
+        # MSVC does not support implicitly converting a const iterator to a const pointer.
+        ptr_call = (
+            "data()"
+            if force_mutable or c_type.endswith("*") or cpp_builder.is_msvc_cl()
+            else "cbegin()"
+        )
         return (
             f"std::array<{c_type}, {len(elements)}>{{{', '.join(elements)}}}.{ptr_call}"
         )
@@ -511,6 +516,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
+            self.codegen_additional_funcs()
+
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
@@ -666,6 +673,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         code.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
         )
+
+    def codegen_additional_funcs(self):
+        pass
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1268,7 +1278,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             extern_kernel.get_kernel_name(), args, device
         )
 
-        if not is_inplace:
+        if extern_kernel.python_kernel_name in (
+            "torch.ops._c10d_functional.all_reduce_.default",
+            "torch.ops._c10d_functional.wait_tensor.default",
+        ):
+            # all_reduce_ is an inplace op and its returned tensor is not used anywhere.
+            # wait_tensor returns its input without any modification and the returned tensor is not used anywhere.
+            # In both cases, we can immediately delete the returned AtenTensorHandle to reduce its lifetime.
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object({output_handle_name}));"
+            )
+        elif not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
@@ -1445,6 +1465,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
+    def codegen_dynamic_select_index(self, node):
+        index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+
+        index_compute_str = (
+            f"{index_cpp_str} < 0 ? {index_cpp_str} + "
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+        )
+        self.writeline(
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+
     def make_buffer_free(self, buffer):
         return (
             ""
@@ -1541,10 +1575,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_size(),
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
+            buffer.get_is_pinned(),
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None
+        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -1596,8 +1631,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
+        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
         )
 
         if allocation_size != size:
@@ -1615,7 +1651,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
-    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+    def codegen_alloc_from_pool(
+        self, name, offset, dtype, shape, stride
+    ) -> tuple[str, list[str]]:
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(stride)
         tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1632,11 +1670,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
-        self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
-        )
-        return f"RAIIAtenTensorHandle({tmp_name})"
+        # We return the lines instead of writing here because writing here is bug prune.
+        # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
+        # as well, otherwise you get memory leaks
+        allocations_to_write = [
+            f"AtenTensorHandle {tmp_name};",
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));",
+        ]
+        return f"RAIIAtenTensorHandle({tmp_name})", allocations_to_write
 
     def codegen_reinterpret_view(
         self,

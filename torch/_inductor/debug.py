@@ -22,7 +22,9 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 from torch import fx as fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._inductor import utils
 from torch._logging import getArtifactLogger
+from torch._logging._internal import trace_structured
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -313,7 +315,7 @@ def enable_aot_logging() -> Iterator[None]:
 # Used for provenance tracking
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
-_inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
@@ -693,6 +695,57 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_collective_schedule",
+                "encoding": "json",
+            },
+            payload_fn=lambda: schedule,
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_collective_schedule via structured logging",
+            exc_info=True,
+        )
+
+
+def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
+    schedule = [
+        getattr(op, "python_kernel_name", None)
+        for node in nodes
+        if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
+    ]
+
+    # Only log when there is at least one collective op
+    if schedule:
+        _dump_collective_schedule(schedule)
+
+
+def log_runtime_estimates(node_runtimes: Sequence[tuple[Any, float]]) -> None:
+    """Log per-operation runtime estimates for TLParse."""
+
+    ops = [
+        {
+            "name": getattr(s.node, "python_kernel_name", s.get_name()),
+            "type": "collective" if utils.is_collective(s.node) else "compute",
+            "estimated_runtime_ns": runtime_ns,
+        }
+        for s, runtime_ns in node_runtimes
+    ]
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_tlparse_runtime",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {"ops": ops},
+    )
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -705,13 +758,13 @@ save_args_cnt = itertools.count()
 def create_mapping_pre_post_grad_nodes(
     pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, list[str]]]:
     """
     Create bidirectional mappings between pre_grad graph nodes
     and post_grad graph code nodes, and vice versa.
     """
     # return a dummy dict if there's any error
-    empty_return: dict[str, dict[str, Any]] = {
+    empty_return: dict[str, dict[str, list[str]]] = {
         "preToPost": {},
         "postToPre": {},
     }
@@ -723,7 +776,8 @@ def create_mapping_pre_post_grad_nodes(
         return empty_return
 
     if not isinstance(pre_grad_graph_id, int):
-        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        # pre_grad_graph_id may be empty if there's no pre_grad graph
+        # and there's only a backward graph from backward pass engine
         return empty_return
 
     pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)

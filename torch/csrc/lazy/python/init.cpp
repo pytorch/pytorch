@@ -331,13 +331,9 @@ void initLazyBindings(PyObject* module) {
   // So far this problem has only been observed internally, so we will just
   // block it off there.
 
-#if !(defined(USE_DEPLOY))
-
   // When libtorch_python is loaded, we register the python frame getter
   // otherwise, debug util simply omits python frames
   GetPythonFramesFunction() = GetPythonFrames;
-
-#endif // USE_DEPLOY
 }
 
 } // namespace torch::lazy

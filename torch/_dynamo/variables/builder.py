@@ -104,6 +104,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -132,6 +133,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
+    is_function,
     is_function_or_wrapper,
     is_invoke_subgraph,
     is_lru_cache_wrapped_function,
@@ -161,6 +163,7 @@ from .base import (
     VariableTracker,
     VariableTrackerMeta,
 )
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1223,6 +1226,12 @@ class VariableBuilder:
         ) and BuiltinMethodVariable.is_supported_builtin_method(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return BuiltinMethodVariable(value, source=self.source)
+        elif is_function(value) and value in (float.fromhex, float.hex):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return GetAttrVariable(
+                BuiltinVariable(float, source=self.source),
+                value.__name__,
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1324,9 +1333,16 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
-            # This is a userdefined class, so install an ID_MATCH even if its a
-            # global variable.
-            self.install_guards(GuardBuilder.ID_MATCH)
+
+            if not is_from_closure_source(self.source):
+                # For closure source, the variable comes from LOAD_SUPER_ATTR,
+                # which calls self.__class__. This is internal Cpython
+                # implementation, and it is rare for the user to modify
+                # self.__class__ manually.
+                # For other cases, this is a userdefined class, so install an
+                # ID_MATCH even if its a global variable.
+                self.install_guards(GuardBuilder.ID_MATCH)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1727,6 +1743,11 @@ class VariableBuilder:
 
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
+
+        # See [Note] Static Addresses and Precompile
+        # https://github.com/pytorch/pytorch/issues/159228
+        if torch._dynamo.config.caching_precompile:
+            return
 
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
@@ -3226,7 +3247,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
