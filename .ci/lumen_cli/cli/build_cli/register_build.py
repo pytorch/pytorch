@@ -1,11 +1,7 @@
 import argparse
 import logging
 
-from cli.lib.common.cli_helper import (
-    register_target_commands_and_runner,
-    RichHelp,
-    TargetSpec,
-)
+from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
 from cli.lib.core.vllm import VllmBuildRunner
 
 
@@ -38,4 +34,4 @@ def register_build_commands(subparsers: argparse._SubParsersAction) -> None:
         description="Build third-party targets.\n\nAvailable targets:\n" + overview,
         formatter_class=RichHelp,
     )
-    register_target_commands_and_runner(external_parser, _TARGETS)
+    register_targets(external_parser, _TARGETS)

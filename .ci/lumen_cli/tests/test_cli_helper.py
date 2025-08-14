@@ -4,12 +4,7 @@ import unittest
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
-from cli.lib.common.cli_helper import (
-    BaseRunner,
-    register_target_commands_and_runner,
-    RichHelp,
-    TargetSpec,
-)
+from cli.lib.common.cli_helper import BaseRunner, register_targets, RichHelp, TargetSpec
 
 
 # ---- Dummy runners for unittests----
@@ -35,7 +30,7 @@ def common_args(p: argparse.ArgumentParser) -> None:
 
 def build_parser(specs: dict[str, TargetSpec]) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="app", formatter_class=RichHelp)
-    register_target_commands_and_runner(
+    register_targets(
         parser=parser,
         target_specs=specs,
         common_args=common_args,
@@ -89,7 +84,7 @@ class TestRegisterTargets(unittest.TestCase):
             patch.object(FooRunner, "run", return_value=None) as mock_run,
         ):
             ns = parser.parse_args(["foo", "--x", "3", "--verbose"])
-            ns.func(ns)  # set by register_target_commands_and_runner
+            ns.func(ns)  # set by register_targets
             # __init__ received the Namespace
             self.assertEqual(mock_init.call_count, 1)
             (called_ns,), _ = mock_init.call_args

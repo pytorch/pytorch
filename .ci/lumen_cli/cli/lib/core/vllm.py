@@ -21,7 +21,7 @@ from cli.lib.common.path_helper import (
     get_path,
     is_path_exist,
 )
-from cli.lib.common.utils import run_cmd
+from cli.lib.common.utils import run_command
 
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ class VllmBuildRunner(BaseRunner):
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
-        run_cmd(cmd, cwd="vllm", env=os.environ.copy())
+        run_command(cmd, cwd="vllm", env=os.environ.copy())
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:
@@ -178,7 +178,7 @@ class VllmBuildRunner(BaseRunner):
         if not inputs.use_local_dockerfile:
             logger.info("using vllm default dockerfile.torch_nightly for build")
             return
-        dockerfile_path = get_path(inputs.dockerfile_path, full_path=True)
+        dockerfile_path = get_path(inputs.dockerfile_path, resolve=True)
         vllm_torch_dockerfile = Path(
             f"./{self.work_directory}/docker/Dockerfile.nightly_torch"
         )
@@ -190,7 +190,7 @@ class VllmBuildRunner(BaseRunner):
         """
         if not path:
             path = _DEFAULT_RESULT_PATH
-        abs_path = get_path(path, full_path=True)
+        abs_path = get_path(path, resolve=True)
         return abs_path
 
     def _get_torch_wheel_path_arg(self, torch_whl_dir: Optional[Path]) -> str:
