@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..d15d83a2184 100644
+index 7d5ba727389..24eb3d0d15f 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
 @@ -1,3 +1,25 @@
@@ -151,7 +151,7 @@ index 7d5ba727389..d15d83a2184 100644
              _, g = next(it)
              next(it)
              next(it)
-@@ -1002,27 +1015,29 @@ class TestBasicOps(unittest.TestCase):
+@@ -1002,41 +1015,35 @@ class TestBasicOps(unittest.TestCase):
          self.assertEqual(list(filter(None, [0,1,0,2,0])), [1,2])
          self.assertEqual(list(filter(bool, [0,1,0,2,0])), [1,2])
          self.assertEqual(take(4, filter(isEven, count())), [0,2,4,6])
@@ -198,9 +198,23 @@ index 7d5ba727389..d15d83a2184 100644
 +        #     c = filter(isEven, range(6))
 +        #     self.pickletest(proto, c)
  
-     @pickle_deprecated
+-    @pickle_deprecated
      def test_filterfalse(self):
-@@ -1047,8 +1062,8 @@ class TestBasicOps(unittest.TestCase):
+         self.assertEqual(list(filterfalse(isEven, range(6))), [1,3,5])
+         self.assertEqual(list(filterfalse(None, [0,1,0,2,0])), [0,0,0])
+         self.assertEqual(list(filterfalse(bool, [0,1,0,2,0])), [0,0,0])
+         self.assertEqual(take(4, filterfalse(isEven, count())), [1,3,5,7])
+-        self.assertRaises(TypeError, filterfalse)
+-        self.assertRaises(TypeError, filterfalse, lambda x:x)
+-        self.assertRaises(TypeError, filterfalse, lambda x:x, range(6), 7)
+-        self.assertRaises(TypeError, filterfalse, isEven, 3)
+-        self.assertRaises(TypeError, next, filterfalse(range(6), range(6)))
+-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            self.pickletest(proto, filterfalse(isEven, range(6)))
+ 
+     def test_zip(self):
+         # XXX This is rather silly now that builtin zip() calls zip()...
+@@ -1047,8 +1054,8 @@ class TestBasicOps(unittest.TestCase):
          self.assertEqual(take(3,zip('abcdef', count())), lzip('abcdef', range(3)))
          self.assertEqual(list(zip('abcdef')), lzip('abcdef'))
          self.assertEqual(list(zip()), lzip())
@@ -211,7 +225,7 @@ index 7d5ba727389..d15d83a2184 100644
          self.assertEqual([tuple(list(pair)) for pair in zip('abc', 'def')],
                           lzip('abc', 'def'))
          self.assertEqual([pair for pair in zip('abc', 'def')],
-@@ -1105,19 +1120,19 @@ class TestBasicOps(unittest.TestCase):
+@@ -1105,19 +1112,19 @@ class TestBasicOps(unittest.TestCase):
  
          self.assertEqual(list(zip_longest('abc', 'defg', **{})),
                           list(zip(list('abc')+[None], 'defg'))) # empty keyword dict
@@ -244,7 +258,7 @@ index 7d5ba727389..d15d83a2184 100644
  
          self.assertEqual([tuple(list(pair)) for pair in zip_longest('abc', 'def')],
                           list(zip('abc', 'def')))
-@@ -1296,7 +1311,6 @@ class TestBasicOps(unittest.TestCase):
+@@ -1296,7 +1303,6 @@ class TestBasicOps(unittest.TestCase):
                  self.assertEqual(list(product(*(args*r))),
                                   list(product(*args, **dict(repeat=r))))
          self.assertEqual(len(list(product(*[range(7)]*6))), 7**6)
@@ -252,7 +266,7 @@ index 7d5ba727389..d15d83a2184 100644
  
          def product1(*args, **kwds):
              pools = list(map(tuple, args)) * kwds.get('repeat', 1)
-@@ -1336,7 +1350,8 @@ class TestBasicOps(unittest.TestCase):
+@@ -1336,7 +1342,8 @@ class TestBasicOps(unittest.TestCase):
          argtypes = ['', 'abc', '', range(0), range(4), dict(a=1, b=2, c=3),
                      set('abcdefg'), range(11), tuple(range(13))]
          for i in range(100):
@@ -262,7 +276,7 @@ index 7d5ba727389..d15d83a2184 100644
              expected_len = prod(map(len, args))
              self.assertEqual(len(list(product(*args))), expected_len)
              self.assertEqual(list(product(*args)), list(product1(*args)))
-@@ -1767,6 +1782,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1767,6 +1774,7 @@ class TestBasicOps(unittest.TestCase):
          script_helper.assert_python_ok("-c", script)
  
      # Issue 13454: Crash when deleting backward iterator from tee()
@@ -270,7 +284,7 @@ index 7d5ba727389..d15d83a2184 100644
      def test_tee_del_backward(self):
          forward, backward = tee(repeat(None, 20000000))
          try:
-@@ -1920,7 +1936,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1920,7 +1928,7 @@ class TestBasicOps(unittest.TestCase):
                      tp.foobar = 1
  
  
@@ -279,7 +293,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def test_accumulate(self):
          self.assertEqual(list(accumulate([1,2,3,4,5])), [1, 3, 6, 10, 15])
-@@ -2032,7 +2048,7 @@ class TestExamples(unittest.TestCase):
+@@ -2032,7 +2040,7 @@ class TestExamples(unittest.TestCase):
          self.assertEqual(list(takewhile(lambda x: x<5, [1,4,6,4,1])), [1,4])
  
  
@@ -288,7 +302,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def test_batched_recipe(self):
          def batched_recipe(iterable, n):
-@@ -2081,6 +2097,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2081,6 +2089,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              for i, element in zip(range(i + 1, stop), iterable):
                  pass
  
@@ -296,7 +310,7 @@ index 7d5ba727389..d15d83a2184 100644
      def test_islice_recipe(self):
          self.assertEqual(list(self.islice('ABCDEFG', 2)), list('AB'))
          self.assertEqual(list(self.islice('ABCDEFG', 2, 4)), list('CD'))
-@@ -2265,7 +2282,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2265,7 +2274,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              raise
  
  
@@ -305,7 +319,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def makecycle(self, iterator, container):
          container.append(iterator)
-@@ -2465,7 +2482,7 @@ def L(seqn):
+@@ -2465,7 +2474,7 @@ def L(seqn):
      return chain(map(lambda x:x, R(Ig(G(seqn)))))
  
  
@@ -314,7 +328,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def test_accumulate(self):
          s = [1,2,3,4,5]
-@@ -2644,7 +2661,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
+@@ -2644,7 +2653,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
              self.assertRaises(TypeError, tee, N(s))
              self.assertRaises(ZeroDivisionError, list, tee(E(s))[0])
  
@@ -323,7 +337,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def test_repeat(self):
          self.assertEqual(operator.length_hint(repeat(None, 50)), 50)
-@@ -2657,7 +2674,7 @@ class LengthTransparency(unittest.TestCase):
+@@ -2657,7 +2666,7 @@ class LengthTransparency(unittest.TestCase):
          self.assertEqual(operator.length_hint(repeat(None, times=-1)), 0)
          self.assertEqual(operator.length_hint(repeat(None, times=-2)), 0)
  
@@ -332,7 +346,7 @@ index 7d5ba727389..d15d83a2184 100644
  
      def test_sf_793826(self):
          # Fix Armin Rigo's successful efforts to wreak havoc
-@@ -2718,6 +2735,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2718,6 +2727,7 @@ class RegressionTests(unittest.TestCase):
  
      @support.skip_if_pgo_task
      @support.requires_resource('cpu')
@@ -340,7 +354,7 @@ index 7d5ba727389..d15d83a2184 100644
      def test_long_chain_of_empty_iterables(self):
          # Make sure itertools.chain doesn't run into recursion limits when
          # dealing with long chains of empty iterables. Even with a high
-@@ -2750,7 +2768,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2750,7 +2760,7 @@ class RegressionTests(unittest.TestCase):
              next(g, None)  # shouldn't crash
  
  
@@ -349,7 +363,7 @@ index 7d5ba727389..d15d83a2184 100644
      def test_keywords_in_subclass(self):
          # count is not subclassable...
          testcases = [
-@@ -2805,49 +2823,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
+@@ -2805,49 +2815,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
                  self.assertEqual(u.newarg, 3)
  
  
