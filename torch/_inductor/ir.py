@@ -52,7 +52,6 @@ from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._prims_common import (
-    check_contiguous_sizes_strides,
     compute_required_storage_length,
     is_boolean_dtype,
     is_float_dtype,
@@ -3558,9 +3557,22 @@ class IndexingConstant(BaseConstant):
 def is_contiguous_strides_for_shape(
     stride: Sequence[_IntLike], shape: Sequence[_IntLike]
 ) -> bool:
-    sym_stride = convert_shape_to_symint(stride)
-    sym_shape = convert_shape_to_symint(shape)
-    return check_contiguous_sizes_strides(sym_shape, sym_stride)
+    expected_stride = 1
+    expected_stride_max = 1
+    for x, y in reversed(tuple(zip(shape, stride))):
+        if x == 1:
+            continue
+
+        if (
+            not V.graph.sizevars.statically_known_equals(y, expected_stride)
+            and not V.graph.sizevars.statically_known_equals(y, expected_stride_max)
+        ):
+            return False
+
+        expected_stride_max *= sympy.Max(1, x)
+        expected_stride *= x
+
+    return True
 
 
 def get_align_for_dtype(dtype: torch.dtype) -> int:

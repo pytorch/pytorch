@@ -254,14 +254,14 @@ def check_all_strides(
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
-def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
+# This function is equivalent to compute_contiguous() from TensorImpl.cpp
+def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     """
-    Performs an equality check between actual stride & expected stride (based on composed sizes),
-    handling contiguous stride representations:
-    e.g. torch.empty(u0, u1, u2).contiguous().stride() -> (Max(1, u1) * Max(1, u2), Max(1, u2), 1)
-    and we'd like to treat this equal to (u1 * u2, u2, 1) for comparison purposes.
-    """
+    Tests whether a tensor is contiguous or not.
 
+    Tensors are contiguous when they have no elements,
+    one element, or when they have "nested" strides.
+    """
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
@@ -271,11 +271,14 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
 
     maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
     maybe_guard_or_true = guard_or_true if false_if_dde else guard_size_oblivious
-    
+
+    if maybe_guard_or_false(a.numel() < 2):
+        return True
+
     expected_stride = 1
     expected_stride_max = 1
 
-    for x, y in reversed(tuple(zip(sizes, strides))):
+    for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
             continue
@@ -294,24 +297,6 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
         expected_stride *= x
 
     return True
-
-
-# This function is equivalent to compute_contiguous() from TensorImpl.cpp
-def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
-    """
-    Tests whether a tensor is contiguous or not.
-
-    Tensors are contiguous when they have no elements,
-    one element, or when they have "nested" strides.
-    """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_size_oblivious
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
-
-    if maybe_guard_or_false(a.numel() < 2):
-        return True
-
-    return check_contiguous_sizes_strides(a.shape, a.stride(), false_if_dde=false_if_dde)
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
