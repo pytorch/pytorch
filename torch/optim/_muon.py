@@ -246,7 +246,7 @@ Muon.__doc__ = (
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
 
-    .. _Muon: An optimizer for hidden layers in neural networks:
+    .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
     .. _Muon is Scalable for LLM Training:
         https://arxiv.org/pdf/2502.16982
