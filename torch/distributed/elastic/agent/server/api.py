@@ -27,6 +27,7 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -88,6 +89,7 @@ class WorkerSpec:
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         assert self.local_world_size > 0

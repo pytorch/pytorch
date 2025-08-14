@@ -281,10 +281,11 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 # Use GELU activation function
                 return torch.nn.functional.gelu(input, approximate="tanh")
 
-        input = torch.randn(1, 3, 4, 4)
+        input = (torch.randn(1, 3, 4, 4),)
         onnx_program_op18 = torch.onnx.export(
             GeluModel(),
             input,
+            opset_version=18,
             dynamo=True,
         )
         all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
@@ -598,6 +599,18 @@ class TestFakeTensorExport(common_utils.TestCase):
             torch.onnx.export(
                 SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
             )
+
+    def test_model_output_can_be_none(self):
+        class ModelWithNoneOutput(torch.nn.Module):
+            def forward(self, x):
+                return x + 1, None
+
+        onnx_program = torch.onnx.export(
+            ModelWithNoneOutput(),
+            (torch.randn(1, 1, 2),),
+            dynamo=True,
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
 
 
 if __name__ == "__main__":
