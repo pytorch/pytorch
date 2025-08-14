@@ -46,7 +46,6 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
-    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
     Unsupported,
@@ -113,6 +112,7 @@ from .user_defined import (
     MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedVariable,
 )
 
@@ -1373,11 +1373,11 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_force_unpack_var_sequence(tx)
+                and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].force_unpack_var_sequence(tx)
+                    init_args = args[1].unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1793,10 +1793,7 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
-        elif isinstance(obj, variables.LocalGeneratorObjectVariable) or (
-            isinstance(obj, UserDefinedObjectVariable)
-            and obj.has_force_unpack_var_sequence(tx)
-        ):
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
             return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -2001,7 +1998,10 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
+        args = [
+            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
+            for arg in args
+        ]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )
@@ -2140,14 +2140,9 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx: "InstructionTranslator", *args):
-        arg = args[0]
+    def call_next(self, tx: "InstructionTranslator", arg: VariableTracker):
         try:
             return arg.next_variable(tx)
-        except ObservedUserStopIteration:
-            if len(args) == 2:
-                return args[1]
-            raise
         except Unsupported as ex:
             if isinstance(arg, variables.BaseListVariable):
                 ex.remove_from_stats()
@@ -2548,13 +2543,6 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
-
-        if (
-            isinstance(a, UserDefinedObjectVariable)
-            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
-        ):
-            return a.call_method(tx, "__neg__", [], {})
-
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2689,19 +2677,19 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_xor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__xor__", [b], {})
 
     def call_ixor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__ixor__", [b], {})
 
     def call_sub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__sub__", [b], {})
 
     def call_isub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__isub__", [b], {})
 
     def call_and_(self, tx: "InstructionTranslator", a, b):
@@ -2718,7 +2706,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
 
@@ -2736,7 +2724,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
             return a.call_method(tx, "__iand__", [b], {})
 
     def call_or_(self, tx: "InstructionTranslator", a, b):
@@ -2763,7 +2751,7 @@ class BuiltinVariable(VariableTracker):
                 MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
-                UserDefinedObjectVariable,
+                UserDefinedSetVariable,
             ),
         ):
             return a.call_method(tx, "__or__", [b], {})
@@ -2794,7 +2782,7 @@ class BuiltinVariable(VariableTracker):
                 DictKeysVariable,
                 MutableMappingVariable,
                 SetVariable,
-                UserDefinedObjectVariable,
+                UserDefinedSetVariable,
             ),
         ):
             return a.call_method(tx, "__ior__", [b], {})

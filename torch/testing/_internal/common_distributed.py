@@ -96,10 +96,10 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
@@ -253,9 +253,9 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert (
-        actual in logging_err
-    ), f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    assert actual in logging_err, (
+        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    )
 
 
 def with_nccl_blocking_wait(func):
@@ -294,9 +294,9 @@ def with_nccl_blocking_wait(func):
         finally:
             # restore old values.
             if cached_nccl_async_error_handling is not None:
-                os.environ[
-                    "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-                ] = cached_nccl_async_error_handling
+                os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                    cached_nccl_async_error_handling
+                )
 
             if cached_nccl_blocking_wait is not None:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
@@ -338,15 +338,26 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if not c10d.is_nccl_available():
-        return skip_but_pass_in_sandcastle(
-            "c10d was not compiled with the NCCL backend",
-        )
+    if TEST_CUDA:
+        if not c10d.is_nccl_available():
+            return skip_but_pass_in_sandcastle(
+                "c10d was not compiled with the NCCL backend",
+            )
+        else:
+            return skip_but_pass_in_sandcastle_if(
+                torch.cuda.nccl.version() < version,
+                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+            )
     else:
-        return skip_but_pass_in_sandcastle_if(
-            torch.cuda.nccl.version() < version,
-            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-        )
+
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
 
 def requires_nccl():
@@ -435,9 +446,10 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns True if the device's compute capability is (major, minor) or higher.
     Error out if the device is not a CUDA device.
     Returns False if device is a RoCM device.
+    Returns True if device is a non-CUDA device.
     """
     if device.type != "cuda":
-        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+        return True
 
     if torch.version.hip is not None:
         # ROCm devices may have different compute capability codes
@@ -812,7 +824,7 @@ class MultiProcessTestCase(TestCase):
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
             logger.error(
-                "Caught exception: \n%s exiting " "process %s with exit code: %s",
+                "Caught exception: \n%s exiting process %s with exit code: %s",
                 traceback.format_exc(),
                 self.rank,
                 MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
@@ -1456,12 +1468,19 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend="nccl", init_pg=True, fake_pg=False
+    rank, world_size, backend=None, init_pg=True, fake_pg=False
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
         torch.accelerator.set_device_index(rank)
+
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
+    if backend is None:
+        backend = c10d.get_default_backend_for_device(device_type)
+
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6789"
     if init_pg:
@@ -1508,9 +1527,12 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+        device = torch.accelerator.current_accelerator().type
+        cls.device = f"{device}:{cls.rank}"
+        cls.device_ids = None if device in cls.device else [cls.rank]
+        c10d.init_process_group(
+            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -1605,7 +1627,7 @@ class MultiProcContinousTest(TestCase):
     @classmethod
     def _run_test_given_id(cls, test_id: str, **kwargs) -> None:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        test_name = test_id.split(".")[-1]
+        test_name = test_id.rsplit(".", maxsplit=1)[-1]
         # Get the test function from the test class
         self = cls(test_name)
         self.rank = cls.rank
@@ -1689,9 +1711,7 @@ class MultiProcContinousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.info(
-                "Started process %s with pid %s", rank, process.pid
-            )  # noqa: UP031
+            logger.info("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
     def setUpClass(cls):

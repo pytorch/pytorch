@@ -86,6 +86,8 @@ prims = torch.ops.prims
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
+backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
+
 
 class SearchFn(Protocol):
     __name__: str
@@ -1976,8 +1978,8 @@ class PatternMatcherPass:
                     if is_match(m) and entry.extra_check(m):
                         count += 1
                         entry.apply(m, graph, node)
-                        counters["inductor"]["pattern_matcher_count"] += 1
-                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+                        counters[backend]["pattern_matcher_count"] += 1
+                        counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self) -> None:
@@ -2213,13 +2215,13 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     @functools.cache
     @functools.wraps(fn)
     def lazy_init() -> Any:
-        counters_ref = counters["inductor"].copy()
+        counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn()
 
         # clear view matches encountered during tracing
-        counters["inductor"] = counters_ref
+        counters[backend] = counters_ref
 
         return result
 
