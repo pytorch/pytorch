@@ -340,7 +340,7 @@ class TORCH_API Tensor: public TensorBase {
   }
 
   Tensor hip() const {
-    return to(options().device(c10::DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor ve() const {

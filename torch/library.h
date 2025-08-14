@@ -372,7 +372,7 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
       case c10::DeviceType::Meta:
         return c10::DispatchKey::Meta;
       case c10::DeviceType::HIP:
-        return c10::DispatchKey::HIP;
+        return c10::DispatchKey::CUDA;
       case c10::DeviceType::MAIA:
         return c10::DispatchKey::MAIA;
       case c10::DeviceType::HPU:

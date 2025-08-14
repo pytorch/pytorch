@@ -283,10 +283,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   DeviceType device_type = iter.device_type(0);
-  if (iter.device_type(1) == kCUDA) {
+  if (iter.device_type(1) == kCUDA || iter.device_type(1) == kHIP) {
     device_type = kCUDA;
-  } else if (iter.device_type(1) == kHIP) {
-    device_type = kHIP;
   } else if (iter.device_type(1) == kMPS) {
     device_type = kMPS;
   } else if (iter.device_type(1) == kXPU){

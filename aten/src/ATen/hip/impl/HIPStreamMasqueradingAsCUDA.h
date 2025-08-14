@@ -25,7 +25,7 @@ public:
         HIPStream(
           Stream(
             Stream::UNSAFE,
-            Device(c10::DeviceType::HIP, stream.device_index()),
+            Device(c10::DeviceType::CUDA, stream.device_index()),
             stream.id())
         )
       ) {}

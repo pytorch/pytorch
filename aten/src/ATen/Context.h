@@ -58,7 +58,7 @@ class TORCH_API Context {
     if (!opt_device_type.has_value()) {
       opt_device_type = at::getAccelerator(true);
     }
-    if (opt_device_type == at::kCUDA) {
+    if (opt_device_type == at::kCUDA || opt_device_type == at::kHIP) {
       return at::detail::getCUDAHooks();
     } else if (opt_device_type == at::kXPU) {
       return at::detail::getXPUHooks();
@@ -68,8 +68,6 @@ class TORCH_API Context {
       return at::detail::getPrivateUse1Hooks();
     } else if (opt_device_type == at::kMTIA) {
       return at::detail::getMTIAHooks();
-    } else if (opt_device_type == at::kHIP) {
-      return at::detail::getHIPHooks();
     } else if (opt_device_type == at::kHPU) {
       return at::detail::getHPUHooks();
     } else {

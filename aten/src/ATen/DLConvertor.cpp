@@ -108,19 +108,11 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       ctx.device_type = DLDeviceType::kDLCPU;
       break;
     case DeviceType::CUDA:
-#ifdef USE_ROCM
-      // ROCM, if enabled will look like cuda to PyTorch
-      // while everyone else should see HIP
-      ctx.device_type = DLDeviceType::kDLROCM;
-#else
+    case DeviceType::HIP:
       ctx.device_type = DLDeviceType::kDLCUDA;
-#endif
       break;
     case DeviceType::OPENCL:
       ctx.device_type = DLDeviceType::kDLOpenCL;
-      break;
-    case DeviceType::HIP:
-      ctx.device_type = DLDeviceType::kDLROCM;
       break;
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
@@ -146,20 +138,11 @@ static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* dat
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
-#ifndef USE_ROCM
-    // if we are compiled under HIP, we cannot do cuda
     case DLDeviceType::kDLCUDA:
+    case DLDeviceType::kDLROCM:
       return at::Device(DeviceType::CUDA, index);
-#endif
     case DLDeviceType::kDLOpenCL:
       return at::Device(DeviceType::OPENCL, index);
-    case DLDeviceType::kDLROCM:
-#ifdef USE_ROCM
-      // this looks funny, we need to return CUDA here to masquerade
-      return at::Device(DeviceType::CUDA, index);
-#else
-      return at::Device(DeviceType::HIP, index);
-#endif
     case DLDeviceType::kDLOneAPI:
       TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
       return at::detail::getXPUHooks().getDeviceFromPtr(data);

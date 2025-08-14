@@ -118,9 +118,7 @@ class InlineDeviceGuard {
       typename U = T,
       typename std::enable_if_t<!std::is_same_v<U, VirtualGuardImpl>, int> = 0>
   void set_device(at::Device device) {
-    AT_ASSERT(
-        (U::static_type == DeviceType::HIP && device.is_cuda()) ||
-        device.type() == U::static_type);
+    AT_ASSERT(device.type() == U::static_type);
     auto index = device.index();
     if (index == -1)
       return;

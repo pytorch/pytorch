@@ -35,6 +35,10 @@ struct C10_API Device final {
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
+    if (is_hip()) {
+        // Do not allow HIP devices as they always alias as CUDA.
+        type_ = DeviceType::CUDA;
+    }
     validate();
   }
 

@@ -139,7 +139,7 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.is_cuda() || device.type() == c10::DeviceType::HIP) {
+    if (device.is_cuda() || device.is_hip()) {
       cuda_memory_usage_ = alloc_size;
     } else if (
         device.is_cpu() || device.type() == c10::DeviceType::MKLDNN ||
