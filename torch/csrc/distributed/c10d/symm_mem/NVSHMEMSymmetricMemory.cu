@@ -346,7 +346,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     initialize_nvshmem_with_store(store, rank, world_size);
     auto ptr = nvshmem_malloc(size);
-    TORCH_CHECK(ptr != nullptr, "nvshmem_malloc failed");
+    // If size is 0 (which is legal allocation request) we shouldn't error out
+    TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
