@@ -113,20 +113,21 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           case $DESIRED_PYTHON in
-          3.14t)
-            CONDA_ENV_CREATE_FLAGS="python-freethreading"
-          3.14)
-            EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
-            desired_python="3.14.0rc1"
-            ;;
-          3.13t)
-            CONDA_ENV_CREATE_FLAGS="python-freethreading"
-            EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
-            desired_python="3.13"
-            ;;
-          *)
-            desired_python=$DESIRED_PYTHON
-            ;;
+            3.14t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+            3.14)
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
+            3.13t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+              desired_python="3.13"
+              ;;
+            *)
+              desired_python=$DESIRED_PYTHON
+              ;;
+          esac
 
           conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS
           conda activate test_conda_env
