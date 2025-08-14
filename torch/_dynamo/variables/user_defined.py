@@ -394,7 +394,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        # Is this import slow?
         from .ctx_manager import GenericContextWrappingVariable
 
         if (
@@ -452,7 +451,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 args[1:],
             )
-
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
@@ -559,11 +557,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif (
             self.value is types.MethodType
             and len(args) == 2
-            and isinstance(
-                args[0], (variables.UserFunctionVariable, variables.GetAttrVariable)
-            )
-            and args[0].get_name() in ("__enter__", "__exit__")
+            and isinstance(args[0], variables.UserFunctionVariable)
             and isinstance(args[1], GenericContextWrappingVariable)
+            and args[0].get_name() in ("__enter__", "__exit__")
         ):
             cm_obj = args[1].cm_obj
             fn = getattr(cm_obj, args[0].get_name()).__func__

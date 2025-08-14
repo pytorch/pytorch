@@ -1009,7 +1009,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         z = 0
 
         def whoo(t):
-            nonlocal z
+            nonlocal z  # noqa: F824
             try:
                 L.append(1)
                 yield t.sin()
@@ -1050,7 +1050,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             y = gen.close()
@@ -1078,7 +1077,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             gen.close()
@@ -1380,8 +1378,10 @@ class TestGeneratorThrow(GeneratorTestsBase):
             a = next(gen)
             try:
                 gen.throw(ValueError)
-            except StopIteration:
+            except StopIteration as e:
+                assert len(e.args) == 0
                 return a
+            raise AssertionError("Expected StopIteration")
 
         t = torch.randn(2)
         y = self._compile_check(fn, (t,))
@@ -1511,6 +1511,76 @@ class TestGeneratorThrow(GeneratorTestsBase):
             except Exception as e:
                 raise AssertionError from e
             assert z == 1
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_const_value_in_except_and_finally(self):
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return 2  # noqa: B901
+            finally:
+                return 3  # noqa: B012, SIM107, B901
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert e.args[0] == 3
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_value_in_except_and_finally(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return Foo(2)  # noqa: B901
+            finally:
+                return Foo(3)  # noqa: B012, SIM107, B901
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert e.args[0].x == 3
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_None_in_except_and_finally(self):
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return 2  # noqa: B901
+            finally:
+                return  # noqa: B012, SIM107
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert len(e.args) == 0
+            except Exception as e:
+                raise AssertionError from e
             return t.sin()
 
         self._compile_check(fn)

@@ -857,9 +857,13 @@ class BuiltinVariable(VariableTracker):
                             )
                         # They cannot be the same object if the arguments are different
                         m = BuiltinVariable(operator.eq).call_function
-                        if any(
-                            not m(tx, [a, b], {}).value  # type: ignore[attr-defined]
-                            for a, b in zip(left.args, right.args)
+                        eq_nargs = len(left.args) == len(right.args)
+                        if not eq_nargs or (
+                            eq_nargs
+                            and any(
+                                not m(tx, [a, b], {}).value  # type: ignore[attr-defined]
+                                for a, b in zip(left.args, right.args)
+                            )
                         ):
                             return ConstantVariable.create(
                                 False if op is operator.is_ else True
