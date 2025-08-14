@@ -183,6 +183,7 @@ template <class T, class TEMP = void>
 template <class T>
 #endif
 struct Vectorized {
+
  private:
   __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
 

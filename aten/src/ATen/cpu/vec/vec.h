@@ -1,17 +1,9 @@
 #pragma once
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(__aarch64__)
+#include <ATen/cpu/vec/vec_common_aarch64.h>
+#elif defined(CPU_CAPABILITY_AVX512)
 #include <ATen/cpu/vec/vec512/vec512.h>
-#elif defined(__aarch64__)
-#if defined(CPU_CAPABILITY_SVE128) || !defined(CPU_CAPABILITY_SVE)
-#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_convert.h>
-#include <ATen/cpu/vec/vec256/vec256.h>
-#else
-#include <ATen/cpu/vec/sve/vec_common_sve.h>
-#endif
 #else
 #include <ATen/cpu/vec/vec128/vec128.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
