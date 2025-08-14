@@ -4364,7 +4364,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(ver, "2.9")
         comm_lib_version = t["comm_lib_version"]
         torch_comm_lib_version = torch.cuda.nccl.version()
-        self.assertEqual(comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version))
+        self.assertEqual(
+            comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version)
+        )
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
