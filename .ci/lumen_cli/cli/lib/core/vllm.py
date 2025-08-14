@@ -336,6 +336,7 @@ class VllmTestRunner(BaseRunner):
             self._install_dependencies()
         # verify the torches are not overridden by test dependencies
         self.check_versions()
+        run_command("pip freeze")
 
     def run(self):
         """
@@ -442,8 +443,8 @@ class VllmTestRunner(BaseRunner):
                 version = getattr(module, "__version__", None)
                 version = version if version else "Unknown version"
                 logger.info("%s: %s", pkg, version)
-            except ImportError:
-                logger.info(" %s: Not installed", pkg)
+            except ImportError as e:
+                logger.info(" %s: Not installed: %s", pkg, e)
         logger.info("Done. checked installed packages")
 
     def _set_envs(self, inputs: VllmTestParameters):
@@ -481,7 +482,8 @@ class VllmTestRunner(BaseRunner):
         logger.info("Running tests: %s", tests["title"])
 
         pkgs = tests.get("package_install", [])
-        pip_install_packages(packages=pkgs, prefer_uv=True)
+        if pkgs:
+            pip_install_packages(packages=pkgs, prefer_uv=True)
         with (
             temp_environ(tests.get("env_var", {})),
             working_directory(tests.get("working_directory", "tests")),
