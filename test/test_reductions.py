@@ -3663,8 +3663,12 @@ as the input tensor excluding its innermost dimension'):
             self.assertEqual(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True),
                              msg=error_msg)
 
+            # Test calling the function without dim parameter
+            # All functions now support this (including logsumexp as of this implementation)
+            self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
+
             if name != 'logsumexp':
-                # The scipy function does not work for reduction the zero dimension
+                # The scipy function does not work for reduction of the zero dimension
                 self.assertEqual(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(),
                                  msg=error_msg)
                 self.assertEqual(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(),
@@ -3675,11 +3679,6 @@ as the input tensor excluding its innermost dimension'):
                 self.assertEqual(np.float32(np_function(np_input, axis=-2, keepdims=True)),
                                  fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
                                  msg=error_msg)
-
-                # logsumexp throws a type error when not specifying dim so test separately.
-                self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
-            else:
-                self.assertRaises(TypeError, lambda: fn(master_input))
 
     # Tests to ensure that any() and all() functions work with zero-dim tensors. Kept separate from
     # other tests for checking reduction with zero-dim tensors because these tests have significantly
