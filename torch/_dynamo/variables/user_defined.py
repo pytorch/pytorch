@@ -94,7 +94,12 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -2110,7 +2115,9 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting if self.source else AttributeMutationNew()
+        self.mutation_type = (
+            AttributeMutationExisting() if self.source else AttributeMutationNew()
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
