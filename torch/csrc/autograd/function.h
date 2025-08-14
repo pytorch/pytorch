@@ -244,13 +244,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    * they may have different streams.
    */
   std::optional<c10::Stream> stream() {
-    auto opt_device_type = at::getAccelerator();
-    if (!opt_device_type.has_value()) {
-      return std::nullopt;
-    }
     for (const auto& metadata : input_metadata_) {
-      if (metadata.device().type() == opt_device_type.value())
+      if (at::isAccelerator(metadata.device().type())) {
         return metadata.stream();
+      }
     }
 
     return std::nullopt;

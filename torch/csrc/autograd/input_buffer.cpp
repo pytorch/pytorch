@@ -212,13 +212,15 @@ void InputBuffer::add(
     }
     return;
   }
+
+  const auto guard = c10::impl::VirtualGuardImpl{device_type};
   // Handle the case where var is on an accelerator but producer node has no
   // canonical stream, e.g. this can happen if forward is DtoH
   const std::optional<c10::Stream>& opt_producer_stream =
       (opt_producer_stream_.has_value()
            ? opt_producer_stream_
            : std::optional<c10::Stream>(
-                 at::accelerator::getCurrentStream(device.index())));
+                 guard.getStream(device)));
 
   // opt_consumer_stream is always non-null when is_accelerator is true
   // when InputBuffer is used in the engine. InputBuffer is also called
@@ -227,7 +229,7 @@ void InputBuffer::add(
       (opt_consumer_stream_.has_value()
            ? opt_consumer_stream_
            : std::optional<c10::Stream>(
-                 at::accelerator::getCurrentStream(device.index())));
+                 guard.getStream(device)));
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
@@ -250,8 +252,7 @@ void InputBuffer::add(
       opt_accum_streams[pos] = opt_producer_stream;
     } else {
       // Case C
-      opt_accum_streams[pos] =
-          at::accelerator::getCurrentStream(device.index());
+      opt_accum_streams[pos] = guard.getStream(device);
     }
     // 2)
     buffer[pos] = std::move(var);
