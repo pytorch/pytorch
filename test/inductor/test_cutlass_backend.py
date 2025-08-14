@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor.codegen.cutlass.serialization import get_cutlass_operation_serializer
+from torch._inductor.codegen.cutlass.serialization import (
+    get_cutlass_operation_serializer,
+)
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -31,7 +33,7 @@ import torch.version
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
+from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
@@ -1164,7 +1166,7 @@ class TestCutlassBackend(TestCase):
                     assert op_name == "addmm"
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUDATemplateCaller):
+                        if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
@@ -1172,7 +1174,7 @@ class TestCutlassBackend(TestCase):
                                 "All pingpong Kernels should have been filtered"
                             )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1209,7 +1211,7 @@ class TestCutlassBackend(TestCase):
                     assert op_name == "addmm"
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUDATemplateCaller):
+                        if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
@@ -1217,7 +1219,7 @@ class TestCutlassBackend(TestCase):
                                 "Only pingpong Kernels should have been allowed"
                             )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1285,7 +1287,7 @@ class TestCutlassBackend(TestCase):
                         _, choices, _, _ = args
                         cuda_template_count = 0
                         for choice in choices:
-                            if isinstance(choice, CUDATemplateCaller):
+                            if isinstance(choice, CUTLASSTemplateCaller):
                                 choice_info = choice.info_dict()
                                 op_conf_name = choice_info.get("op_conf_name", "")
                                 assert isinstance(op_conf_name, str)
@@ -1298,7 +1300,9 @@ class TestCutlassBackend(TestCase):
                                         "fastaccum Kernels should have been filtered"
                                     )
                                 cuda_template_count += 1
-                        assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                        assert cuda_template_count > 0, (
+                            "No CUTLASSTemplateCaller choices"
+                        )
 
         run_test(True)
         run_test(False)
@@ -1364,7 +1368,7 @@ class TestCutlassBackend(TestCase):
                 assert op_name == "mm"
                 cuda_template_count = 0
                 for choice in choices:
-                    if isinstance(choice, CUDATemplateCaller):
+                    if isinstance(choice, CUTLASSTemplateCaller):
                         choice_info = choice.info_dict()
                         op_conf_name = choice_info.get("op_conf_name", "")
                         assert isinstance(op_conf_name, str)
@@ -1373,7 +1377,7 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUDATemplateCaller choices found for matmul with shape "
+                    "No CUTLASSTemplateCaller choices found for matmul with shape "
                     f"M={M}, N={N}, K={K}",
                 )
 
@@ -1419,7 +1423,7 @@ class TestCutlassBackend(TestCase):
             assert op_name == "mm"
             cuda_template_count = 0
             for choice in choices:
-                if isinstance(choice, CUDATemplateCaller):
+                if isinstance(choice, CUTLASSTemplateCaller):
                     choice_info = choice.info_dict()
                     op_conf_name = choice_info.get("op_conf_name", "")
                     assert isinstance(op_conf_name, str)
@@ -1428,7 +1432,7 @@ class TestCutlassBackend(TestCase):
             self.assertGreater(
                 cuda_template_count,
                 0,
-                "No CUDATemplateCaller choices found for matmul with shape "
+                "No CUTLASSTemplateCaller choices found for matmul with shape "
                 f"M={M}, N={N}, K={K}",
             )
 
