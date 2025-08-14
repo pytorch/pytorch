@@ -506,7 +506,7 @@ class ScheduleTest(MultiProcContinousTest):
             tmp_schedule = _PipelineScheduleRuntime(
                 stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
             )
-            tmp_schedule._load_actions(old_schedule.pipeline_order)
+            tmp_schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
             # Test CSV round-trip for compute_comms schedule
             schedule = _PipelineScheduleRuntime(
@@ -520,7 +520,7 @@ class ScheduleTest(MultiProcContinousTest):
             one_more_schedule = _PipelineScheduleRuntime(
                 stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
             )
-            one_more_schedule._load_actions(
+            one_more_schedule._prepare_schedule_with_comms(
                 schedule.pipeline_order_with_comms, format="compute_comms"
             )
 
@@ -723,7 +723,7 @@ class ScheduleTest(MultiProcContinousTest):
             schedule = _PipelineScheduleRuntime(
                 stages, num_microbatches, loss_fn=loss_fn
             )
-            schedule._load_actions(old_schedule.pipeline_order)
+            schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
@@ -779,7 +779,7 @@ class ScheduleTest(MultiProcContinousTest):
             schedule = _PipelineScheduleRuntime(
                 stages, num_microbatches, loss_fn=loss_fn
             )
-            schedule._load_actions(old_schedule.pipeline_order)
+            schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
