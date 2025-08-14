@@ -2646,7 +2646,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 2)
 
-    @parametrize("name", ("stdout", "stderr"))
+    @parametrize("name", ("suppress", "stdout", "stderr"))
     def test_contextlib_suppress(self, name):
         counters.clear()
         eager = EagerAndRecordGraphs()
@@ -2654,7 +2654,9 @@ class GraphModule(torch.nn.Module):
         def fn(t):
             y = t.sin()
             # ensure we graph break on the suppress call below
-            if name == "stdout":
+            if name == "suppress":
+                ctx = contextlib.suppress(ValueError)
+            elif name == "stdout":
                 ctx = contextlib.redirect_stdout(sys.stderr)
             else:
                 ctx = contextlib.redirect_stderr(sys.stdout)
