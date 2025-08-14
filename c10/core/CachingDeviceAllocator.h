@@ -425,19 +425,9 @@ struct PrivatePool {
 
 // Represents a contiguous virtual memory segment mapped for allocation.
 struct SegmentRange {
-  SegmentRange(void* p, size_t s) : ptr_(static_cast<char*>(p)), size_(s) {}
-
-  char* begin() const {
-    return ptr_;
-  }
-
-  char* end() const {
-    return ptr_ + size_;
-  }
-
- private:
-  char* ptr_; // Starting address of the mapped range.
-  size_t size_; // Size in bytes of the mapped range.
+  SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
+  char* ptr; // Starting address of the mapped range.
+  size_t size; // Size in bytes of the mapped range.
 };
 
 // ExpandableSegment traits to map StreamT to its corresponding HandleT for
@@ -495,9 +485,9 @@ struct ExpandableSegment {
 
   // Maps a virtual memory range to physical memory.
   virtual SegmentRange map(SegmentRange range) {
-    auto begin = segmentLeft(range.begin());
-    auto end = segmentRight(range.end());
-    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.begin());
+    auto begin = segmentLeft(range.ptr);
+    auto end = segmentRight(range.ptr + range.size);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
@@ -511,10 +501,10 @@ struct ExpandableSegment {
 
   // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
-    auto begin = segmentRight(range.begin());
-    auto end = segmentLeft(range.end());
+    auto begin = segmentRight(range.ptr);
+    auto end = segmentLeft(range.ptr + range.size);
     if (begin >= end) {
-      return SegmentRange{range.begin(), 0};
+      return SegmentRange{range.ptr, 0};
     }
     unmapHandles(begin, end);
     return rangeFromHandles(begin, end);
