@@ -8714,6 +8714,37 @@ class TestHopSchema(TestCase):
             str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
         )
 
+    def test_cond_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.cond.gen_schema(
+            torch.tensor(True),
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_cond_gen_schema_symbool_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_bool = torch.randn(3, 4).nonzero().size(0) == 0
+
+        schema = torch.ops.higher_order.cond.gen_schema(
+            sym_bool,
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
