@@ -281,7 +281,7 @@ def _single_tensor_muon(
         buf = muon_momentum_bufs[i]
         buf.mul_(momentum).add_(grad)
         if nesterov:
-            grad.add_(buf, alpha=momentum)
+            grad = grad.add(buf, alpha=momentum)
         else:
             grad = buf
 
