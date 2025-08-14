@@ -175,11 +175,10 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
               executionKernels.constFoldingExecutions.empty(),
               "HigherOrderKernel does not support const folding");
           if (executorConfig.maxParallelOps > 1) {
-            graphExecutors.emplace_back(
-                std::make_unique<ParallelGraphExecutor>(
-                    *subgraph,
-                    std::move(executionKernels.nodeKernels),
-                    executorConfig));
+            graphExecutors.emplace_back(std::make_unique<ParallelGraphExecutor>(
+                *subgraph,
+                std::move(executionKernels.nodeKernels),
+                executorConfig));
           } else {
             graphExecutors.emplace_back(
                 std::make_unique<torch::nativert::SerialGraphExecutor>(
