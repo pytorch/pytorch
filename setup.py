@@ -174,6 +174,7 @@
 #     host compiler for nvcc.
 #
 #   CUDA_NVCC_EXECUTABLE
+#   CUDAToolkit_NVCC_EXECUTABLE
 #     Specify a NVCC to use. This is used in our CI to point to a cached nvcc
 #
 #   CUDNN_LIB_DIR
