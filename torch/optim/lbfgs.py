@@ -455,7 +455,7 @@ class LBFGS(Optimizer):
                     # no use to re-evaluate that function here
                     with torch.enable_grad():
                         loss = closure()
-                        loss = float(loss.item() if isinstance(loss, Tensor) else loss)
+                    loss = float(loss)
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
