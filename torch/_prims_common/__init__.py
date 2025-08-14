@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from collections.abc import Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
@@ -2090,7 +2090,9 @@ def alert_not_deterministic(caller: str):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+    def get_torch_state_as_tuple(
+        fake_mode: AbstractContextManager[Any] = nullcontext(),
+    ):
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA not available")
 

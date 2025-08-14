@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -163,6 +164,10 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     if not isinstance(fn, torch._ops.OpOverload):
         # Only OpOverloads have layout constraints.
         return None
+
+    if maybe_layout_tag := get_layout_constraint_tag(fn, with_default=False):
+        return tag_to_layout_constraint(maybe_layout_tag)
+
     if fn in _maybe_layout_constraints:
         return _maybe_layout_constraints[fn]
     return None
@@ -2874,6 +2879,7 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
+make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 
 # Register with type_promotion_kind None.
@@ -6835,7 +6841,9 @@ def sym_size(a, dim):
     # int, but you KNOW that int must always be a constant,
     # then you do not need trace that call at all (and just
     # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6843,7 +6851,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
