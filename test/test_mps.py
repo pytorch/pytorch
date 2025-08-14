@@ -29,6 +29,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
+from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
@@ -197,6 +198,32 @@ class TestAutocastMPS(TestCase):
 
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
+
+    def test_conv_transpose3d_autocast_fp32(self):
+        m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
+        x = torch.randn(20, 16, 10, 50, 100, device="mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = m(x)
+        self.assertEqual(y.dtype, torch.float32)
+
+    def test_conv3d_autocast(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160415
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv3d(3, 3, 1)
+                self.c2 = nn.Conv3d(3, 3, 1)
+
+            def forward(self, x):
+                x = self.c1(x)
+                x = self.c2(x)
+                return x
+
+        x = torch.randn(2, 3, 4, 4, 4, device="mps")
+        model = Foo().to("mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = model(x)
+        self.assertEqual(y.dtype, torch.float16)
 
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
@@ -7735,6 +7762,8 @@ class TestMPS(TestCaseMPS):
         y = torch.arange(32, device='mps', dtype=torch.int32)
         self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
         self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+        # Regression test for https://github.com/pytorch/pytorch/issues/160208
+        self.assertEqual(torch.add(y, x, alpha=2).cpu(), torch.add(y.cpu(), x.cpu(), alpha=2))
 
     # Test add
     def test_add_scalars(self):
@@ -9445,6 +9474,78 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, contiguous, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+
+
+
+class TestSDPAMetaDispatchMode(TorchDispatchMode):
+    """
+    TorchDispatchMode which intercepts the
+    _scaled_dot_product_attention_math_for_mps aten operator to check that the
+    meta kernel is correct.
+    """
+
+    def __init__(self, test):
+        self.test = test
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args, kwargs=None):
+        kwargs = kwargs or {}
+        res = func(*args, **kwargs)
+        if func != torch.ops.aten._scaled_dot_product_attention_math_for_mps.default:
+            return res
+
+        meta_args, meta_kwargs = pytree.tree_map_only(torch.Tensor, lambda t: t.to(device="meta"), (args, kwargs))
+        meta_res = func(*meta_args, **meta_kwargs)
+
+        def format_res(res):
+            return [
+                (t.shape, t.stride(), t.dtype) if isinstance(t, torch.Tensor) else t
+                for t in pytree.tree_flatten(res)[0]
+            ]
+
+        # Format the output so that we only look at the tensor metadata
+        self.test.assertEqual(format_res(res), format_res(meta_res))
+        return res
+
+
+def create_sdpa_meta_test():
+    """
+    Creates a new class which takes every test in TestSDPA and adds the
+    TestSDPAMetaDispatchMode context in order to test the
+    scaled_dot_product_attention_for_mps meta kernel. This allows us to test all
+    the branches for the sdpa op. If there are changes to the sdpa kernel
+    without changing the meta kernel, a torch.compile guard will catch the issue
+    but not necessarily export.
+    """
+    orig_test_cls = TestSDPA
+
+    new_test_cls = type(f"{orig_test_cls.__name__}Meta", orig_test_cls.__bases__, {})
+    new_test_cls.__qualname__ = new_test_cls.__name__
+
+    for name in dir(orig_test_cls):
+        if name.startswith("test_"):
+            fn = getattr(orig_test_cls, name)
+            if not callable(fn):
+                setattr(new_test_cls, name, getattr(orig_test_cls, name))
+                continue
+
+            new_name = f"{name}_meta"
+
+            def new_fn(self, *args, **kwargs):
+                with TestSDPAMetaDispatchMode(self):
+                    fn(self, *args, **kwargs)
+
+            new_fn.__name__ = new_name
+
+            setattr(new_test_cls, new_name, new_fn)
+
+        elif not hasattr(new_test_cls, name):
+            setattr(new_test_cls, name, getattr(orig_test_cls, name))
+
+    return new_test_cls
+
+TestSDPAMeta = create_sdpa_meta_test()
+instantiate_parametrized_tests(TestSDPAMeta)
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -12623,6 +12724,67 @@ class TestSparseMPS(TestCaseMPS):
         sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
         self.assertEqual(sparse, sparse_cpu)
 
+    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8, torch.int32, torch.int64,
+                           torch.float32, torch.float16, torch.bfloat16, torch.bool])
+    def test_coalesce(self, dtype):
+        indices = torch.tensor([[0, 0, 1, 1], [0, 0, 2, 2]], dtype=torch.int64, device="mps")
+        values = torch.tensor([1., 2., 3., 4.], dtype=dtype, device="mps")
+        size = (2, 3)
+        indices_cpu = indices.cpu()
+        values_cpu = values.cpu()
+        sparse_mps = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices_cpu, values_cpu, size, device="cpu")
+        coalesced_mps = sparse_mps.coalesce()
+        coalesced_cpu = sparse_cpu.coalesce()
+
+        self.assertTrue(coalesced_mps.is_coalesced())
+        self.assertTrue(coalesced_cpu.is_coalesced())
+        self.assertEqual(coalesced_mps._nnz(), 2)
+        self.assertEqual(coalesced_mps.cpu(), coalesced_cpu)
+
+    def test_already_coalesced_tensor(self):
+        already_coalesced = self._get_basic_sparse_coo()
+        result = already_coalesced.coalesce()
+        self.assertTrue(result.is_coalesced())
+        self.assertEqual(result._indices().cpu(), already_coalesced._indices().cpu())
+        self.assertEqual(result._values().cpu(), already_coalesced._values().cpu())
+
+    def test_coalesce_empty_sparse_tensor(self):
+        empty_indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
+        empty_values = torch.tensor([], dtype=torch.float32, device="mps")
+        empty_sparse = torch.sparse_coo_tensor(empty_indices, empty_values, (3, 3), device="mps")
+        empty_coalesced = empty_sparse.coalesce()
+        self.assertTrue(empty_coalesced.is_coalesced())
+        self.assertEqual(empty_coalesced._nnz(), 0)
+
+    def test_coalesce_large_tensor(self):
+        size = (1000000, 1000000)
+        num_elements = 1000
+
+        # 800 unique random positions
+        unique_indices = torch.randint(0, size[0], (2, 800), dtype=torch.int64)
+        # 200 duplicates by repeating some of the first 200 indices
+        duplicate_indices = unique_indices[:, :200]
+        indices = torch.cat([unique_indices, duplicate_indices], dim=1)
+        # shuffle indices to mix duplicates with unique entries
+        perm = torch.randperm(indices.size(1))
+        indices = indices[:, perm]
+
+        values = torch.randn(num_elements, dtype=torch.float32)
+        indices_mps = indices.to("mps")
+        values_mps = values.to("mps")
+        sparse_mps = torch.sparse_coo_tensor(indices_mps, values_mps, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
+
+        self.assertFalse(sparse_mps.is_coalesced())
+        coalesced_mps = sparse_mps.coalesce()
+        coalesced_cpu = sparse_cpu.coalesce()
+        self.assertTrue(coalesced_mps.is_coalesced())
+        self.assertTrue(coalesced_cpu.is_coalesced())
+        self.assertEqual(coalesced_mps._nnz(), coalesced_cpu._nnz())
+        self.assertEqual(coalesced_mps._indices().cpu(), coalesced_cpu._indices())
+        self.assertEqual(coalesced_mps._values().cpu(), coalesced_cpu._values())
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
@@ -12638,6 +12800,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestSparseMPS)
 
 if __name__ == "__main__":
     run_tests()
