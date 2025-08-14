@@ -829,6 +829,7 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: dict[GraphOutputName, FQN]
+    parameters_to_mutate: dict[GraphOutputName, FQN]
     user_inputs_to_mutate: dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
@@ -852,6 +853,7 @@ class GraphSignature:
         named_buffers: list[str],
         num_user_inputs: int,
         num_user_outputs: int,
+        trace_joint: bool,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
     ) -> GraphSignature:
@@ -897,8 +899,9 @@ class GraphSignature:
         mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
+                if trace_joint:
+                    # Only buffers can be mutated, not parameters
+                    assert idx >= len(parameters)
                 mutations.append(names[idx + num_tokens])
 
         assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
@@ -911,12 +914,16 @@ class GraphSignature:
 
         user_inputs_to_mutate = {}
         buffers_to_mutate = {}
+        parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
-                assert mutation_name in buffers
-                buffers_to_mutate[output_name] = mutation_name
+                assert mutation_name in buffers or mutation_name in parameters
+                if mutation_name in buffers:
+                    buffers_to_mutate[output_name] = mutation_name
+                else:
+                    parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -937,6 +944,7 @@ class GraphSignature:
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
+            parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
@@ -983,6 +991,9 @@ class AOTConfig:
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
     force_non_lazy_backward_lowering: bool = False
+    # This config makes sure to check certain things like
+    # mutating input with req_grad in export joint tracing.
+    export_trace_joint: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
