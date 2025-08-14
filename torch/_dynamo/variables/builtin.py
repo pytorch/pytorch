@@ -992,11 +992,7 @@ class BuiltinVariable(VariableTracker):
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
             ):
-                if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
-                    for x in args
-                ):
+                if fn is AssertionError and not check_constant_args(args, kwargs):
                     unimplemented_v2(
                         gb_type="assert with non-string message",
                         context=str(args),
@@ -1881,7 +1877,7 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
-    def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
+    def call_dict(self_, tx: "InstructionTranslator", *args, **kwargs):  # noqa: B902
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
@@ -2018,8 +2014,11 @@ class BuiltinVariable(VariableTracker):
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         try:
             return args[0].call_method(tx, "__len__", args[1:], kwargs)
-        except AttributeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+        except AttributeError:
+            msg = ConstantVariable.create(
+                f"object of type {args[0].python_type()} has no len()"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
