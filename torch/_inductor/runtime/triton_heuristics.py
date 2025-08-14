@@ -2484,7 +2484,9 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False, max_num_warps=16):
+    def make_config(
+        x, r, num_warps=None, num_stages=1, register_intensive=False, max_num_warps=16
+    ):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
@@ -2512,16 +2514,25 @@ def _reduction_configs(
     def make_outer_config():
         max_x_block = 256
         load_factor = inductor_meta.get("num_load", 0)
+        reduction_factor = inductor_meta.get("num_reduction", 0)
         x = size_hints["x"]
 
-        if x <= 8 * 4096:
+        if x <= 1024:
             x_block = 8
+        elif x // 4096 <= 8:
+            x_block = 16
         else:
             x_block = max(min(max_x_block, next_power_of_2(x // 4096)), 64)
 
         if is_dynamic:
             # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            )
+        elif reduction_factor >= 3:
+            outer_r_block = 8
         else:
             outer_r_block = min(next_power_of_2(rnumel), 128)
 
@@ -2529,7 +2540,9 @@ def _reduction_configs(
             x_block = 4096 // outer_r_block
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
-        return make_config(x_block, outer_r_block, register_intensive=True, max_num_warps=8)
+        return make_config(
+            x_block, outer_r_block, register_intensive=True, max_num_warps=8
+        )
 
     contiguous_config = make_config(
         1,
@@ -2661,7 +2674,7 @@ def reduction(
 
     assert triton_meta is not None
 
-    is_dynamic = any(["ks" in k for k in triton_meta["signature"].keys()])
+    is_dynamic = any("ks" in k for k in triton_meta["signature"].keys())
     configs = _reduction_configs(
         size_hints=size_hints, inductor_meta=inductor_meta, is_dynamic=is_dynamic
     )
