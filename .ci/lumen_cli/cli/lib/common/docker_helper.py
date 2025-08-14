@@ -25,23 +25,17 @@ def _get_client() -> docker.DockerClient:
 def local_image_exists(
     image_name: str, client: Optional[docker.DockerClient] = None
 ) -> bool:
-    """
-    Return True if a local Docker image (by name:tag, id, or digest) exists.
-    """
+    """Return True if a local Docker image exists."""
     if not image_name:
         return False
+
     client = client or _get_client()
-    logger.info("Checking if image %s exists...", image_name)
     try:
         client.images.get(image_name)
-        logger.info("Found %s...", image_name)
         return True
-    except NotFound:
-        logger.info("Image %s not found locally...", image_name)
-        return False
-    except APIError as e:
+    except (NotFound, APIError) as e:
         logger.error(
-            "APIError when checking Docker image '%s': %s",
+            "Error when checking Docker image '%s': %s",
             image_name,
             e.explanation if hasattr(e, "explanation") else str(e),
         )
