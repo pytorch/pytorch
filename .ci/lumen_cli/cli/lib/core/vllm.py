@@ -33,7 +33,7 @@ from cli.lib.common.pip_helper import (
     pip_install_packages,
     run_python,
 )
-from cli.lib.common.utils import run_cmd, run_shell, temp_environ, working_directory
+from cli.lib.common.utils import run_command, temp_environ, working_directory
 
 
 logger = logging.getLogger(__name__)
@@ -176,7 +176,7 @@ class VllmBuildRunner(BaseRunner):
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
-        run_cmd(cmd, cwd="vllm", env=os.environ.copy())
+        run_command(cmd, cwd="vllm", env=os.environ.copy())
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:
@@ -191,7 +191,7 @@ class VllmBuildRunner(BaseRunner):
         if not inputs.use_local_dockerfile:
             logger.info("using vllm default dockerfile.torch_nightly for build")
             return
-        dockerfile_path = get_path(inputs.dockerfile_path, full_path=True)
+        dockerfile_path = get_path(inputs.dockerfile_path, resolve=True)
         vllm_torch_dockerfile = Path(
             f"./{self.work_directory}/docker/Dockerfile.nightly_torch"
         )
@@ -203,7 +203,7 @@ class VllmBuildRunner(BaseRunner):
         """
         if not path:
             path = _DEFAULT_RESULT_PATH
-        abs_path = get_path(path, full_path=True)
+        abs_path = get_path(path, resolve=True)
         return abs_path
 
     def _get_torch_wheel_path_arg(self, torch_whl_dir: Optional[Path]) -> str:
@@ -390,9 +390,8 @@ class VllmTestRunner(BaseRunner):
         copy(
             Path("requirements/test.txt"),
             Path("snapshot_constraint.txt"),
-            full_path=False,
         )
-        run_cmd(
+        run_command(
             f"{sys.executable} -m uv pip compile requirements/test.in "
             "-o test.txt "
             "--index-strategy unsafe-best-match "
@@ -487,7 +486,7 @@ class VllmTestRunner(BaseRunner):
             failures = []
             for step in tests["steps"]:
                 with temp_environ(step.get("env_var", {})):
-                    code = run_shell(cmd=step["command"], check=False)
+                    code = run_command(cmd=step["command"], check=False)
                     if code != 0:
                         failures.append(step)
             if failures:
