@@ -966,7 +966,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -976,11 +976,7 @@ class BuiltinVariable(VariableTracker):
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
             ):
-                if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
-                    for x in args
-                ):
+                if fn is AssertionError and not check_constant_args(args, kwargs):
                     unimplemented_v2(
                         gb_type="assert with non-string message",
                         context=str(args),
@@ -1072,12 +1068,6 @@ class BuiltinVariable(VariableTracker):
                         res = fn(
                             *[x.as_python_constant() for x in args],
                         )
-                    except Exception as exc:
-                        raise_observed_exception(
-                            type(exc),
-                            tx,
-                            args=list(map(ConstantVariable.create, exc.args)),
-                        )
                     except AsPythonConstantNotImplementedError as exc:
                         unimplemented_v2(
                             gb_type="constant fold exception",
@@ -1085,6 +1075,16 @@ class BuiltinVariable(VariableTracker):
                             explanation="Encountered exception when attempting to constant fold.",
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
+                        )
+                    except (
+                        TypeError,
+                        ValueError,
+                        ZeroDivisionError,
+                    ) as exc:
+                        raise_observed_exception(
+                            type(exc),
+                            tx,
+                            args=list(map(ConstantVariable.create, exc.args)),
                         )
                     return VariableTracker.build(tx, res)
 
@@ -1547,7 +1547,7 @@ class BuiltinVariable(VariableTracker):
             if len(arg.args) == 0:
                 value = f"{arg.exc_type}"
             else:
-                value = ", ".join(a.as_python_constant() for a in arg.args)
+                value = ", ".join(str(a.as_python_constant()) for a in arg.args)
             return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
