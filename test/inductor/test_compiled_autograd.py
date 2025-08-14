@@ -5021,6 +5021,33 @@ new_empty_strided.default
 copy_.default""",
         )  # noqa: B950
 
+    def test_undefined_input_buffer_accumulate(self):
+        class UndefinedGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        class DefinedGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        def fn():
+            x = torch.randn(5, requires_grad=True)
+            out = UndefinedGrad.apply(x) + DefinedGrad.apply(x)
+            out.sum().backward()
+            yield x.grad
+
+        self.check_output_and_recompiles(fn)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
