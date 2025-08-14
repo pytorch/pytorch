@@ -480,7 +480,6 @@ class CachingAutotuner(KernelInterface):
             and device_prop.major
             and (device_prop.major >= 8 or torch.version.hip)
             and device_prop.regs_per_multiprocessor is not None
-            and self.inductor_meta.get("reduction_hint", None) != ReductionHint.OUTER
         ):
             assert device_prop.regs_per_multiprocessor
             assert device_prop.max_threads_per_multi_processor
@@ -2516,26 +2515,19 @@ def _reduction_configs(
         if x <= 8 * 4096:
             x_block = 8
         else:
-            x_block = min(max_x_block, next_power_of_2(x // 4096))
-            if x_block < 64:
-                x_block = 64
+            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), 64)
 
-        num_warps = None
         if is_dynamic:
             # Dynamic shapes introduce a lot register pressure for indexing
             outer_r_block = 1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 16)
         else:
-            # Try to do reduction in 1 pass
             outer_r_block = min(next_power_of_2(rnumel), 128)
 
-            if x_block * outer_r_block >= 4096:
-                x_block = 4096 // outer_r_block
-                # Same logic as make_reduction_config, but want even smaller num_warps
-                num_warps = x_block * outer_r_block // 128
-                num_warps = _num_warps(num_warps, max_num_warps=4, min_num_warps=2)
+        if x_block * outer_r_block >= 4096:
+            x_block = 4096 // outer_r_block
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
-        return make_config(x_block, outer_r_block, num_warps=num_warps, register_intensive=True)
+        return make_config(x_block, outer_r_block, register_intensive=True)
 
     contiguous_config = make_config(
         1,
