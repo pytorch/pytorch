@@ -46,16 +46,17 @@ reverted for failing a `non-default` workflow.
 ## Infra
 
 Currently most of our self hosted runners are hosted on AWS, for a comprehensive list of available runner types you
-can reference `.github/scale-config.yml`.
+can reference [`test-infra/.github/scale-config.yml`](https://github.com/pytorch/test-infra/blob/main/.github/scale-config.yml).
 
 Exceptions to AWS for self hosted:
 * ROCM runners
 
 ### Adding new runner types
 
-New runner types can be added by committing changes to `.github/scale-config.yml`. Example: https://github.com/pytorch/pytorch/pull/70474
+New runner types can be added by committing changes to [`test-infra/.github/scale-config.yml`](https://github.com/pytorch/test-infra/blob/main/.github/scale-config.yml). Example: https://github.com/pytorch/test-infra/pull/6774
 
-> NOTE: New runner types can only be used once the changes to `.github/scale-config.yml` have made their way into the default branch
+> [!NOTE]
+> New runner types can only be used once the changes to [`test-infra/.github/scale-config.yml`](https://github.com/pytorch/test-infra/blob/main/.github/scale-config.yml) have made their way into the default branch
 
 ### Testing [pytorch/builder](https://github.com/pytorch/builder) changes
 
