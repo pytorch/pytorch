@@ -588,7 +588,7 @@ class FunctionalCallableWithEpilogue:
         # Inlining has the benefit of allowing easiser fusion inside subgraph.
         # Though the epilogue graph contains copy_, it is OK because inductor can handle it
         # and this is also how we have been supporting top-level graph input mutation.
-        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+        return torch.func.functionalize(self.orig_callable)(*args, **kwargs)
 
     def __hash__(self):
         return id(self.orig_callable)

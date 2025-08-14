@@ -1369,8 +1369,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
-            supports_input_mutation=False,
-            supports_aliasing=False,
+            supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
         )
         validate_subgraph_output_types(body_r)
 
