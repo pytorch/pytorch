@@ -2182,8 +2182,7 @@ class CppKernel(Kernel):
         # Note: using helper has non-negligible impact on performance
 
         if reduction_type == "welford_reduce":
-            # return not reduction_size.is_number or reduction_size > 4096
-            return False
+            return not reduction_size.is_number or reduction_size > 512
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
