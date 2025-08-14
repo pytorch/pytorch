@@ -326,6 +326,52 @@ class TestDynamismExpression(TestCase):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_no_grad_param_inplace(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.ones(4, 4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.parameter.div_(2)
+                return x + self.parameter
+
+        foo_ep = Foo()
+        foo_eager = Foo()
+        ep = export(foo_ep, (torch.rand(4, 4),)).run_decompositions()
+        val = ep.graph_signature.parameters_to_mutate
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_parameter : [num_users=1] = placeholder[target=p_parameter]
+    %x : [num_users=1] = placeholder[target=x]
+    %div : [num_users=2] = call_function[target=torch.ops.aten.div.Tensor](args = (%p_parameter, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %div), kwargs = {})
+    return (div, add)""",
+        )
+
+        self.assertTrue("div" in val.keys())
+        self.assertTrue("parameter" in val.values())
+
+        test_inp = torch.rand(4, 4)
+
+        res = foo_eager(test_inp)
+
+        # TODO We almost need to make the param mutation happen outside
+        # of the graph. Or wrap the param mutation in a no_grad HOP. Simply
+        # overriding gm.__call__ doesn't seem to work due to:
+        #   1. graph module does something weird to __call__ so it is not easy to override
+        #   2. We inspect module.forward to bind fake args when retracing
+        with self.assertRaisesRegex(RuntimeError, "leaf"):
+            res_export = ep.module()(torch.rand(4, 4))
+
+        with torch.no_grad():
+            res_export = ep.module()(test_inp)
+
+        self.assertTrue(torch.allclose(res, res_export))
+
     def test_export_slice_unbacked_dim1(self):
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
@@ -3999,6 +4045,17 @@ def forward(self, x):
         ep = export(M(), (torch.ones(3, 3),))
         inp = torch.randn(3, 3)
         self.assertTrue(torch.allclose(ep.module()(inp)[0], inp + 1))
+
+    def test_set_grad_as_side_effect(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                torch._C._set_grad_enabled(False)
+                return x.sum()
+
+        before = torch.is_grad_enabled()
+        ep = torch.export.export(Foo(), (torch.randn(4, 4),))
+        after = torch.is_grad_enabled()
+        self.assertEqual(before, after)
 
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
