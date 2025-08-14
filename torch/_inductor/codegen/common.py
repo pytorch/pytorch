@@ -491,12 +491,12 @@ def init_backend_registration() -> None:
     Register the backend for different devices, including the scheduling
     for kernel code generation and the host side wrapper code generation.
     """
+    from .combined_scheduling import CombinedScheduling
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
-    from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
@@ -519,9 +519,9 @@ def init_backend_registration() -> None:
         )
 
     if get_scheduling_for_device("cuda") is None:
-        # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        # CombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
         cuda_backends = {
-            "triton": CUDACombinedScheduling,
+            "triton": CombinedScheduling,
             "halide": HalideScheduling,
         }
         register_backend_for_device(

@@ -19,7 +19,7 @@ class ROCmCPPScheduling(BaseScheduling):
     """
     Partial Scheduling implementation for ROCm C++ Kernels.
     This class is intended to be used in combination with TritonScheduling,
-    and delegated to by CUDACombinedScheduling.
+    and delegated to by CombinedScheduling.
 
     It handles fusion decisions and ROCm C++ specific template code generation.
     """

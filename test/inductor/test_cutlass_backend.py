@@ -194,7 +194,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
@@ -879,11 +879,11 @@ class TestCutlassBackend(TestCase):
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
-            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
+            counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
             assert mm is not None
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
+            actual_count = counters["inductor"]["cutlass_epilogue_fusion_counter"]
             assert actual_count == expected_fuse_count, (
                 f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
             )
@@ -1871,7 +1871,8 @@ class TestCutlassBackend(TestCase):
             _ = torch.compile(model)(B)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1965,7 +1966,8 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -1996,14 +1998,15 @@ class TestCutlassBackend(TestCase):
             ref_result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 0
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            0,
         )
 
         torch._dynamo.reset()
         result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
             1,
         )
 
@@ -2061,7 +2064,7 @@ class TestCutlassBackend(TestCase):
 
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
-                    "cuda_epilogue_fusion_counter"
+                    "cutlass_epilogue_fusion_counter"
                 ],
                 2 * (i + 1),
             )
@@ -2088,7 +2091,8 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
