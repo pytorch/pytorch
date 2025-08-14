@@ -29,6 +29,7 @@ from torch._dynamo.external_utils import (
     call_accumulate_grad,
     call_backward,
     call_hook,
+    call_input_buffer_accumulate,
     FakeCompiledAutogradEngine,
     unwrap_maybe_dynamic_int,
 )
@@ -776,7 +777,10 @@ class AutogradCompilerInstance:
         old_var_proxy = self.to_proxy(old_var)
         new_var_proxy = self.to_proxy(new_var)
         proxy_out = self.fx_tracer.create_proxy(
-            "call_function", torch.add, args=(old_var_proxy, new_var_proxy), kwargs={}
+            "call_function",
+            call_input_buffer_accumulate,
+            args=(old_var_proxy, new_var_proxy),
+            kwargs={},
         )
         result = self.allocate_dummy()
         self.bind_objects_to_proxies([result], [proxy_out])
