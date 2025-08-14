@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     pipeline,
     PipelineStage,
     Schedule1F1B,
+    ScheduleDualPipeV,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
@@ -106,7 +107,9 @@ class ScheduleTest(MultiProcContinousTest):
         stage_modules = [mod.get_submodule(submod_name) for submod_name in submod_names]
         stages = [
             PipelineStage(stage_module, stage_idx, n_stages, self.device)
-            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+            for stage_module, stage_idx in zip(
+                stage_modules, stage_indices, strict=True
+            )
         ]
         return stages, stage_modules, submod_names
 
@@ -137,7 +140,13 @@ class ScheduleTest(MultiProcContinousTest):
                 raise AssertionError(
                     f"One gradient is None for {param_name}: {grad1} vs {grad2}"
                 )
-            torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
+            try:
+                torch.testing.assert_close(grad1, grad2, rtol=rtol, atol=atol)
+            except AssertionError:
+                print(
+                    f"Numerical issues detected for {param_name}: param grad {grad1} vs ref grad {grad2}"
+                )
+                raise
 
         if submod_names is None:
             # Single stage case - need to detect tracer vs manual pipeline
@@ -682,16 +691,69 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
-        "schedule_class", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
+        "schedule_class",
+        [ScheduleZBVZeroBubble, ScheduleDualPipeV],
+    )
+    @parametrize("use_new_runtime", [False, True])
+    def test_v_shape_schedules(self, schedule_class, use_new_runtime):
+        # n_stages = 8
+        # rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
+        n_stages = 4
+        rank_stages = {0: [0, 3], 1: [1, 2]}
+        mod, ref_mod, x, target, loss_fn = self._setup_models_and_data(
+            n_layers=n_stages
+        )
+
+        # Run reference
+        ref_out, ref_loss = self._run_reference_model(ref_mod, x, target, loss_fn)
+
+        # Create multi-stage pipeline with custom stage indices
+        num_microbatches = 8
+        stage_indices = rank_stages[self.rank]
+        stages, stage_modules, submod_names = self._create_multi_stage_pipeline(
+            mod, len(stage_indices), n_stages, stage_indices
+        )
+
+        schedule = schedule_class(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
+
+        if schedule_class != ScheduleDualPipeV and use_new_runtime:
+            old_schedule = schedule
+            schedule = _PipelineScheduleRuntime(
+                stages, num_microbatches, loss_fn=loss_fn
+            )
+            schedule._load_actions(old_schedule.pipeline_order)
+
+        # Run pipeline - special case where first and last stage are on rank 0
+        out = None
+        losses = []
+        for _ in range(2):
+            self._zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = schedule.step(x, target=target, losses=losses)
+            else:
+                schedule.step()
+
+        # Verify results (rank 0 has both first and last stages)
+        if self.rank == 0:
+            torch.testing.assert_close(out, ref_out)
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Check gradients using helper method
+        self._check_gradients(stage_modules, ref_mod, submod_names)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize(
+        "schedule_class",
+        [ScheduleVShaped, ScheduleUnbalanced],
     )
     @parametrize("use_new_runtime", [False, True])
     def test_non_symmetric_stage_ids(self, schedule_class, use_new_runtime):
-        if schedule_class is ScheduleZBVZeroBubble:
-            n_stages = 4
-            rank_stages = {0: [0, 3], 1: [1, 2]}
-        else:
-            n_stages = schedule_class.n_stages
-            rank_stages = schedule_class.rank_stages
+        n_stages = schedule_class.n_stages
+        rank_stages = schedule_class.rank_stages
 
         mod, ref_mod, x, target, loss_fn = self._setup_models_and_data(
             n_layers=n_stages
