@@ -1555,7 +1555,7 @@ def get_selected_tests(options) -> list[str]:
     if options.einops:
         selected_tests = list(
             filter(
-                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
                 selected_tests,
             )
         )
@@ -1582,6 +1582,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
             "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise
