@@ -19,11 +19,20 @@ def main(args: list[str]) -> None:
         action="store_true",
         help="get min supported python version",
     )
+    parser.add_argument(
+        "--cuda-arch-list",
+        help="get cuda arch list",
+        type=str,
+        default="",
+    )
+
     options = parser.parse_args(args)
     if options.cuda_stable_version:
         return print(generate_binary_build_matrix.CUDA_STABLE)
     if options.min_python_version:
         return print(generate_binary_build_matrix.FULL_PYTHON_VERSIONS[0])
+    if options.cuda_arch_list != "":
+        return print(generate_binary_build_matrix.CUDA_ARCHES_LIST[options.cuda_arch_list])
 
 
 if __name__ == "__main__":
