@@ -149,6 +149,40 @@ def _process_batched_inputs(
 
 # Creates BatchedTensors for every Tensor in arg that should be batched.
 # Returns the (potentially) batched arguments and the batch_size.
+def _add_batch_dim_in_graph(self, batch_dim, level):
+    """
+    Thin wrapper around torch._C._add_batch_dim that is used to proxy in
+    PT2 export/compile fx graph
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _add_batch_dim_in_graph, (self,), self, batch_dim, level
+        )
+
+    res = _add_batch_dim(self, batch_dim, level)
+    return res
+
+
+def _remove_batch_dim_in_graph(self, level, batch_size, out_dim):
+    """
+    Thin wrapper around torch._C._remove_batch_dim that is used to proxy in
+    PT2 export/compile fx graph
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _remove_batch_dim_in_graph, (self,), self, level, batch_size, out_dim
+        )
+
+    res = _remove_batch_dim(self, level, batch_size, out_dim)
+    return res
 
 
 def _create_batched_inputs(
@@ -156,7 +190,7 @@ def _create_batched_inputs(
 ) -> tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
-        arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
+        arg if in_dim is None else _add_batch_dim_in_graph(arg, in_dim, vmap_level)
         for in_dim, arg in zip(flat_in_dims, flat_args)
     ]
     return tree_unflatten(batched_inputs, args_spec)
@@ -181,7 +215,7 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
             "Did you mean to set out_dims= to None for output?"
         )
 
-    return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+    return _remove_batch_dim_in_graph(batched_output, vmap_level, batch_size, out_dim)
 
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
@@ -266,6 +300,12 @@ VMAP_DECOMPOSITIONS_LIB = None
 # torch.package, Python 3.11, and torch.jit-less environments are unhappy with
 # decompositions. Only load them when needed if possible.
 def lazy_load_decompositions():
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(lazy_load_decompositions, ())
     global DECOMPOSITIONS_LOADED
     if DECOMPOSITIONS_LOADED:
         return
@@ -465,13 +505,47 @@ def _check_randomness_arg(randomness):
         )
 
 
+def _vmap_increment_nesting_in_graph(batch_size, randomness):
+    """
+    Thin wrapper around torch._C._vmap_increment_nesting that is used
+    to proxy in export/compile graph
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _vmap_increment_nesting_in_graph, (batch_size,), batch_size, randomness
+        )
+    res = _vmap_increment_nesting(batch_size, randomness)
+    return res
+
+
+def _vmap_decrement_nesting_in_graph():
+    """
+    Thin wrapper around torch._C._vmap_increment_nesting that is used
+    to proxy in export/compile graph
+    """
+    from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
+
+    mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+
+    if mode:
+        return torch.overrides.handle_torch_function(
+            _vmap_decrement_nesting_in_graph,
+            (),
+        )
+    return _vmap_decrement_nesting()
+
+
 @contextlib.contextmanager
 def vmap_increment_nesting(batch_size, randomness):
     try:
-        vmap_level = _vmap_increment_nesting(batch_size, randomness)
+        vmap_level = _vmap_increment_nesting_in_graph(batch_size, randomness)
         yield vmap_level
     finally:
-        _vmap_decrement_nesting()
+        _vmap_decrement_nesting_in_graph()
 
 
 def _flat_vmap(

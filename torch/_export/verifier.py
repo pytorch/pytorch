@@ -223,6 +223,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
+                torch._functorch.vmap._add_batch_dim_in_graph,
+                torch._functorch.vmap._remove_batch_dim_in_graph,
+                torch._functorch.vmap._vmap_increment_nesting_in_graph,
+                torch._functorch.vmap._vmap_decrement_nesting_in_graph,
+                torch._functorch.vmap.lazy_load_decompositions,
             )
 
             if not isinstance(op, _allowed_op_types()):
