@@ -56,6 +56,7 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
         mod = ModelWithKwargs().to(device)
         batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
@@ -85,11 +86,7 @@ class MicrobatchTests(TestCase):
         ref = mod(x, y)
         out = pipe(x, y)[0]
 
-        rtol, atol = None, None
-        if self.device_type == "xpu":
-            rtol, atol = 1e-4, 1e-4
-
-        torch.testing.assert_close(out, ref, rtol=rtol, atol=atol)
+        torch.testing.assert_close(out, ref)
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
