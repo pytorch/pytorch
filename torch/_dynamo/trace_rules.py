@@ -2962,6 +2962,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu.random.seed_all",
         "torch.xpu.random.seed",
         "torch.xpu.set_stream",
+        "torch.xpu.stream",
         "torch.xpu.synchronize",
     ],
     TorchInGraphFunctionVariable,
