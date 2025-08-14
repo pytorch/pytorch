@@ -25,6 +25,7 @@ from .bytecode_transformation import (
     add_push_null,
     bytecode_from_template,
     create_call_function,
+    create_call_function_ex,
     create_instruction,
     create_jump_absolute,
     create_load_const,
@@ -515,7 +516,7 @@ class ContinueExecutionCache:
                             "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
                         ),
                         # finish the call
-                        create_instruction("CALL_FUNCTION_EX", arg=0),
+                        *create_call_function_ex(0, False),
                     ]
                 )
             else:

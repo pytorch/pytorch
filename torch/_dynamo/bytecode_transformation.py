@@ -412,6 +412,20 @@ def create_call_function(nargs: int, push_null: bool) -> list[Instruction]:
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
+def create_call_function_ex(flags: int, push_null: bool) -> list[Instruction]:
+    if sys.version_info >= (3, 11):
+        output = []
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            # 3.13 swapped NULL and callable
+            # if flags == 1, 2 values popped - otherwise if flags == 0, 1 value
+            rots = flags + 2 if sys.version_info >= (3, 13) else flags + 3
+            output.extend(create_rot_n(rots))
+        output.append(create_instruction("CALL_FUNCTION_EX", arg=flags))
+        return output
+    return [create_instruction("CALL_FUNCTION_EX", arg=flags)]
+
+
 def create_call_method(nargs: int) -> list[Instruction]:
     if sys.version_info >= (3, 12):
         return [create_instruction("CALL", arg=nargs)]

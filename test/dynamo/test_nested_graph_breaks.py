@@ -363,6 +363,31 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 13)
 
+    def test_cells_double_graph_break(self):
+        def f1(x1):
+            cell1 = x1 + 1
+
+            def f2(x2):
+                nonlocal cell1
+                cell1 += 2
+                torch._dynamo.graph_break()
+                torch._dynamo.graph_break()
+                return x2 + cell1
+
+            return f2(x1 + 4), cell1
+
+        def outer(x):
+            return f1(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(outer)
+        x = torch.zeros(3)
+        res = outer(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
     def test_side_effects_cells(self):
         cell1, cell2, cell3, cell4 = (torch.zeros(3),) * 4
 

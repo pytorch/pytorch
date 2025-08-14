@@ -73,6 +73,7 @@ from .bytecode_transformation import (
     cleaned_instructions,
     create_binary_slice,
     create_call_function,
+    create_call_function_ex,
     create_copy,
     create_dup_top,
     create_instruction,
@@ -2440,6 +2441,7 @@ class InstructionTranslatorBase(
         Assumes that the unsupported instruction has already been run.
 
         Expects the stack to be in the state:
+            [frame N cells, ..., frame 1 cells],
             [
                 frame N locals,
                 frame N-1 stack + locals,
@@ -2483,6 +2485,7 @@ class InstructionTranslatorBase(
         )
 
         # current frame state
+        # all cells
         # [
         #   [frame N stack (fixed) + locals]
         #   ...,
@@ -2665,30 +2668,59 @@ class InstructionTranslatorBase(
 
             skip_code(resume_codes[0])
 
-        # load first resume function (to be called this frame)
-        if resume_codes[-1].co_freevars:
-            cg.make_function_with_closure(
-                txes[-1], resume_names[-1], resume_codes[-1], True, 1
-            )
-        else:
-            cg.extend_output(cg.load_function_name(resume_names[-1], True, 1))
+        # load cells as we load resume functions
 
-        # load all other resume functions (to be called later)
-        resume_names.pop()
-        resume_codes.pop()
-        for tx, name, code in zip(txes, resume_names, resume_codes):
+        # load resume functions except the root's
+        cg.extend_output(create_copy(2))
+        for i, (name, code) in enumerate(zip(resume_names, resume_codes)):
+            if i == len(resume_names) - 1:
+                break
+            # stack: cells, frames, *(resume 1, ...), cells
             if code.co_freevars:
-                cg.make_function_with_closure(tx, name, code, False, 0)
+                cg.extend_output(
+                    [
+                        create_dup_top(),
+                        cg.create_load_const(i),
+                        cg.create_binary_subscr(),
+                    ]
+                )
+                cg.make_function_with_closure(name, code)
             else:
                 cg.extend_output(cg.load_function_name(name, False, 0))
+            cg.extend_output(create_swap(2))
         cg.extend_output(
             [
-                create_instruction("BUILD_LIST", arg=len(resume_codes)),
-                *create_swap(2),
+                create_instruction("POP_TOP"),
+                create_instruction("BUILD_LIST", arg=len(resume_codes) - 1),
             ]
         )
 
-        # resume 1 (+ NULL), [resume N, ..., resume 2], frames
+        # stack: cells, frames, [resume 1, ..., resume N - 1]
+        # load root resume function
+        cg.extend_output(create_swap(3))
+        if resume_codes[-1].co_freevars:
+            cg.extend_output(
+                [
+                    cg.create_load_const(-1),
+                    cg.create_binary_subscr(),
+                ]
+            )
+            cg.make_function_with_closure(resume_names[-1], resume_codes[-1])
+            cg.extend_output(
+                [
+                    *create_rot_n(3),
+                ]
+            )
+        else:
+            cg.extend_output(
+                [
+                    create_instruction("POP_TOP"),
+                    *cg.load_function_name(resume_names[-1], False),
+                    *create_rot_n(3),
+                ]
+            )
+
+        # resume 1, [resume N, ..., resume 2], frames
 
         # load top level-frame; final stack state should be:
         # first resume function (+ NULL),
@@ -2729,7 +2761,7 @@ class InstructionTranslatorBase(
         # TOS: [resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(
             [
-                create_instruction("CALL_FUNCTION_EX", arg=0),
+                *create_call_function_ex(0, True),
                 create_instruction("RETURN_VALUE"),
             ]
         )
