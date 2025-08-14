@@ -1051,20 +1051,10 @@ test_libtorch_api() {
     mkdir -p $TEST_REPORTS_DIR
 
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-    "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
   else
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
 
-    # On s390x, pytorch is built without llvm.
-    # Even if it would be built with llvm, llvm currently doesn't support used features on s390x and
-    # test fails with errors like:
-    # JIT session error: Unsupported target machine architecture in ELF object pytorch-jitted-objectbuffer
-    # unknown file: Failure
-    # C++ exception with description "valOrErr INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/torch/csrc/jit/tensorexpr/llvm_jit.h":34, please report a bug to PyTorch. Unexpected failure in LLVM JIT: Failed to materialize symbols: { (main, { func }) }
-    if [[ "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
-    fi
   fi
 
   # quantization is not fully supported on s390x yet
@@ -1692,7 +1682,6 @@ elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
-  install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
