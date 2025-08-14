@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 env:
-  PYTHON_VERSION: "3.8"
+  PYTHON_VERSION: "3.12"
   PYTEST_ADDOPTS: "--capture=no --verbose"
 
 jobs:
