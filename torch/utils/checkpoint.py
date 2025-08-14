@@ -463,8 +463,8 @@ def checkpoint(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. In version 2.5 we will raise an exception "
-            "if use_reentrant is not passed. use_reentrant=False is "
+            "passed explicitly. Starting in PyTorch 2.9, calling checkpoint "
+            "without use_reentrant will raise an exception. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
             "details on the differences between the two variants.",
