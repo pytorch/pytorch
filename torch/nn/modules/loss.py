@@ -1371,7 +1371,7 @@ class LinearCrossEntropyLoss(Module):
         #
         # Argument for LinearCrossEntropyLoss
         #
-        chunking_strategy: str = "none",  # F.CrossEntropyChunkingStrategy.none,
+        chunking_strategy: Optional[str] = None,
         #
         # Arguments for CrossEntropyLoss
         #
@@ -1407,12 +1407,13 @@ class LinearCrossEntropyLoss(Module):
             target,
             self.linear.weight,
             bias=self.linear.bias,
+            cross_entropy_weight=self.cross_entropy.weight,
+            reduce=self.cross_entropy.reduce,
+            size_average=self.cross_entropy.size_average,
             chunking_strategy=self.chunking_strategy,
             ignore_index=self.cross_entropy.ignore_index,
             label_smoothing=self.cross_entropy.label_smoothing,
-            reduce=self.cross_entropy.reduce,
             reduction=self.cross_entropy.reduction,
-            cross_entropy_weight=self.cross_entropy.weight,
         )
 
 

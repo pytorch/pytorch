@@ -3612,33 +3612,38 @@ def linear_cross_entropy(
     input: Tensor,
     target: Tensor,
     linear_weight: Tensor,
-    chunking_strategy: str = CrossEntropyChunkingStrategy.none.value,
-    #
-    # Parameter for F.linear
-    #
     bias: Optional[Tensor] = None,
-    #
-    # Parameters for F.cross_entropy
-    #
     cross_entropy_weight: Optional[Tensor] = None,
+    reduce: Optional[Tensor] = None,
+    size_average: Optional[bool] = None,
+    chunking_strategy: Optional[str] = None,
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    reduce: Optional[Tensor] = None,
     reduction: str = "mean",
-    size_average: Optional[bool] = None,
 ) -> Tensor:
+    def choose_chunking() -> str:
+        return CrossEntropyChunkingStrategy.none
+
+    if chunking_strategy is None:
+        chunking_strategy = choose_chunking().value
+
+    assert isinstance(chunking_strategy, str), (
+        chunking_strategy,
+        type(chunking_strategy),
+    )
     torch._check_with(
         AssertionError,
         hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
         lambda: (
-            "Expected one of "
-            f"{', '.join(CrossEntropyChunkingStrategy)} but got {chunking_strategy=}"
+            "Expected one of"
+            f" {', '.join(i.value for i in CrossEntropyChunkingStrategy)}"
+            f" but got {chunking_strategy=}"
         ),
     )
     torch._check_with(
         NotImplementedError,
-        chunking_strategy == CrossEntropyChunkingStrategy.none,
-        lambda: "{chunking_strategy=} is not yet implemented",
+        chunking_strategy == CrossEntropyChunkingStrategy.none.value,
+        lambda: f"{chunking_strategy=} is not yet implemented",
     )
 
     return cross_entropy(

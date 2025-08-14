@@ -249,6 +249,8 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        # TODO(rec): This should not need to be here.
+        torch.nn.functional.linear_cross_entropy,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
@@ -913,6 +915,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.leaky_relu: lambda input, negative_slope=0.01, inplace=False: -1,
         torch.nn.functional.linear: lambda input, weight, bias=None: -1,
+        # TODO(rec): enable this
+        # torch.nn.functional.linear_cross_entropy: (
+        #     lambda input, target, linear_weight, bias=None, cross_entropy_weight=None, reduce=None, size_average=None, chunking_strategy=None, ignore_index=-100, label_smoothing=0.0, reduction="mean": -1  # noqa: B950
+        # ),
         torch.nn.functional.local_response_norm: lambda input, size, alpha=0.0001, beta=0.75, k=1.0: -1,
         torch.nn.functional.log_softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
         torch.nn.functional.logsigmoid: lambda input: -1,
