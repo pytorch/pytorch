@@ -8781,6 +8781,51 @@ class TestHopSchema(TestCase):
             """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
         )
 
+    def test_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(carry, x):
+            return carry + x, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0) -> (Tensor, Tensor)""",
+        )
+
+    def test_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(carry, x, scale):
+            return carry + x * scale, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(carry1, carry2, x1, x2):
+            return carry1 + x1, carry2 * x2, carry1 - x1, carry2 + x2
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
     def test_while_loop_gen_schema_with_int_carries(self):
         def cond_fn(x, y, z, c):
             return x < y
