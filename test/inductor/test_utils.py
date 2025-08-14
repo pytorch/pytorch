@@ -5,7 +5,9 @@ import unittest
 from sympy import Symbol, sympify
 
 import torch
-from torch._inductor.fx_utils import count_flops_fx, countable_fx
+from torch._dynamo.testing import EagerAndRecordGraphs
+from torch._export.utils import _detect_fake_mode_from_gm
+from torch._inductor.fx_utils import count_flops_fx, countable_fx, FakeTensorUpdater
 from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import (
@@ -202,6 +204,89 @@ class TestUtils(TestCase):
 
 
 instantiate_device_type_tests(TestUtils, globals())
+
+
+class TestFakeTensorUpdater(TestCase):
+    def test_hop_no_subgraph_inputs(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
+
+        a = torch.randn(32)
+
+        fn(a)
+        gm = backend.graphs[0]
+        updater = FakeTensorUpdater(gm)
+
+        # Swap the sum node for a median node.
+        sum_node = gm.graph.find_nodes(op="call_function", target=torch.sum)[0]
+        with gm.graph.inserting_after(sum_node):
+            median_node = gm.graph.call_function(
+                torch.median, sum_node.args, sum_node.kwargs
+            )
+            sum_node.replace_all_uses_with(median_node, lambda n: n != median_node)
+            self.assertNotIn("val", median_node.meta)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        self.assertIn("val", median_node.meta)
+
+    def test_hop_subgraph_inputs(self):
+        @torch.compiler.nested_compile_region
+        def nested_section(a: torch.Tensor) -> torch.Tensor:
+            return torch.sin(a)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            x = nested_section(a)
+            y = nested_section(b)
+            return x + y
+
+        a = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
+        b = torch.randint(0, (1 << 16), (32,), dtype=torch.int32)
+
+        fn(a, b)
+        gm = backend.graphs[0]
+        updater = FakeTensorUpdater(gm)
+
+        # Create some new nodes to shadow the inputs, which won't have FakeTensors yet.
+        new_nodes: list[torch.fx.Node] = []
+        for node in gm.graph.find_nodes(op="placeholder"):
+            with gm.graph.inserting_after(node):
+                add_node = gm.graph.call_function(torch.ops.aten.add.Scalar, (node, 1))
+                node.replace_all_uses_with(add_node, lambda n: n != add_node)
+            self.assertNotIn("val", node.meta)
+            new_nodes.append(add_node)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        for node in new_nodes:
+            self.assertIn("val", node.meta)
+
+        # Try the same thing in one of the subgraphs.
+        new_nodes = []
+        assert isinstance(gm.subgraph_0, torch.fx.GraphModule)
+        for node in gm.subgraph_0.graph.find_nodes(op="placeholder"):
+            with gm.subgraph_0.graph.inserting_after(node):
+                add_node = gm.subgraph_0.graph.call_function(
+                    torch.ops.aten.add.Scalar, (node, 1)
+                )
+                node.replace_all_uses_with(add_node, lambda n: n != add_node)
+            self.assertNotIn("val", node.meta)
+            new_nodes.append(add_node)
+
+        with V.set_fake_mode(_detect_fake_mode_from_gm(gm)):
+            updater.incremental_update()
+
+        for node in new_nodes:
+            self.assertIn("val", node.meta)
+
 
 if __name__ == "__main__":
     run_tests()
