@@ -39,8 +39,10 @@ def local_image_exists(
     except NotFound:
         logger.info("Image %s not found locally...", image_name)
         return False
-    except APIError:
-        logger.warning(
-            "Run into apierror when trying to check docker image using docker client."
+    except APIError as e:
+        logger.error(
+            "APIError when checking Docker image '%s': %s",
+            image_name,
+            e.explanation if hasattr(e, "explanation") else str(e),
         )
         return False
