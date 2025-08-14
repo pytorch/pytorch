@@ -6,9 +6,9 @@ on:
   #
   # Make sure to don't introduce explicit checking out and installing/running
   # untrusted user code into this workflow!
-  pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [main]
+  # pull_request_target:
+  #   types: [opened, synchronize, reopened, labeled, unlabeled]
+  #   branches: [main]
 
   # To check labels on ghstack PRs.
   # Note: as pull_request doesn't trigger on PRs targeting main,
@@ -16,7 +16,7 @@ on:
   # a PR that targets a gh/**/base branch.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [gh/**/base]
+    branches: [main]
 
   workflow_dispatch:
     inputs:
