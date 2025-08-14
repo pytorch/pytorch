@@ -600,19 +600,9 @@ struct PrivatePool {
 
 // Represents a contiguous virtual memory segment mapped for allocation.
 struct SegmentRange {
-  SegmentRange(void* p, size_t s) : ptr_(static_cast<char*>(p)), size_(s) {}
-
-  char* begin() const {
-    return ptr_;
-  }
-
-  char* end() const {
-    return ptr_ + size_;
-  }
-
- private:
-  char* ptr_; // Starting address of the mapped range.
-  size_t size_; // Size in bytes of the mapped range.
+  SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
+  char* ptr; // Starting address of the mapped range.
+  size_t size; // Size in bytes of the mapped range.
 };
 
 // ExpandableSegment traits to map StreamT to its corresponding HandleT for
@@ -670,9 +660,9 @@ struct ExpandableSegment {
 
   // Maps a virtual memory range to physical memory.
   virtual SegmentRange map(SegmentRange range) {
-    auto begin = segmentLeft(range.begin());
-    auto end = segmentRight(range.end());
-    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.begin());
+    auto begin = segmentLeft(range.ptr);
+    auto end = segmentRight(range.ptr + range.size);
+    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
     if (begin == end) {
       return rangeFromHandles(begin, end);
     }
@@ -686,10 +676,10 @@ struct ExpandableSegment {
 
   // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
-    auto begin = segmentRight(range.begin());
-    auto end = segmentLeft(range.end());
+    auto begin = segmentRight(range.ptr);
+    auto end = segmentLeft(range.ptr + range.size);
     if (begin >= end) {
-      return SegmentRange{range.begin(), 0};
+      return SegmentRange{range.ptr, 0};
     }
     unmapHandles(begin, end);
     return rangeFromHandles(begin, end);
@@ -835,7 +825,10 @@ struct AllocParams {
       StreamT stream,
       BlockPoolT* pool,
       size_t alloc_size)
-      : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
+      : search_key(device, stream, size),
+        pool(pool),
+        alloc_size(alloc_size),
+        stat_types(pool->get_stat_types()) {}
 
   c10::DeviceIndex device() const {
     return search_key.device;
@@ -851,8 +844,8 @@ struct AllocParams {
 
   BlockPoolT* pool; // Pointer to the BlockPool managing this allocation
   size_t alloc_size; // Size of the allocation in bytes
+  StatTypes stat_types; // Types of statistics to track for this allocation
   BlockT* block{nullptr}; // Pointer to the allocated block, if found/created
-  StatTypes stat_types{}; // Types of statistics to track for this allocation
   Status status{Status::Ok}; // Status of the allocation attempt
 
  private:
@@ -1290,7 +1283,7 @@ struct CachingDeviceAllocatorImpl {
     return true;
   }
 
-  // Returns the BlockPool (large or small, normal or private) for the given
+  // Returns the BlockPool (large or small, default or private) for the given
   // size and stream.
   BlockPoolT& get_pool(size_t size, StreamT stream) {
     // captures_underway is a conservative guess that the current stream may
@@ -1307,7 +1300,7 @@ struct CachingDeviceAllocatorImpl {
         }
       }
     }
-    // Graph mode isn't underway, so we can use the normal pools.
+    // Graph mode isn't underway, so we can use the default pools.
     return (size <= kSmallSize) ? small_blocks : large_blocks;
   }
 
