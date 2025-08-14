@@ -7024,7 +7024,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             return out
         elif isinstance(out, ir.StorageBox):
             return TensorBox(out)
-        elif isinstance(out, (ir.MultiOutput, ir.ReinterpretView)):
+        elif isinstance(out, ir.MultiOutput):
             return TensorBox.create(out)
         else:
             raise RuntimeError(f"NYI unsupported output type: {type(out)}")
