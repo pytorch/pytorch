@@ -5248,10 +5248,8 @@ xfail_by_backend = {
         "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
         "test_custom_function_error",  # forward AD
         "test_custom_function_save_for_forward",  # forward AD
-        "test_dont_materialize_grads",  # undefined grad
         "test_no_grad_copy",  # setting static member in lifted backward
         "test_no_grad_copy_sparse",  # setting static member in lifted backward
-        "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
         "test_save_output_nr",  # output_nr grad passed as None
         # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
         "test_grad_nonleaf_register_hook",
@@ -5266,7 +5264,6 @@ xfail_by_backend = {
         # Uncategorized
         "test_lobpcg",  # NaNs
         "test_autograd_simple_views_python",  # gradient is None
-        "test_function_returns_undefined_tensor",  # gradient is None
         "test_input_buffer_accum",  # add(sparse, dense)
         "test_return_duplicate",  # batched gradients
         "test_return_duplicate_inplace",  # batched gradients
@@ -5296,6 +5293,7 @@ xfail_by_backend = {
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
         "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
+        "test_autograd_simple_views_python",  # Data-dependent branching
         # Slow tests, these tests are close to CI timeout if we try to torch.compile them
         "test_checkpointing",
         "test_checkpointing_without_reentrant_memory_savings",
