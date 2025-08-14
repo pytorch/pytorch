@@ -77,6 +77,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
     // TODO: use the same allocation for signal pad
     void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
+    TORCH_CHECK(signal_pad_ptr != nullptr, "nvshmem_malloc failed");
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
@@ -339,6 +340,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     initialize_nvshmem_with_store(store, rank, world_size);
     auto ptr = nvshmem_malloc(size);
+    TORCH_CHECK(ptr != nullptr, "nvshmem_malloc failed");
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
