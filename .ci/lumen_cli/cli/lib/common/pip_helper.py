@@ -40,7 +40,11 @@ def pip_install_packages(
 def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=False):
     wheel = first_matching_pkg(pattern)
     target = f"{wheel}[{extras}]" if extras else wheel
+<<<<<<< Updated upstream
     logger.info("Installing %s", target)
+=======
+    logger.info("Installing: %s", target)
+>>>>>>> Stashed changes
     pip_install_packages([target], prefer_uv=pref_uv)
 
 

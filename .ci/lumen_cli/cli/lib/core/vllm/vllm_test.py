@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import re
+
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
 from cli.lib.common.path_helper import copy, remove_dir
