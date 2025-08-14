@@ -158,8 +158,7 @@ function install_130 {
 
   CUDA_VERSION=13.0 bash install_nccl.sh
 
-  # TODO: cuSparseLt-0.8.0.4 is not available for CUDA 13.0.0 yet
-  # CUDA_VERSION=13.0 bash install_cusparselt.sh
+  CUDA_VERSION=13.0 bash install_cusparselt.sh
 
   ldconfig
 }
