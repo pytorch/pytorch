@@ -25,6 +25,7 @@ importlib.import_module("filelock")
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    add_test_failures,
     CommonTemplate,
     copy_tests,
     run_and_get_cpp_code,
@@ -347,7 +348,7 @@ test_failures = {
     "test_rand_like_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
-    "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu", "xpu")),
     "test_slice_mutation2_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
@@ -382,8 +383,9 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
-    **dynamic_shapes_test_failures,
 }
+
+add_test_failures(test_failures, dynamic_shapes_test_failures)
 
 if not TEST_WITH_ROCM:
     test_failures.update(
