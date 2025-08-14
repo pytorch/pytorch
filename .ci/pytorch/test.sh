@@ -1632,7 +1632,14 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     (cd scripts/torch_cli && python -m pip install -e .)
     vllm_commit=$(get_pinned_commit vllm)
-    export TORCH_CUDA_ARCH_LIST="8.0"
+    if [[ "$BUILD_ENVIRONMENT" == *sm80* ]]; then
+      export TORCH_CUDA_ARCH_LIST="8.0"
+    elif [[ "$BUILD_ENVIRONMENT" == *sm90* ]]; then
+      export TORCH_CUDA_ARCH_LIST="9.0"
+    else
+      export TORCH_CUDA_ARCH_LIST="8.9"
+    fi
+    echo $TORCH_CUDA_ARCH_LIST
     bash scripts/torch_cli/cli/lib/vllm/setup_vllm.sh "${vllm_commit}"
     python -m cli.run test external vllm --test-name "$TEST_CONFIG"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
