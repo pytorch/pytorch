@@ -23,6 +23,7 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 try:
@@ -133,17 +134,11 @@ class OpDispatcher:
         kwargs: dict[str, object],
     ) -> object:
         """
-        Main dispatching logic
+        Main dispatching logic.  Follows precedence order:
+        (1) custom_op_handler
+        (2) registered sharding strategy, then rule
+        (3) composite implicit autograd decomposition
         """
-        # operators that does not need to go through sharding propagation
-        if torch._C._dispatch_has_kernel_for_dispatch_key(
-            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-        ):
-            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
-            # so we manually decompose them, here
-            out = op_call.decompose(*args, **kwargs)
-            assert out is not NotImplemented
-            return out
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -151,20 +146,36 @@ class OpDispatcher:
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
         logger.debug("Dispatching op_call: %s", op_info.schema)
 
-        self.sharding_propagator.propagate(op_info)
+        try:
+            self.sharding_propagator.propagate(op_info)
+        except NotImplementedError:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            ):
+                # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+                # so we manually decompose them, here
+                out = op_call.decompose(*args, **kwargs)
+                assert out is not NotImplemented
+                return out
+            else:
+                raise
+
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
-        if mesh.get_coordinate() is not None:
+        participating = mesh.get_coordinate() is not None
+        if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
                 assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.redistribute_schema
+                    op_info,
+                    output_sharding.redistribute_schema,
+                    output_sharding.use_val_from_redistribute_schema,
                 )
 
             local_tensor_args = (
@@ -187,8 +198,19 @@ class OpDispatcher:
                     cast(dtensor.DTensor, args[0]),
                     cast(torch.Tensor, local_tensor_args[0]),
                 )
+
+                # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
+                # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
+                # our RNG manager)
+                maybe_user_generator = op_info.local_kwargs.pop("generator", None)
+                assert maybe_user_generator is None or isinstance(
+                    maybe_user_generator, torch.Generator
+                )
+                # maybe_user_generator = None
                 rng_context = (
-                    random._rng_tracker._distribute_region(first_arg._spec)
+                    random._rng_tracker._distribute_region(
+                        first_arg._spec, generator=maybe_user_generator
+                    )
                     if random._rng_tracker and not first_local_arg.is_meta
                     else contextlib.nullcontext()
                 )
@@ -257,7 +279,20 @@ class OpDispatcher:
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
-                return args[0]
+                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
+                # the inplace argument's tensor meta. Here we choose to special case
+                # this op because as far as I know this is the only inplace op that
+                # has such as behavior. We can extend this special case if necessary.
+                if op_call == aten.squeeze_.dim:
+                    output_spec = output_sharding.output_spec
+                    assert isinstance(output_spec, DTensorSpec)
+                    assert isinstance(args[0], dtensor.DTensor)
+                    args[0]._spec = output_spec
+                    # use return_and_correct_aliasing to match the outer and the inner
+                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
+                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
+                else:
+                    return args[0]
             else:
                 return None
         elif op_info.schema.is_out_variant_op():
@@ -279,12 +314,17 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            if participating and op_info.schema.is_view_op():
+                return return_and_correct_aliasing(op_call, args, kwargs, ret)
+            else:
+                return ret
 
     @staticmethod
     def redistribute_local_args(
         op_info: OpInfo,
         suggested_input_schema: OpSchema,
+        use_val_from_redistribute_schema: bool,
     ) -> None:
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
@@ -307,7 +347,12 @@ class OpDispatcher:
                 else:
                     new_local_args.append(local_tensor)
             else:
-                new_local_args.append(reshard_arg_spec)
+                if use_val_from_redistribute_schema:
+                    # args can be updated for view related ops, we refer to the
+                    # update in redistribute_schema.
+                    new_local_args.append(reshard_arg_spec)
+                else:
+                    new_local_args.append(arg_spec)
 
         op_info.local_args = tuple(new_local_args)
 

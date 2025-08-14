@@ -951,10 +951,14 @@ class TritonOverrides(OpOverrides):
 
         if dtype == torch.bool:
             return f"({x} != 0)"
-        elif dtype == torch.uint8:
-            # to work around llvm uint conversion semantics
-            # that produces 0's for negative values
-            return f"{x}.to(tl.int8).to(tl.uint8)"
+        elif dtype == torch.uint8 and (
+            src_dtype is not None and src_dtype.is_floating_point or src_dtype is None
+        ):
+            # to work around llvm uint conversion semantics that produces 0's for negative
+            # values when converting from floating types.
+            # optimization - if source type is known and it's not a floating type, then
+            # do not apply conversion to the intermediate type.
+            return f"{x}.to(tl.int16).to(tl.uint8)"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
@@ -1997,14 +2001,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def want_no_x_dim(self):
-        if (
+        return (
             self.persistent_reduction
             and len(self.numels) == self.num_reduction_dims + 1
-        ):
-            if self.fixed_config:
-                return self.fixed_config["XBLOCK"] == 1
-            return V.choices.want_no_x_dim(self.features)
-        return False
+            and self.fixed_config
+            and self.fixed_config["XBLOCK"] == 1
+        )
 
     @property
     def assert_function(self) -> str:
@@ -2667,6 +2669,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
 
+    def _combine_masks(self, *variables: Optional[CSEVariable]):
+        masks = None
+        for elem in variables:
+            if elem is None:
+                continue
+            if hasattr(elem, "mask_vars"):
+                if masks is None:
+                    masks = elem.mask_vars
+                else:
+                    masks = masks | elem.mask_vars
+        return masks
+
     def bucketize(
         self,
         values: CSEVariable,
@@ -2715,6 +2729,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
+
+        masks = self._combine_masks(values, boundary_indices, sorter_indices)
+        result.mask_vars = masks  # type: ignore[attr-defined]
 
         return result
 
@@ -3966,8 +3983,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            # Triton will not accept an OrderedSet for autotune_hints
             "grid_type": self._get_grid_type().__name__,
+            # Triton will not accept an OrderedSet for autotune_hints
             "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,

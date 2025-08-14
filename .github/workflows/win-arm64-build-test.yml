@@ -1,0 +1,187 @@
+name: windows-arm64-build-test
+
+on:
+  push:
+    tags:
+      - ciflow/win-arm64/*
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  PYTHON_VERSION: "3.12"
+  PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+  ENABLE_APL: 1
+  ENABLE_OPENBLAS: 0
+  BUILD_TYPE: release
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: "windows-11-arm64-preview"
+    timeout-minutes: 240
+    steps:
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_sscache
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
+
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: pytorch
+          submodules: recursive
+
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+
+      - name: Parse ref
+        id: parse-ref
+        shell: bash
+        run: python pytorch/.github/scripts/parse_ref.py
+
+      - name: Get workflow job id
+        shell: bash
+        id: get-job-id
+        run: |
+          set -eux
+          python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+
+      - name: Bootstrap Libuv
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+
+      - name: Build
+        id: build
+        shell: cmd
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BUILD_WHEEL: 1
+          MAX_JOBS: 8
+          PYTHON_VERSION: "3.12"
+          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          AWS_DEFAULT_REGION: us-east-1
+          USE_CUDA: '0'
+          USE_XPU: '0'
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          cd pytorch
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
+          powershell -ExecutionPolicy Bypass -File ".ci/pytorch/win-arm64-build.ps1"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: torch-wheel-win-arm64-py3-12
+          retention-days: 14
+          if-no-files-found: error
+          path: C:\${{ github.run_id }}\build-results
+
+  test:
+    if: github.repository_owner == 'pytorch'
+    strategy:
+      fail-fast: false
+    runs-on: "windows-11-arm64-preview"
+    needs: build
+    steps:
+      - name: Enable long paths
+        shell: cmd
+        run: |
+          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
+          git config --system core.longpaths true
+
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: pytorch
+          submodules: recursive
+
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+
+      - name: Get workflow job id
+        shell: bash
+        id: get-job-id
+        run: |
+          set -eux
+          python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4.1.7
+        with:
+          name: torch-wheel-win-arm64-py3-12
+          path: C:\${{ github.run_id }}\build-results
+
+      - name: Test
+        id: test
+        shell: cmd
+        env:
+          USE_CUDA: '0'
+          INSTALL_WINDOWS_SDK: 1
+          PYTHON_VERSION: "3.12"
+          VC_PRODUCT: "BuildTools"
+          AWS_DEFAULT_REGION: us-east-1
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
+        run: |
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+          call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
+          set GIT_BASH=C:\Program Files\Git\usr\bin\bash.exe
+          "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"

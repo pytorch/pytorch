@@ -68,6 +68,7 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
+    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -604,7 +605,7 @@ class BaseSchedulerNode:
             out_lines.append(op_info_str)
             if "stack_trace" in o.meta:
                 stack_trace = f"{o.meta['stack_trace']}"
-                stack_trace_last_line = stack_trace.split("|")[-1]
+                stack_trace_last_line = stack_trace.rsplit("|", maxsplit=1)[-1]
                 out_lines.append(
                     "#pragma CMT "
                     + stack_trace_last_line.replace("{", "{{")
@@ -2130,13 +2131,20 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
+
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
+            with dynamo_timed(
+                "Scheduler.create_combo_kernel_nodes",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                self.create_combo_kernel_nodes(num_ck_nodes=None)
 
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
@@ -2151,14 +2159,38 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            from torch._logging import trace_structured
+
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "scheduler_nodes_before_comm_overlap",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n\n".join(
+                    [
+                        f"snode[{i}]"
+                        + n.debug_str()
+                        + f" buffer_names:{n.get_buffer_names()}"
+                        for i, n in enumerate(self.nodes)
+                    ]
+                ),
+            )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
-        if torch._inductor.config.graph_partition:
+        if (
+            torch._inductor.config.graph_partition
+            and torch._inductor.config.triton.cudagraphs
+        ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
 
         self.compute_last_usage()
+
+        if torch._inductor.config.test_configs.track_memory_lifecycle:
+            self.insert_memory_check_nodes()
+
         log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
@@ -2364,12 +2396,11 @@ class Scheduler:
                     for fs in s.free_symbols:
                         unbacked_symbol_to_origin_node[fs] = None
 
+        has_non_input_unbacked_defs = False
         for node in self.nodes:
-            log.debug("scheduling %s", node.node)
-
+            assert node.node is not None
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            assert node.node is not None
             unbacked_symbol_defs = sorted(
                 node.node.get_unbacked_symbol_defs(), key=lambda x: x.name
             )
@@ -2378,20 +2409,28 @@ class Scheduler:
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
+                has_non_input_unbacked_defs = True
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
-            unbacked_symbol_uses = sorted(
-                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
-            )
-            # if a kernel takes unbacked symints, register dependencies
-            for s in unbacked_symbol_uses:
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node}"
+        for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
+            if has_non_input_unbacked_defs:
+                assert node.node is not None
+
+                unbacked_symbol_uses = sorted(
+                    node.node.get_free_symbol_uses(unbacked_only=True),
+                    key=lambda x: x.name,
                 )
-                if (r := unbacked_symbol_to_origin_node[s]) is not None:
-                    for buf in self.name_to_node[r].get_outputs():
-                        node.add_fake_dep(StarDep(buf.get_name()))
+                # if a kernel takes unbacked symints, register dependencies
+                for s in unbacked_symbol_uses:
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node}"
+                    )
+                    if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                        for buf in self.name_to_node[r].get_outputs():
+                            node.add_fake_dep(StarDep(buf.get_name()))
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2446,17 +2485,20 @@ class Scheduler:
             add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure unbacked symints aren't dead-code-eliminated
-        for out in V.graph.graph_outputs:
-            for s in out.get_free_symbol_uses(unbacked_only=True):
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                )
-                if r := unbacked_symbol_to_origin_node[s]:
-                    for buf_name in self.name_to_node[r].get_buffer_names():
-                        log.debug(
-                            "scheduling output %s for unbacked symint %s", buf_name, s
-                        )
-                        add_user(buf_name, OutputNode(StarDep(buf_name)))
+        if has_non_input_unbacked_defs:
+            for out in V.graph.graph_outputs:
+                for s in out.get_free_symbol_uses(unbacked_only=True):
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                    )
+                    if r := unbacked_symbol_to_origin_node[s]:
+                        for buf_name in self.name_to_node[r].get_buffer_names():
+                            log.debug(
+                                "scheduling output %s for unbacked symint %s",
+                                buf_name,
+                                s,
+                            )
+                            add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -2493,6 +2535,83 @@ class Scheduler:
         str = logbuf.getrawvalue().rstrip()
         compute_dependencies_log.debug("BUFFER USER LIST\n")
         compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", str)
+
+    def insert_memory_check_nodes(self) -> None:
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            compute_memory_timeline,
+            FreeableInputBuffer,
+            get_freeable_input_buf,
+        )
+
+        graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
+        name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = (
+            get_freeable_input_buf(self.nodes, graph_inputs)
+        )
+
+        if not torch._inductor.config.reorder_for_peak_memory:
+            assign_memory_planning_info_for_scheduler_buffers(
+                self.nodes, self.name_to_buf
+            )
+
+        graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+        buf_info_list, _ = compute_memory_timeline(
+            self.nodes,
+            name_to_freeable_input_buf,
+            graph_outputs,
+        )
+
+        step_allocs_deallocs: list[tuple[list[str], list[str]]] = [
+            ([], []) for _ in range(len(self.nodes))
+        ]
+        for buf_info in buf_info_list:
+            # Skip zero-size buffers
+            if buf_info.size_alloc == 0 and buf_info.size_free == 0:
+                continue
+
+            buf_name = buf_info.buffer.get_name()
+
+            step_allocs_deallocs[buf_info.start_step][0].append(buf_name)
+            step_allocs_deallocs[buf_info.end_step][1].append(buf_name)
+
+        from torch._inductor.runtime.debug_utils import register_check_mem_op
+
+        register_check_mem_op()
+
+        def construct_mem_check_node(
+            step_idx: int, is_final_step: bool
+        ) -> ExternKernelSchedulerNode:
+            expected_newly_alive = step_allocs_deallocs[step_idx][0]
+            expected_newly_dead = step_allocs_deallocs[step_idx][1]
+
+            nontensor_args = [expected_newly_alive, expected_newly_dead, is_final_step]
+
+            node = ir.MemoryCheckKernel(
+                layout=NoneLayout(device=torch.device("cpu")),
+                kernel=torch.ops._inductor_debug.check_memory_step.default,
+                tensor_args=[],
+                nontensor_args=nontensor_args,
+                unflatten_args=lambda tensor_args, constant_args: (
+                    tensor_args,
+                    {
+                        "alive": constant_args[0],
+                        "dead": constant_args[1],
+                        "is_final_step": constant_args[2],
+                    },
+                ),
+            )
+            node.operation_name = f"mem_check_{self.nodes[step_idx].get_name()}"
+            return ExternKernelSchedulerNode(self, node)
+
+        new_nodes = []
+
+        for i, node in enumerate(self.nodes):
+            new_nodes.append(node)
+            new_nodes.append(
+                construct_mem_check_node(i, is_final_step=(i == len(self.nodes) - 1))
+            )
+
+        self.nodes = new_nodes
 
     def dead_node_elimination(self) -> None:
         """
@@ -3919,7 +4038,7 @@ class Scheduler:
             if remaining:
                 for rd in remaining:
                     if self.fusable_read_and_write(rd, cd):
-                        remaining.remove(rd)
+                        remaining.remove(rd)  # noqa: B909
 
         remaining_deps = OrderedSet(
             dep.name
@@ -4202,27 +4321,48 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(self, node: BaseSchedulerNode) -> bool:
+    def should_partition(
+        self, node: BaseSchedulerNode, should_log: bool = False
+    ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # When not using cudagraphs, keep all kernels in the `call` function
+        # instead of graph partition functions, since graph partition only brings
+        # benefit to cudagraph
+        if not torch._inductor.config.triton.cudagraphs:
+            return True
+
+        # avoid duplicating logs when should_partition is called multiple times
+        # on the same node
+        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
+            return
+
+        log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
+
         if isinstance(node, FusedSchedulerNode):
             return any(self.should_partition(snode) for snode in node.snodes)
 
-        if not node.is_gpu():
-            return True
+        assert node.node is not None
 
-        if node.node is None:
+        if not node.is_gpu():
+            log_partition_reason("non gpu ops", node=node)
+
             return True
 
         if isinstance(node.node, ir.DeviceCopy):
+            log_partition_reason("DeviceCopy ops", node=node)
             return True
 
         if isinstance(node.node, ir.Conditional):
+            log_partition_reason("Conditional ops", node=node)
             return True
 
         if getattr(node.node, "unbacked_bindings", None):
+            log_partition_reason("unbacked binding ops", node=node)
             return True
 
         if is_cudagraph_unsafe_op(node.node):
+            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
             return True
 
         return False
@@ -4692,7 +4832,7 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node, should_log=True)
             if cur_partition and skip_cudagraph != should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
@@ -4769,6 +4909,10 @@ class Scheduler:
         each function.
         """
         partitions, signatures = self.graph_partition()
+
+        if len(partitions) > 1:
+            msg = f"cudagraph partition into {len(partitions)} partitions"
+            maybe_log_cudagraph_partition(msg=msg, prefix="")
 
         for partition, signature in zip(partitions, signatures):
             assert len(partition) >= 1, (

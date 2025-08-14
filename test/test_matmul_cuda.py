@@ -27,7 +27,9 @@ from torch.testing._internal.common_cuda import (
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
+    IS_SM90,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -542,7 +544,7 @@ class TestMatmulCuda(TestCase):
             else:
                 B = torch.randn(k, n_align, device=device, dtype=dtype_AB).t()[:n, :]
         elif op == "2d/3d":
-            n, k = 7, 13
+            n, k = 7, 259  # k is larger here, to validate iterating over k tiles on an op
             n_align = (n + align - 1) // align * align
             k_align = (k + align - 1) // align * align
             if a_row_major:
@@ -767,6 +769,7 @@ class TestMatmulCuda(TestCase):
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ devices"
+f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 
 # avoid division by zero when calculating scale
@@ -785,7 +788,7 @@ def amax_to_scale(
     if float8_dtype == e4m3_type:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     elif float8_dtype == e5m2_type:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
@@ -806,10 +809,35 @@ def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
 
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
+def tensor_to_scale_block(
+    x: torch.Tensor,
+    float8_dtype: torch.dtype,
+    block_outer: int,
+    block_inner: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
+    amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
+    scale = torch.finfo(float8_dtype).max / amax
+    x = x.mul(scale).to(float8_dtype)
+    x = x.flatten(2, 3).flatten(0, 1)
+    scale = scale.flatten(2, 3).flatten(0, 1)
+    return x, scale
+
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
+    out_fp32 = torch.mm(x_fp32, y_fp32)
+
+    return out_fp32.to(out_dtype)
+
+def mm_float8_emulated_block(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
+    x = x.unflatten(1, (x_scale.shape[1], -1)).unflatten(0, (x_scale.shape[0], -1))
+    y = y.unflatten(1, (y_scale.shape[1], -1)).unflatten(0, (y_scale.shape[0], -1))
+    x_fp32 = x.to(torch.float) / x_scale[:, None, :, None]
+    y_fp32 = y.to(torch.float) / y_scale[:, None, :, None]
+    x_fp32 = x_fp32.flatten(2, 3).flatten(0, 1)
+    y_fp32 = y_fp32.flatten(2, 3).flatten(0, 1)
     out_fp32 = torch.mm(x_fp32, y_fp32)
 
     return out_fp32.to(out_dtype)
@@ -1237,11 +1265,7 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1, 1) and scale_b.size()=(1, 2)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1252,11 +1276,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                " For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1024, 1) and scale_b.size()=(1, 2049)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1266,22 +1286,18 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape("For non-TensorWise scaling, scale tensors must be 2-dimensional"),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, N), device="cuda"),
+                scale_b=torch.ones((N, 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "Both scale_a and scale_b must be contiguous for RowWise scaling."
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1345,6 +1361,58 @@ class TestFP8Matmul(TestCase):
             atol, rtol = 2e-3, 2e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @parametrize("output_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
+    def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block):
+        torch.manual_seed(42)
+
+        x = torch.randn(256, 512, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(768, 512, device="cuda", dtype=output_dtype).pow(3)
+
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+
+        # 1x128 blocks need scales to be outer-dim-major
+        if lhs_block == 1:
+            x_scales = x_scales.t().contiguous().t()
+        if rhs_block == 1:
+            y_scales = y_scales.t().contiguous().t()
+
+        # Calculate actual F8 mm
+        out_scaled_mm = mm_float8(
+            x_fp8, y_fp8.t(), a_scale=x_scales, b_scale=y_scales.t(), output_dtype=output_dtype
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated = mm_float8_emulated_block(
+            x_fp8, x_scales, y_fp8.t(), y_scales.t(), output_dtype
+        )
+
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            out_scaled_mm.flatten().float(), out_emulated.flatten().float(), dim=0
+        )
+        self.assertGreaterEqual(float(cosine_sim), 0.999)
+
+        if output_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 6e-1, 7e-2
+        else:
+            atol, rtol = 7e-1, 2e-3
+
+        self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+        # One last check against the full-precision reference, to ensure we
+        # didn't mess up the scaling itself and made the test trivial.
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            out_scaled_mm.flatten().float(), (x @ y.t()).flatten().float(), dim=0
+        )
+        self.assertGreaterEqual(float(cosine_sim), 0.999)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
@@ -1424,8 +1492,16 @@ class TestFP8Matmul(TestCase):
                 ]
 
                 self.assertEqual(no_carveout, no_carveout_again)
-                self.assertNotEqual(no_carveout, carveout_66)
-                self.assertNotEqual(carveout_66, carveout_0)
+                capability = torch.cuda.get_device_capability()
+                if capability == (10, 0):
+                    # expected failure
+                    # CUTLASS only supports SM carveout via green contexts on SM100
+                    self.assertEqual(no_carveout, carveout_66)
+                    self.assertEqual(carveout_66, carveout_0)
+                else:
+                    # correct behavior
+                    self.assertNotEqual(no_carveout, carveout_66)
+                    self.assertNotEqual(carveout_66, carveout_0)
 
     def test_pack_uint4(self):
         """
@@ -1771,17 +1847,16 @@ class TestFP8Matmul(TestCase):
     # _scaled_mm() already has more combinations of parameters than
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
-
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
-        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
-        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
+        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
+        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
@@ -1800,17 +1875,17 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
-        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
+        a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         for check_zero_size in (True, False):
@@ -1822,7 +1897,6 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
             scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
-
             f = torch._scaled_grouped_mm
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                     out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
@@ -1838,17 +1912,17 @@ class TestFP8Matmul(TestCase):
                 self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
-        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
@@ -1861,17 +1935,17 @@ class TestFP8Matmul(TestCase):
         self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
-    @parametrize("strided", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided):
         device = "cuda"
+        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
         s_int = int(strided)
-        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
-        b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
         scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
