@@ -8656,38 +8656,38 @@ class WhileLoop(ExternKernel):
         )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
-        real_outputs = {
-            idx: out
-            for idx, out in enumerate(body_outputs)
-            if idx not in mutated_idx_set
-        }
-        real_outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                while_loop,
-                [(list, idx)],
-            )
-            for idx, output in real_outputs.items()
-        ]
-        while_loop.outputs = real_outputs
-        while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[attr-defined, union-attr]
-            for inp in mutated_inputs
-        ]
 
-        outputs_iter = iter(real_outputs)
+        # Create all outputs first
         mutated_inputs_iter = iter(mutated_inputs)
-        all_outputs = [
-            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
-            for idx in range(len(body_outputs))
-        ]
+        all_outputs = []
+        while_loop.outputs = []
+        while_loop.mutation_outputs = []
+
+        for idx, output in enumerate(body_outputs):
+            if idx in mutated_idx_set:
+                assert idx < len(carried_inputs), "only carries can be mutated."
+                # Create MutationOutput for mutated inputs
+                mutated_input = next(mutated_inputs_iter)
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
+                all_outputs.append(mutated_input)
+            else:
+                # Create MultiOutput for regular outputs
+                multi_out = MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    while_loop,
+                    [(list, idx)],
+                )
+                while_loop.outputs.append(multi_out)
+                all_outputs.append(multi_out)
+
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
