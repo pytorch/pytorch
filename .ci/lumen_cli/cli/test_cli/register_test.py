@@ -2,7 +2,7 @@ import argparse
 import logging
 
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
-from cli.lib.core.vllm import VllmTestRunner
+from cli.lib.core.vllm.vllm_test import VllmTestRunner
 
 
 logger = logging.getLogger(__name__)

@@ -1,11 +1,13 @@
 import logging
 import os
+import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
+import re
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.envs_helper import env_path_field, env_str_field, get_env
 from cli.lib.common.path_helper import copy, remove_dir
@@ -16,14 +18,7 @@ from cli.lib.common.pip_helper import (
     run_python,
 )
 from cli.lib.common.utils import run_command, working_directory
-from cli.lib.core.vllm.lib import (
-    check_versions,
-    clone_vllm,
-    preprocess_test_in,
-    run_test_plan,
-    sample_vllm_test_library,
-    validate_cuda,
-)
+from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_library
 
 
 logger = logging.getLogger(__name__)
@@ -197,3 +192,60 @@ class VllmTestRunner(BaseRunner):
             raise ValueError(
                 "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
             )
+
+
+def preprocess_test_in(
+    target_file: str = "requirements/test.in", additional_packages: Iterable[str] = ()
+):
+    """
+    This modifies the target_file file in place in vllm work directory.
+    It removes torch and unwanted packages in target_file and replace with local torch whls
+    package  with format "$WHEEL_PACKAGE_NAME @ file://<LOCAL_PATH>"
+    """
+    additional_package_to_move = list(additional_packages or ())
+    pkgs_to_remove = [
+        "torch",
+        "torchvision",
+        "torchaudio",
+        "xformers",
+        "mamba_ssm",
+    ] + additional_package_to_move
+    # Read current requirements
+    target_path = Path(target_file)
+    lines = target_path.read_text().splitlines()
+
+    # Remove lines starting with the package names (==, @, >=) — case-insensitive
+    pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
+    kept_lines = [line for line in lines if not pattern.match(line)]
+
+    # Get local installed torch/vision/audio from pip freeze
+    # This is hacky, but it works
+    pip_freeze = subprocess.check_output(["pip", "freeze"], text=True)
+    header_lines = [
+        line
+        for line in pip_freeze.splitlines()
+        if re.match(
+            r"^(torch|torchvision|torchaudio)\s*@\s*file://", line, re.IGNORECASE
+        )
+    ]
+
+    # Write back: header_lines + blank + kept_lines
+    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    target_path.write_text(out)
+    logger.info("[INFO] Updated %s", target_file)
+
+
+def validate_cuda(value: str) -> bool:
+    VALID_VALUES = {"8.0", "8.9", "9.0"}
+    return all(v in VALID_VALUES for v in value.split())
+
+
+def check_versions():
+    """
+    check installed packages version
+    """
+    logger.info("Double check installed packages")
+    patterns = ["torch", "xformers", "torchvision", "torchaudio", "vllm"]
+    for pkg in patterns:
+        pkg_exists(pkg)
+    logger.info("Done. checked installed packages")
