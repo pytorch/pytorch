@@ -402,6 +402,15 @@ AOTITorchError aoti_torch_is_contiguous(
   });
 }
 
+AOTITorchError aoti_torch_is_defined(
+    AtenTensorHandle tensor,
+    bool* ret_is_defined) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_defined = t->defined();
+  });
+}
+
 AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,
     AtenTensorHandle* new_handle) {
@@ -1204,8 +1213,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   if (msg) {
     std::cout << "  " << msg;
   }
-  std::cout << "  "
-            << "]:" << '\n';
+  std::cout << "  " << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
