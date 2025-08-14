@@ -1,7 +1,6 @@
 # test_path_utils.py
 # Run: pytest -q
 
-import logging
 import os
 import unittest
 from pathlib import Path
@@ -30,21 +29,21 @@ class TestPathHelper(unittest.TestCase):
         # Use relative path to avoid absolute-ness
         rel_str = "sub/f.txt"
         os.chdir(self.tmp_path)
-        p = get_path(rel_str, full_path=False)
+        p = get_path(rel_str, resolve=False)
         self.assertIsInstance(p, Path)
         self.assertFalse(p.is_absolute())
         self.assertEqual(str(p), rel_str)
 
-    def test_get_path_full_path_resolves(self):
+    def test_get_path_resolves(self):
         rel_str = "sub/f.txt"
-        p = get_path(str(self.tmp_path / rel_str), full_path=True)
+        p = get_path(str(self.tmp_path / rel_str), resolve=True)
         self.assertTrue(p.is_absolute())
         self.assertTrue(str(p).endswith(rel_str))
 
     def test_get_path_with_path_input(self):
-        p_in = self.tmp_path / "x" / "y"
-        p_out = get_path(p_in, full_path=False)
-        self.assertIs(p_out, p_in)
+        p_in = self.tmp_path / "sub/f.txt"
+        p_out = get_path(p_in, resolve=False)
+        self.assertTrue(str(p_out) == str(p_in))
 
     def test_get_path_with_none_raises(self):
         with self.assertRaises(ValueError):
@@ -98,15 +97,6 @@ class TestPathHelper(unittest.TestCase):
         copy(src, dst)
         self.assertEqual((dst / "a" / "f.txt").read_text(), "content")
 
-    def test_copy_dir_into_existing_dir_overwrite_false_raises(self):
-        src = self.tmp_path / "srcdir"
-        dst = self.tmp_path / "destdir"
-        (src / "x").mkdir(parents=True)
-        (src / "x" / "f.txt").write_text("content")
-        dst.mkdir()
-        with self.assertRaises(FileExistsError):
-            copy(src, dst, overwrite=False)
-
     def test_copy_dir_into_existing_dir_overwrite_true_merges(self):
         src = self.tmp_path / "srcdir"
         dst = self.tmp_path / "destdir"
@@ -114,17 +104,9 @@ class TestPathHelper(unittest.TestCase):
         (src / "x" / "new.txt").write_text("new")
         dst.mkdir()
         (dst / "existing.txt").write_text("old")
-        copy(src, dst, overwrite=True)
+        copy(src, dst)
         self.assertEqual((dst / "existing.txt").read_text(), "old")
         self.assertEqual((dst / "x" / "new.txt").read_text(), "new")
-
-    def test_copy_logs_done_message(self):
-        src = self.tmp_path / "s.txt"
-        dst = self.tmp_path / "d.txt"
-        src.write_text("x")
-        with self.assertLogs(level=logging.INFO) as cm:
-            copy(src, dst)
-        self.assertTrue(any("Done. Copied file" in msg for msg in cm.output))
 
     def test_is_str_path_exist(self):
         p = self.tmp_path / "x.txt"

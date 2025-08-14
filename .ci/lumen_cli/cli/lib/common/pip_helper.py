@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterable
 from typing import Optional, Union
 
-from cli.lib.common.utils import run_cmd
+from cli.lib.common.utils import run_command
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def pip_install_packages(
     cmd += list(packages)
 
     logger.info("pip installing packages: %s", " ".join(map(shlex.quote, cmd)))
-    run_cmd(" ".join(map(shlex.quote, cmd)), env=env)
+    run_command(" ".join(map(shlex.quote, cmd)), env=env)
     logger.info("Done installing packages")
 
 
@@ -66,4 +66,4 @@ def run_python(args: Union[str, list[str]], env=None):
     if isinstance(args, str):
         args = shlex.split(args)
     cmd = [sys.executable] + args
-    run_cmd(" ".join(map(shlex.quote, cmd)), env=env)
+    run_command(" ".join(map(shlex.quote, cmd)), env=env)
