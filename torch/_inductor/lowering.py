@@ -6841,7 +6841,9 @@ def sym_size(a, dim):
     # int, but you KNOW that int must always be a constant,
     # then you do not need trace that call at all (and just
     # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6849,7 +6851,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
