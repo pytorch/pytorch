@@ -311,7 +311,7 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     if maybe_guard_or_false(a.numel() < 2):
         return True
 
-    return check_contiguous_sizes_strides(a.shape, a.stride())
+    return check_contiguous_sizes_strides(a.shape, a.stride(), false_if_dde=false_if_dde)
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
