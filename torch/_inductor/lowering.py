@@ -3369,6 +3369,18 @@ def empty_strided(
     return pointwise
 
 
+@register_lowering(torch.ops.aten._assert_async.msg, type_promotion_kind=None)
+def lower_assert_async_msg(cond, msg):
+    V.ops.device_assert(cond, msg)
+
+
+@register_lowering(
+    torch.ops.aten._functional_assert_async.msg, type_promotion_kind=None
+)
+def lower_functional_assert_async_msg(cond, msg):
+    V.ops.device_assert(cond, msg)
+
+
 @register_lowering(aten.new_empty_strided)
 def new_empty_strided(
     x, size, stride, *, dtype=None, layout=None, device=None, pin_memory=None

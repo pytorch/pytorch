@@ -706,6 +706,9 @@ class OpsHandler(Generic[T]):
         """This is a fake op used in analysis but not codegen"""
         raise NotImplementedError
 
+    def device_assert(self, cond: T, msg: Optional[str] = None) -> None:
+        raise NotImplementedError
+
 
 _ignore_op_re = re.compile(r"_.*|paren").fullmatch
 
@@ -932,6 +935,17 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     @staticmethod
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
+
+    def device_assert(self, cond, msg: Optional[str] = None) -> None:
+        from torch._inductor import ir
+
+        from .virtualized import V
+
+        dev = getattr(V.graph, "device", None) or torch.device("cpu")
+        msg = msg or ""
+        device_assert = ir.DeviceAssert(cond, msg, dev)
+        V.graph.register_buffer(device_assert, set_name=True)
+        V.graph.register_operation(device_assert)
 
 
 class KernelFormatterHandler(DefaultHandler):
