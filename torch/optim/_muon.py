@@ -195,7 +195,7 @@ class Muon(Optimizer):
 
 
 Muon.__doc__ = (
-    r"""Implements Muon algoritm.
+    r"""Implements Muon algorithm.
 
     .. math::
        \begin{aligned}
@@ -235,8 +235,8 @@ Muon.__doc__ = (
     Args:
         {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3).
-        weight_decay (float, optional): weight decay (L2 penalty). According to Moonshot's scaling law experiments, 
-            weight decay addresses the issue that model weight grew too large over time and demonstrate 
+        weight_decay (float, optional): weight decay (L2 penalty). According to Moonshot's scaling law experiments,
+            weight decay addresses the issue that model weight grew too large over time and demonstrate
             better scalability.  (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
         nesterov (bool, optional): enables Nesterov momentum. Only applicable
