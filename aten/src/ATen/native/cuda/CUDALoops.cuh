@@ -693,7 +693,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
           *out1 = f(inp1_0, inp1_1);
           *out2 = f(inp2_0, inp2_1);
           *out3 = f(inp3_0, inp3_1);
-	} else {
+        } else {
           auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
           auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
           auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
@@ -746,7 +746,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
           *out5 = f(inp5_0, inp5_1);
           *out6 = f(inp6_0, inp6_1);
           *out7 = f(inp7_0, inp7_1);
-	} else {
+        } else {
           auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
           auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
           auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
