@@ -3499,18 +3499,17 @@ Example::
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupXCCL>(
           module, "ProcessGroupXCCL", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Store>& store,
-                     int rank,
-                     int size,
-                     c10::intrusive_ptr<::c10d::ProcessGroupXCCL::Options> options) {
-                    // gil_scoped_release is not safe as a call_guard in init.
-                    // https://github.com/pybind/pybind11/issues/5473
-                    py::gil_scoped_release nogil{};
-
-                    return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
-                        store, rank, size, std::move(options));
-                  }),
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          c10::intrusive_ptr<::c10d::ProcessGroupXCCL::Options>
+                              options) {
+                // gil_scoped_release is not safe as a call_guard in init.
+                // https://github.com/pybind/pybind11/issues/5473
+                py::gil_scoped_release nogil{};
+                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
+                    store, rank, size, std::move(options));
+              }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
