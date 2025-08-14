@@ -154,13 +154,51 @@ setup_ccache() {
         ln -sf "${ccache_path}" "${CCACHE_DIR}/${compiler}"
     done
 
-    # Special handling for nvcc: create wrapper but move it outside PATH
-    # This prevents CMake CUDA detection issues while still enabling caching
-    ln -sf "${ccache_path}" "${CCACHE_DIR}/nvcc"
-    mv "${CCACHE_DIR}/nvcc" "${CCACHE_LIB_DIR}/"
+    # Special handling for nvcc: create a wrapper script that handles both
+    # CMake detection and ccache functionality
+    cat > "${CCACHE_DIR}/nvcc" << 'EOF'
+#!/bin/bash
+# Smart nvcc wrapper for CMake detection and ccache
 
-    # Set CUDA_NVCC_EXECUTABLE so CMake uses our cached nvcc
-    export CUDA_NVCC_EXECUTABLE="${CCACHE_LIB_DIR}/nvcc"
+# Find the real nvcc (avoid recursion)
+real_nvcc=""
+for path in $(echo "$PATH" | tr ':' '\n'); do
+    if [[ "$path" != "$(dirname "$0")" ]] && [[ -x "$path/nvcc" ]]; then
+        real_nvcc="$path/nvcc"
+        break
+    fi
+done
+
+if [[ -z "$real_nvcc" ]]; then
+    # Fallback: common CUDA installation paths
+    for cuda_path in /usr/local/cuda/bin/nvcc /opt/cuda/bin/nvcc /usr/bin/nvcc; do
+        if [[ -x "$cuda_path" ]]; then
+            real_nvcc="$cuda_path"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$real_nvcc" ]]; then
+    echo "Error: Could not find real nvcc executable" >&2
+    exit 1
+fi
+
+# CMake detection calls that need to bypass ccache
+# These include version checks, capability queries, and diagnostic commands
+if [[ "$*" =~ (--version|-V|--help|-h|--dryrun) ]] || \
+   [[ "$*" =~ __cmake_determine_cuda ]] || \
+   [[ "$*" =~ --list-gpu-arch ]] || \
+   [[ "$*" =~ --list-gpu-code ]] || \
+   [[ "$1" == "-v" && "$#" -le 2 ]]; then
+    exec "$real_nvcc" "$@"
+fi
+
+# For actual compilation, use ccache
+exec ccache "$real_nvcc" "$@"
+EOF
+    chmod +x "${CCACHE_DIR}/nvcc"
+
     export PATH="${CCACHE_DIR}:${PATH}"
 }
 
