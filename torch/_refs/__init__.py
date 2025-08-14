@@ -396,7 +396,7 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    for arg_idx, shape in enumerate(shapes):
+    for shape in shapes:
         if not isinstance(shape, Sequence):
             raise RuntimeError(
                 "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
