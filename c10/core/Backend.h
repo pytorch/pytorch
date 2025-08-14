@@ -241,10 +241,11 @@ inline DeviceType backendToDeviceType(Backend b) {
     case Backend::SparseCsrCUDA:
     case Backend::HIP:
     case Backend::SparseHIP:
-    //case Backend::QuantizedHIP:
     case Backend::SparseCsrHIP:
       return DeviceType::CUDA;
     case Backend::VE:
+    case Backend::SparseVE:
+    case Backend::SparseCsrVE:
       return DeviceType::VE;
     case Backend::FPGA:
       return DeviceType::FPGA;
@@ -254,10 +255,6 @@ inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::XLA;
     case Backend::Lazy:
       return DeviceType::Lazy;
-    case Backend::SparseVE:
-      return DeviceType::VE;
-    case Backend::SparseCsrVE:
-      return DeviceType::VE;
     case Backend::IPU:
       return DeviceType::IPU;
     case Backend::XPU:

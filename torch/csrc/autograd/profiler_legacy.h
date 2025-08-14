@@ -21,6 +21,8 @@ enum class C10_API_ENUM EventKind : uint16_t {
   MemoryAlloc,
 };
 
+// NOLINTBEGIN(clang-analyzer-optin.performance.Padding)
+
 // To be deprecated, once we switch to Kineto profiling
 struct TORCH_API LegacyEvent {
   LegacyEvent(
@@ -271,6 +273,8 @@ struct TORCH_API LegacyEvent {
   uint64_t flops_ = 0;
 };
 
+// NOLINTEND(clang-analyzer-optin.performance.Padding)
+
 // a linked-list of fixed sized vectors, to avoid
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
@@ -361,6 +365,8 @@ struct TORCH_API RecordProfile {
   void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
+// NOLINTBEGIN(cppcoreguidelines-special-member-functions)
+
 // A guard that enables the legacy profiler, taking in an optional callback to
 // process the results Usage:
 // {
@@ -397,5 +403,7 @@ struct TORCH_API TLSLegacyProfilerGuard {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
+
+// NOLINTEND(cppcoreguidelines-special-member-functions)
 
 } // namespace torch::autograd::profiler
