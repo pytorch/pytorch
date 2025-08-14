@@ -1,9 +1,14 @@
 import logging
 import os
+import re
+import subprocess
+import sys
 import textwrap
+from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
@@ -11,6 +16,7 @@ from cli.lib.common.envs_helper import (
     env_bool_field,
     env_path_field,
     env_str_field,
+    get_env,
     with_params_help,
 )
 from cli.lib.common.git_helper import clone_external_repo
@@ -20,8 +26,14 @@ from cli.lib.common.path_helper import (
     force_create_dir,
     get_path,
     is_path_exist,
+    remove_dir,
 )
-from cli.lib.common.utils import run_command
+from cli.lib.common.pip_helper import (
+    pip_install_first_match,
+    pip_install_packages,
+    run_python,
+)
+from cli.lib.common.utils import run_command, temp_environ, working_directory
 
 
 logger = logging.getLogger(__name__)
@@ -152,6 +164,7 @@ class VllmBuildRunner(BaseRunner):
         3. run docker build
         """
         inputs = VllmBuildParameters()
+        logger.info("Running vllm build with inputs: %s", inputs)
         clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
@@ -254,10 +267,336 @@ class VllmBuildRunner(BaseRunner):
         ).strip()
 
 
-def clone_vllm():
+@dataclass
+class VllmTestParameters:
+    """
+    Parameters defining the vllm external test input
+
+    !!!DO NOT ADD SECRETS IN THIS CLASS!!!
+    you can put environment variable name in VllmTestParameters if it's not the same as the secret one
+    fetch secrests directly from env variables during runtime
+    """
+
+    torch_whls_path: Path = env_path_field("TORCH_WHEELS_PATH", "./dist")
+
+    vllm_whls_path: Path = env_path_field("VLLM_WHEELS_PATH", "./shared")
+
+    torch_cuda_arch_list: str = env_str_field("TORCH_CUDA_ARCH_LIST", "8.9")
+
+    def __post_init__(self):
+        if not self.torch_whls_path.exists():
+            raise ValueError("missing torch_whls_path")
+        if not self.vllm_whls_path.exists():
+            raise ValueError("missing vllm_whls_path")
+
+
+class TestInpuType(Enum):
+    TEST_PLAN = "test_plan"
+    UNKNOWN = "unknown"
+
+
+class VllmTestRunner(BaseRunner):
+    def __init__(self, args: Any):
+        self.work_directory = "vllm"
+
+        self.test_plan = ""
+        self.test_type = TestInpuType.UNKNOWN
+
+        if args.test_plan:
+            self.test_plan = args.test_plan
+            self.test_type = TestInpuType.TEST_PLAN
+
+        # Matches the structeur in the artifacts.zip from torcb build
+        self.TORCH_WHL_PATH_REGEX = "torch*.whl"
+        self.TORCH_WHL_EXTRA = "opt-einsum"
+        self.TORCH_ADDITIONAL_WHLS_REGEX = [
+            "vision/torchvision*.whl",
+            "audio/torchaudio*.whl",
+        ]
+
+        # Match the structure of the artifacts.zip from vllm external build
+        self.VLLM_TEST_WHLS_REGEX = [
+            "wheels/xformers/xformers*.whl",
+            "wheels/vllm/vllm*.whl",
+            "wheels/flashinfer-python/flashinfer*.whl",
+        ]
+
+    def prepare(self):
+        """
+        prepare test environment for vllm. This includes clone vllm repo, install all wheels, test dependencies and set env
+        """
+        params = VllmTestParameters()
+        logger.info("Display VllmTestParameters %s", params)
+        self._set_envs(params)
+
+        clone_vllm(dst=self.work_directory)
+        with working_directory(self.work_directory):
+            remove_dir(Path("vllm"))
+            self._install_wheels(params)
+            self._install_dependencies()
+        # verify the torches are not overridden by test dependencies
+        self.check_versions()
+
+    def run(self):
+        """
+        main function to run vllm test
+        """
+        self.prepare()
+        with working_directory(self.work_directory):
+            if self.test_type == TestInpuType.TEST_PLAN:
+                self.run_test_plan(self.test_plan)
+            else:
+                raise ValueError(f"Unknown test type {self.test_type}")
+
+    def _install_wheels(self, params: VllmTestParameters):
+        logger.info("Running vllm test with inputs: %s", params)
+        logger.info("Installing torch wheel")
+        torch_p = f"{str(params.torch_whls_path)}/{self.TORCH_WHL_PATH_REGEX}"
+        pip_install_first_match(torch_p, self.TORCH_WHL_EXTRA)
+
+        logger.info("Installing other torch-related wheels")
+        torch_whls_path = [
+            f"{str(params.torch_whls_path)}/{whl_path}"
+            for whl_path in self.TORCH_ADDITIONAL_WHLS_REGEX
+        ]
+        for torch_whl in torch_whls_path:
+            pip_install_first_match(torch_whl)
+        logger.info("Done. Installed torch and other torch-related wheels ")
+
+        logger.info("Installing vllm wheels")
+        vllm_whls_path = [
+            f"{str(params.vllm_whls_path)}/{whl_path}"
+            for whl_path in self.VLLM_TEST_WHLS_REGEX
+        ]
+        for vllm_whl in vllm_whls_path:
+            pip_install_first_match(vllm_whl)
+        logger.info("Done. Installed vllm wheels")
+
+    def _install_test_dependencies(self):
+        """
+        Install test dependencies for vllm test
+        This method replaces torch dependencies with local torch wheel info in
+        requirements/test.in file from vllm repo.
+
+        Then generates the test.txt file using uv pip compile, along with requirements/test.txt,
+        which is generated by the test.in with torch stable as soft constraint to match
+        packages' version
+
+        """
+        # TODO(elainewy): move this as part of vllm build, to generate the test.txt file
+        logger.info("generate test.txt from requirements/test.in with local torch whls")
+        preprocess_test_in()
+
+        copy(
+            Path("requirements/test.txt"),
+            Path("snapshot_constraint.txt"),
+        )
+        run_command(
+            f"{sys.executable} -m uv pip compile requirements/test.in "
+            "-o test.txt "
+            "--index-strategy unsafe-best-match "
+            "--constraint snapshot_constraint.txt "
+            "--torch-backend cu128"
+        )
+        logger.info("install requirements from test.txt")
+        pip_install_packages(requirements="test.txt", prefer_uv=True)
+        logger.info("Done. install requirements from test.txt")
+
+        # install mambda from source since it does not work now with pip
+        # TODO(elainewy): move this as part of vllm build
+        pip_install_packages(
+            packages=[
+                "--no-build-isolation",
+                "git+https://github.com/state-spaces/mamba@v2.2.4",
+            ],
+            prefer_uv=True,
+        )
+        logger.info("Done. installed requirements from test.txt")
+
+    def _install_dependencies(self):
+        pip_install_packages(packages=["-e", "tests/vllm_test_utils"], prefer_uv=True)
+        pip_install_packages(packages=["hf_transfer"], prefer_uv=True)
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
+        # using script from vllm repo to remove all torch packages from requirements txt
+        run_python("use_existing_torch.py")
+
+        # install common packages
+        for requirements in ["requirements/common.txt", "requirements/build.txt"]:
+            pip_install_packages(
+                requirements=requirements,
+                prefer_uv=True,
+            )
+        # install test packages
+        self._install_test_dependencies()
+
+    def check_versions(self):
+        """
+        check installed packages version
+        """
+        logger.info("double check installed packages")
+        patterns = ["torch", "xformers", "torchvision", "torchaudio", "vllm"]
+        for pkg in patterns:
+            try:
+                module = __import__(pkg)
+                version = getattr(module, "__version__", None)
+                version = version if version else "Unknown version"
+                logger.info("%s: %s", pkg, version)
+            except ImportError:
+                logger.info(" %s: Not installed", pkg)
+        logger.info("Done. checked installed packages")
+
+    def _set_envs(self, inputs: VllmTestParameters):
+        os.environ["TORCH_CUDA_ARCH_LIST"] = inputs.torch_cuda_arch_list
+        if not self.validate_cuda(get_env("TORCH_CUDA_ARCH_LIST")):
+            logger.warning(
+                "Missing supported TORCH_CUDA_ARCH_LIST. "
+                "Currently support TORCH_CUDA_ARCH_LIST env var "
+                "with supported arch [8.0, 8.9, 9.0]"
+            )
+        self.validate_cuda(get_env("TORCH_CUDA_ARCH_LIST"))
+
+        os.environ["HF_TOKEN"] = os.getenv("VLLM_TEST_HUGGING_FACE_TOKEN", "")
+        if not get_env("HF_TOKEN"):
+            raise ValueError(
+                "missing required HF_TOKEN, please set VLLM_TEST_HUGGING_FACE_TOKEN env var"
+            )
+        if not get_env("TORCH_CUDA_ARCH_LIST"):
+            raise ValueError(
+                "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
+            )
+
+    def run_test_plan(self, test_plan: str):
+        """
+        a method to run list of tests based on the test plan. currently this only
+        used to run vllm tests.
+        """
+        logger.info("run vllm tests.....")
+        tests_map = sample_test_plans()
+        if test_plan not in tests_map:
+            raise RuntimeError(
+                f"test {test_plan} not found, please add it to test plan pool"
+            )
+        tests = tests_map[test_plan]
+        logger.info("Running tests: %s", tests["title"])
+        with (
+            temp_environ(tests.get("env_var", {})),
+            working_directory(tests.get("working_directory", "tests")),
+        ):
+            failures = []
+            for step in tests["steps"]:
+                with temp_environ(step.get("env_var", {})):
+                    code = run_command(cmd=step["command"], check=False)
+                    if code != 0:
+                        failures.append(step)
+            if failures:
+                logger.error("Failed tests: %s", failures)
+                raise RuntimeError(f"{len(failures)} pytest runs failed: {failures}")
+            logger.info("Done. All tests passed")
+
+    def validate_cuda(self, value: str) -> bool:
+        VALID_VALUES = {"8.0", "8.9", "9.0"}
+        return all(v in VALID_VALUES for v in value.split())
+
+
+def clone_vllm(dst: str = "vllm"):
     clone_external_repo(
         target="vllm",
         repo="https://github.com/vllm-project/vllm.git",
-        dst="vllm",
+        dst=dst,
         update_submodules=True,
     )
+
+
+def preprocess_test_in(
+    target_file: str = "requirements/test.in", additional_packages: Iterable[str] = ()
+):
+    """
+    This modifies the target_file file in place. by default, it points to vllm's requirements/test.in
+    It removes torch packages in target_file and replace with local torch whls
+    """
+    additional_package_to_move = list(additional_packages or ())
+    pkgs_to_remove = [
+        "torch",
+        "torchvision",
+        "torchaudio",
+        "xformers",
+        "mamba_ssm",
+    ] + additional_package_to_move
+    # Read current requirements
+    target_path = Path(target_file)
+    lines = target_path.read_text().splitlines()
+
+    # Remove lines starting with the package names (==, @, >=) — case-insensitive
+    pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
+    kept_lines = [line for line in lines if not pattern.match(line)]
+
+    # Get local torch/vision/audio installs from pip freeze
+    # this is hacky, but it works
+    pip_freeze = subprocess.check_output(["pip", "freeze"], text=True)
+    header_lines = [
+        line
+        for line in pip_freeze.splitlines()
+        if re.match(
+            r"^(torch|torchvision|torchaudio)\s*@\s*file://", line, re.IGNORECASE
+        )
+    ]
+
+    # Write back: header_lines + blank + kept_lines
+    out = "\n".join(header_lines + [""] + kept_lines) + "\n"
+    target_path.write_text(out)
+    logger.info("[INFO] Updated %s", target_file)
+
+
+def sample_test_plans():
+    """
+    Simple sample to unblock the vllm ci development, which is mimic to
+    https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
+    """
+    # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
+    # TODO(elainewy): implement logics to handle package_install
+    return {
+        # test plan:
+        # required id, title, and steps
+        # optional: env_var, package_install, working_directory
+        # by default the working_drectory is "tests/", but it can be changed based on tests, for instance,
+        # vllm sample test happens in samples/
+        "vllm_basic_correctness_test": {
+            "title": "Basic Correctness Test",
+            "id": "basic_correctness_test",
+            "env_var": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
+            # test step:
+            # required: command
+            # available fields: env_var (env_var only set within the scope of the test step), package_install(pip package)
+            "steps": [
+                {
+                    "command": "pytest -v -s basic_correctness/test_cumem.py",
+                },
+                {
+                    "command": "pytest -v -s basic_correctness/test_basic_correctness.py",
+                },
+                {
+                    "command": "pytest -v -s basic_correctness/test_cpu_offload.py",
+                },
+                {
+                    "command": "pytest -v -s basic_correctness/test_preemption.py",
+                    "env_var": {
+                        "VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT": "1",
+                    },
+                },
+            ],
+        },
+        "vllm_basic_models_test": {
+            "title": "Basic models test",
+            "id": "basic_models_test",
+            "steps": [
+                {"command": "pytest -v -s models/test_transformers.py"},
+                {"command": "pytest -v -s models/test_registry.py"},
+                {"command": "pytest -v -s models/test_utils.py"},
+                {"command": "pytest -v -s models/test_vision.py"},
+                {"command": "pytest -v -s models/test_initialization.py"},
+            ],
+        },
+    }
