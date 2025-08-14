@@ -63,7 +63,7 @@ function install_nvshmem {
 
   # nvSHMEM license: https://docs.nvidia.com/nvshmem/api/sla.html
   filename="libnvshmem_cuda${cuda_major_version}-linux-${arch_path}-${nvshmem_version}"
-  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}.tar.gz"
+  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}.tar.xz"
 
   # download, unpack, install
   wget -q "${url}"
