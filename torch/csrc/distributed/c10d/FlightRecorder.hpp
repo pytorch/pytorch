@@ -23,8 +23,7 @@ namespace c10d {
 DEFINE_CONSTANT(version_val, "2.9")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
-DEFINE_CONSTANT(nccl_version_key, "nccl_version")
-DEFINE_CONSTANT(ccl_version_key, "ccl_version")
+DEFINE_CONSTANT(comm_lib_version_key, "comm_lib_version")
 DEFINE_CONSTANT(version_key, "version")
 DEFINE_CONSTANT(pg_config_key, "pg_config")
 DEFINE_CONSTANT(pg_status_key, "pg_status")
@@ -180,7 +179,7 @@ struct FlightRecorder {
   std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
       pg_name_to_ranks_ = {};
-  std::string ccl_version_;
+  std::string comm_lib_version_;
 
   std::optional<size_t> record(
       size_t pg_id,
@@ -201,7 +200,7 @@ struct FlightRecorder {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void record_accelerator_version(const std::string ccl_version);
+  void record_accelerator_version(const std::string comm_lib_version);
 
   void update_state(Entry& r);
 

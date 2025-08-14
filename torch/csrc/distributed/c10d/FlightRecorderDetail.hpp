@@ -128,12 +128,12 @@ void FlightRecorder<EventType>::record_pg_ranks(
 
 template <typename EventType>
 void FlightRecorder<EventType>::record_accelerator_version(
-    const std::string ccl_version) {
+    const std::string comm_lib_version) {
   if (!enabled_) {
     return;
   }
   std::lock_guard<std::mutex> guard(mutex_);
-  ccl_version_ = std::move(ccl_version);
+  comm_lib_version_ = std::move(comm_lib_version);
 }
 
 template <typename EventType>
@@ -425,8 +425,7 @@ std::string FlightRecorder<EventType>::dump_json(
     bool onlyActive) {
   json result;
   result[version_key_str] = version_val_str;
-  result[nccl_version_key_str] = ccl_version_; // Keep for BC
-  result[ccl_version_key_str] = ccl_version_;
+  result[comm_lib_version_key_str] = comm_lib_version_;
   result[pg_config_key_str] = getPgConfigJson();
   result[pg_status_key_str] = getPgStatusJson();
 
@@ -523,8 +522,7 @@ std::string FlightRecorder<EventType>::dump(
   // common values
   result.insert(version_key, version_val);
   result.insert(pg_config_key, getPgConfig());
-  result.insert(nccl_version_key_str, ccl_version_);
-  result.insert(ccl_version_key_str, ccl_version_);
+  result.insert(comm_lib_version_key_str, comm_lib_version_);
   result.insert(pg_status_key, getPgStatus());
 
   // collective trace
