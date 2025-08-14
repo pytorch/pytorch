@@ -2392,7 +2392,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             if best_config_future is not None:
                 best_config = await_sync(best_config_future)
-                if best_config:
+                if best_config and best_config.get("backend") == "TRITON":
                     important_keys = (
                         "ACC_TYPE",
                         "ALLOW_TF32",
