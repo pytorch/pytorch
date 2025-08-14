@@ -784,12 +784,6 @@ static at::Tensor call_accumulate(
     PyObject* py_compiler,
     const at::Tensor& old_var,
     const at::Tensor& new_var) {
-  if (!old_var.defined()) {
-    return new_var;
-  }
-  if (!new_var.defined()) {
-    return old_var;
-  }
   py::handle handle(py_compiler);
   py::object stuff = handle.attr("accumulate")(old_var, new_var);
   return py::cast<at::Tensor>(std::move(stuff));
