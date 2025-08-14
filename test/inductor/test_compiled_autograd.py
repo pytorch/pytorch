@@ -5043,7 +5043,9 @@ copy_.default""",
         def fn():
             x = torch.randn(5, requires_grad=True)
             out = UndefinedGrad.apply(x) + DefinedGrad.apply(x)
-            out.sum().backward()
+            out2 = DefinedGrad.apply(x) + UndefinedGrad.apply(x)
+            loss = out.sum() + out2.sum()
+            loss.backward()
             yield x.grad
 
         self.check_output_and_recompiles(fn)
