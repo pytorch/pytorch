@@ -3621,6 +3621,24 @@ def linear_cross_entropy(
     label_smoothing: float = 0.0,
     reduction: str = "mean",
 ) -> Tensor:
+    tensors = input, target, linear_weight, cross_entropy_weight, reduce
+    if has_torch_function_variadic(*tensors):
+        return handle_torch_function(
+            linear_cross_entropy,
+            tensors,
+            input,
+            target,
+            linear_weight,
+            bias=bias,
+            cross_entropy_weight=cross_entropy_weight,
+            reduce=reduce,
+            size_average=size_average,
+            chunking_strategy=chunking_strategy,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            reduction=reduction,
+        )
+
     def choose_chunking() -> str:
         return CrossEntropyChunkingStrategy.none
 
