@@ -1127,12 +1127,11 @@ void LayerNormKernelImplInternal(
   }
 }
 
-inline bool use_cudnn_layernorm(bool gamma, bool beta) {
+inline bool use_cudnn_layernorm(bool gamma, bool beta, at::ScalarType dtype) {
   static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
-  bool ok = enabled && gamma && beta;
-  if (ok) {
-    TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN LAYERNORM");
-  }
+  // cuDNN only supports bf16, fp16, and fp32
+  bool dtype_supported = dtype != at::ScalarType::Double;
+  bool ok = enabled && gamma && beta && dtype_supported;
   return ok;
 }
 
@@ -1147,7 +1146,7 @@ void LayerNormKernelImpl(
     Tensor* mean,
     Tensor* rstd) {
 
-  if (use_cudnn_layernorm(gamma.numel(), beta.numel())) {
+  if (use_cudnn_layernorm(gamma.numel(), beta.numel(), X.scalar_type())) {
     at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -1163,12 +1162,11 @@ void LayerNormKernelImpl(
   }
 }
 
-inline bool use_cudnn_rmsnorm(bool gamma) {
+inline bool use_cudnn_rmsnorm(bool gamma, at::ScalarType dtype) {
   static bool enabled = (c10::utils::check_env("TORCH_CUDNN_RMSNORM_ENABLED") == true);
-  bool ok = enabled && gamma;
-  if (ok) {
-    TORCH_WARN_ONCE("USING EXPERIMENTAL CUDNN RMSNORM");
-  }
+  // cuDNN only supports bf16, fp16, and fp32
+  bool dtype_supported = dtype != at::ScalarType::Double;
+  bool ok = enabled && gamma && dtype_supported;
   return ok;
 }
 
@@ -1180,7 +1178,7 @@ void RmsNormKernelImpl(
   double eps,
   Tensor* Y,
   Tensor* rstd) {
-if (use_cudnn_rmsnorm(gamma.numel())) {
+if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
   at::native::raw_cudnn_rmsnorm_forward_out(X, gamma, eps, rstd, Y, M, N);
 } else {
   AT_DISPATCH_FLOATING_TYPES_AND2(
