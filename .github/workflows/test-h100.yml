@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - .github/workflows/test-h100.yml
+      - test/inductor/test_max_autotune.py
+      - torch/_inductor/kernel/mm.py
+      - torch/_inductor/kernel/mm_grouped.py
+
   workflow_dispatch:
   schedule:
     - cron: 0 4,10,16,22 * * *  # every 6 hours
