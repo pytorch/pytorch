@@ -428,9 +428,7 @@ class TestScheduleCsv(TestCase):
                 sch_ref[rank] = [_Action.from_str(s) for s in row]
 
         for rank in sch_ref:
-            for timestep, (a, b) in enumerate(
-                zip(sch[rank], sch_ref[rank])
-            ):
+            for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
                 self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
 
 
