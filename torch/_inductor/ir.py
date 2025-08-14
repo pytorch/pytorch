@@ -8508,6 +8508,35 @@ class WhileLoop(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    @staticmethod
+    def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
+        if not _has_aliased_buffers(carried_inputs):
+            return carried_inputs
+
+        # Import clone from lowering module
+        from .lowering import clone
+
+        # Unwrap views to get the underlying buffers for comparison
+        unwrapped_buffers = [
+            buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+            for buffer in carried_inputs
+        ]
+
+        # Track which buffers we've seen and their indices
+        seen_buffers = set()
+        result = []
+
+        for i, (original_input, unwrapped_buffer) in enumerate(zip(carried_inputs, unwrapped_buffers)):
+            if id(unwrapped_buffer) in seen_buffers:
+                result.append(clone(original_input))
+            else:
+                seen_buffers.add(id(unwrapped_buffer))
+                result.append(original_input)
+
+        return result
+
+
+
     @classmethod
     def create(
         cls,
@@ -8543,6 +8572,7 @@ class WhileLoop(ExternKernel):
         fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
         carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
         additional_inputs_ = [cls.realize_input(x) for x in additional_inputs]
         additional_inputs_ = _require_exact_strides(
