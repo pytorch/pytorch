@@ -664,7 +664,22 @@ def _merge_output(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+
+    hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
+    # For now, we only support auto-functionalization for cond when using python
+    # functionalization mode
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)

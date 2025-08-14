@@ -8315,6 +8315,10 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """The IR node for torch.cond. It first lowers the subgraph, then create outputs
+    based on subgraph's outputs.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -8365,6 +8369,10 @@ class Conditional(ExternKernel):
         assert isinstance(fx_operands, Sequence), type(fx_operands)
         assert all(isinstance(n, Node) for n in fx_operands)
         fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        fake_predicate = cast(Node, V.graph.current_node.args[0]).meta["val"]
+        cond_schema = torch.ops.higher_order.cond.gen_schema(
+            fake_predicate, true_fn.graph_module, false_fn.graph_module, fake_operands
+        )
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -8441,6 +8449,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        def _compute_mutation_outputs(
+            schema: torch._higher_order_ops.schema.HopSchema, args: Any, kwargs: Any
+        ) -> list[Any]:
+            flattened_args, spec = pytree.tree_flatten((args, kwargs))
+            assert spec == schema.tree_spec, (
+                f"schema doesn't match {spec} vs {schema.tree_spec}"
+            )
+            mutation_output = []
+            for arg_spec, arg_node in zip(schema.arguments, flattened_args):
+                if arg_spec.is_write:
+                    mutation_output.append(arg_node)
+            return mutation_output
+
+        conditional.mutation_outputs = [
+            MutationOutput(inp.layout, inp, conditional)  # type: ignore[union-attr]
+            for inp in _compute_mutation_outputs(
+                cond_schema,
+                (predicate, true_fn, false_fn, operands),
+                {},
+            )
+        ]
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:

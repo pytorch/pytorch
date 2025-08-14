@@ -942,6 +942,9 @@ def check_input_alias_and_mutation_return_outputs(
             no_inference_mode_ctx = torch.inference_mode(False)
             ctx_stack.enter_context(new_fake_mode)
             ctx_stack.enter_context(no_inference_mode_ctx)
+            ctx_stack.enter_context(torch._C._DisableFuncTorch())
+            ctx_stack.enter_context(disable_functional_mode())
+            ctx_stack.enter_context(suspend_functionalization())
             if new_fake_mode.shape_env is not None:
                 ctx_stack.enter_context(
                     new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
