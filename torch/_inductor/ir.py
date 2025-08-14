@@ -8476,6 +8476,8 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
+    """IR node for while_loop, which supports input mutations"""
+
     carried_inputs: Optional[Sequence[IRNode]] = None
     additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
@@ -8508,6 +8510,9 @@ class WhileLoop(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    # Accidental aliasing can be created due to cse, where the empty buffers we
+    # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
+    # See test_scan_multiple_layers_gradient for a concrete example.
     @staticmethod
     def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
         if not _has_aliased_buffers(carried_inputs):
@@ -8523,10 +8528,12 @@ class WhileLoop(ExternKernel):
         ]
 
         # Track which buffers we've seen and their indices
-        seen_buffers = set()
+        seen_buffers: OrderedSet[int] = OrderedSet()
         result = []
 
-        for i, (original_input, unwrapped_buffer) in enumerate(zip(carried_inputs, unwrapped_buffers)):
+        for i, (original_input, unwrapped_buffer) in enumerate(
+            zip(carried_inputs, unwrapped_buffers)
+        ):
             if id(unwrapped_buffer) in seen_buffers:
                 result.append(clone(original_input))
             else:
@@ -8534,8 +8541,6 @@ class WhileLoop(ExternKernel):
                 result.append(original_input)
 
         return result
-
-
 
     @classmethod
     def create(

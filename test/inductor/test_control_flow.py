@@ -41,7 +41,9 @@ def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
 # a testing loss_fn
 def loss_fn(result) -> torch.Tensor:
     flat_results, _ = pytree.tree_flatten(result)
-    total_loss = torch.tensor(0.0, device=flat_results[0].device if flat_results else torch.device('cpu'))
+    total_loss = torch.tensor(
+        0.0, device=flat_results[0].device if flat_results else torch.device("cpu")
+    )
 
     for res in flat_results:
         # Convert to float if integer tensor to avoid numerical issues
