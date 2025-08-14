@@ -1261,6 +1261,7 @@ def _compile(
                 shape_env_guard_count = len(output.shape_env.guards)
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
+                graph_node_shapes = output.get_graph_sizes_structured()
                 graph_input_count = len(output.placeholders)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
@@ -1272,6 +1273,7 @@ def _compile(
                 shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                graph_node_shapes = {}
                 graph_input_count = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
@@ -1306,6 +1308,7 @@ def _compile(
                     dynamo_time_before_restart
                 ),
                 "stack_trace": stack_trace,
+                "graph_node_shapes": str(graph_node_shapes),
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
