@@ -3558,7 +3558,9 @@ class IndexingConstant(BaseConstant):
 def is_contiguous_strides_for_shape(
     stride: Sequence[_IntLike], shape: Sequence[_IntLike]
 ) -> bool:
-    return check_contiguous_sizes_strides(shape, stride)
+    sym_stride = convert_shape_to_symint(stride)
+    sym_shape = convert_shape_to_symint(shape)
+    return check_contiguous_sizes_strides(sym_shape, sym_stride)
 
 
 def get_align_for_dtype(dtype: torch.dtype) -> int:
