@@ -132,7 +132,7 @@ include_patterns = [
     'test/test_complex.py',
     'test/test_datapipe.py',
     'test/test_futures.py',
-    # 'test/test_numpy_interop.py',
+    'test/test_numpy_interop.py',
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
