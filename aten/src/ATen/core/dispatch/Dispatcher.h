@@ -488,6 +488,10 @@ class TORCH_API OperatorHandle {
     return operatorDef_->op.hasComputedKernelForDispatchKey(k);
   }
 
+  SafeKernelFunction getComputedKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.getComputedKernelForDispatchKey(k);
+  }
+
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
   }
