@@ -39,6 +39,7 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
                   and torch.cuda.get_device_capability()[1] > 0)
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
+IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
@@ -106,7 +107,22 @@ def evaluate_platform_supports_fp8():
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     return False
 
+def evaluate_platform_supports_fp8_grouped_gemm():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            if "USE_FBGEMM_GENAI" not in torch.__config__.show():
+                return False
+            archs = ['gfx942']
+            for arch in archs:
+                if arch in torch.cuda.get_device_properties(0).gcnArchName:
+                    return True
+        else:
+            return SM90OrLater and not SM100OrLater
+    return False
+
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+
+PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 
@@ -275,7 +291,7 @@ def _get_torch_rocm_version():
     if not TEST_WITH_ROCM or torch.version.hip is None:
         return (0, 0)
     rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
 def _check_cusparse_generic_available():
@@ -288,7 +304,7 @@ def _check_hipsparse_generic_available():
         return False
 
     rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
     return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
 
