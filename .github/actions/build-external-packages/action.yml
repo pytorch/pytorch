@@ -1,7 +1,7 @@
 # .github/workflows/build-external.yml
-name: Build External package
+name: Build External packages
 
-description: build external package
+description: build external packages for PyTorch
 
 inputs:
   build-environment:
@@ -43,7 +43,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build external project
+    - name: Build external packages in sequence
       id: build-external
       env:
         BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -75,7 +75,7 @@ runs:
           python3 -m cli.run build external "$target"
 
         done
-        END_TIME=$(date +%s)
+
         END_TIME=$(date +%s)
         {
           echo "build_time=$((END_TIME - START_TIME))"
