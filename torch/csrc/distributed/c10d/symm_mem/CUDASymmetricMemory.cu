@@ -65,10 +65,12 @@ AllocationRef::~AllocationRef() {
   auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size));
+#if defined(CUDART_SUPPORTS_MULTICAST)
   if (is_multicast) {
     C10_CUDA_DRIVER_CHECK(
         driver_api->cuMulticastUnbind_(handle, device_idx, 0, block_size));
   }
+#endif
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
