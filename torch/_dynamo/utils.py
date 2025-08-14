@@ -45,7 +45,6 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from collections.abc import Hashable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -953,7 +952,14 @@ def identity(x: T) -> T:
 
 
 def hashable(x: Any) -> bool:
-    return isinstance(x, Hashable)
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+    # cannot hash writable memoryview object
+    except ValueError:
+        return False
 
 
 def nothing(*args: Any, **kwargs: Any) -> None:
@@ -1286,6 +1292,7 @@ class CompilationMetrics:
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
     stack_trace: Optional[list[str]] = None
+    graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
