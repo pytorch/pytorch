@@ -1339,11 +1339,11 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
   auto t2 = t.pow(2);
 
   at::clearCallbacks();
-  EXPECT_TRUE(operator_names.count("No Operator Name") == 0)
+  EXPECT_TRUE(!operator_names.contains("No Operator Name"))
       << "Expected that all traced operators had an associated OperatorName object";
-  EXPECT_TRUE(operator_names.count("aten::randn") == 1)
+  EXPECT_TRUE(operator_names.contains("aten::randn"))
       << "Expected aten::randn to have been called and recorded, but it was not";
-  EXPECT_TRUE(operator_names.count("aten::pow.Tensor_Scalar") == 1)
+  EXPECT_TRUE(operator_names.contains("aten::pow.Tensor_Scalar"))
       << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
 }
 
@@ -2344,7 +2344,7 @@ TEST(InlinedCallStackTest, SelfCallMethods) {
   std::unordered_map<std::string, size_t> module_hierarchies;
   for (Node* n : graph->nodes()) {
     auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
-    if (module_hierarchies.count(hierarchy) == 0) {
+    if (!module_hierarchies.contains(hierarchy)) {
       module_hierarchies[hierarchy] = 0;
     }
     module_hierarchies[hierarchy] += 1;
