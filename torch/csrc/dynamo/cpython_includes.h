@@ -21,10 +21,6 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_interpframe_structs.h>
-#include <internal/pycore_stackref.h>
-#endif
 #endif
 
 #if IS_PYTHON_3_14_PLUS
