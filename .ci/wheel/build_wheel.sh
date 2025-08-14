@@ -139,7 +139,7 @@ case $desired_python in
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="=2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
         desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
@@ -148,7 +148,7 @@ case $desired_python in
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="=2.1.0"
-        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
         desired_python="3.14.0rc1"
         RENAME_WHEEL=false
         ;;
