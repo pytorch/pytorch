@@ -1218,3 +1218,13 @@ def _has_gen_schema(op: HigherOrderOperator):
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
     )
+
+
+def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    assert len(data) == len(masks)
+    return [item for item, keep in zip(data, masks) if keep]
+
+
+def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    data_iter = iter(data)
+    return [next(data_iter) if kept else None for kept in masks]
