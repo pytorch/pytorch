@@ -1,0 +1,46 @@
+"""
+PyTest configuration for the new pytest-based test infrastructure.
+This configuration is designed to work alongside PyTorch's existing test infrastructure.
+"""
+import pytest
+import torch
+import os
+import sys
+
+# Add PyTorch root to Python path
+PYTORCH_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PYTORCH_ROOT not in sys.path:
+    sys.path.insert(0, PYTORCH_ROOT)
+
+def pytest_configure(config):
+    """Register markers and configure pytest."""
+    config.addinivalue_line("markers", "cuda: mark test as requiring CUDA")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+
+@pytest.fixture(scope="session")
+def cuda_available():
+    """Check if CUDA is available."""
+    return torch.cuda.is_available()
+
+@pytest.fixture(autouse=True)
+def skip_cuda(request, cuda_available):
+    """Skip CUDA tests if CUDA is not available."""
+    if request.node.get_closest_marker('cuda') and not cuda_available:
+        pytest.skip('CUDA not available')
+
+@pytest.fixture(scope="function")
+def cuda_device(cuda_available):
+    """Provide CUDA device if available."""
+    if not cuda_available:
+        pytest.skip('CUDA not available')
+    return torch.device('cuda')
+
+@pytest.fixture(autouse=True)
+def cuda_memory_cleanup():
+    """Clean up CUDA memory before and after each test."""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        yield
+        torch.cuda.empty_cache()
+    else:
+        yield

@@ -1,0 +1,25 @@
+# Test framework
+pytest>=7.0.0
+pytest-xdist>=3.3.1  # For parallel test execution
+pytest-timeout>=2.1.0  # For test timeouts
+pytest-cov>=4.1.0  # For coverage reporting
+pytest-html>=4.1.1  # For HTML test reports
+pytest-benchmark>=4.0.0  # For performance benchmarking
+
+# Test utilities
+coverage>=7.3.2
+hypothesis>=6.87.1
+parameterized>=0.9.0
+
+# Formatting and linting
+black>=23.9.1
+flake8>=6.1.0
+mypy>=1.5.1
+
+# Documentation
+sphinx>=7.2.6
+sphinx-rtd-theme>=1.3.0
+
+# Type checking
+types-setuptools>=68.2.0.0
+typing-extensions>=4.8.0
