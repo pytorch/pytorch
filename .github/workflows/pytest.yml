@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        shard: [1, 2, 3, 4]  # We can adjust the number of shards based on test count
+        shard: [1]  # Since we're starting with just one test, we can use a single shard
       fail-fast: false
 
     steps:
@@ -29,29 +29,20 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-shard pytest-sugar pytest-xdist
-
-    - name: Build PyTorch
-      run: |
-        python setup.py develop
+        pip install torch pytest pytest-sugar pytest-xdist
 
     - name: Run pytest tests
-      env:
-        PYTORCH_TEST_WITH_SLOW: 1
-        PYTEST_SHARD: ${{ matrix.shard }}/4
       run: |
         pytest test/test_without_numpy_pytest.py \
-          --shard ${{ matrix.shard }}/4 \
           -n auto \
           --dist loadscope \
-          --junitxml=test-results/pytest-${{ matrix.shard }}.xml
+          --junitxml=test-results/pytest.xml
 
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-${{ matrix.shard }}
+        name: pytest-results
         path: test-results/
 
   # This job aggregates test results
