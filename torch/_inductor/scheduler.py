@@ -2640,7 +2640,6 @@ class Scheduler:
             if not can_eliminate:
                 updated_nodes.append(node)
             else:
-                # dead code
                 log.debug("removed dead operation: %s", node.get_name())
                 V.graph.removed_operations.add(node.get_name())
                 for read in node.read_writes.reads:

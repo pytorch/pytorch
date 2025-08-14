@@ -3264,7 +3264,7 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
-    def codegen_while_loop(self, while_loop):
+    def codegen_while_loop(self, while_loop, with_checkpoint):
         name = while_loop.get_name()
         outer_carried_inputs = [
             buf.codegen_reference() for buf in while_loop.carried_inputs
@@ -3273,7 +3273,13 @@ class PythonWrapperCodegen(CodeGen):
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
 
+        ckp_offset = len(outer_carried_inputs)
         self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+        if with_checkpoint:
+            self.writeline(
+                f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+            )
+
         for i, inp in enumerate(outer_carried_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
@@ -3305,6 +3311,11 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(
             f"if not {cond_outer_outputs[0]}: break"
         )  # condition doesn't hold
+
+        if with_checkpoint:
+            for i, out in enumerate(body_outer_outputs):
+                self.writeline(f"{name}[{i + ckp_offset}].append({out})")
+
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
         if V.graph.aot_mode:
@@ -3316,6 +3327,12 @@ class PythonWrapperCodegen(CodeGen):
                 while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
             )
         self.writeline(ExitSubgraphLine(self))
+        # stack the inp checkpoint when body finishes execution
+        if with_checkpoint:
+            for i, out in enumerate(outer_carried_inputs):
+                self.writeline(
+                    f"{name}[{i + ckp_offset}] = torch.stack({name}[{i + len(outer_carried_inputs)}])"
+                )
 
     @staticmethod
     def statically_known_int_or_none(x):
