@@ -22,6 +22,7 @@ ciflow_push_tags:
 - ciflow/rocm
 - ciflow/rocm-mi300
 - ciflow/s390
+- ciflow/riscv64
 - ciflow/slow
 - ciflow/trunk
 - ciflow/unstable
@@ -31,7 +32,9 @@ ciflow_push_tags:
 - ciflow/pull
 - ciflow/h100
 - ciflow/h100-distributed
+- ciflow/win-arm64
 - ciflow/h100-symm-mem
+- ciflow/h100-cutlass-backend
 retryable_workflows:
 - pull
 - trunk
