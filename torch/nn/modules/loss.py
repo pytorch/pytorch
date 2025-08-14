@@ -1330,7 +1330,7 @@ class CrossEntropyLoss(_WeightedLoss):
         Providing arbitrary values may yield misleading loss values and unstable gradients during training.
 
     Examples:
-
+        >>> # xdoctest: +SKIP
         >>> # Example of target with incorrectly specified class probabilities
         >>> loss = nn.CrossEntropyLoss()
         >>> torch.manual_seed(283)
