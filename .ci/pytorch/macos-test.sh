@@ -157,6 +157,32 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+# Shellcheck doesn't like it when you pass no arguments to a function
+# that can take args. See https://www.shellcheck.net/wiki/SC2120
+# shellcheck disable=SC2120
+checkout_install_torchbench() {
+  local commit
+  commit=$(cat .ci/docker/ci_commit_pins/torchbench.txt)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "$commit"
+
+  if [ "$1" ]; then
+    python install.py --continue_on_fail models "$@"
+  else
+    # Occasionally the installation may fail on one model but it is ok to continue
+    # to install and test other models
+    python install.py --continue_on_fail
+  fi
+
+  # soxr comes from https://github.com/huggingface/transformers/pull/39429
+  pip install transformers==4.54.0 soxr==0.5.0
+
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
+  popd
+}
+
 torchbench_setup_macos() {
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
@@ -179,8 +205,6 @@ torchbench_setup_macos() {
   USE_OPENMP=0 python setup.py develop
   popd
 
-  # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
-  # shellcheck disable=SC2119,SC2120
   checkout_install_torchbench
 }
 
