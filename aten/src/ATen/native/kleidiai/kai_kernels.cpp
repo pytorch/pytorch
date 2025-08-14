@@ -20,15 +20,11 @@ void kai_pack_int4_rhs(
     const std::optional<Tensor>& bias,
     const int64_t n,
     const int64_t k,
-    const int64_t bl) {
-       size_t expected_size = kai_pack_rhs_int4_size(n, k, bl, scales.scalar_type());
-  TORCH_WARN(
-      ": expected ", expected_size,
-      ", got ", weight_packed.numel()
-  );
+    const int64_t bl)
+{
   if (bl == k) {
     // Channelwise
-    if (scales.scalar_type() == at::kBFloat16) {
+    if (weight.scalar_type() == at::kBFloat16) {
       auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
           kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
       auto& params = kernel_packet.rhs_pack_params;
