@@ -504,7 +504,9 @@ def prepare_fw_with_masks_all_requires_grad(fn):
         # require_gradness reasoning much easier.
         if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
             fw_out = pytree.tree_map_only(
-                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+                torch.Tensor,
+                lambda x: x.requires_grad_(True) if x.dtype.is_floating_point else x,
+                fw_out,
             )
         return fw_out, pytree.tree_map_only(
             torch.Tensor, lambda x: x.requires_grad, fw_out
@@ -1218,3 +1220,13 @@ def _has_gen_schema(op: HigherOrderOperator):
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
     )
+
+
+def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    assert len(data) == len(masks)
+    return [item for item, keep in zip(data, masks) if keep]
+
+
+def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    data_iter = iter(data)
+    return [next(data_iter) if kept else None for kept in masks]
