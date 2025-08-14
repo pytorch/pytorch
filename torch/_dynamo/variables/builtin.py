@@ -1076,7 +1076,11 @@ class BuiltinVariable(VariableTracker):
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
                         )
-                    except (TypeError, ValueError, ZeroDivisionError,) as exc:
+                    except (
+                        TypeError,
+                        ValueError,
+                        ZeroDivisionError,
+                    ) as exc:
                         raise_observed_exception(
                             type(exc),
                             tx,
