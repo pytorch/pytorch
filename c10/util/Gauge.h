@@ -42,8 +42,10 @@ class C10_API GaugeHandle {
 
 } // namespace c10::monitor
 
-#define STATIC_GAUGE(_key)                            \
-  []() -> ::c10::monitor::GaugeHandle& {              \
-    static ::c10::monitor::GaugeHandle handle(#_key); \
-    return handle;                                    \
+#define STATIC_GAUGE_STR(key_str)                       \
+  [&]() -> ::c10::monitor::GaugeHandle& {               \
+    static ::c10::monitor::GaugeHandle handle(key_str); \
+    return handle;                                      \
   }()
+
+#define STATIC_GAUGE(_key) STATIC_GAUGE_STR(#_key)
