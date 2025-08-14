@@ -370,6 +370,14 @@ class GraphRegionTrackerTests(TestCase):
             """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
         )
 
+    def test_region_sorting(self):
+        from torch._dynamo.graph_region_tracker import _sort_with_ref_region
+
+        index_to_rank = {0: 0, 2: 1, 1: 2}
+        regions = [[0, 1, 2], [1, 2, 0]]
+        _sort_with_ref_region(index_to_rank, regions)
+        self.assertExpectedInline(regions, """[[0, 2, 1], [1, 0, 2]]""")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

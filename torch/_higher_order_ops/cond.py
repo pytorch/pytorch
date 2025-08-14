@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 import logging
 import warnings
 from typing import Any, Callable, Optional, Union
@@ -19,6 +20,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -293,15 +296,32 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
+
+        grads_tensor_masks = []
+
+        def create_fn_remove_none(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                nonlocal grads_tensor_masks
+
+                true_outputs = fn(*args)
+                grads_tensor_masks = [
+                    True if isinstance(out, torch.Tensor) else False
+                    for out in true_outputs
+                ]
+                return filter_with_masks(true_outputs, grads_tensor_masks)
+
+            return wrapped
+
         true_bw_gm = materialize_as_graph(
-            ctx._true_bw_fn,
+            create_fn_remove_none(ctx._true_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
         false_bw_gm = materialize_as_graph(
-            ctx._false_bw_fn,
+            create_fn_remove_none(ctx._false_bw_fn),
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -313,7 +333,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_bw_gm,
             args,
         )
-        return None, None, None, *grads
+        return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 # Note:
