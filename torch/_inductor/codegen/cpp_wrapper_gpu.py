@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import re
 from itertools import count, zip_longest
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 
 import sympy
@@ -13,10 +14,12 @@ import torch
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import CudaKernelParamCache
 from ..ir import (
+    ExternKernel,
     GraphPartitionSignature,
     TensorBox,
     TMADescriptorExperimental,
@@ -32,6 +35,11 @@ from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from ..scheduler import BaseSchedulerNode
 
 _cpp_string_literal_escapes = {
     "\\": "\\\\",
@@ -692,6 +700,42 @@ class CppWrapperGpu(CppWrapperCpu):
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        def aggregate_stack_traces(
+            node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+        ) -> dict[str, str]:
+            if isinstance(node_schedule, list):
+                return functools.reduce(
+                    lambda a, b: a | b,
+                    [
+                        node.node.get_stack_traces()
+                        for node in node_schedule
+                        if hasattr(node, "node") and node.node
+                    ],
+                    {},
+                )
+            elif isinstance(node_schedule, ExternKernel):
+                return node_schedule.get_stack_traces()
+            else:
+                return {}
+
+        stack_trace_str = 'R"('
+        stack_traces = aggregate_stack_traces(node_schedule)
+        unique_stack_traces = OrderedSet(
+            stack_trace for stack_trace in stack_traces.values()
+        )
+
+        for stack_trace in unique_stack_traces:
+            for line in stack_trace.split("\n"):
+                stack_trace_str += f"\n// {line}"
+            stack_trace_str += "\n"
+        stack_trace_str += ')"'
+        self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
 
     @staticmethod
     def prepare_triton_wrapper_args(

@@ -5028,8 +5028,9 @@ class AOTInductorTestsTemplate:
             else "aoti_torch_cpu_addmm_out"
         )
         with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
-            _, code = run_and_get_cpp_code(
-                AOTIRunnerUtil.compile, model, example_inputs
+            ep = torch.export.export(model, example_inputs)
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package, ep
             )
             shim_fn_codes = (
                 f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
@@ -5038,6 +5039,10 @@ class AOTInductorTestsTemplate:
                 FileCheck().check(shim_fn_codes).run(code)
             else:
                 FileCheck().check_not(shim_fn_codes).run(code)
+
+            compiled_model = torch._inductor.aoti_load_package(package_path)
+            result = compiled_model(*example_inputs)
+            self.assertEqual(result, model(*example_inputs))
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
