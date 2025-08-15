@@ -788,6 +788,25 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
         log.debug("Failed to log inductor_runtime_and_tensor_meta", exc_info=True)
 
 
+def log_graph_execution(name: str) -> None:
+    """Log a single graph execution for TLParse."""
+
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_graph_execution",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"graph": name},
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_graph_execution via structured logging",
+            exc_info=True,
+        )
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
