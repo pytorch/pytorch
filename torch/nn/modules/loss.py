@@ -692,10 +692,6 @@ class BCELoss(_WeightedLoss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -721,21 +717,15 @@ class BCELoss(_WeightedLoss):
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(weight, size_average, reduce, reduction)
-        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
         """
         return F.binary_cross_entropy(
-            input,
-            target,
-            weight=self.weight,
-            reduction=self.reduction,
-            label_smoothing=self.label_smoothing,
+            input, target, weight=self.weight, reduction=self.reduction
         )
 
 
@@ -825,10 +815,6 @@ class BCEWithLogitsLoss(_Loss):
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -852,14 +838,12 @@ class BCEWithLogitsLoss(_Loss):
         reduce=None,
         reduction: str = "mean",
         pos_weight: Optional[Tensor] = None,
-        label_smoothing: float = 0.0,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
         self.weight: Optional[Tensor]
         self.pos_weight: Optional[Tensor]
-        self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -869,7 +853,6 @@ class BCEWithLogitsLoss(_Loss):
             self.weight,
             pos_weight=self.pos_weight,
             reduction=self.reduction,
-            label_smoothing=self.label_smoothing,
         )
 
 
@@ -1304,7 +1287,9 @@ class CrossEntropyLoss(_WeightedLoss):
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
           target data type is required to be long when using class indices. If containing class probabilities, the
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
-          data type is required to be float when using class probabilities.
+          data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
+          probability constraints on the class probabilities and that it is the user's responsibility to ensure
+          ``target`` contains valid probability distributions (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1331,6 +1316,51 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> output = loss(input, target)
         >>> output.backward()
+
+    .. note::
+        When ``target`` contains class probabilities, it should consist of soft labels—that is,
+        each ``target`` entry should represent a probability distribution over the possible classes for a given data sample,
+        with individual probabilities between ``[0,1]`` and the total distribution summing to 1.
+        This is why the :func:`softmax()` function is applied to the ``target`` in the class probabilities example above.
+
+        PyTorch does not validate whether the values provided in ``target`` lie in the range ``[0,1]``
+        or whether the distribution of each data sample sums to ``1``.
+        No warning will be raised and it is the user's responsibility
+        to ensure that ``target`` contains valid probability distributions.
+        Providing arbitrary values may yield misleading loss values and unstable gradients during training.
+
+    Examples:
+        >>> # xdoctest: +SKIP
+        >>> # Example of target with incorrectly specified class probabilities
+        >>> loss = nn.CrossEntropyLoss()
+        >>> torch.manual_seed(283)
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> # Provided target class probabilities are not in range [0,1]
+        >>> target
+        tensor([[ 0.7105,  0.4446,  2.0297,  0.2671, -0.6075],
+                [-1.0496, -0.2753, -0.3586,  0.9270,  1.0027],
+                [ 0.7551,  0.1003,  1.3468, -0.3581, -0.9569]])
+        >>> # Provided target class probabilities do not sum to 1
+        >>> target.sum(axis=1)
+        tensor([2.8444, 0.2462, 0.8873])
+        >>> # No error message and possible misleading loss value
+        >>> loss(input, target).item()
+        4.6379876136779785
+        >>>
+        >>> # Example of target with correctly specified class probabilities
+        >>> # Use .softmax() to ensure true probability distribution
+        >>> target_new = target.softmax(dim=1)
+        >>> # New target class probabilities all in range [0,1]
+        >>> target_new
+        tensor([[0.1559, 0.1195, 0.5830, 0.1000, 0.0417],
+                [0.0496, 0.1075, 0.0990, 0.3579, 0.3860],
+                [0.2607, 0.1355, 0.4711, 0.0856, 0.0471]])
+        >>> # New target class probabilities sum to 1
+        >>> target_new.sum(axis=1)
+        tensor([1.0000, 1.0000, 1.0000])
+        >>> loss(input, target_new).item()
+        2.55349063873291
     """
 
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
