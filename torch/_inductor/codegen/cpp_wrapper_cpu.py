@@ -518,6 +518,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
+            self.codegen_additional_funcs()
+
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
 
@@ -673,6 +675,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         code.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type({name}, &{name}_device_type));"
         )
+
+    def codegen_additional_funcs(self):
+        pass
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
