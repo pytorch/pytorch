@@ -1500,7 +1500,7 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
-    def test_add_complex11(self):
+    def test_add_complex10(self):
         # Fix https://github.com/pytorch/pytorch/issues/160495
         # Test scalar complex broadcasting
         def fn(a, b, alpha):
