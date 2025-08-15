@@ -1923,21 +1923,13 @@ def use_ck_template(layout: Layout) -> bool:
         log.warning("Please pip install Composable Kernel package")
         return False
 
-    if config.is_fbcode():
-        config.rocm.ck_dir = ck_package_dirname
-
     if not config.rocm.ck_dir:
         config.rocm.ck_dir = ck_package_dirname
         log.warning(
-            "TORCHINDUCTOR_CK_DIR env variable was not set.\n\
-            Using: %s",
+            "TorchInductor's config.rocm.ck_dir was not set. "
+            "Updating to: %s",
             ck_package_dirname,
         )
-        return False
-
-    if ck_package_dirname != config.rocm.ck_dir:
-        log.warning("Invalid path to CK library")
-        return False
 
     return True
 

@@ -21,6 +21,13 @@ REPO_DIR = SCRIPT_DIR.parent.parent
 
 # CK pin is read in a similar way that triton commit is
 def read_ck_pin() -> str:
+    """
+    Reads the CK (Composable Kernel) commit hash.
+    The hash is pinned to a known stable version of CK.
+
+    Returns:
+        str: The commit hash read from 'rocm-composable-kernel.txt'.
+    """
     ck_file = "rocm-composable-kernel.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / ck_file) as f:
         return f.read().strip()
