@@ -19,7 +19,7 @@
     "def MixedMMH100.get_best_choices()": 85
   },
   "torch/_inductor/autotune_process.py": {
-    "class CUDABenchmarkRequest": 115,
+    "class CUTLASSBenchmarkRequest": 115,
     "class TritonBenchmarkRequest": 121,
     "def TritonBenchmarkRequest.make_run_fn()": 81
   },
