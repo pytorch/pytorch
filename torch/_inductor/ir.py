@@ -4036,16 +4036,16 @@ class NoneLayout(OutputSpec):
         return self.device
 
 
-def create_computed_mutated_buffer(target: IRNode, data: IRNode) -> Buffer:
+def create_computed_mutated_buffer(mutation_target: IRNode, data: IRNode) -> Buffer:
     """Create and register a buffer that mutates an existing node"""
-    V.graph.mark_buffer_mutated(target.get_name())
+    V.graph.mark_buffer_mutated(mutation_target.get_name())
 
     buffer = ComputedBuffer(
         name=None,
-        layout=NonOwningLayout(target),
-        data=operation,
+        layout=NonOwningLayout(mutation_target),
+        data=data,
     )
-    buffer.mutation_target = target
+    buffer.mutation_target = mutation_target.get_name()
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
     return buffer

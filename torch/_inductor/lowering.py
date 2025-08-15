@@ -4033,7 +4033,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         output_indexer=output_indexer,
         scatter_mode=backend_reduce_str(reduce),
     )
-    ir.create_computed_mutated_buffer(self, data)
+    ir.create_computed_mutated_buffer(self, scatter)
 
     if ndim == 0:
         self = view(self, [])
