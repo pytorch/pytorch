@@ -1311,7 +1311,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime + tensor meta artifact was logged
+                # Verify artifact was logged
                 self.assertIn(
                     '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
                 )
