@@ -1601,9 +1601,10 @@ class Reduction(Loops):
             reduction_hint = hint
         if split == -1:
             assert input_node is not None
-            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node
-            )
+            with patch.object(FlexibleLayout, "allow_indexing", True):
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
             return cls.create_multilayer_existing_ranges(
@@ -3557,12 +3558,21 @@ class IndexingConstant(BaseConstant):
 def is_contiguous_strides_for_shape(
     stride: Sequence[_IntLike], shape: Sequence[_IntLike]
 ) -> bool:
-    return all(
-        size == 1 or left == right
-        for left, right, size in zip(
-            stride, FlexibleLayout.contiguous_strides(shape), shape
-        )
-    )
+    expected_stride = 1
+    expected_stride_max = 1
+    for x, y in reversed(tuple(zip(shape, stride))):
+        if x == 1:
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            y, expected_stride
+        ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
+            return False
+
+        expected_stride_max *= sympy.Max(1, x)
+        expected_stride *= x
+
+    return True
 
 
 def get_align_for_dtype(dtype: torch.dtype) -> int:
@@ -6678,6 +6688,9 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            if name in constexpr_names and triton_version_uses_attrs_dict():
+                # see #160000 - we don't pass in constexpr args to speed up runtime.
+                continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):

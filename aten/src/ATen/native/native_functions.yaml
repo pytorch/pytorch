@@ -3447,7 +3447,11 @@
 
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor? bias) -> Tensor
 
+- func: fbgemm_linear_fp16_weight_fp32_activation.out(Tensor input, Tensor packed_weight, Tensor? bias, Tensor(a!) output) -> Tensor
+
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_fp16_weight.out(Tensor input, Tensor packed_weight, Tensor bias, Tensor(a!) output) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
 
