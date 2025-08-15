@@ -1230,19 +1230,28 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = [
-            FlexConfig(64, 64, 1, 4),
-        ]
-        self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
-            FlexDecodeConfig(32, 1, 2),
-            FlexDecodeConfig(32, 1, 1),
-            FlexDecodeConfig(32, 2, 2),
-            FlexDecodeConfig(32, 2, 1),
-            FlexDecodeConfig(64, 1, 2),
-            FlexDecodeConfig(64, 1, 1),
-            FlexDecodeConfig(64, 2, 2),
-            FlexDecodeConfig(64, 2, 1),
-        ]
+        self.flex_attn_bwd_autotune_configs: list[FlexConfig] = []
+        self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
+
+        if not bool(os.getenv("CI")):
+            self.flex_attn_bwd_autotune_configs += [
+                FlexConfig(BLOCK1, BLOCK2, s, w)
+                for BLOCK1 in [32, 64]
+                for BLOCK2 in [32, 64, 128]
+                for s in [1, 3, 4, 5]  # num_stages
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
+                if BLOCK2 % BLOCK1 == 0
+            ]
+            self.flex_decode_autotune_configs += [
+                FlexDecodeConfig(32, 1, 2),
+                FlexDecodeConfig(32, 1, 1),
+                FlexDecodeConfig(32, 2, 2),
+                FlexDecodeConfig(32, 2, 1),
+                FlexDecodeConfig(64, 1, 2),
+                FlexDecodeConfig(64, 1, 1),
+                FlexDecodeConfig(64, 2, 2),
+                FlexDecodeConfig(64, 2, 1),
+            ]
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
@@ -1273,9 +1282,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def get_flex_attn_bwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_bwd_configs: list[FlexConfig] = []
-        TRITON_LESS_FLEX_ATTN_BWD_CONFIGS = os.getenv(
-            "TRITON_LESS_FLEX_ATTN_BWD_CONFIGS", "0"
-        ).lower() in {"true", "1", "t", "y", "yes", "on"}
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
@@ -1297,10 +1303,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
-        if TRITON_LESS_FLEX_ATTN_BWD_CONFIGS:
-            flex_attn_bwd_configs = list(
-                filter(lambda c: c.num_stages == 1, flex_attn_bwd_configs)
-            )
         return flex_attn_bwd_configs
 
     def get_flex_decode_configs(
