@@ -74,5 +74,7 @@ runs:
         END_TIME=$(date +%s)
         {
           echo "build_time=$((END_TIME - START_TIME))"
-          echo "output_dir=$PARENT_OUTPUT_DIR"
+          if [ -d "$PARENT_OUTPUT_DIR" ]; then
+            echo "output_dir=$PARENT_OUTPUT_DIR"
+          fi
         } >> "$GITHUB_OUTPUT"
