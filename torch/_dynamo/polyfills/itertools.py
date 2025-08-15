@@ -126,10 +126,11 @@ def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[
 
 @substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]
 def filterfalse(function: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    it = iter(iterable)
     if function is None:
-        return filter(lambda x: not x, iterable)
+        return filter(operator.not_, it)
     else:
-        return filter(lambda x: not function(x), iterable)
+        return filter(lambda x: not function(x), it)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
