@@ -93,6 +93,7 @@ from ..utils import (
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
+from .functions import bind_args_cached
 from .lists import SizeVariable
 
 
@@ -630,6 +631,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "Set torch._dynamo.config.enable_trace_contextlib = True",
                         ],
                     )
+
+                from . import SDPAKernelVariable, UserFunctionVariable
+
+                # Special treatments for certain context managers created via
+                # contextlib, because
+                # 1. we (pytorch) own their impls
+                # 2. it's tedious to trace through them, so we effectively
+                #    "allow in graph" them without sacrificing soundness.
+                #
+                # We would typically reach here via either
+                # 1. the instance construction in `with ctx_manager(...):`:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L301
+                # 2. calling a function decorated with a context manager:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L122
+                #
+                # So we basically trace through the surface part of the
+                # contextlib code, and then special case the shared remaining
+                # logic (the actual context manager instance construction and
+                # usage later on).
+                if isinstance(args[0], UserFunctionVariable):
+                    fn = args[0].fn
+                    fn_source = args[0].source
+                    # At this point `fn` is the "unwrapped" version of the
+                    # context-managerified function.
+                    if fn is torch.nn.attention.sdpa_kernel.__wrapped__:
+                        source = (
+                            AttrSource(fn_source, "__wrapped__") if fn_source else None
+                        )
+                        args, kwargs = args[1], args[2]
+                        name_to_arg_map = bind_args_cached(
+                            fn, tx, source, args.items, kwargs.items
+                        )
+                        backends = name_to_arg_map["backends"].as_python_constant()
+                        set_priority = name_to_arg_map[
+                            "set_priority"
+                        ].as_python_constant()
+                        return SDPAKernelVariable.create(tx, backends, set_priority)
+
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully

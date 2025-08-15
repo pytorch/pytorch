@@ -1764,6 +1764,33 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    # Regression test to make sure dynamo won't graph break on calling functions
+    # decorated with special context manager.
+    def test_sdpa_kernel_ctx_manager_as_decorator(self):
+        SDPA_BACKEND_PRIORITY = [
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+
+        @torch.nn.attention.sdpa_kernel(
+            backends=SDPA_BACKEND_PRIORITY, set_priority=True
+        )
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.rand(16, 16, 64, 256, dtype=torch.float16)
+        ref = f(x)
+        res = opt_f(x)
+
+        self.assertEqual(ref, res)
+
     # Regression test to make sure the value of set_priority is used correctly.
     def test_sdpa_kernel_ctx_manager_set_priority(self):
         backends = [torch.nn.attention.SDPBackend.MATH]
