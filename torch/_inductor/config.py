@@ -1535,12 +1535,29 @@ class cuda:
     # Whether to use fast math.
     use_fast_math = False
 
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx: Optional[str] = None
+
+
+class cutlass:
+    """Common cutlass settings for the inductor backend."""
+
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+            os.path.join(
+                os.path.dirname(torch.__file__),
+                "../third_party/torch-xpu-tla"
+                if torch.xpu.is_available()
+                else "../third_party/cutlass/",
+            ),
         )
     )
 
@@ -1559,14 +1576,6 @@ class cuda:
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
-
-    # Path to CUDA NVCC.
-    # NVCC search order:
-    # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
-    # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
 
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
