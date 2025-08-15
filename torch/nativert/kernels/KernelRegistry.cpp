@@ -1045,6 +1045,17 @@ REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   at::native::where_self_out(cond, self, other, out);
 })
 
+REGISTER_CPU_KERNEL("torch.ops.fb.scale_gradient.default", fb_scale_gradient, {
+  const auto& in_0 = KernelInput(0).toTensor();
+
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = create_empty_from(in_0);
+  }
+  auto& out = KernelOutput(0).toTensor();
+  out.resize_(in_0.sizes());
+  out.copy_(in_0);
+})
+
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_byte_rowwise_offsets.default",
     quantized_embedding_bag_byte_rowwise_offsets,
