@@ -46,6 +46,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
     Unsupported,
@@ -2140,9 +2141,14 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def call_next(self, tx: "InstructionTranslator", *args):
+        arg = args[0]
         try:
             return arg.next_variable(tx)
+        except ObservedUserStopIteration:
+            if len(args) == 2:
+                return args[1]
+            raise
         except Unsupported as ex:
             if isinstance(arg, variables.BaseListVariable):
                 ex.remove_from_stats()
@@ -2543,6 +2549,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
