@@ -1202,10 +1202,10 @@ def fuzz_and_test(starting_seed: Optional[int] = None, max_depth: Optional[int] 
         max_depth: If provided, use this fixed max_depth for all iterations
     """
     print("=== Testing fuzz_and_execute with arguments ===")
+    failed_seeds = []
 
     for i in range(100):
         print(f"------------------ TEST itteration {i} ---------------")
-
         # Use starting_seed + iteration number if provided, otherwise use random seed
         if starting_seed is not None:
             iteration_seed = starting_seed + i
@@ -1214,8 +1214,11 @@ def fuzz_and_test(starting_seed: Optional[int] = None, max_depth: Optional[int] 
             seed, success = fuzz_and_execute(max_depth=max_depth)
 
         if not success:
-            return
+            failed_seeds.append(seed)
 
+    print(f"total success is {100- len(failed_seeds)}")
+    print(f"total faluire is {len(failed_seeds)}")
+    print("failed seeds are {}".format(failed_seeds))
 
 def quick_visualize_test(
     seed: Optional[int] = None, max_depth: int = 3, title: Optional[str] = None
@@ -1285,6 +1288,7 @@ def main():
 
     # Set fuzzer configuration based on command line arguments
     from tensor_fuzzer import FuzzerConfig
+
     if args.avoid_complex:
         FuzzerConfig.avoid_complex = True
         print("🚫 Avoiding complex number dtypes (torch.complex64, torch.complex128)")
@@ -1310,7 +1314,7 @@ def main():
         print(f"🔧 Using fixed max_depth: {args.max_depth}")
     else:
         print("🔧 Using random max_depth (1-20) for each iteration")
-    
+
     fuzz_and_test(starting_seed=args.seed, max_depth=args.max_depth)
 
 

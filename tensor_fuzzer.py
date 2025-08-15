@@ -56,10 +56,14 @@ def fuzz_torch_tensor_type() -> torch.dtype:
         torch.complex64,
         torch.complex128,
     ]
-    
+
     # Filter out complex dtypes if avoid_complex is enabled
     if FuzzerConfig.avoid_complex:
-        tensor_dtypes = [dtype for dtype in tensor_dtypes if dtype not in [torch.complex64, torch.complex128]]
+        tensor_dtypes = [
+            dtype
+            for dtype in tensor_dtypes
+            if dtype not in [torch.complex64, torch.complex128]
+        ]
 
     # Randomly select and return a data type
     return random.choice(tensor_dtypes)
@@ -629,9 +633,7 @@ def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, com
     elif spec.dtype in [torch.complex64, torch.complex128]:
         # Only generate complex values if not avoiding complex dtypes
         if FuzzerConfig.avoid_complex:
-            # This should not happen if the spec was generated properly,
-            # but fallback to a float value in case
-            return random.uniform(-10.0, 10.0)
+            raise ValueError("Cannot generate complex values with avoid_complex=True")
         return complex(random.uniform(-10.0, 10.0), random.uniform(-10.0, 10.0))
     else:  # integer or bool
         if spec.dtype == torch.bool:
