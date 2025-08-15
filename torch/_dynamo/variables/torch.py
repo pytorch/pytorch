@@ -77,6 +77,7 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
+from .functions import bind_args_cached
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -124,6 +125,14 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        # We'll let Dynamo inline into the contextlib part of these context
+        # manager instances, all the way till it invokes the wrapped function
+        # itself (at which point we wrap it back to special context manager
+        # VTs).
+        #
+        # This allows us to support calling functions decorated with these
+        # context managers, without much extra effort or code dup.
+        torch.nn.attention.sdpa_kernel.__wrapped__,  # type: ignore[attr-defined]
     ]
 )
 
@@ -301,6 +310,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -408,6 +418,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return FSDPParamGroupUseTrainingStateVariable.create(
                 tx, args[0], args[1].as_python_constant()
             )
+        elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
+            name_to_arg_map = bind_args_cached(
+                self.value, tx, self.source, args, kwargs
+            )
+            backends = name_to_arg_map["backends"].as_python_constant()
+            set_priority = name_to_arg_map["set_priority"].as_python_constant()
+            return SDPAKernelVariable.create(tx, backends, set_priority)
 
         return super().call_function(tx, args, kwargs)
 

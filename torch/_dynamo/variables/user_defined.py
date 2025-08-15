@@ -69,7 +69,6 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -79,7 +78,6 @@ from ..utils import (
     is_frozen_dataclass,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
-    is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
@@ -93,7 +91,6 @@ from ..utils import (
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
-from .functions import bind_args_cached
 from .lists import SizeVariable
 
 
@@ -589,6 +586,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
+            from . import TorchCtxManagerClassVariable
             from .functions import (
                 BaseUserFunctionVariable,
                 FunctionDecoratedByContextlibContextManagerVariable,
@@ -620,7 +618,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
-                args[0], BaseUserFunctionVariable
+                args[0], (BaseUserFunctionVariable, TorchCtxManagerClassVariable)
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented_v2(
@@ -631,8 +629,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "Set torch._dynamo.config.enable_trace_contextlib = True",
                         ],
                     )
-
-                from . import SDPAKernelVariable, UserFunctionVariable
 
                 # Special treatments for certain context managers created via
                 # contextlib, because
@@ -650,21 +646,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # contextlib code, and then special case the shared remaining
                 # logic (the actual context manager instance construction and
                 # usage later on).
-                if isinstance(args[0], UserFunctionVariable):
-                    fn = args[0].fn
-                    fn_source = args[0].source
-                    # At this point `fn` is the "unwrapped" version of the
-                    # context-managerified function.
-                    if fn is torch.nn.attention.sdpa_kernel.__wrapped__:
-                        args, kwargs = args[1], args[2]
-                        name_to_arg_map = bind_args_cached(
-                            fn, tx, fn_source, args.items, kwargs.items
-                        )
-                        backends = name_to_arg_map["backends"].as_python_constant()
-                        set_priority = name_to_arg_map[
-                            "set_priority"
-                        ].as_python_constant()
-                        return SDPAKernelVariable.create(tx, backends, set_priority)
+                if isinstance(args[0], TorchCtxManagerClassVariable):
+                    fn_var = args[0]
+                    args_list = args[1].items
+                    kwargs_dict = args[2].keys_as_python_constant()
+                    return fn_var.call_function(tx, args_list, kwargs_dict)
 
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
@@ -1316,7 +1302,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from .. import trace_rules
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
@@ -1562,14 +1547,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func, self, source_fn=source_fn, source=source
                 )
             elif inspect.isfunction(dynamic_subobj):
-                if is_utils_checkpoint(func):
-                    return build_checkpoint_variable(source=source)
-                elif source is not None:
-                    return trace_rules.lookup(func).create_with_source(
-                        func, source=source
-                    )
-                else:
-                    return trace_rules.lookup(func)(func)
+                return VariableTracker.build(tx, func, source)
 
         if (
             # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
