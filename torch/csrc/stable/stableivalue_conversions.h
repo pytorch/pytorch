@@ -21,8 +21,8 @@ T to(StableIValue val);
 // =============================================================================
 
 // note that the signatures for from and to are forward declared in
-// stable/utils.h but defined below to avoid circular dependencies where other
-// headers (like tensor-inl.h) will need to/from.
+// stable/stableivalue_conversions.h but defined below to avoid circular
+// dependencies where other headers (like tensor-inl.h) will need to/from.
 
 namespace detail {
 

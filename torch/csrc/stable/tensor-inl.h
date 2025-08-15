@@ -6,8 +6,8 @@
 // without circular dependencies.
 
 #pragma once
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor.h>
-#include <torch/csrc/stable/utils.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/shim_utils.h>
 

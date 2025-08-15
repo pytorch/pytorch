@@ -5,10 +5,10 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-// Technically, this file doesn't use anything from utils.h, but we
-// need to include it here as the contents of utils.h used to live
-// here and so we need to expose them for backwards compatibility.
-#include <torch/csrc/stable/utils.h>
+// Technically, this file doesn't use anything from stableivalue_conversions.h,
+// but we need to include it here as the contents of stableivalue_conversions.h
+// used to live here and so we need to expose them for backwards compatibility.
+#include <torch/csrc/stable/stableivalue_conversions.h>
 
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
