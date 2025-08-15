@@ -1730,7 +1730,8 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
 def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     return (
-        can_use_tma(*matrices, add_guards=add_guards)
+        all(len(m.get_size()) == 2 for m in matrices)
+        and can_use_tma(*matrices, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 
