@@ -388,13 +388,6 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
-  m.impl("my_amax", &boxed_my_amax);
-  m.impl("my_amax_vec", &boxed_my_amax_vec);
-}
-
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("my_amax", &boxed_my_amax);
-  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 bool test_default_constructor(bool defined) {
@@ -430,6 +423,8 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
+  m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 // Test functions for torch::stable::accelerator APIs
