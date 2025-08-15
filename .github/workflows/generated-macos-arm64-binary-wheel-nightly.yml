@@ -118,6 +118,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -134,11 +135,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -260,6 +263,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -276,11 +280,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -402,6 +408,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -418,11 +425,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -544,6 +553,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -560,11 +570,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -686,6 +698,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -702,11 +715,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -828,6 +843,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -844,11 +860,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -970,6 +988,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -986,11 +1005,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
@@ -1112,6 +1133,7 @@ jobs:
 
           EXTRA_CONDA_INSTALL_FLAGS=""
           CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -1128,11 +1150,13 @@ jobs:
               desired_python="3.13"
               ;;
             *)
-              desired_python=$DESIRED_PYTHON
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
