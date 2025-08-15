@@ -104,11 +104,13 @@ C10_EXPORT bool is_finalizing();
 
 C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
-    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+    std::shared_ptr<c10::Allocator> mempool_allocator = nullptr);
 
 C10_EXPORT void register_availability(
     const std::string& name,
-    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+    std::shared_ptr<c10::Allocator> mempool_allocator = nullptr);
 
 C10_EXPORT bool has_allocator(c10::DeviceType device_type);
 
@@ -183,5 +185,7 @@ TORCH_API bool has_multicast_support(
 TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
+
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device);
 
 } // namespace c10d::symmetric_memory

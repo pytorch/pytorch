@@ -18,14 +18,22 @@ class AllocatorMap {
 
   void register_allocator(
       c10::DeviceType device_type,
-      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+      std::shared_ptr<c10::Allocator> mempool_allocator = nullptr /* optional */) {
     map_[device_type] = std::move(allocator);
+    if (mempool_allocator) {
+      mempool_map_[device_type] = std::move(mempool_allocator);
+    }
   }
 
   void register_availability(
       const std::string& name,
-      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+      std::shared_ptr<c10::Allocator> mempool_allocator = nullptr /* optional */) {
     avail_map_[name] = std::move(allocator);
+    if (mempool_allocator) {
+      avail_mempool_map_[name] = std::move(mempool_allocator);
+    }
   }
 
   void set_backend(const std::string& name) {
@@ -44,7 +52,8 @@ class AllocatorMap {
       }
       TORCH_CHECK(!in_use_, "Backend can not be changed after use.");
     }
-    register_allocator(device_type, it->second);
+    auto it2 = avail_mempool_map_.find(name);
+    register_allocator(device_type, it->second, it2->second);
   }
 
   std::optional<std::string> get_backend(c10::DeviceType device_type) {
@@ -66,6 +75,16 @@ class AllocatorMap {
     return it->second;
   }
 
+  std::shared_ptr<c10::Allocator> get_mempool_allocator(
+      c10::DeviceType device_type) {
+    auto it = mempool_map_.find(device_type);
+    TORCH_CHECK(
+        it != mempool_map_.end(),
+        "SymmetricMemory does not support MemPool for device type ",
+        device_type);
+    return it->second;
+  }
+
   bool has_allocator(c10::DeviceType device_type) {
     auto it = map_.find(device_type);
     return it != map_.end();
@@ -83,6 +102,11 @@ class AllocatorMap {
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       map_;
 
+  std::unordered_map<
+      c10::DeviceType,
+      std::shared_ptr<c10::Allocator>>
+      mempool_map_;
+
   // For backends to register availability.
   // This registration is at static time. Therefore, it is expected that the
   // derived `SymmetricMemoryAllocator` classes do not have backend-specific
@@ -91,6 +115,11 @@ class AllocatorMap {
       std::string, // backend name "NVSHMEM", "CUDA", "NCCL", etc.
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       avail_map_;
+
+  std::unordered_map<
+      std::string, // backend name "NVSHMEM", "CUDA", "NCCL", etc.
+      std::shared_ptr<c10::Allocator>>
+      avail_mempool_map_;
 
   bool in_use_ = false;
 };
@@ -168,15 +197,17 @@ bool is_finalizing() {
 
 void register_allocator(
     c10::DeviceType device_type,
-    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+    std::shared_ptr<c10::Allocator> mempool_allocator) {
   return AllocatorMap::get().register_allocator(
-      device_type, std::move(allocator));
+      device_type, std::move(allocator), mempool_allocator);
 }
 
 void register_availability(
     const std::string& name,
-    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_availability(name, std::move(allocator));
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator,
+    std::shared_ptr<c10::Allocator> mempool_allocator) {
+  return AllocatorMap::get().register_availability(name, std::move(allocator), mempool_allocator);
 }
 
 void set_backend(const std::string& name) {
@@ -194,6 +225,11 @@ bool has_allocator(c10::DeviceType device_type) {
 c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type) {
   return AllocatorMap::get().get_allocator(device_type);
+}
+
+std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device) {
+  return AllocatorMap::get().get_mempool_allocator(device.type());
 }
 
 void set_group_info(

@@ -1,3 +1,4 @@
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -407,15 +408,27 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
+
+    // Create allocator for MemPool
+    auto alloc_for_mempool = [allocator](size_t size, int device, void* stream) {
+      return allocator->alloc(size, device, std::nullopt);
+    };
+    auto free_for_mempool = [allocator](void* ptr, size_t size, int device, void* stream) {
+      allocator->free(ptr);
+    };
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> mempool_allocator =
+        torch::cuda::CUDAPluggableAllocator::createCustomAllocator(alloc_for_mempool, free_for_mempool);
+
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
       // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          allocator);
+          allocator /* SymmMem allocator */,
+          mempool_allocator /* mempool_allocator */);
     } else {
       // Register availability in case `set_backend` is called dynamically
-      register_availability("NVSHMEM", allocator);
+      register_availability("NVSHMEM", allocator, mempool_allocator);
     }
   }
 };

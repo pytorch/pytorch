@@ -1781,4 +1781,15 @@ def get_backend(device: _device) -> Optional[str]:
     return _SymmetricMemory.get_backend(torch.device(device))
 
 
+def get_mempool_allocator(device: _device):
+    r"""
+    Get the mempool allocator for symmetric memory allocation for a given device.
+    If not found, return None.
+
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        mempool allocator.
+    """
+    return _SymmetricMemory.get_mempool_allocator(torch.device(device))
+
 __all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
