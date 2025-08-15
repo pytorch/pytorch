@@ -1965,6 +1965,26 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 template_lookup_table: Optional[dict[str, list[dict[str, Any]]]] = None
 
 
+class template_lookup_table_config:
+    """Configs specific to template lookup table system."""
+
+    # Recorder is a system to emit single template choices or full lookup table
+    # through the autotuning process.
+
+    # NOTE: the current recorder implementation emits all choices that it considers
+    # TODO(coconutruben): make recorder configurable to only emit the topk choices
+    # after benchmarking - Note to self, this requires ChoiceCaller knowing what the
+    # kwargs of the choice were
+    recorder_emit: bool = True
+    recorder_record_dir: Optional[str] = os.environ.get(
+        "TORCH_INDUCTOR_LOOKUP_TABLE_RECORD_DIR", None
+    )
+    # Whether to record template hashes for templates that provide them.
+    # Template hashes make the lookup table more robust but potentially
+    # less portable
+    record_template_hash: bool = True
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 

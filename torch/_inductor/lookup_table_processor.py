@@ -16,6 +16,7 @@ from typing import Any, Optional
 from .ir import Layout
 from .kernel_inputs import KernelInputs
 from .lookup_table import lookup_template_configs
+from .lookup_table_recorder import record
 from .template_config_processor import TemplateConfigProcessor
 
 
@@ -66,4 +67,8 @@ class LookupTableProcessor(TemplateConfigProcessor):
             # lookup table is in use
             cgen = (c for c in lookup_configs)
 
-        yield from cgen
+        for c in cgen:
+            # Record the config to the lookup table
+            # TODO(coconutruben): move this into select_algorithm.py when we have all the necessary info there to record
+            record(kernel_inputs, op_name, template_name, c, template_hash)
+            yield c
