@@ -1966,6 +1966,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         class Foo:
             def __init__(self, x):
                 self.x = x
+
             def __add__(self, other):
                 return Foo(self.x + other.x)
 
