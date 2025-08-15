@@ -217,6 +217,7 @@ def check_model_fx(
             {
                 "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
                 "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                "compile_threads": 1,
             }
         ),
     ):
@@ -241,10 +242,15 @@ def check_model_fx(
 
         torch.manual_seed(0)
 
-        ep = torch.export.export(model, example_inputs, dynamic_shapes=dynamic_shapes)
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
+        ep = torch.export.export(
+            model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         options = options or {}
         options["fx_wrapper"] = True
         gm = torch._inductor.aot_compile(ep.module(), example_inputs, options=options)
+        gm.print_readable()
         actual = gm(*example_inputs)
 
     self.assertEqual(actual, expected, atol=atol, rtol=rtol)
@@ -263,6 +269,7 @@ def check_model_with_multiple_inputs_fx(
             {
                 "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
                 "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                "compile_threads": 1,
             }
         ),
     ):
@@ -274,7 +281,11 @@ def check_model_with_multiple_inputs_fx(
 
         torch.manual_seed(0)
         example_inputs = list_example_inputs[0]
-        ep = torch.export.export(model, example_inputs, dynamic_shapes=dynamic_shapes)
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
+        ep = torch.export.export(
+            model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         options = options or {}
         options["fx_wrapper"] = True
         gm = torch._inductor.aot_compile(ep.module(), example_inputs, options=options)
