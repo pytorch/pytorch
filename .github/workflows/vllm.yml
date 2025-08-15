@@ -1,0 +1,45 @@
+name: vllm-test
+
+on:
+  push:
+    tags:
+      - ciflow/vllm/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  torch-build-sm89:
+    name: sm89-vllm-test
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-additional-packages: "vision audio torchao"
+      build-external-packages: "vllm"
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+      cuda-arch-list: '8.9'
+      runner: linux.24xlarge.memory
+      test-matrix: |
+        { include: [
+          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu"  },
+          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+        ]}
+    secrets: inherit

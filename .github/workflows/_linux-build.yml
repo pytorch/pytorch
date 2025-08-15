@@ -96,6 +96,13 @@ on:
         required: false
         type: string
         default: ""
+      build-external-packages:
+        description: |
+          If set, the build external packages and saves their wheels as artifacts
+          use command separated list of packages to build ex: 'vllm,transformers'.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -355,6 +362,26 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+
+      - name: Build external packages
+        id: build-external-packages
+        if: inputs.build-external-packages != '' &&  steps.build.outcome != 'skipped'
+        uses: ./.github/actions/build-external-packages
+        with:
+          build-targets: ${{ inputs.build-external-packages }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          cuda-arch-list: ${{ inputs.cuda-arch-list }}
+          output-dir: external
+
+      - name: Move external packages to dist
+        if: steps.build-external-packages.outputs.output_dir != '' && steps.build-external-packages.outcome != 'skipped'
+        shell: bash
+        run: |
+          src="${{ steps.build-external-packages.outputs.output_dir }}"
+          if [ -d "$src" ]; then
+            mkdir -p "dist/$(dirname "$src")"
+            mv "$src" "dist/$(dirname "$src")/"
+          fi
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
