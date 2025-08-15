@@ -393,8 +393,7 @@ void raw_cudnn_batchnorm_forward_out(
               .set_stride({X.size(1), 1, X.size(1), X.size(1)})
               .set_data_type(get_fe_dtype(running_var_opt.value())));
 
-      auto batchnorm_inference_options = fe::graph::Batchnorm_inference_attributes()
-          .set_epsilon(epsilon_fe);
+      auto batchnorm_inference_options = fe::graph::Batchnorm_inference_attributes();
 
       Y_fe = batchnorm_graph->batchnorm_inference(
           X_fe, running_mean_fe, running_var_fe, scale_fe, bias_fe, batchnorm_inference_options);
