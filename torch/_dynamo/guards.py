@@ -202,7 +202,7 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
-    from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.output_graph import OutputGraph, OutputGraphGuardsState
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -2437,6 +2437,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
+        from torch._dynamo.output_graph import OutputGraph
+
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
         assert output_graph is not None
@@ -2453,6 +2455,7 @@ class GuardBuilder(GuardBuilderBase):
             # shape variables to sources from tracked_fakes.  This must happen after
             # tensor checks.
             # NB: self.output_graph can be None in the debug_nops tests
+            assert isinstance(output_graph, OutputGraph)
             fs = output_graph.tracked_fakes
             input_contexts = [a.symbolic_context for a in fs]
 
@@ -3045,7 +3048,7 @@ class ShapeCodeParts:
 
 @dataclasses.dataclass
 class GuardsState:
-    output_graph: OutputGraph
+    output_graph: OutputGraphGuardsState
     shape_code_parts: Optional[ShapeCodeParts]
 
 
@@ -3249,7 +3252,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         f_code: types.CodeType,
-        output_graph: Optional[OutputGraph] = None,
+        output_graph: OutputGraphGuardsState,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
         guard_filter_fn: Optional[
@@ -3265,7 +3268,8 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.output_graph = output_graph
+        self.output_graph: Optional[OutputGraphGuardsState] = output_graph
+        assert self.output_graph is not None
 
         # Only used for serialization.
         self.shape_code_parts = shape_code_parts
@@ -3313,7 +3317,6 @@ class CheckFunctionManager:
                 return ret
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
-        assert output_graph is not None
         builder, guard_manager = self.build_guards(
             sorted_guards,
             existing_diff_guard_sources,
@@ -3431,92 +3434,11 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: Optional[bytes] = None
-        assert self.output_graph is not None
-        builtins_dict_name = self.output_graph.name_of_builtins_dict_key_in_fglobals
         if self.guards_serialization_mode == "save":
-            used_global_vars = set()
-            used_local_vars = set()
+            from torch._dynamo.output_graph import OutputGraph
 
-            def prune_variable(source: Source) -> None:
-                if name := get_global_source_name(source):
-                    assert isinstance(name, str)
-                    # Leave out the builtins dict key, as we will special handle
-                    # it later because the guarded code rarely use the entire
-                    # builtin dict in the common case.
-                    if name not in (builtins_dict_name,):
-                        used_global_vars.add(name)
-                elif name := get_local_source_name(source):
-                    assert isinstance(name, str)
-                    used_local_vars.add(name)
-
-            output_graph_guards_state = self.output_graph.dump_guards_state()
-            # Only serialize the global variables that are actually used in guards.
-            for guard in sorted_guards:
-                if isinstance(guard.originating_source, ShapeEnvSource):
-                    assert self.shape_code_parts
-                    for source in self.shape_code_parts.shape_env_sources:
-                        prune_variable(source)
-                else:
-                    prune_variable(guard.originating_source)
-
-            for source in self.output_graph.guard_on_key_order:
-                prune_variable(source)
-
-            def normalize_create_fn(x: Any) -> Any:
-                if isinstance(x, functools.partial):
-
-                    def _ref(x: Any) -> Any:
-                        if isinstance(x, (TensorWeakRef, weakref.ref)):
-                            return x()
-                        return x
-
-                    new_args = tuple(_ref(a) for a in x.args)
-                    new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
-                    return functools.partial(x.func, *new_args, **new_keywords)
-
-                return x
-
-            global_scope_state = {
-                k: v
-                for k, v in output_graph_guards_state.global_scope.items()
-                if k in used_global_vars or k in self.additional_used_global_vars
-            }
-            global_scope_state[builtins_dict_name] = {
-                k: v
-                for k, v in output_graph_guards_state.global_scope[
-                    builtins_dict_name
-                ].items()  # type: ignore[attr-defined]
-                if k in self.used_builtin_vars
-            }
-            output_graph_guards_state = dataclasses.replace(
-                output_graph_guards_state,
-                local_scope={
-                    k: v
-                    for k, v in output_graph_guards_state.local_scope.items()
-                    if k in used_local_vars or k in self.additional_used_local_vars
-                },
-                global_scope=global_scope_state,
-                _guards=torch._guards.GuardsSet(
-                    {
-                        dataclasses.replace(
-                            guard,
-                            obj_weakref=None,
-                            guarded_class_weakref=None,
-                            create_fn=normalize_create_fn(guard.create_fn),
-                        )
-                        for guard in sorted_guards
-                    }
-                ),
-                input_source_to_sizes_strides=pytree.tree_map(
-                    convert_int_to_concrete_values,
-                    output_graph_guards_state.input_source_to_sizes_strides,
-                ),
-            )
-            guards_state = GuardsState(
-                output_graph=output_graph_guards_state,  # type: ignore[arg-type]
-                shape_code_parts=self.shape_code_parts,
-            )
-            self.guards_state = pickle_guards_state(guards_state)
+            assert isinstance(self.output_graph, OutputGraph)
+            self.guards_state = self.serialize_guards(sorted_guards, self.output_graph)
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -3534,12 +3456,103 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    def serialize_guards(
+        self,
+        sorted_guards: list[Guard],
+        output_graph: OutputGraph,
+    ) -> bytes:
+        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
+        used_global_vars = set()
+        used_local_vars = set()
+
+        def prune_variable(source: Source) -> None:
+            if name := get_global_source_name(source):
+                assert isinstance(name, str)
+                # Leave out the builtins dict key, as we will special handle
+                # it later because the guarded code rarely use the entire
+                # builtin dict in the common case.
+                if name not in (builtins_dict_name,):
+                    used_global_vars.add(name)
+            elif name := get_local_source_name(source):
+                assert isinstance(name, str)
+                used_local_vars.add(name)
+
+        output_graph_guards_state = output_graph.dump_guards_state()
+        # Only serialize the global variables that are actually used in guards.
+        for guard in sorted_guards:
+            if isinstance(guard.originating_source, ShapeEnvSource):
+                assert self.shape_code_parts
+                for source in self.shape_code_parts.shape_env_sources:
+                    prune_variable(source)
+            else:
+                prune_variable(guard.originating_source)
+
+        for source in output_graph.guard_on_key_order:
+            prune_variable(source)
+
+        def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+            if isinstance(x, functools.partial):
+
+                def _ref(x: Any) -> Any:
+                    if isinstance(x, (TensorWeakRef, weakref.ref)):
+                        return x()
+                    return x
+
+                new_args = tuple(_ref(a) for a in x.args)
+                new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
+                return functools.partial(x.func, *new_args, **new_keywords)
+
+            return x
+
+        global_scope_state = {
+            k: v
+            for k, v in output_graph_guards_state.global_scope.items()
+            if k in used_global_vars or k in self.additional_used_global_vars
+        }
+        global_scope_state[builtins_dict_name] = {
+            k: v
+            for k, v in output_graph_guards_state.global_scope[
+                builtins_dict_name
+            ].items()  # type: ignore[attr-defined]
+            if k in self.used_builtin_vars
+        }
+        output_graph_guards_state = dataclasses.replace(
+            output_graph_guards_state,
+            local_scope={
+                k: v
+                for k, v in output_graph_guards_state.local_scope.items()
+                if k in used_local_vars or k in self.additional_used_local_vars
+            },
+            global_scope=global_scope_state,
+            _guards=torch._guards.GuardsSet(
+                {
+                    dataclasses.replace(
+                        guard,
+                        obj_weakref=None,
+                        guarded_class_weakref=None,
+                        create_fn=normalize_create_fn(guard.create_fn),
+                    )
+                    for guard in sorted_guards
+                }
+            ),
+            input_source_to_sizes_strides=pytree.tree_map(
+                convert_int_to_concrete_values,
+                output_graph_guards_state.input_source_to_sizes_strides,
+            ),
+        )
+        guards_state = GuardsState(
+            output_graph=output_graph_guards_state,
+            shape_code_parts=self.shape_code_parts,
+        )
+
+        return pickle_guards_state(guards_state)
+
     def build_guards(
         self,
         sorted_guards: list[Guard],
         existing_diff_guard_sources: OrderedSet[str],
         f_code: types.CodeType,
-        output_graph: OutputGraph,
+        output_graph: OutputGraphGuardsState,
         serialization_mode: Optional[str] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
