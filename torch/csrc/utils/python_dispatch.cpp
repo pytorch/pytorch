@@ -722,7 +722,7 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey")
+  py::native_enum<c10::DispatchKey>(m, "DispatchKey", "enum.Enum")
       // clang-format off
       DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
@@ -771,7 +771,7 @@ void initDispatchBindings(PyObject* module) {
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-          ;
+          .finalize();
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -976,7 +976,8 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_autocast_supported_devices", []() {
-    std::vector<std::string> result;
+    std::vector<std::string> result(
+        at::autocast::_AUTOCAST_SUPPORTED_DEVICES.size());
     for (const auto device_type : at::autocast::_AUTOCAST_SUPPORTED_DEVICES) {
       result.emplace_back(
           c10::DeviceTypeName(device_type, /*lower_case*/ true));
@@ -1029,10 +1030,11 @@ void initDispatchBindings(PyObject* module) {
   m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
 
   using c10::impl::TorchDispatchModeKey;
-  py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
+  py::native_enum<TorchDispatchModeKey>(m, "_TorchDispatchModeKey", "enum.Enum")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
-      .value("FAKE", TorchDispatchModeKey::FAKE);
+      .value("FAKE", TorchDispatchModeKey::FAKE)
+      .finalize();
 }
 
 // TODO: dedupe with the kernel

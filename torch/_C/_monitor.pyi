@@ -13,6 +13,13 @@ class Aggregation(Enum):
     MAX = ...
     MIN = ...
 
+VALUE = Aggregation.VALUE
+MEAN = Aggregation.MEAN
+COUNT = Aggregation.COUNT
+SUM = Aggregation.SUM
+MAX = Aggregation.MAX
+MIN = Aggregation.MIN
+
 class Stat:
     name: str
     count: int

@@ -1515,7 +1515,7 @@ void initJITBindings(PyObject* module) {
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
 
-  py::enum_<MobileOptimizerType>(m, "_MobileOptimizerType")
+  py::native_enum<MobileOptimizerType>(m, "_MobileOptimizerType", "enum.Enum")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
       .value(
           "INSERT_FOLD_PREPACK_OPS",
@@ -1527,7 +1527,8 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .value(
           "VULKAN_AUTOMATIC_GPU_TRANSFER",
-          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER);
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
+      .finalize();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -1871,9 +1872,10 @@ void initJITBindings(PyObject* module) {
     }
     return type.value();
   });
-  py::enum_<SchemaArgType>(m, "_SchemaArgType")
+  py::native_enum<SchemaArgType>(m, "_SchemaArgType", "enum.IntEnum")
       .value("input", SchemaArgType::input)
-      .value("output", SchemaArgType::output);
+      .value("output", SchemaArgType::output)
+      .finalize();
   py::class_<SchemaArgument>(m, "_SchemaArgument")
       .def(py::init<SchemaArgType, size_t>())
       .def_readwrite("type", &SchemaArgument::type)

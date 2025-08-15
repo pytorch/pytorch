@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
+#include <pybind11/native_enum.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -255,28 +256,20 @@ struct type_caster<c10::Stream> {
 
 template <>
 struct type_caster<c10::DispatchKey>
-    : public type_caster_base<c10::DispatchKey> {
-  using base = type_caster_base<c10::DispatchKey>;
-  c10::DispatchKey tmp{};
+    : public type_caster_enum_type<c10::DispatchKey> {
+  using base = type_caster_enum_type<c10::DispatchKey>;
 
- public:
+  // Override the load member for this enum to accept str as an input.
   bool load(handle src, bool convert) {
-    if (base::load(src, convert)) {
-      return true;
-    } else if (py::isinstance(
-                   src, py::module_::import("builtins").attr("str"))) {
-      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
-      value = &tmp;
-      return true;
+    if (py::isinstance<py::str>(src)) {
+      c10::DispatchKey val{c10::parseDispatchKey(src.cast<std::string>())};
+      // It would be cleaner to not do the cast-to-object maneuver here, but key
+      // class members for type_caster_enum_type are private, so there's no way
+      // around this without relying on internal implementation details.
+      py::object tmp_object = py::cast(val);
+      return base::load(tmp_object, convert);
     }
-    return false;
-  }
-
-  static handle cast(
-      c10::DispatchKey src,
-      return_value_policy policy,
-      handle parent) {
-    return base::cast(src, policy, parent);
+    return base::load(src, convert);
   }
 };
 
