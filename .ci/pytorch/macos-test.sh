@@ -175,7 +175,7 @@ checkout_install_torchbench() {
     python install.py --continue_on_fail
   fi
 
-  pip install -r .ci/docker/ci_commit_pins/huggingface.txt
+  pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze

@@ -5,7 +5,7 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 function install_huggingface() {
-  pip_install -r huggingface.txt
+  pip_install -r huggingface-requirements.txt
 }
 
 function install_timm() {
