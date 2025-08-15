@@ -46,14 +46,18 @@ struct NVSHMEMAllocation {
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
+      void* ptr,
       std::shared_ptr<NVSHMEMAllocation> allocation,
       const std::string& group_name)
       : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
     // For logging only
     static int exchanged_n_times = 0;
+    // Buffer size is rest of space available after ptr (this field may not be
+    // important in future thus subject to removal)
+    buffer_size_ = allocation->buffer_size -
+        (reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(allocation->ptr));
     c10::cuda::CUDAGuard guard(device_idx_);
 
     auto global_rank = get_group_info("0").rank;
@@ -78,7 +82,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
       buffers_.push_back(nvshmem_ptr(
-          allocation->ptr, rank_to_global_rank_[r]));
+          ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
@@ -133,6 +137,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return signal_pads_dev_;
   }
 
+  // This API is subject to removal
   size_t get_buffer_size() override {
     return buffer_size_;
   }
@@ -367,7 +372,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      void* ptr,  // data_ptr() of the tensor
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
     {
@@ -376,10 +381,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
     }
+    // Today this would still find the ptr in the map because one allocation
+    // matches one tensor. But will break once we enable MemPool.
+    // TODO: implement a customized `find` that searches for the allocation that
+    // contains ptr.
     auto it = allocations_.find(ptr);
     TORCH_CHECK(it != allocations_.end());
     auto symm_mem =
-        c10::make_intrusive<NVSHMEMSymmetricMemory>(it->second, *group_name);
+        c10::make_intrusive<NVSHMEMSymmetricMemory>(ptr, it->second, *group_name);
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
