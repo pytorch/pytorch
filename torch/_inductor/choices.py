@@ -10,6 +10,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
+from .lookup_table_processor import LookupTableProcessor
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .template_config_processor import TemplateConfigProcessor
 
 
 class Sortable(typing.Protocol):
@@ -55,6 +57,27 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
+
+    def __init__(self) -> None:
+        # By default, use the LookupTableProcessor to process template configurations
+        self._config_processor: TemplateConfigProcessor = LookupTableProcessor()
+
+    def set_config_processor(self, processor: TemplateConfigProcessor) -> None:
+        """
+        Set the template config processor to use for post-processing template configurations.
+
+        See lookup_table_processor.py for an example of a processor
+        If you want to use your own processor, you can do something like:
+        class MyProcessor(TemplateConfigProcessor):
+            def process(self, kernel_inputs, layout, template_name, op_name, configs):
+                # Do some processing here
+                ...
+        torch._inductor.virtualized.V.choices.set_config_processor(MyProcessor())
+
+        Args:
+            processor: The processor to use. Must be an instance of TemplateConfigProcessor.
+        """
+        self._config_processor = processor
 
     def get_config_heuristics(
         self, device_type: Optional[str] = "cuda"
@@ -108,7 +131,8 @@ class InductorChoices:
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
         """
-        Get generator of template parameters for MM templates using template-specific heuristics.
+        Get generator of template parameters for MM templates using template-specific heuristics
+        and post-processing through the configured processor.
 
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
@@ -119,17 +143,22 @@ class InductorChoices:
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
         """
-        input_tensors = kernel_inputs.nodes()
-        if len(input_tensors) < 2:
-            raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
+        input_nodes = kernel_inputs.nodes()
+        if len(input_nodes) < 2:
+            raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
 
-        # Extract device_type from kernel_inputs
-        device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
         # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, device_type, op_name)
+        heuristic = get_template_heuristic(
+            template_name, kernel_inputs.device_type, op_name
+        )
 
-        yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        # Start with heuristic configs
+        configs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        # Process through the configured processor
+        processed_configs = self._config_processor.process(
+            configs, kernel_inputs, layout, op_name, template_name
+        )
+        yield from processed_configs
 
     def triton_kernel_kwargs(
         self,

@@ -25,8 +25,9 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..ir import is_triton
 from ..kernel_inputs import MMKernelInputs
+from ..lookup_table import lookup_table_extract_choices, lookup_template_configs
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -319,13 +320,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc,
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc,
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -649,6 +650,19 @@ def decomposeK(a, b, k_splits):
     return reduced_buf.to(a.dtype)
 
 
+def _flexible_layout(layout):
+    """
+    provide flexible layout from |layout| if not already
+    """
+    # TODO(coconutruben): make hashable to use lru_cache here
+    from torch._inductor.ir import FlexibleLayout
+
+    if isinstance(layout, FlexibleLayout):
+        return layout
+    assert layout is not None
+    return FlexibleLayout(device=layout.device, dtype=layout.dtype, size=layout.size)
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     """
@@ -676,16 +690,18 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     aten_layout = layout
     if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
-        aten_layout = FlexibleLayout(
-            device=layout.device, dtype=layout.dtype, size=layout.size
-        )
+        aten_layout = _flexible_layout(aten_layout)
 
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
     # options to tune from
-    choices = (
-        [aten_mm.bind(kernel_inputs.nodes(), aten_layout)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[Any] = []
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + [aten_mm.bind(kernel_inputs.nodes(), aten_layout)]
+
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout):
@@ -730,11 +746,20 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
+            decompose_k_params = lookup_template_configs(
+                kernel_inputs.nodes(), name, "decompose_k"
+            )
+            if decompose_k_params is None:
+                # Fallback to default configs if no lookup table exists
+                k_splits = get_k_splits(m, n, k)
+            else:
+                # if the lookup table exists and has a decompose_k entries, we use them
+                k_splits = [int(entry["k"]) for entry in decompose_k_params]
+
             from torch._dispatch.python import enable_python_dispatcher
 
             from ..decomposition import select_decomp_table
 
-            k_splits = get_k_splits(m, n, k)
             for k_split in k_splits:
                 if not V.graph.sizevars.statically_known_true(
                     sympy.Eq(sympy.Mod(k, k_split), 0)
@@ -837,6 +862,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
             lazy_register_extern_choice(k).bind(kernel_inputs.nodes(), layout)
         )
 
+    choices = lookup_table_extract_choices(
+        choices,
+        lambda: [aten_mm.bind(kernel_inputs.nodes(), _flexible_layout(aten_layout))],
+    )
     best_config_future = None
     # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
     # The future will be awaited at scheduling time in select_algorithm.py
@@ -905,7 +934,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
-
+    name = "addmm"
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs([inp_expanded, mat1, mat2])
 
@@ -921,17 +950,14 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
+    # options to tune from
+    choices: list[Any] = []
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
-        from torch._inductor.ir import FixedLayout, FlexibleLayout
-
-        if isinstance(layout, FixedLayout):
-            layout = FlexibleLayout(
-                device=layout.device, dtype=layout.dtype, size=layout.size
-            )
+        layout = _flexible_layout(layout)
         choices = (
             [
                 aten_addmm.bind(
@@ -949,14 +975,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         return autotune_select_algorithm(
             # TODO(coconutruben): replace with kernel_inputs.nodes()
             # once that supports the unexpanded nodes as well
-            "addmm",
+            name,
             choices,
             [inp, mat1, mat2],
             layout,
         )
 
-    choices = (
-        [
+    # Get template configs directly from the lookup table
+    aten_params = lookup_template_configs(kernel_inputs.nodes(), name, "aten")
+
+    def add_aten():
+        return [
             aten_addmm.bind(
                 kernel_inputs.nodes(),
                 layout,
@@ -964,9 +993,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
         ]
-        if use_aten_gemm_kernels()
-        else []
-    )
+
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + add_aten()
 
     if (
         use_aten_gemm_kernels()
@@ -974,21 +1006,29 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         and inp_expanded.get_device().type == "cuda"
         and inductor_config.triton.autotune_cublasLt
     ):
-        # unexpand inp to make sure fused addmm from cublasLt is used
-        choices.insert(
-            0,
-            aten_bias_addmm.bind(
+        # Get template configs directly from the lookup table
+        bias_addmm_params = lookup_template_configs(
+            kernel_inputs.nodes(), name, aten_bias_addmm.name
+        )
+        if bias_addmm_params is None or len(bias_addmm_params) > 0:
+            # Add the bias_addmm choice if
+            # - the lookup table is not in use, or
+            # - the lookup table is in use and requesting it (len > 0)
+            c = aten_bias_addmm.bind(
                 kernel_inputs.nodes(),
                 layout,
                 alpha=alpha,
                 beta=beta,
-            ),
-        )
+            )
+            # lookup table filtering behavior requires this choice to be added
+            # at the end, after the default ATEN choice
+            idx = len(choices) if bias_addmm_params is not None else 0
+            choices.insert(idx, c)
 
     if is_nonzero and use_triton_template(layout):
         # Get template params using the new unified function
         for kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template.name, "addmm"
+            kernel_inputs, layout, mm_template.name, name
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1003,7 +1043,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template params using the new unified function
             for kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, persistent_tma_mm_template.name, "addmm"
+                kernel_inputs, layout, persistent_tma_mm_template.name, name
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -1021,7 +1061,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if (
         is_nonzero
         and use_cutlass_template(layout, m, n, k)
-        and _use_cutlass_for_op("addmm")
+        and _use_cutlass_for_op(name)
     ):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
@@ -1055,7 +1095,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm("addmm", choices, kernel_inputs.nodes(), layout)
+    # Safe noop if lookup table is not in use
+    choices = lookup_table_extract_choices(choices, add_aten)
+    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)

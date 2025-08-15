@@ -6587,6 +6587,11 @@ class SubgraphBuffer(ExternKernel):
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
+                # Also, remove the lookup table if it exists here, as it's only
+                # valid with max_autotune right now
+                # TODO(coconutruben): remove this when lookup table is valid without
+                # max-autotune
+                template_lookup_table=None,
             ):
                 self.subgraph.run(*self.example_inputs)
 
