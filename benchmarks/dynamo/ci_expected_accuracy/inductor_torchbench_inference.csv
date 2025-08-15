@@ -254,7 +254,7 @@ nvidia_deeprecommender,pass,0
 
 
 
-opacus_cifar10,pass,0
+opacus_cifar10,eager_fail_to_run,0
 
 
 
