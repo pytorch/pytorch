@@ -1965,8 +1965,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                         stage.submod.reshard()  # type: ignore[operator]
                 elif comp_type == FORWARD:
-                    if self.rank == 0:
-                        pass
                     with record_function(f"PP::Stage{stage_idx}-Forward{mb_index}"):
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
