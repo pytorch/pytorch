@@ -41,6 +41,9 @@ DeviceType parse_type(const std::string& device_string) {
         "'mkldnn' is no longer used as device type. So torch.device('mkldnn') will be "
         "deprecated and removed in the future. Please use other valid device types instead.");
   }
+  if (device_string == get_privateuse1_backend()) {
+    return DeviceType::PrivateUse1;
+  }
   auto device = std::find_if(
       types.begin(),
       types.end(),
@@ -49,9 +52,6 @@ DeviceType parse_type(const std::string& device_string) {
       });
   if (device != types.end()) {
     return device->second;
-  }
-  if (device_string == get_privateuse1_backend()) {
-    return DeviceType::PrivateUse1;
   }
   std::vector<const char*> device_names;
   for (const auto& it : types) {

@@ -113,8 +113,6 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
 
     if InType == "uint8_t":
         code.append("        " + OutType + " wgt = 1.f;")
-        code.append("        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)")
-        code.append("        " + OutType + " bio;")
         code.append("        if (weights) {")
         code.append(
             "          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];"
@@ -125,7 +123,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
                 "        const float* scale_bias = reinterpret_cast<const float*>(\n"
                 "            &input[idx * fused_block_size + block_size]);"
             )
-            code.append("        bio = wgt * scale_bias[1];")
+            code.append("        " + OutType + " bio = wgt * scale_bias[1];")
             code.append("        wgt = wgt * scale_bias[0];")
         else:
             code.append("        bio = wgt * scale_bias[2 * idx + 1];")
@@ -316,8 +314,6 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
 
     if InType == "uint8_t":
         code.append("        " + OutType + " wgt = 1.f;")
-        code.append("        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)")
-        code.append("        " + OutType + " bio;")
         code.append("        if (weights) {")
         code.append(
             "          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];"
@@ -328,10 +324,10 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
                 "        const float* scale_bias = reinterpret_cast<const float*>(\n"
                 "            &input[idx * fused_block_size + block_size]);"
             )
-            code.append("        bio = wgt * scale_bias[1];")
+            code.append("        " + OutType + " bio = wgt * scale_bias[1];")
             code.append("        wgt = wgt * scale_bias[0];")
         else:
-            code.append("        bio = wgt * scale_bias[2 * idx + 1];")
+            code.append("        " + OutType + " bio = wgt * scale_bias[2 * idx + 1];")
             code.append("        wgt = wgt * scale_bias[2 * idx];")
         code.append("        __m256 vbio = _mm256_set1_ps(bio);")
     else:

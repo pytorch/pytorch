@@ -106,6 +106,11 @@ finally:
 # on A100 GPUs - 40 GB.
 BATCH_SIZE_KNOWN_MODELS = {}
 
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
+
 
 # TODO(sdym): use batch-size-file parameter of common.main, like torchbench.py
 # Get the list of models and their batch sizes
@@ -116,6 +121,8 @@ with open(MODELS_FILENAME) as fh:
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(",")
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+            continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
 assert len(BATCH_SIZE_KNOWN_MODELS)
@@ -451,6 +458,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             model.train()
         else:
             model.eval()
+
+        # Turning off kv cache for torchbench models. This is not the right
+        # thing to do, but the pt2 dashboard is outdated. Real transformers
+        # benchmarks will be added soon using a different infra.
+        if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+            model.config.use_cache = False
 
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size

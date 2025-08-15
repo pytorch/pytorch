@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import threading
 import types
 import typing
 import typing_extensions
@@ -20,18 +21,11 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import (
     _tmp_donotuse_dont_inline_everything,
     JitTestCase,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestRecursiveScript(JitTestCase):
@@ -780,6 +774,25 @@ class TestRecursiveScript(JitTestCase):
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
 
+    def test_thread_safe_error_stacks(self):
+        # prior to #160386, this causes a segfault. See [Note: Thread-safe CallStack]
+        callstacks = []
+
+        def callstack_creator():
+            factory = torch._C._jit_tree_views.SourceRangeFactory(
+                "source code", "a.py", 1, 0
+            )
+            x = torch._C.CallStack("a", factory.make_range(1, 0, 1))
+            callstacks.append(x)
+            del x
+
+        t = threading.Thread(target=callstack_creator)
+        t.start()
+        t.join()
+        del t
+        del callstacks[0]
+        self.assertTrue(len(callstacks) == 0)
+
     def test_override_instance_method_ignore(self):
         class M(torch.nn.Module):
             @torch.jit.ignore
@@ -799,3 +812,7 @@ class TestRecursiveScript(JitTestCase):
         # ScriptModule should correctly reflect the override.
         s = torch.jit.script(m)
         self.assertEqual(s.i_am_ignored(), "new")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

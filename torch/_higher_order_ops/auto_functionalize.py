@@ -3,7 +3,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, get_args, Optional, Union
+from typing import Any, Callable, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils
@@ -11,8 +11,10 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _has_gen_schema,
     call_op,
     HopInstance,
+    HopSchema,
     materialize_callable_in_args,
     unique_graph_id,
 )
@@ -237,7 +239,7 @@ def write_view_information_to_args(
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
-                arg_to_base_index.get(arg_name, None),
+                arg_to_base_index.get(arg_name, None),  # type: ignore[arg-type]
             )
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -388,7 +390,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
-                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,
+                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,  # type: ignore[arg-type]
             )
         else:
             _op_to_check = _mutable_op
@@ -411,12 +413,6 @@ def can_auto_functionalize(
 ) -> bool:
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
-        def _has_gen_schema(op: HigherOrderOperator):
-            method = "gen_schema"
-            return hasattr(type(op), method) and getattr(
-                type(op), method
-            ) is not getattr(HigherOrderOperator, method)
-
         if not _has_gen_schema(op._op):
             return False
 
@@ -526,7 +522,8 @@ def do_auto_functionalize(
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
+            op,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -575,9 +572,31 @@ def do_auto_functionalize(
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
 
+# Wrapper for GraphModule that applies functionalization during execution to enable
+# epilogue graph inlining and better fusion opportunities in subgraphs
+# When tracing this wrapper, we'll get a graph module with epilogue.
+#
+# We want to hash it according to the original graph module, so that when we go
+# from Functional mode -> fake mode for multiple invoke_subgraph calls that share,
+# the same inner graph module, we can hit the cache.
+class FunctionalCallableWithEpilogue:
+    def __init__(self, orig_callable: Callable):
+        self.orig_callable = orig_callable
+
+    def __call__(self, *args, **kwargs):
+        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
+        # Inlining has the benefit of allowing easiser fusion inside subgraph.
+        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
+        # and this is also how we have been supporting top-level graph input mutation.
+        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+
+    def __hash__(self):
+        return id(self.orig_callable)
+
+
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: _MutableOpType,
+    op: Union[OpOverload, HopInstance],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -589,28 +608,13 @@ def do_auto_functionalize_v2(
     # args come from the schema. This makes it easier for us to work with them.
     normalized_kwargs = {}
 
+    schema = op._schema
+    op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
-    schema = (
-        op.gen_schema(*args, **kwargs)
-        if isinstance(op, HigherOrderOperator)
-        else op._schema
-    )
 
     def _functionalize_callable(arg: Any):
         if callable(arg):
-
-            def functional_fn(*args, **kwargs):
-                # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-                # Inlining has the benefit of allowing easiser fusion inside subgraph.
-                # Though the epilogue graph contains copy_, it is OK becuase inductor can handle it
-                # and this is also how we have been supporting top-level graph input mutation.
-                return tuple(
-                    pytree.tree_leaves(torch.func.functionalize(arg)(*args, **kwargs))
-                )
-
-            return torch._higher_order_ops.base_hop.FunctionWithNoFreeVars(
-                functional_fn
-            )
+            return FunctionalCallableWithEpilogue(arg)
         return arg
 
     args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
@@ -701,7 +705,8 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **auto_func_kwargs  # type: ignore[arg-type]
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -713,9 +718,9 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
-        assert (
-            len(schema.returns) > 0
-        ), f"hop is expected to return at least one output {schema}."
+        assert len(schema.returns) > 0, (
+            f"hop is expected to return at least one output {schema}."
+        )
         assert len(unwrapped_actual_out) == len(schema.returns)
     else:
         if len(schema.returns) == 0:
@@ -843,15 +848,15 @@ def auto_functionalized_v2_dense(
         _only_clone_these_bases = tuple(range(len(_all_bases)))
 
     if isinstance(_mutable_op, OpOverload):
-        schema = _mutable_op._schema
+        schema: torch._C.FunctionSchema = _mutable_op._schema
     else:
         schema = pytree.tree_unflatten([], kwargs.pop("_op_schema")).schema
 
-    _mutable_op = (
-        _mutable_op
-        if isinstance(_mutable_op, OpOverload)
-        else HopInstance(_mutable_op, schema)
-    )
+    if isinstance(_mutable_op, OpOverload):
+        _callable_op: Union[HopInstance, OpOverload] = _mutable_op
+    else:
+        assert isinstance(schema, HopSchema)
+        _callable_op = HopInstance(_mutable_op, schema)
 
     op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
         schema,
@@ -861,7 +866,7 @@ def auto_functionalized_v2_dense(
     )
 
     out = call_op(
-        _mutable_op,
+        _callable_op,
         tuple(),
         op_kwargs_new,
     )
@@ -939,7 +944,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wrapps forward graph module.
+        # where backward fn is a callablle that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable
@@ -956,7 +961,7 @@ def auto_functionalized_v2_proxy(
         if _only_clone_these_bases is None:
             _only_clone_these_bases = tuple(range(len(all_bases)))
 
-        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema
+        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema  # type: ignore[arg-type]
         new_kwargs, _ = _generate_new_op_kwargs_from_bases(
             schema,
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},

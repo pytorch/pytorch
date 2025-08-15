@@ -54,17 +54,17 @@ class Adagrad(Optimizer):
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
 
-        defaults = dict(
-            lr=lr,
-            lr_decay=lr_decay,
-            eps=eps,
-            weight_decay=weight_decay,
-            initial_accumulator_value=initial_accumulator_value,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            fused=fused,
-        )
+        defaults = {
+            "lr": lr,
+            "lr_decay": lr_decay,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "initial_accumulator_value": initial_accumulator_value,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "fused": fused,
+        }
         super().__init__(params, defaults)
 
         if fused:
@@ -117,6 +117,7 @@ class Adagrad(Optimizer):
                 )
 
     def share_memory(self):
+        """Calls tensor.share_memory_() on the state sum tensors."""
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
@@ -466,7 +467,7 @@ def _multi_tensor_adagrad(
             torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            # Reuse the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
@@ -484,7 +485,7 @@ def _multi_tensor_adagrad(
         torch._foreach_add_(std, eps)
 
         if weight_decay != 0 or maximize:
-            # Again, re-use the intermediate memory (device_grads) already allocated
+            # Again, reuse the intermediate memory (device_grads) already allocated
             torch._foreach_mul_(device_grads, minus_clr)
             numerator = device_grads
         else:

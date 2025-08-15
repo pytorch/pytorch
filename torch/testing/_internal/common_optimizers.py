@@ -1268,9 +1268,9 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(
-        x in ["foreach", "fused", "differentiable"] for x in skip
-    ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
+        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+    )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 
@@ -1543,13 +1543,6 @@ optim_db: list[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -1640,13 +1633,6 @@ optim_db: list[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1676,13 +1662,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
@@ -1763,13 +1742,6 @@ optim_db: list[OptimizerInfo] = [
             ),
         ),
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -1905,13 +1877,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1989,13 +1954,6 @@ optim_db: list[OptimizerInfo] = [
         has_capturable_arg=True,
         skips=(
             DecorateInfo(
-                skipIfMPS,  # addcdiv doesn't work for non-contiguous, see #118115
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
@@ -2033,13 +1991,6 @@ optim_db: list[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         has_capturable_arg=True,
         skips=(
-            DecorateInfo(
-                skipIfMPS,  # Rprop doesn't update for non-contiguous, see #118117
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-                active_if=lambda kwargs: not kwargs["contiguous"],
-                device_type="mps",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",

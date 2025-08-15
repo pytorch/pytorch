@@ -96,6 +96,4 @@ kernel void col2im_kernel(
 INSTANTIATE_COL2IM(bool);
 INSTANTIATE_COL2IM(float);
 INSTANTIATE_COL2IM(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_COL2IM(bfloat);
-#endif

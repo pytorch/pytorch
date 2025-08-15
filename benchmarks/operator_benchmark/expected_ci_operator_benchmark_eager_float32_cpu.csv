@@ -1,4 +1,4 @@
-Benchmarking Framework,Benchamrking Module Name,Case Name,tag,run_backward,Execution Time
+Benchmarking Framework,Benchmarking Module Name,Case Name,tag,run_backward,Execution Time
 PyTorch,add,add_M1_N1_K1_cpu,short,FALSE,3.9497
 PyTorch,add,add_M64_N64_K64_cpu,short,FALSE,14.3181
 PyTorch,add,add_M64_N64_K128_cpu,short,FALSE,14.6826

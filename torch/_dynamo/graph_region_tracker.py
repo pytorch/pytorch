@@ -17,6 +17,7 @@ import copyreg
 import io
 import logging
 import math
+import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
@@ -102,9 +103,11 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_tensor_arg(arg: Any) -> Any:
+def _extract_args(arg: Any) -> Any:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
+    elif isinstance(arg, (torch.Tensor, int)):
+        return arg
     else:
         return None
 
@@ -113,11 +116,23 @@ def _normalize_args(
     node: Node,
 ) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
-    sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
+    sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return (sorted_keys, tuple(_extract_tensor_arg(arg) for arg in all_args))
+    return (sorted_keys, tuple(_extract_args(arg) for arg in all_args))
+
+
+def _sort_with_ref_region(
+    index_to_rank: dict[int, int], regions: list[list[Any]]
+) -> None:
+    # sort topologically
+    # we need to handle edge cases where some nodes have no dependencies
+    # so first we map each node to its ranking
+    ref_region = regions[0]
+    sorted_indices = sorted(range(len(ref_region)), key=lambda i: index_to_rank[i])
+    for region in regions:
+        region[:] = [region[i] for i in sorted_indices]
 
 
 def get_global_state_key() -> GlobalStateKey:
@@ -230,13 +245,16 @@ class GraphRegionTracker:
         to track the new node.
         """
         try:
-            duplicates = self.hash_to_duplicates[
-                self._hash_node(
-                    tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
-                )
-            ]
-            duplicates.append(node)
-            self.node_to_duplicates[node] = duplicates
+            if (
+                node not in self.node_to_duplicates
+            ):  # don't allow nodes to be added twice
+                duplicates = self.hash_to_duplicates[
+                    self._hash_node(
+                        tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+                    )
+                ]
+                duplicates.append(node)
+                self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
@@ -261,6 +279,16 @@ class GraphRegionTracker:
 
         if mutated_arg_positions:
             self.node_to_mutated_arg_positions[node] = mutated_arg_positions
+
+    def add_node_mutation(
+        self,
+        node: Node,
+        arg_pos: int,
+    ) -> None:
+        if node in self.node_to_mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node].add(arg_pos)
+        else:
+            self.node_to_mutated_arg_positions[node] = OrderedSet([arg_pos])
 
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
@@ -314,8 +342,13 @@ class GraphRegionTracker:
                 self._is_identical,
             )
             # sort topologically
-            for region in region_group:
-                region.sort(key=lambda n: topological_ranking[n])
+            # we need to handle edge cases where some nodes have no dependencies
+            # so first we map each node to its ranking,
+            ref_region = region_group[0]
+            index_to_rank = {
+                index: topological_ranking[n] for index, n in enumerate(ref_region)
+            }
+            _sort_with_ref_region(index_to_rank, region_group)
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
@@ -409,6 +442,7 @@ def fully_expand_region_group(
                 candidate not in seen_nodes
                 and candidate not in nodes_to_add
                 and candidate.op != "placeholder"
+                and candidate.op != "get_attr"
                 and is_identical_fn(candidate, current_node)
                 and not region_wrapper.will_inclusion_create_cycle(candidate)
             )
@@ -419,7 +453,7 @@ def fully_expand_region_group(
 
         if add_to_all_regions:
             assert len(region_wrappers) == len(nodes_to_add), (
-                "Numer of nodes to add must equal the number of regions"
+                "Number of nodes to add must equal the number of regions"
             )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)

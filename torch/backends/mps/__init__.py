@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import lru_cache as _lru_cache
 from typing import Optional, TYPE_CHECKING
 
@@ -6,7 +5,14 @@ import torch
 from torch.library import Library as _Library
 
 
-__all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
+__all__ = [
+    "get_core_count",
+    "get_name",
+    "is_built",
+    "is_available",
+    "is_macos13_or_newer",
+    "is_macos_or_newer",
+]
 
 
 def is_built() -> bool:
@@ -37,10 +43,27 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
     return torch._C._mps_is_on_macos_or_newer(13, minor)
 
 
+@_lru_cache
+def get_name() -> str:
+    r"""Return Metal device name"""
+    return torch._C._mps_get_name()
+
+
+@_lru_cache
+def get_core_count() -> int:
+    r"""Return GPU core count.
+
+    According to the documentation, one core is comprised of 16 Execution Units.
+    One execution Unit has 8 ALUs.
+    And one ALU can run 24 threads, i.e. one core is capable of executing 3072 threads concurrently.
+    """
+    return torch._C._mps_get_core_count()
+
+
 _lib: Optional[_Library] = None
 
 
-def _init():
+def _init() -> None:
     r"""Register prims as implementation of var_mean and group_norm."""
     global _lib
 

@@ -95,24 +95,18 @@ std::string get_cpu_capability() {
   // environment variable
   auto capability = native::get_cpu_capability();
   switch (capability) {
-#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::DEFAULT:
       return "DEFAULT";
+#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::VSX:
       return "VSX";
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
 #elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
     case native::CPUCapability::SVE256:
       return "SVE256";
 #else
-    case native::CPUCapability::DEFAULT:
-      return "NO AVX";
     case native::CPUCapability::AVX2:
       return "AVX2";
     case native::CPUCapability::AVX512:

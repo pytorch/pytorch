@@ -4,6 +4,7 @@ from collections import namedtuple
 from collections.abc import Iterator, Sized
 from typing import Any, Callable, Optional, TypeVar, Union
 
+import torch
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -54,7 +55,8 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
         >>> def add_one(x):
         ...     return x + 1
         >>> dp = IterableWrapper(range(10))
-        >>> map_dp_1 = dp.map(add_one)  # Invocation via functional form is preferred
+        >>> # Invocation via functional form is preferred
+        ... map_dp_1 = dp.map(add_one)
         >>> list(map_dp_1)
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> # We discourage the usage of `lambda` functions as they are not serializable with `pickle`
@@ -74,6 +76,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
         input_col=None,
         output_col=None,
     ) -> None:
+        torch._C._log_api_usage_once("python.data_pipes.map")
         super().__init__()
         self.datapipe = datapipe
 
@@ -147,7 +150,7 @@ def _collate_helper(conversion, item):
 
     for name in conversion.keys():
         if name not in columns_name:
-            raise RuntimeError("Conversion keys missmatch")
+            raise RuntimeError("Conversion keys mismatch")
 
     for name in columns_name:
         if name in conversion:
@@ -200,7 +203,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> class MyIterDataPipe(torch.utils.data.IterDataPipe):
         ...     def __init__(self, start, end):
         ...         super(MyIterDataPipe).__init__()
-        ...         assert end > start, "this example code only works with end >= start"
+        ...         assert end > start, "this example only works with end >= start"
         ...         self.start = start
         ...         self.end = end
         ...
@@ -209,13 +212,11 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         ...
         ...     def __len__(self):
         ...         return self.end - self.start
-        ...
         >>> ds = MyIterDataPipe(start=3, end=7)
         >>> print(list(ds))
         [3, 4, 5, 6]
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
-        ...
         >>> collated_ds = CollateIterDataPipe(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]

@@ -55,6 +55,9 @@ class PairwiseDistance(Module):
         self.keepdim = keepdim
 
     def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.pairwise_distance(x1, x2, self.norm, self.eps, self.keepdim)
 
 
@@ -91,4 +94,7 @@ class CosineSimilarity(Module):
         self.eps = eps
 
     def forward(self, x1: Tensor, x2: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.cosine_similarity(x1, x2, self.dim, self.eps)

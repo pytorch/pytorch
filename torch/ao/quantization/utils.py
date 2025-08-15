@@ -2,7 +2,9 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
+
 import functools
+import sys
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
@@ -14,8 +16,16 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-NodePattern.__module__ = "torch.ao.quantization.utils"
+if sys.version_info < (3, 12):
+    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    NodePattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    NodePattern = TypeAliasType(
+        "NodePattern", Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    )
+
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -27,10 +37,27 @@ QuantizerCls = Any
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[
-    Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
-]
-Pattern.__module__ = "torch.ao.quantization.utils"
+
+if sys.version_info < (3, 12):
+    Pattern = Union[
+        Callable,
+        tuple[Callable, Callable],
+        tuple[Callable, tuple[Callable, Callable]],
+        Any,
+    ]
+    Pattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    Pattern = TypeAliasType(
+        "Pattern",
+        Union[
+            Callable,
+            tuple[Callable, Callable],
+            tuple[Callable, tuple[Callable, Callable]],
+            Any,
+        ],
+    )
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -414,9 +441,9 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
         assert min_val <= max_val, f"min {min_val} should be less than max {max_val}"
     else:
-        assert torch.all(
-            min_val <= max_val
-        ), f"min {min_val} should be less than max {max_val}"
+        assert torch.all(min_val <= max_val), (
+            f"min {min_val} should be less than max {max_val}"
+        )
 
     return True
 
@@ -451,13 +478,13 @@ def calculate_qmin_qmax(
 
         qrange_len = initial_quant_max - initial_quant_min + 1
         if dtype in [torch.qint8, torch.int8]:
-            assert (
-                0 < qrange_len <= 256
-            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
+            assert 0 < qrange_len <= 256, (
+                "quantization range should be positive and not exceed the maximum bit range (=256)."
+            )
         elif dtype in [torch.qint32, torch.int32]:
-            assert (
-                0 < qrange_len <= 2**32
-            ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+            assert 0 < qrange_len <= 2**32, (
+                "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+            )
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
@@ -605,17 +632,17 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     """
     # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
     # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
-    assert (
-        quant_min <= 0 <= quant_max
-    ), "Used-specified quantization range must include 0."
-    assert (
-        quant_min < quant_max
-    ), "qmin must be strictly less than qmax for user-specified quantization range."
+    assert quant_min <= 0 <= quant_max, (
+        "Used-specified quantization range must include 0."
+    )
+    assert quant_min < quant_max, (
+        "qmin must be strictly less than qmax for user-specified quantization range."
+    )
 
 
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
 # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
-# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikely to change
 # (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
 def determine_qparams(
     min_val: torch.Tensor,

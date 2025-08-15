@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
+PyObject* guard_complete_hook = NULL;
 
 typedef struct {
   int active_dynamo_threads;
@@ -221,17 +222,6 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
-}
-
-void clear_old_frame_if_python_312_plus(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame) {
-#if IS_PYTHON_3_12_PLUS
-
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
-
-#endif
 }
 
 static PyObject* dynamo_eval_custom_code_impl(
@@ -484,6 +474,18 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
+PyObject* dynamo_eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) {}
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame) {}
+PyObject* dynamo_eval_frame_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) {}
 
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
@@ -496,6 +498,17 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 #endif // !(IS_PYTHON_3_14_PLUS)
+
+void clear_old_frame_if_python_312_plus(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
@@ -626,6 +639,22 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
+  PyObject* old_hook = guard_complete_hook;
+
+  if (obj == Py_None) {
+    obj = NULL;
+  }
+
+  guard_complete_hook = Py_XNewRef(obj);
+
+  if (old_hook == NULL) {
+    Py_RETURN_NONE;
+  } else {
+    return old_hook;
+  }
+}
+
 // Debugging function for GNU C only.
 // Used to set gdb breakpoints in hot CPython sites from Python.
 // Code example:
@@ -666,6 +695,7 @@ static PyMethodDef _methods[] = {
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 

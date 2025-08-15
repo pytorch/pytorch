@@ -41,8 +41,10 @@ class Placement:
     def is_replicate(self) -> bool:
         return isinstance(self, Replicate)
 
-    def is_partial(self) -> bool:
-        return isinstance(self, Partial)
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        if reduce_op is None:
+            return isinstance(self, Partial)
+        return isinstance(self, Partial) and self.reduce_op == reduce_op
 
 
 @dataclass(frozen=True)
@@ -699,7 +701,7 @@ class Partial(Placement):
         # _partition_value: partition the value of a replicated tensor on the mesh dimension
 
         # _partition_value is the conjugate operation of _reduce_value
-        # - i.e. _partition_value on a sum reduce op is just a divison operation
+        # - i.e. _partition_value on a sum reduce op is just a division operation
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
         # different operation

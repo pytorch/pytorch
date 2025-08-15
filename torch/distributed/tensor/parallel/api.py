@@ -6,7 +6,6 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
@@ -71,7 +70,6 @@ def parallelize_module(  # type: ignore[return]
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-    _validate_tp_mesh_dim(device_mesh)
 
     if parallelize_plan is None:
         warnings.warn(
@@ -88,39 +86,53 @@ def parallelize_module(  # type: ignore[return]
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
+            if module_path == "":
+                # shortcut: empty string means to apply the plan to the current module
+                parallelize_module(module, device_mesh, parallelize_style)
+                continue
+
             path_splits = module_path.split(".")
-            if len(path_splits) == 0:
-                raise ValueError(
-                    "Expect module path to be non-empty, but got empty string!"
-                )
-            while path_splits:
-                atom = path_splits.pop(0)
-                matched_children = filter(
+            # Instead of blindly popping tokens, first check the match,
+            # we only consume/pop the token if we found a match.
+            token = path_splits[0]
+
+            matched_children = list(
+                filter(
                     # `t[0]` is child name
-                    lambda t: fnmatch(t[0], atom),
+                    lambda t: fnmatch(t[0], token),
                     module.named_children(),
                 )
-                # apply the plan to all matched submodules
-                for _, submodule in matched_children:
-                    if path_splits:
-                        # we haven't reached the leaf, apply in dict style
-                        leaf_path = ".".join(
-                            path_splits
-                        )  # rest of the path after `atom`
-                        parallelize_module(
-                            submodule,
-                            device_mesh,
-                            {leaf_path: parallelize_style},
-                            src_data_rank=src_data_rank,
-                        )
-                    else:
-                        # otherwise, directly apply style to this submodule
-                        parallelize_module(
-                            submodule,
-                            device_mesh,
-                            parallelize_style,
-                            src_data_rank=src_data_rank,
-                        )
+            )
+            if not matched_children:
+                # No match at this level. Log a warning and process next plan entry.
+                warnings.warn(
+                    f"Parallelize plan key '{module_path}' could not be resolved: "
+                    f"no submodule matching token '{token}' in module {module}, "
+                    f"skipping this plan entry."
+                )
+                continue
+
+            # Now that we have a match, we can consume the token.
+            path_splits.pop(0)
+            # apply the plan to all matched submodules
+            for _, submodule in matched_children:
+                if path_splits:
+                    # we haven't reached the leaf, apply in dict style
+                    leaf_path = ".".join(path_splits)  # rest of the path after `token`
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        {leaf_path: parallelize_style},
+                        src_data_rank=src_data_rank,
+                    )
+                else:
+                    # otherwise, directly apply style to this submodule
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        parallelize_style,
+                        src_data_rank=src_data_rank,
+                    )
         return module
     else:
         raise TypeError(  # pyre-ignore[7]

@@ -20,8 +20,8 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/StorageImpl.h>
-#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -64,7 +64,7 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   auto device = THPUtils_unpackLong(arg);
 
   torch::utils::device_lazy_init(at::kCUDA);
-  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device), /*force*/ true);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -418,16 +418,6 @@ PyObject* THCPModule_cudaCachingAllocator_enable(
       "cudaCachingAllocator_enable expects a bool, but got ",
       THPUtils_typename(arg));
   c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
-    PyObject* _unused,
-    PyObject* env) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
-      THPUtils_unpackString(env));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1125,7 +1115,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool)>(
+      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1135,6 +1125,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           std::optional<std::string>,
           const std::string&,
           size_t,
+          bool,
           bool,
           bool)>(torch::cuda::_record_memory_history));
 
@@ -1350,12 +1341,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
-  });
-
-  m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
 
   m.def(
@@ -2056,10 +2041,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
-     METH_O,
-     nullptr},
-    {"_cuda_cudaCachingAllocator_set_allocator_settings",
-     THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {"_cuda_getAllocatorBackend",

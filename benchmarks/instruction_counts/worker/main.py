@@ -170,7 +170,7 @@ def main(communication_file: str) -> None:
         # Runner process sent SIGINT.
         sys.exit()
 
-    except BaseException:
+    except BaseException:  # noqa: B036
         trace_f = io.StringIO()
         traceback.print_exc(file=trace_f)
         result = WorkerFailure(failure_trace=trace_f.getvalue())

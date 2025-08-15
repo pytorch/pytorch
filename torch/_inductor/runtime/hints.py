@@ -136,7 +136,7 @@ class DeviceProperties(typing.NamedTuple):
     warp_size: Optional[int] = None
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
@@ -153,9 +153,8 @@ class DeviceProperties(typing.NamedTuple):
         except AttributeError:
             if device_type == "xpu":
                 multi_processor_count = props.gpu_subslice_count
-            elif device_type == "mps":
-                # TODO: Fetch the actual value from ioreg
-                multi_processor_count = 8
+            elif device_type == "mtia":
+                multi_processor_count = 64
             else:
                 raise
         return cls(

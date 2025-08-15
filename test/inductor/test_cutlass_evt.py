@@ -4,6 +4,7 @@ import unittest
 import sympy
 
 import torch
+import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
@@ -14,7 +15,7 @@ from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwi
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
 
 
 if try_import_cutlass():
@@ -26,9 +27,14 @@ if try_import_cutlass():
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
-        CutlassTensor,
         trace,
     )
+
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
@@ -107,6 +113,7 @@ class MockGraphHandler(GraphLowering):
         self.name_to_buffer = name_to_buffer
         self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
+        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
@@ -347,7 +354,9 @@ return tmp_1, D""",
         )
         buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(buffer_renames, name_to_buffer)
+        result = create_example_tensors(
+            buffer_renames, name_to_buffer, lambda x: int(x)
+        )
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
@@ -370,8 +379,10 @@ return tmp_1, D""",
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
-            ),
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
+            )[0],
             """\
 { /* thread */
         { /* F */
@@ -381,12 +392,12 @@ return tmp_1, D""",
               {}, /* C */
               {}, /* compute_0 */
             },
-            {/* ptr_aux */ (float*) aux, /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
+            {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
             {}, /* compute_1 */
           },
-          {/* ptr_aux */ (float*) F, /* dAux */ {2048, _1{}, _0{}}}, /* F */
+          {/* ptr_aux */ (float*) (ptr_1 + ptr_1_offset), /* dAux */ {2048, _1{}, _0{}}}, /* F */
         },
-        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {/* ptr_col */ (float*) (ptr_2 + ptr_2_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
         {}, /* compute_2 */
         {}, /* compute_3 */
         {}, /* compute_4 */
@@ -425,15 +436,17 @@ def fn(accum, bias):
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(example_tensors)
-            ),
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
+            )[0],
             """\
 { /* thread */
         { /* E */
           {}, /* accum */
-          {/* ptr_aux */ (float*) E, /* dAux */ {2048, _1{}, _0{}}}, /* E */
+          {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* dAux */ {2048, _1{}, _0{}}}, /* E */
         },
-        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {/* ptr_col */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
         {}, /* compute_0 */
       }
 """,
@@ -442,7 +455,7 @@ def fn(accum, bias):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
-        _, _, code = trace(
+        _, _, code, _ = trace(
             BIAS_CODE,
             EXAMPLE_TENSORS,
             DataType.f32,
@@ -450,6 +463,7 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,
@@ -557,5 +571,5 @@ using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

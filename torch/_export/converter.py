@@ -6,7 +6,7 @@ import typing
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.export._trace
@@ -134,7 +134,7 @@ def execute_subgraph_from_prim_loop(
 ):
     """
     subgraph: GraphModule from sub-block.
-    iter_idx: The index of interation.
+    iter_idx: The index of interaction.
     len_loop_local_arguments: The number of loop local arguments in args.
     """
 
@@ -229,7 +229,7 @@ def get_dtype_as_int(tensor):
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
-kind_to_standard_operators = {
+kind_to_standard_operators: dict[str, Callable[..., Any]] = {
     "prim::max": builtins.max,
     "prim::min": builtins.min,
     "prim::TupleIndex": operator.getitem,
@@ -624,9 +624,9 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_constant:
-                assert isinstance(
-                    self.name_to_constant[name], torch.ScriptObject
-                ), "Input conversion only handles ScriptObject"
+                assert isinstance(self.name_to_constant[name], torch.ScriptObject), (
+                    "Input conversion only handles ScriptObject"
+                )
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -661,9 +661,7 @@ class TS2FXGraphConverter:
         def to_float_tensor(t):
             return t.to(dtype=torch.float).item()
 
-        inp_list = [
-            self.get_fx_value_by_ir_value(inp) for inp in node.inputs()
-        ]  # noqa: C416
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
         fx_node = self.fx_graph.call_function(
             to_float_tensor,
             tuple(inp_list),
@@ -749,9 +747,7 @@ class TS2FXGraphConverter:
         self.name_to_constant[name] = value
 
     def convert_prim_CallMethod(self, node: torch._C.Node):
-        inp_list = [
-            self.get_fx_value_by_ir_value(inp) for inp in node.inputs()
-        ]  # noqa: C416
+        inp_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]  # noqa: C416
         fx_node = self.fx_graph.call_method(
             node.s("name"),
             tuple(inp_list),
@@ -783,9 +779,9 @@ class TS2FXGraphConverter:
                 self.name_to_node[output_name] = self.fx_graph.get_attr(attr_fqn)
             else:
                 if attr_fqn not in self.name_to_non_tensor_attribute_node:
-                    self.name_to_non_tensor_attribute_node[
-                        attr_fqn
-                    ] = self.name_to_non_tensor_attribute[attr_fqn]
+                    self.name_to_non_tensor_attribute_node[attr_fqn] = (
+                        self.name_to_non_tensor_attribute[attr_fqn]
+                    )
                 self.name_to_node[output_name] = self.name_to_non_tensor_attribute_node[
                     attr_fqn
                 ]
@@ -814,7 +810,7 @@ class TS2FXGraphConverter:
 
         fx_node = self.fx_graph.call_function(target, args, kwargs)
 
-        # TODO: covnert sourceRange() into stack_trace
+        # TODO: convert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
         if node.outputsSize() == 1:
@@ -850,15 +846,15 @@ class TS2FXGraphConverter:
                 k = self.get_fx_value_by_ir_value(inp)
             else:
                 v = self.get_fx_value_by_ir_value(inp)
-                assert (
-                    k is not None and v is not None
-                ), "DictConstruct has an empty key value pair."
+                assert k is not None and v is not None, (
+                    "DictConstruct has an empty key value pair."
+                )
                 output_dict[k] = v
                 k, v = None, None
 
-        assert (
-            k is None and v is None
-        ), "DictConstruct has an odd number of elements (violating our assumption)."
+        assert k is None and v is None, (
+            "DictConstruct has an odd number of elements (violating our assumption)."
+        )
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
@@ -887,7 +883,7 @@ class TS2FXGraphConverter:
             torch.ops.aten._local_scalar_dense.default, (to_copy_node,)
         )
 
-        # TODO: covnert sourceRange() into stack_trace
+        # TODO: convert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
         output_name = node.output().debugName()
@@ -946,7 +942,7 @@ class TS2FXGraphConverter:
                         kwargs,
                     )
 
-                    # TODO: covnert sourceRange() into stack_trace
+                    # TODO: convert sourceRange() into stack_trace
                     # fx_node.meta["stack_trace"] = node.sourceRange()
 
                     output_name = node.output().debugName()
@@ -1010,7 +1006,7 @@ class TS2FXGraphConverter:
             ):
                 target = torch.ops.aten.add.t
             else:
-                raise RuntimeError(f"unable to determind the target for {node}")
+                raise RuntimeError(f"unable to determined the target for {node}")
         else:
             target = get_op_overload(node)
 
@@ -1124,9 +1120,9 @@ class TS2FXGraphConverter:
                     ),  # + 1 because the 0th element is the condition.
                 )
                 global_argument_index = global_arguments.index(name)
-                fx_block_args[
-                    i + node.outputsSize() + global_argument_index
-                ] = self.name_to_node[name]
+                fx_block_args[i + node.outputsSize() + global_argument_index] = (
+                    self.name_to_node[name]
+                )
 
     def _check_set_attr_in_if_block(self, if_node: torch._C.Node):
         for block in if_node.blocks():
@@ -1545,9 +1541,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
-                assert isinstance(
-                    name_to_constant[spec.target], torch.Tensor
-                ), f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
+                assert isinstance(name_to_constant[spec.target], torch.Tensor), (
+                    f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
+                )
                 spec.kind = InputKind.CONSTANT_TENSOR
                 spec.persistent = None
         ep.verifier().check(ep)
@@ -1569,7 +1565,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         #
         # This function should happen in TS2EPConverter instead of
         # TS2FXGraphConverter since it gets attributes from self.ts_model
-        # which is not accessable in TS2FXGraphConverter. It is similar to where
+        # which is not accessible in TS2FXGraphConverter. It is similar to where
         # we collect self.name_to_param and self.name_to_buffer.
         name_to_attribute_fqn: dict[str, str] = {}
 

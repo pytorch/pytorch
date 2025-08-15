@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
@@ -251,6 +252,7 @@ struct CachingHostAllocatorImpl {
     auto* block = reinterpret_cast<B*>(ctx);
 
     std::optional<std::vector<E>> events;
+    ska::flat_hash_set<S> streams;
     {
       std::lock_guard<std::mutex> g(block->mutex_);
       block->allocated_ = false;
@@ -259,12 +261,17 @@ struct CachingHostAllocatorImpl {
       } else {
         events = std::vector<E>();
         events->reserve(block->streams_.size());
-        for (auto stream : block->streams_) {
-          record_stream(events, stream);
-        }
-        block->event_count_ += events->size();
+        block->event_count_ += block->streams_.size();
+        // Move out streams to avoid holding the mutex during event recording
+        streams = std::move(block->streams_);
         block->streams_.clear();
       }
+    }
+
+    // Event recording must be done outside the mutex to avoid potential
+    // deadlocks (e.g., when Python GIL is involved)
+    for (auto stream : streams) {
+      record_stream(events, stream);
     }
 
     if (!events) {
@@ -345,7 +352,8 @@ struct CachingHostAllocatorImpl {
   }
 
   virtual bool pinned_use_background_threads() {
-    return false;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        pinned_use_background_threads();
   }
 
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {

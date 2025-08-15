@@ -124,9 +124,7 @@ class TestGraphInfoProvider(TestCase):
         )
 
     def test_recomputable_node_only_graph_with_larger_graph_context(self):
-        recomputable_node_only_graph_with_larger_graph_context = (
-            self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context
-        )
+        recomputable_node_only_graph_with_larger_graph_context = self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context  # noqa: B950
         expected_nodes = self.all_recomputable_banned_nodes
         # node1 does not have an indirect path to node5 because of node2
         # node2 has an indirect path to node5

@@ -394,7 +394,9 @@ class Op:
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-        self.pg_name, self.pg_desc = event["process_group"]
+        # Store the hashed pg_name for accessing memberships, and original pg info for display
+        self.pg_name = pg_name  # This is the hashed version used for memberships lookup
+        self.original_pg_name, self.pg_desc = event["process_group"]
         assert type in COLLECTIVES | P2P | {"coalesced"}, (
             f"{type} is not a supported operation"
         )
@@ -417,6 +419,7 @@ class Op:
         else:
             self.input_sizes, self.output_sizes = None, None
         self.collective_seq_id = event["collective_seq_id"]
+        self.stack_id = event.get("stack_id", -1)
         self.p2p_seq_id = event["p2p_seq_id"]
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
@@ -425,9 +428,9 @@ class Op:
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
-        pg_ranks = sorted(pg_ranks)
-        self._src_g = pg_ranks[self._src] if self._src is not None else None
-        self._dst_g = pg_ranks[self._dst] if self._dst is not None else None
+        pg_ranks_sorted = sorted(pg_ranks)
+        self._src_g = pg_ranks_sorted[self._src] if self._src is not None else None
+        self._dst_g = pg_ranks_sorted[self._dst] if self._dst is not None else None
 
     @property
     def src(self) -> int:
@@ -456,6 +459,7 @@ class Op:
                 f"pg_name={self.pg_name}",
                 f"pg_description={self.pg_desc}",
                 f"pg_size={self.pg_size}",
+                f"stack_id={self.stack_id}",
                 f"state={self.state}",
             )
             return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)

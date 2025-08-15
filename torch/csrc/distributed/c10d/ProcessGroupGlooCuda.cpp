@@ -13,14 +13,16 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::ALLREDUCE,
             seq,
+            timeout,
             "gloo:all_reduce",
             inputs),
-        context_(context),
         inputs_(inputs),
         reduceOp_(reduceOp) {}
 
@@ -52,12 +54,19 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs_;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs_;
+  }
+
   void synchronize() override {
     // TODO: is synchronization needed?
   }
 
  private:
-  std::shared_ptr<gloo::Context> context_;
   std::vector<at::Tensor> inputs_;
   const ReduceOp reduceOp_;
 };
@@ -69,8 +78,15 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncAllreduceWork(context, inputs, std::move(reduceOp), tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncAllreduceWork(
+            context,
+            inputs,
+            std::move(reduceOp),
+            tag,
+            seq,
+            timeout) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
@@ -119,8 +135,9 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncSparseAllreduceWork(context, inputs, tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncSparseAllreduceWork(context, inputs, tag, seq, timeout) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to CPU tensors.
@@ -172,20 +189,21 @@ static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCUDAWork(
     std::vector<at::Tensor>& inputs,
     ReduceOp reduceOp,
     uint32_t tag,
-    uint64_t seq) {
+    uint64_t seq,
+    std::chrono::milliseconds timeout) {
   auto layout = inputs[0].layout();
 
   if (layout == c10::kStrided) {
     if (context->getDevice()->hasGPUDirect()) {
       return c10::make_intrusive<AsyncAllreduceCUDADeviceWork>(
-          std::move(context), inputs, reduceOp, tag, seq);
+          std::move(context), inputs, reduceOp, tag, seq, timeout);
     } else {
       return c10::make_intrusive<AsyncAllreduceCUDAHostWork>(
-          std::move(context), inputs, reduceOp, tag, seq);
+          std::move(context), inputs, reduceOp, tag, seq, timeout);
     }
   } else if (layout == c10::kSparse) {
     return c10::make_intrusive<AsyncSparseAllreduceCUDAWork>(
-        std::move(context), inputs, tag, seq);
+        std::move(context), inputs, tag, seq, timeout);
   } else {
     TORCH_CHECK(false, "ProcessGroupGloo::allreduce: unsupported layout");
   }

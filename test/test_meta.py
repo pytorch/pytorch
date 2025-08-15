@@ -1502,7 +1502,7 @@ class TestMeta(TestCase):
     def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
-        # aten.fill_ returns an aliase
+        # aten.fill_ returns an alias
         self.assertEqual(id(inps), id(r))
 
         # aten.fill returns a new tensor

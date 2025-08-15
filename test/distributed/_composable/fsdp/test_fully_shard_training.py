@@ -74,12 +74,12 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
                 assert x.device == device, f"Expects {device} but got {x.device}"
-                assert (
-                    ys[0].device == device
-                ), f"Expects {device} but got {ys[0].device}"
-                assert (
-                    ys[1].device == device
-                ), f"Expects {device} but got {ys[1].device}"
+                assert ys[0].device == device, (
+                    f"Expects {device} but got {ys[0].device}"
+                )
+                assert ys[1].device == device, (
+                    f"Expects {device} but got {ys[1].device}"
+                )
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -103,7 +103,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
         # Single FSDP group
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False, 2, None):
             torch.manual_seed(42)
             model = MLP(3, device)
             # Since seed is per process, not per thread, we broadcast to ensure
@@ -115,15 +115,18 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             inp = torch.randn((2, 3), device=device_type.type)
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
-            model(inp)  # root does not reshard after forward
-            self._assert_tensor_params(model.parameters())
+            model(inp)
+            if reshard_after_forward:
+                self._assert_dtensor_params(model.parameters())
+            else:
+                self._assert_tensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
             model.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
         # Multiple FSDP groups
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False, 2, None):
             torch.manual_seed(42)
             model = nn.Sequential(MLP(3, device), MLP(3, device))
             for param in model.parameters():
@@ -140,11 +143,15 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
                 model[0].out_proj.parameters()
             )
             root_params = list(set(model.parameters()) - set(non_root_params))
-            if reshard_after_forward is False:
-                self._assert_tensor_params(non_root_params)
-            else:
+            if reshard_after_forward is None:
                 self._assert_dtensor_params(non_root_params)
-            self._assert_tensor_params(root_params)
+                self._assert_tensor_params(root_params)
+            elif reshard_after_forward:
+                self._assert_dtensor_params(non_root_params)
+                self._assert_dtensor_params(root_params)
+            else:
+                self._assert_tensor_params(non_root_params)
+                self._assert_tensor_params(root_params)
             self._assert_same_params(model.parameters(), ref_model.parameters())
             for module in model.modules():
                 if isinstance(module, FSDPModule):
@@ -176,13 +183,16 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
 
     def _assert_tensor_params(self, params: Iterable[nn.Parameter]):
-        self.assertGreater(len(list(params)), 0)
+        # need to iterate over the list multiple times
+        params = list(params)
+        self.assertGreater(len(params), 0)
         for param in params:
             self.assertNotIsInstance(param, DTensor)
             self.assertIsInstance(param, torch.Tensor)
 
     def _assert_dtensor_params(self, params: Iterable[nn.Parameter]):
-        self.assertGreater(len(list(params)), 0)
+        params = list(params)
+        self.assertGreater(len(params), 0)
         for param in params:
             self.assertIsInstance(param, DTensor)
 
@@ -1074,9 +1084,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             # the first microbatch's forward
             expected_all_gather_count = num_mlps + 1
             if reshard_after_forward is not False:  # `True` or `2`
-                # Add the number of MLPs without the +1 for the backward
-                # all-gathers since the root does not reshard after forward
-                expected_all_gather_count += num_mlps
+                expected_all_gather_count += num_mlps + 1
                 # Multiply by the number of microbatches since these
                 # all-gathers run every microbatch
                 expected_all_gather_count *= num_microbatches
@@ -1303,7 +1311,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             use_activation_checkpointing,
             reshard_after_forward=reshard_after_forward,
         )
-        # Checking paramters match orig model is critical to validate .full_tensor correctly replicates the
+        # Checking parameters match orig model is critical to validate .full_tensor correctly replicates the
         # strided-sharded layers.
         for ref_p, p in zip(ref_model.parameters(), model.parameters()):
             self.assertIsInstance(p, DTensor)
@@ -1457,6 +1465,71 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
         for param in ref_model.parameters():
             dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardWorldSize1(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_train_parity_single_worldsize1(self):
+        """
+        Tests train parity with DDP for a single FSDP group when sharding
+        parameters on dim-0.
+        """
+        self.run_subtests(
+            {
+                "lin_shapes": [
+                    [(16, 15), (15, 8)],
+                    [(7, 15), (15, 3)],
+                    [(16, 17), (17, 8)],
+                ],
+                "use_shard_placement_fn": [False],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    def _test_train_parity_single_group(
+        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+        )
+        ref_model = copy.deepcopy(model).to(device_type)
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            return Shard(param.shape.index(max(param.shape)))
+
+        shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
+
+        for iter_idx in range(10):
+            losses: list[torch.Tensor] = []
+
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            losses.append(ref_model(*inp).sum())
+            losses[-1].backward()
+            ref_optim.step()
+
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                losses.append(model(*inp).sum())
+                losses[-1].backward()
+
+            # Before there was 1 all-gather and 1 reduce-scatter
+            # Now therre is 1 reduce-scatter
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            optim.step()
+
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":

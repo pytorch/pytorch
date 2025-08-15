@@ -9,7 +9,6 @@ __all__ = [
     "symbolic_helper",
     "utils",
     # All opsets
-    "symbolic_caffe2",
     "symbolic_opset7",
     "symbolic_opset8",
     "symbolic_opset9",
@@ -37,12 +36,8 @@ __all__ = [
     "unregister_custom_op_symbolic",
     # Base error
     "OnnxExporterError",
-    "ExportOptions",
     "ONNXProgram",
-    "dynamo_export",
     "enable_fake_mode",
-    # DORT / torch.compile
-    "is_onnxrt_backend_supported",
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
@@ -54,12 +49,6 @@ from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMod
 
 from ._internal._exporter_legacy import enable_fake_mode
 from ._internal.exporter._onnx_program import ONNXProgram
-from ._internal.onnxruntime import (
-    is_onnxrt_backend_supported,
-    OrtBackend as _OrtBackend,
-    OrtBackendOptions as _OrtBackendOptions,
-    OrtExecutionProvider as _OrtExecutionProvider,
-)
 from ._type_utils import JitScalarType
 from .errors import OnnxExporterError
 from .utils import (
@@ -74,7 +63,6 @@ from .utils import (
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
     errors,
     ops,
-    symbolic_caffe2,
     symbolic_helper,
     symbolic_opset7,
     symbolic_opset8,
@@ -102,11 +90,7 @@ if TYPE_CHECKING:
 JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
-_OrtBackend.__module__ = "torch.onnx"
-_OrtBackendOptions.__module__ = "torch.onnx"
-_OrtExecutionProvider.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
-is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
@@ -364,6 +348,16 @@ def export(
 
         if isinstance(args, torch.Tensor):
             args = (args,)
+        # Prepare legacy export parameters for potential fallback
+        legacy_export_kwargs = {
+            "training": training,
+            "operator_export_type": operator_export_type,
+            "do_constant_folding": do_constant_folding,
+            "custom_opsets": custom_opsets,
+            "export_modules_as_functions": export_modules_as_functions,
+            "autograd_inlining": autograd_inlining,
+        }
+
         return _compat.export_compat(
             model,
             args,
@@ -386,6 +380,7 @@ def export(
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
             fallback=fallback,
+            legacy_export_kwargs=legacy_export_kwargs,
         )
     else:
         import warnings
@@ -393,7 +388,7 @@ def export(
         from torch.onnx.utils import export
 
         warnings.warn(
-            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.8, "
+            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter will be the default. To switch now, set "
             "dynamo=True in torch.onnx.export. This new exporter supports features like exporting "
             "LLMs with DynamicCache. We encourage you to try it and share feedback to help improve "
@@ -430,108 +425,6 @@ def export(
             autograd_inlining=autograd_inlining,
         )
         return None
-
-
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead."
-)
-class ExportOptions:
-    """Options for dynamo_export.
-
-    .. deprecated:: 2.7
-        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
-
-    Attributes:
-        dynamic_shapes: Shape information hint for input/output tensors.
-            When ``None``, the exporter determines the most compatible setting.
-            When ``True``, all input shapes are considered dynamic.
-            When ``False``, all input shapes are considered static.
-    """
-
-    def __init__(self, *, dynamic_shapes: bool | None = None):
-        self.dynamic_shapes: bool | None = dynamic_shapes
-
-
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead."
-)
-def dynamo_export(
-    model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
-    /,
-    *model_args,
-    export_options: ExportOptions | None = None,
-    **model_kwargs,
-) -> ONNXProgram:
-    """Export a torch.nn.Module to an ONNX graph.
-
-    .. deprecated:: 2.7
-        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
-
-    Args:
-        model: The PyTorch model to be exported to ONNX.
-        model_args: Positional inputs to ``model``.
-        model_kwargs: Keyword inputs to ``model``.
-        export_options: Options to influence the export to ONNX.
-
-    Returns:
-        An in-memory representation of the exported ONNX model.
-    """
-
-    import warnings
-
-    from torch.onnx._internal.exporter import _compat
-    from torch.utils import _pytree
-
-    if isinstance(model, torch.export.ExportedProgram):
-        return _compat.export_compat(
-            model,  # type: ignore[arg-type]
-            model_args,
-            f=None,
-            kwargs=model_kwargs,
-            opset_version=18,
-            external_data=True,
-            export_params=True,
-            fallback=True,
-        )
-    if export_options is not None:
-        warnings.warn(
-            "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
-            "For a more comprehensive set of export options, including advanced features, please consider using "
-            "`torch.onnx.export(..., dynamo=True)`. ",
-            category=DeprecationWarning,
-        )
-
-    if export_options is not None and export_options.dynamic_shapes:
-        # Make all shapes dynamic if it's possible
-        def _to_dynamic_shape(x):
-            if isinstance(x, torch.Tensor):
-                rank = len(x.shape)
-                dynamic_shape = {}
-                for i in range(rank):
-                    dynamic_shape[i] = torch.export.Dim.AUTO
-                return dynamic_shape
-            else:
-                return None
-
-        # model_args could be nested
-        dynamic_shapes = _pytree.tree_map(
-            _to_dynamic_shape,
-            model_args,
-        )
-    else:
-        dynamic_shapes = None
-
-    return _compat.export_compat(
-        model,  # type: ignore[arg-type]
-        model_args,
-        f=None,
-        kwargs=model_kwargs,
-        dynamic_shapes=dynamic_shapes,
-        opset_version=18,
-        external_data=True,
-        export_params=True,
-        fallback=True,
-    )
 
 
 def is_in_onnx_export() -> bool:

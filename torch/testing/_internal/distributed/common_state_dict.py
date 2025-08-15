@@ -141,7 +141,7 @@ class FusionEmbeddingWithHook(nn.Module):
 
     def _state_dict_hook(self, destination, prefix, keep_vars):
         """Remove "embedding" from the original embedding in the state_dict
-        name. This keeps the orginal state dict name for the embedding
+        name. This keeps the original state dict name for the embedding
         from before fusing with the FusionEmbedding.
         """
         key = prefix + "embedding.weight"

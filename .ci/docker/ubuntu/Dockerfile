@@ -98,8 +98,9 @@ COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface.txt huggingface.txt
 COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt torchbench.txt
 
 ARG TRITON
 ARG TRITON_CPU
@@ -146,6 +147,12 @@ COPY ./common/install_acl.sh install_acl.sh
 RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
+
+ARG OPENBLAS
+COPY ./common/install_openblas.sh install_openblas.sh
+RUN if [ -n "${OPENBLAS}" ]; then bash ./install_openblas.sh; fi
+RUN rm install_openblas.sh
+ENV INSTALLED_OPENBLAS ${OPENBLAS}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL

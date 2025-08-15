@@ -25,11 +25,6 @@
       DOCKER_IMAGE: !{{ config["container_image"] }}
       DOCKER_IMAGE_TAG_PREFIX: !{{ config["container_image_tag_prefix"] }}
 {%- endif %}
-{%- if config["package_type"] == "manywheel" %}
-  {%- if config.use_split_build is defined %}
-      use_split_build: !{{ config["use_split_build"] }}
-  {%- endif %}
-{%- endif %}
 {%- if config["package_type"] == "libtorch" %}
   {%- if config["libtorch_config"] %}
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}

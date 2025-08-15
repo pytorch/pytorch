@@ -31,15 +31,20 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "maximize": maximize,
+        }
         super().__init__(params, defaults)
 
         sparse_params = []
         complex_params = []
         for index, param_group in enumerate(self.param_groups):
-            assert isinstance(
-                param_group, dict
-            ), f"param_groups must be a list of dicts, but got {type(param_group)}"
+            assert isinstance(param_group, dict), (
+                f"param_groups must be a list of dicts, but got {type(param_group)}"
+            )
             # given param group, convert given params to a list first before iterating
             for d_index, d_param in enumerate(param_group["params"]):
                 if d_param.is_sparse:

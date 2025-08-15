@@ -118,6 +118,14 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool hasCKSDPA() const {
+    return false;
+  }
+
+  virtual bool hasCKGEMM() const {
+    return false;
+  }
+
   virtual const at::cuda::NVRTC& nvrtc() const {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
@@ -160,6 +168,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
 
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionMIOpen() const {
+    TORCH_CHECK(false, "Cannot query MIOpen version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual long versionCUDART() const {

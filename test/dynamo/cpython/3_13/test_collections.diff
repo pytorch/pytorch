@@ -1,0 +1,85 @@
+diff --git a/test/dynamo/cpython/3_13/test_collections.py b/test/dynamo/cpython/3_13/test_collections.py
+index cafc44007d1..1ee548abc7d 100644
+--- a/test/dynamo/cpython/3_13/test_collections.py
++++ b/test/dynamo/cpython/3_13/test_collections.py
+@@ -1,3 +1,23 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_collections.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for collections.py."""
+ 
+ import array
+@@ -29,7 +49,7 @@ from collections.abc import Sequence, MutableSequence
+ from collections.abc import ByteString, Buffer
+ 
+ 
+-class TestUserObjects(unittest.TestCase):
++class TestUserObjects(__TestCase):
+     def _superset_test(self, a, b):
+         self.assertGreaterEqual(
+             set(dir(a)),
+@@ -85,7 +105,7 @@ class TestUserObjects(unittest.TestCase):
+ ### ChainMap (helper class for configparser and the string module)
+ ################################################################################
+ 
+-class TestChainMap(unittest.TestCase):
++class TestChainMap(__TestCase):
+ 
+     def test_basics(self):
+         c = ChainMap()
+@@ -315,7 +335,7 @@ class TestChainMap(unittest.TestCase):
+ 
+ TestNT = namedtuple('TestNT', 'x y z')    # type used for pickle tests
+ 
+-class TestNamedTuple(unittest.TestCase):
++class TestNamedTuple(__TestCase):
+ 
+     def test_factory(self):
+         Point = namedtuple('Point', 'x y')
+@@ -722,7 +742,7 @@ class TestNamedTuple(unittest.TestCase):
+ ### Abstract Base Classes
+ ################################################################################
+ 
+-class ABCTestCase(unittest.TestCase):
++class ABCTestCase(__TestCase):
+ 
+     def validate_abstract_methods(self, abc, *names):
+         methodstubs = dict.fromkeys(names, lambda s, *args: 0)
+@@ -2059,7 +2079,7 @@ class CounterSubclassWithGet(Counter):
+         self.called = True
+         return Counter.get(self, key, default)
+ 
+-class TestCounter(unittest.TestCase):
++class TestCounter(__TestCase):
+ 
+     def test_basics(self):
+         c = Counter('abcaba')
+@@ -2402,10 +2422,5 @@ class TestCounter(unittest.TestCase):
+         self.assertFalse(Counter(a=2, b=1, c=0) > Counter('aab'))
+ 
+ 
+-def load_tests(loader, tests, pattern):
+-    tests.addTest(doctest.DocTestSuite(collections))
+-    return tests
+-
+-
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

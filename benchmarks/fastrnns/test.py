@@ -51,34 +51,34 @@ def test_rnns(
 
     print("Setting up...")
     control = control_creator(**creator_args)
-    experim = experim_creator(**creator_args)
+    experiment = experim_creator(**creator_args)
 
     # Precondition
-    assertEqual(experim.inputs, control.inputs)
-    assertEqual(experim.params, control.params)
+    assertEqual(experiment.inputs, control.inputs)
+    assertEqual(experiment.params, control.params)
 
     print("Checking outputs...")
     control_outputs = control.forward(*control.inputs)
-    experim_outputs = experim.forward(*experim.inputs)
+    experim_outputs = experiment.forward(*experiment.inputs)
     assertEqual(experim_outputs, control_outputs)
 
     print("Checking grads...")
     assert control.backward_setup is not None
-    assert experim.backward_setup is not None
+    assert experiment.backward_setup is not None
     assert control.backward is not None
-    assert experim.backward is not None
+    assert experiment.backward is not None
     control_backward_inputs = control.backward_setup(control_outputs, seed)
-    experim_backward_inputs = experim.backward_setup(experim_outputs, seed)
+    experim_backward_inputs = experiment.backward_setup(experim_outputs, seed)
 
     control.backward(*control_backward_inputs)
-    experim.backward(*experim_backward_inputs)
+    experiment.backward(*experim_backward_inputs)
 
     control_grads = [p.grad for p in control.params]
-    experim_grads = [p.grad for p in experim.params]
+    experim_grads = [p.grad for p in experiment.params]
     assertEqual(experim_grads, control_grads)
 
     if verbose:
-        print(experim.forward.graph_for(*experim.inputs))
+        print(experiment.forward.graph_for(*experiment.inputs))
     print()
 
 
@@ -103,16 +103,16 @@ def test_vl_py(**test_args):
 
         print("Setting up...")
         control = control_creator(**creator_args)
-        experim = experim_creator(**creator_args)
+        experiment = experim_creator(**creator_args)
 
         # Precondition
-        assertEqual(experim.inputs, control.inputs[:2])
-        assertEqual(experim.params, control.params)
+        assertEqual(experiment.inputs, control.inputs[:2])
+        assertEqual(experiment.params, control.params)
 
         print("Checking outputs...")
         control_out, control_hiddens = control.forward(*control.inputs)
         control_hx, control_cx = control_hiddens
-        experim_out, experim_hiddens = experim.forward(*experim.inputs)
+        experim_out, experim_hiddens = experiment.forward(*experiment.inputs)
         experim_hx, experim_cx = experim_hiddens
 
         experim_padded = nn.utils.rnn.pad_sequence(experim_out).squeeze(-2)
@@ -122,25 +122,25 @@ def test_vl_py(**test_args):
 
         print("Checking grads...")
         assert control.backward_setup is not None
-        assert experim.backward_setup is not None
+        assert experiment.backward_setup is not None
         assert control.backward is not None
-        assert experim.backward is not None
+        assert experiment.backward is not None
         control_backward_inputs = control.backward_setup(
             (control_out, control_hiddens), test_args["seed"]
         )
-        experim_backward_inputs = experim.backward_setup(
+        experim_backward_inputs = experiment.backward_setup(
             (experim_out, experim_hiddens), test_args["seed"]
         )
 
         control.backward(*control_backward_inputs)
-        experim.backward(*experim_backward_inputs)
+        experiment.backward(*experim_backward_inputs)
 
         control_grads = [p.grad for p in control.params]
-        experim_grads = [p.grad for p in experim.params]
+        experim_grads = [p.grad for p in experiment.params]
         assertEqual(experim_grads, control_grads)
 
         if test_args["verbose"]:
-            print(experim.forward.graph_for(*experim.inputs))
+            print(experiment.forward.graph_for(*experiment.inputs))
         print()
 
 

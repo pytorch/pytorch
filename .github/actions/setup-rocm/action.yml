@@ -59,11 +59,6 @@ runs:
             echo "$msg"
             exit 1
         fi
-        if [[ $ngpu -eq 1 ]]; then
-            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-            echo "$msg"
-            exit 1
-        fi
 
     - name: Runner diskspace health check
       uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main

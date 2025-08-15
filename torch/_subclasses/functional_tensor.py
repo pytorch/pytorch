@@ -67,7 +67,7 @@ class FunctionalTensor(torch.Tensor):
     # later, as long as it doesn't break anything).
     # FunctionalTensorWrapper copies **all** dispatch keys from the inner tensor
     # to the wrapper, excluding functorch and python dispatch keys.
-    # Here I'm trying to re-use the keyset the functorch wrapper subclasses copy,
+    # Here I'm trying to reuse the keyset the functorch wrapper subclasses copy,
     # except that they don't include ZeroTensor so I'm manually adding it in.
     _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
         torch._C.DispatchKey.ZeroTensor
@@ -160,7 +160,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
             for t in types
@@ -291,7 +291,7 @@ class FunctionalTensor(torch.Tensor):
         return self.elem.to_dense()
 
     @property
-    def layout(self):
+    def layout(self):  # type: ignore[override]
         return self.elem.layout
 
     def __bool__(self):
@@ -488,7 +488,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             - FunctionalTensor._extra_dispatch_keys
         )
 
-        # All we want to do here is re-use the existing C++ functionalization logic.
+        # All we want to do here is reuse the existing C++ functionalization logic.
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
             try:

@@ -138,7 +138,7 @@ class TestVisibleDeviceParses(TestCase):
             _transform_uuid_to_ordinals(["GPU-9e8d35e3", "GPU-123", "GPU-47"], uuids),
             [1],
         )
-        # First ambigous UUID aborts parsing
+        # First ambiguous UUID aborts parsing
         self.assertEqual(
             _transform_uuid_to_ordinals(["GPU-9e8d35e3", "GPU-e", "GPU-47"], uuids), [1]
         )

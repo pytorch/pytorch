@@ -60,7 +60,7 @@ RUN bash ./install_openssl.sh && rm install_openssl.sh
 ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 
 FROM openssl as final
-# remove unncessary python versions
+# remove unnecessary python versions
 RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
 RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6

@@ -16,7 +16,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-default-label-prefix:
@@ -46,6 +48,7 @@ jobs:
           { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-test:

@@ -171,7 +171,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     return;
   }
 
-  // linear_op computes act_int8 * tranpose(w_int8) (matrix multiplication)
+  // linear_op computes act_int8 * transpose(w_int8) (matrix multiplication)
   // where act_int8 and w_int8 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)

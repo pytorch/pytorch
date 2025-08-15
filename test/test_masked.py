@@ -57,7 +57,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
        [[op([1, 2], *args0, **kwargs, dim=None, keepdim=False)]
         [op([3, 4, 5], *args0, **kwargs, dim=None, keepdim=False)]]
 
-      where args0 is args where dim value is replased with None if
+      where args0 is args where dim value is replaced with None if
       present.
 
       Using the same example data, if the op is called with dim=(0, 1)

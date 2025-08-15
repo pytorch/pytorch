@@ -14,7 +14,6 @@
 #include <c10/util/Exception.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
@@ -63,6 +62,10 @@ static_assert(
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_MEM_ALLOC
 #endif
@@ -73,6 +76,18 @@ static_assert(
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 0)
 #define NCCL_SUPPORTS_FP8
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COLLNET
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_CTA_POLICY
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_NVLS_CTAS
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -216,7 +231,9 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 };
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
+TORCH_API int genNcclSplitColor(const std::vector<int>& ranks);
 TORCH_API std::string getNcclVersion();
+TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
@@ -241,6 +258,10 @@ class NCCLComm {
   NCCLComm() = default;
 
   ~NCCLComm() noexcept;
+
+  void setUniqueHash(ncclUniqueId ncclId);
+  void setUniqueHash(std::string hash);
+  std::string getUniqueHash();
 
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
@@ -270,15 +291,13 @@ class NCCLComm {
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
+      ncclConfig_t& config);
 #endif // NCCL_HAS_COMM_SPLIT
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
   at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
@@ -328,17 +347,18 @@ class NCCLComm {
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
-      bool errorOnRereg = true);
+      bool errorOnRereg = true,
+      bool window = false);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
 
   friend class ProcessGroupNCCL;
 
  protected:
-  // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
+  // Unique hash for this communicator.
+  std::string uniqueHash_;
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};

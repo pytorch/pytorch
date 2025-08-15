@@ -119,7 +119,7 @@ std::ostream& operator<<(std::ostream& stream, DeviceType type) {
 //     Whenever a user prints a privateuse1 device name, they need to read this
 //     variable. Although unlikely, we'll data race if someone else is trying to
 //     set this variable at the same time that another thread is print the
-//     device name. We could re-use the same mutex, but reading the atomic will
+//     device name. We could reuse the same mutex, but reading the atomic will
 //     be much faster.
 static std::atomic<bool> privateuse1_backend_name_set;
 static std::string privateuse1_backend_name;
@@ -158,7 +158,7 @@ void register_privateuse1_backend(const std::string& backend_name) {
   privateuse1_backend_name = backend_name;
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
   // to.
-  privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
+  privateuse1_backend_name_set.store(true, std::memory_order_release);
 }
 
 bool is_privateuse1_backend_registered() {

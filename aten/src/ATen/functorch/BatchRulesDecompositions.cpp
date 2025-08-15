@@ -158,6 +158,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
   m.impl("layer_norm", native::layer_norm_symint);
+  m.impl("_fused_rms_norm", native::rms_norm_composite);
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
@@ -193,6 +194,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(_lu_with_info);
   OP_DECOMPOSE(matmul);
   OP_DECOMPOSE(matrix_H);
+  OP_DECOMPOSE(matrix_exp);
   OP_DECOMPOSE(matrix_power);
   OP_DECOMPOSE2(max, other );
   OP_DECOMPOSE(max_pool1d);

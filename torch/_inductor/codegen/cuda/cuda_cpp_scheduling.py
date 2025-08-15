@@ -144,8 +144,9 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
         )
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_nodes)
-
+        kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
+            ctb, epilogue_nodes=epilogue_nodes
+        )
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()

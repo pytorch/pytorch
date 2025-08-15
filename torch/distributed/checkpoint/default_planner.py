@@ -408,7 +408,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             return True
 
         if key in self.keys:
-            True
+            return True
 
         unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
@@ -442,7 +442,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
             if isinstance(v, TensorStorageMetadata):
                 v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
-            if k in metadata.planner_data:
+            if metadata.planner_data is not None and k in metadata.planner_data:
                 set_element(state_dict, metadata.planner_data[k], v)
             else:
                 state_dict[k] = v
@@ -654,7 +654,7 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
-        if chunks_volume != tensor_volume:
+        if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """
                     key:%s invalid fill tensor-volume:

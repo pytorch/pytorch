@@ -622,6 +622,14 @@ void initTorchFunctions(PyObject* module) {
         return impl->was_inductor_storage_resized();
       });
   py_module.def(
+      "_functionalize_inductor_storage_resized_counter",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return impl->inductor_storage_resized_counter();
+      });
+  py_module.def(
       "_functionalize_are_all_mutations_hidden_from_autograd",
       [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
@@ -698,6 +706,11 @@ void initTorchFunctions(PyObject* module) {
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     return t_impl->has_data_mutation();
   });
+  py_module.def("_functionalize_mutation_counter", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+    return t_impl->mutation_counter();
+  });
   py_module.def(
       "_functionalize_get_storage_size", [](const at::Tensor& t, bool before) {
         TORCH_INTERNAL_ASSERT(
@@ -707,16 +720,24 @@ void initTorchFunctions(PyObject* module) {
         auto size = wrapper->get_storage_size(/*before=*/before);
         return size;
       });
-  py_module.def("_functionalize_set_storage_changed", [](const at::Tensor& t) {
+  py_module.def("_functionalize_mark_storage_changed", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
-    wrapper->set_storage_changed();
+    wrapper->mark_storage_changed();
   });
   py_module.def("_functionalize_was_storage_changed", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
     return wrapper->was_storage_changed();
   });
+  py_module.def(
+      "_functionalize_storage_changed_counter", [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto t_impl =
+            at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return t_impl->storage_changed_counter();
+      });
   py_module.def(
       "_functionalize_unsafe_set", [](at::Tensor& dst, const at::Tensor& src) {
         // Forcefully/unsafely dumps src.storage into dst.

@@ -15,10 +15,10 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
-    ExportedProgram,
     ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
@@ -104,9 +104,9 @@ def _assign_attr(
             assert isinstance(from_obj, torch.Tensor)
             to_module.register_buffer(field, from_obj, persistent=persistent)
         elif attr_kind == _AttrKind.CONSTANT:
-            assert not isinstance(
-                from_obj, FakeScriptObject
-            ), "FakeScriptObject should only exist during tracing."
+            assert not isinstance(from_obj, FakeScriptObject), (
+                "FakeScriptObject should only exist during tracing."
+            )
             assert isinstance(
                 from_obj,
                 (
@@ -143,7 +143,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
         super().__init__()
         self.graph = graph
         self._ty = ty
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
@@ -296,7 +296,7 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
-        self.graph.owning_module = self
+        self.graph.owning_module = self  # type: ignore[assignment]
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
 
@@ -308,6 +308,7 @@ class UnflattenedModule(torch.nn.Module):
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_and_input_mutations(export_graph, self.graph_signature)
+        _fix_nn_module_stacks(export_graph)
 
         self.ivals = _IVals()
         # for any intermediate value of a mutation that is read, track the mutation
@@ -461,9 +462,9 @@ class UnflattenedModule(torch.nn.Module):
         # add constants that are aliased and don't appear in graph signature
         for const_name, const in export_module.constants.items():
             if const_name not in consts_targets:
-                assert (
-                    id(const) in consts_map
-                ), "Constants should be either aliased or appear in graph signature"
+                assert id(const) in consts_map, (
+                    "Constants should be either aliased or appear in graph signature"
+                )
                 ph_name, _ = consts_map[id(const)][0]
                 add_to_consts_map(id(const), ph_name, const_name)
                 added_params_buffers.add(s.target)
@@ -524,7 +525,7 @@ class UnflattenedModule(torch.nn.Module):
 
         if self.flat_args_adapter is None:
             raise TypeError(
-                "There is no flat args adapter sepcified. "
+                "There is no flat args adapter specified. "
                 "Are you sure you are calling this with the right arguments? "
             )
         else:
@@ -701,7 +702,7 @@ def unflatten(
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module. This can be useful if you are trying
     to use :mod:`torch.export` with another system that expects a module
-    hierachy instead of the flat graph that :mod:`torch.export` usually produces.
+    hierarchy instead of the flat graph that :mod:`torch.export` usually produces.
 
     .. note:: The args/kwargs of unflattened modules will not necessarily match
         the eager module, so doing a module swap (e.g. :code:`self.submod =
@@ -791,6 +792,45 @@ def _inplace_buffer_and_input_mutations(
     # need to thread it through anymore.
     user_outputs = tuple(return_args[num_mutations:])
     output_node.args = ((user_outputs),)
+
+
+def _fix_nn_module_stacks(graph):
+    # For each nn module stack in the graph, check if the fqns in it represent a stack:
+    # 1. Each fqn must be a prefix of the next fqn.
+    # 2. If not, remove the entries starting from the next fqn, emitting a warning.
+    for node in graph.nodes:
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        nn_module_stack = node.meta["nn_module_stack"]
+        fqns = [
+            fqn.split("@")[0] if "@" in fqn else fqn
+            for fqn, _t in nn_module_stack.values()
+        ]
+
+        # Check if each FQN is a prefix of the next one
+        prev_fqn, *next_fqns = fqns
+        num_valid_indices = 1  # root FQN
+        for curr_fqn in next_fqns:
+            # Check if the previous FQN is a prefix of the current one
+            if _is_prefix(prev_fqn, curr_fqn):
+                num_valid_indices += 1
+                prev_fqn = curr_fqn
+            else:
+                # Found a non-prefix FQN, stop here
+                break
+
+        # If we need to remove entries, create a new stack with only valid entries
+        if num_valid_indices < len(nn_module_stack):
+            log.warning(
+                "nn_module_stack fqns %s at node %s do not form a stack! dropping last %d entries",
+                fqns,
+                node,
+                len(nn_module_stack) - num_valid_indices,
+            )
+            node.meta["nn_module_stack"] = dict(
+                list(nn_module_stack.items())[:num_valid_indices]
+            )
 
 
 def _is_prefix(candidate, target):
@@ -1041,9 +1081,9 @@ class _ModuleFrame:
 
                     if arg.name in self.seen_nodes:
                         flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                        self.node_to_placeholder[
-                            self.seen_nodes[arg.name]
-                        ] = flat_arg_node
+                        self.node_to_placeholder[self.seen_nodes[arg.name]] = (
+                            flat_arg_node
+                        )
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: list[Optional[torch.fx.Node]] = []
@@ -1125,8 +1165,7 @@ class _ModuleFrame:
         if x in self.node_to_placeholder:
             return self.node_to_placeholder[x]
         elif (
-            x.op == "placeholder"
-            or self.module_call_graph.get(self.fqn) is None
+            x.op == "placeholder" or self.module_call_graph.get(self.fqn) is None
             # allow placeholder creation if we are not preserving module call signature
         ):
             self.add_placeholder(x)

@@ -3,6 +3,7 @@
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/mkldnn/xpu/Conv.h>
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/utils/ParamUtils.h>

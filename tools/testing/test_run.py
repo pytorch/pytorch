@@ -285,7 +285,7 @@ class ShardedTest:
         if not isinstance(other, ShardedTest):
             raise NotImplementedError
 
-        # This is how the list was implicity sorted when it was a NamedTuple
+        # This is how the list was implicitly sorted when it was a NamedTuple
         if self.name != other.name:
             return self.name < other.name
         if self.shard != other.shard:

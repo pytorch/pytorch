@@ -85,6 +85,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -4853,6 +4854,7 @@ class DistributedTest:
                         # case.
                         optim.zero_grad(set_to_none=True)
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls, init_before in itertools.product(
@@ -4865,6 +4867,7 @@ class DistributedTest:
                         init_before=init_before,
                     )
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
@@ -4875,6 +4878,7 @@ class DistributedTest:
                     gradient_as_bucket_view=False,
                 )
 
+        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
@@ -6869,7 +6873,7 @@ class DistributedTest:
         def _test_ddp_profiling(self, profiler_ctx, profiler_ctx2=None):
             """Runs DDP based model training and captures profiles.
             This test will do two profiler runs.
-            1. An inital basic run to check if profiler events are correctly captured.
+            1. An initial basic run to check if profiler events are correctly captured.
             2. A second profiling pass after running some iterations of DDP, to check robustness of thread local state.
 
             args
@@ -6992,7 +6996,7 @@ class DistributedTest:
 
         def _validate_execution_trace_nccl(self, et_file: str) -> None:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
-            We test for basic fields in theese nodes in the Execution Trace.
+            We test for basic fields in these nodes in the Execution Trace.
             """
             with open(et_file) as f:
                 et = json.load(f)

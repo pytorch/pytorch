@@ -693,7 +693,7 @@ def _tmp_donotuse_dont_inline_everything(fn):
             fn(*args, **kwargs)
     return wrapper
 
-# make it easy to quicky define/trace a function for these tests
+# make it easy to quickly define/trace a function for these tests
 def _trace(*args, **kwargs):
     def wrapper(func):
         return torch.jit.trace(func, args, **kwargs)
