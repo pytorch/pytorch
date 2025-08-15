@@ -2598,6 +2598,38 @@ def _sync_decision_cross_ranks(
     return saved_values
 
 
+def thread_graphsafe_rng_from_hops(module, is_backward):
+    rng_count = 0
+    rng_string = "bwd_rng_state" if is_backward else "fwd_rng_state"
+    last_fwd_input = next(reversed(module.graph.find_nodes(op="placeholder")))
+    for hop_node in module.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(module, hop_node.args[0].target)
+        if isinstance(subgraph, fx.GraphModule):
+            new_inputs = []
+            for idx, placeholder_node in enumerate(
+                subgraph.graph.find_nodes(op="placeholder")
+            ):
+                if rng_string in placeholder_node.name:
+                    with module.graph.inserting_after(last_fwd_input):
+                        fwd_rng_state = module.graph.placeholder(
+                            f"{rng_string}_{rng_count}"
+                        )
+                        rng_count += 1
+                        fwd_rng_state.meta["val"] = placeholder_node.meta["val"]
+                        last_fwd_input = fwd_rng_state
+                        new_inputs.append(fwd_rng_state)
+
+            hop_node.args = (*hop_node.args, *new_inputs)
+            eager_vals = hop_node.meta.get("eager_input_vals")
+            if eager_vals:
+                eager_args, eager_kwargs = eager_vals
+                new_eager_args = (*eager_args, *[inp.meta["val"] for inp in new_inputs])
+                hop_node.meta["eager_input_vals"] = (new_eager_args, eager_kwargs)
+    return module
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
     _joint_inputs,
@@ -2766,6 +2798,9 @@ def min_cut_rematerialization_partition(
     # this is helpful for memory, especially in the case of aot_eager backend
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
+
+    fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
+    bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values
