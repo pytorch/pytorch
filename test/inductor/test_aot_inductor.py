@@ -118,6 +118,8 @@ try:
             AOTIRunnerUtil,
             check_model,
             check_model_with_multiple_inputs,
+            check_model_fx,
+            check_model_with_multiple_inputs_fx,
             code_check_count,
         )
         from .test_control_flow import (
@@ -133,6 +135,8 @@ try:
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
+            check_model_fx,
+            check_model_with_multiple_inputs_fx,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
@@ -6915,6 +6919,13 @@ def fail_mps(is_skip=False):
     )
 
 
+def fail_fx(is_skip=False):
+    return TestFailure(
+        ("fx",),
+        is_skip=is_skip,
+    )
+
+
 def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
     return TestFailure(
         suffixes,
@@ -7011,6 +7022,169 @@ MPS_TEST_FAILURES = {
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_mps(),
 }
 
+FX_TEST_FAILURES = {
+    # HOO not supported
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_fx(),
+    "test_cond_use_buffers_from_outer_scope": fail_fx(),
+    "test_cond_with_multiple_outputs": fail_fx(),
+    "test_cond_with_outer_code_before_after": fail_fx(),
+    "test_cond_with_parameters": fail_fx(),
+    "test_cond_with_reinterpret_view_inputs_outputs": fail_fx(),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_fx(),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_fx(),
+    "test_cond_nested": fail_fx(),
+    "test_cond_non_tensor_predicates_dynamic_True": fail_fx(),
+    "test_cond_share_predicte": fail_fx(),
+    "test_cond_simple": fail_fx(),
+    "test_cond_symint_input": fail_fx(),
+    "test_while_loop_nested": fail_fx(),
+    "test_while_loop_simple": fail_fx(),
+    "test_while_loop_with_conv_dynamic_False": fail_fx(),
+    "test_while_loop_with_conv_dynamic_True": fail_fx(),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_fx(),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_fx(),
+    "test_while_loop_with_outer_buffers": fail_fx(),
+    "test_while_loop_with_outer_code": fail_fx(),
+    "test_while_loop_with_parameters": fail_fx(),
+    "test_while_loop_with_pytree_inputs": fail_fx(),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_fx(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_fx(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_fx(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_fx(),
+    # custom triton kernel unsupported
+    "test_triton_autotuning": fail_fx(),
+    "test_triton_dynamic_launcher_grid": fail_fx(),
+    "test_triton_dynamic_launcher_grid_infer_from_tensor": fail_fx(),
+    "test_triton_kernel_bool_param": fail_fx(),
+    "test_triton_kernel_dynamic_grid": fail_fx(),
+    "test_triton_kernel_dynamic_shape_with_div": fail_fx(),
+    "test_triton_kernel_equal_to_1_arg": fail_fx(),
+    "test_triton_kernel_equal_to_1_float_arg_dynamic_False": fail_fx(),
+    "test_triton_kernel_equal_to_1_float_arg_dynamic_True": fail_fx(),
+    "test_triton_kernel_extern_kernel_arg": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_1_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_1_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_1_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_1_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_2_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_2_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_2_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_1_num_dims_2_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_1_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_1_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_1_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_1_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_2_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_2_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_2_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_2_num_dims_2_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_1_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_1_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_1_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_1_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_2_dynamic_False_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_2_dynamic_False_autotune_True": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_2_dynamic_True_autotune_False": fail_fx(),
+    "test_triton_kernel_grid_type_3_num_dims_2_dynamic_True_autotune_True": fail_fx(),
+    "test_triton_kernel_multi_output_arg": fail_fx(),
+    "test_triton_kernel_on_device_tma_dynamic_False_tma_version_new": fail_fx(),
+    "test_triton_kernel_on_device_tma_dynamic_False_tma_version_old": fail_fx(),
+    "test_triton_kernel_on_device_tma_dynamic_True_tma_version_new": fail_fx(),
+    "test_triton_kernel_on_device_tma_dynamic_True_tma_version_old": fail_fx(),
+    "test_triton_kernel_reinterpret_view": fail_fx(),
+    "test_triton_kernel_reinterpret_view_mem_leak": fail_fx(),
+    "test_triton_kernel_sympy_expr_arg": fail_fx(),
+    "test_triton_kernel_sympy_fn_like_arg": fail_fx(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_False_tma_version_new": fail_fx(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_False_tma_version_old": fail_fx(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_True_tma_version_new": fail_fx(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_True_tma_version_old": fail_fx(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_False_tma_version_new": fail_fx(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_False_tma_version_old": fail_fx(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_True_tma_version_new": fail_fx(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_True_tma_version_old": fail_fx(),
+    "test_triton_kernel_unbacked_symint_in_grid_dynamic_False_autotuning_False": fail_fx(),
+    "test_triton_kernel_unbacked_symint_in_grid_dynamic_False_autotuning_True": fail_fx(),
+    "test_triton_kernel_unbacked_symint_in_grid_dynamic_True_autotuning_False": fail_fx(),
+    "test_triton_kernel_unbacked_symint_in_grid_dynamic_True_autotuning_True": fail_fx(),
+    "test_triton_kernel_weird_param_order": fail_fx(),
+    "test_triton_kernel_with_none_input": fail_fx(),
+    "test_triton_kernel_with_none_inputs_and_equal_to_1_arg": fail_fx(),
+    "test_triton_mutated_autotuning": fail_fx(),
+    "test_triton_next_power_of_2": fail_fx(),
+    # Misc
+    "test_boolean_indexing": fail_fx(),
+    "test__weight_int4pack_mm_m_32_n_64_q_group_32_num_groups_1": fail_fx(),
+    "test__weight_int4pack_mm_m_32_n_64_q_group_32_num_groups_2": fail_fx(),
+    "test__weight_int4pack_mm_m_32_n_64_q_group_64_num_groups_1": fail_fx(),
+    "test__weight_int4pack_mm_m_32_n_64_q_group_64_num_groups_2": fail_fx(),
+    "test_composed_dynamic_size": fail_fx(),
+    "test_fft_c2c": fail_fx(),
+    "test_dup_unbacked_sym_decl": fail_fx(),
+    "test_dup_unbacked_sym_decl_with_refinement": fail_fx(),
+    "test_dynamic_cat": fail_fx(),
+    "test_dynamic_scalar": fail_fx(),
+    "test_input_codegen_with_sympy_expr": fail_fx(),
+    "test_int_list_input": fail_fx(),
+    "test_assert_async": fail_fx(),
+    "test_index_put_fallback": fail_fx(),
+    "test_assert_tensor_meta": fail_fx(),
+    "test_index_put_with_none_index": fail_fx(),
+    "test_proxy_executor_permute": fail_fx(),
+    "test_pytree_inputs": fail_fx(),
+    "test_repeat_interleave": fail_fx(),
+    "test_repeated_calling": fail_fx(),
+    "test_masked_select_dynamic": fail_fx(),
+    "test_none_args_aot_codegen": fail_fx(),
+    "test_runtime_checks": fail_fx(),
+    "test_pad_fallback": fail_fx(),
+    "test_stft": fail_fx(),
+    "test_stride_with_unbacked_expr": fail_fx(),
+    "test_size_from_multi_output": fail_fx(),
+    "test_missing_cubin": fail_fx(),
+    "test_missing_output": fail_fx(),
+    "test_model_modified_weights": fail_fx(),
+    "test_multi_device": fail_fx(),
+    "test_multiple_output_alias": fail_fx(),
+    "test_sym_i64_input_codegen": fail_fx(),
+    "test_unbacked_equals_input_size_runtime_assertion_mark_unbacked_False": fail_fx(),
+    "test_unbacked_equals_input_size_runtime_assertion_mark_unbacked_True": fail_fx(),
+    "test_update_constant_buffer": fail_fx(),
+    "test_update_constant_buffer_simple": fail_fx(),
+    "test_update_inactive_constant_buffer": fail_fx(),
+    "test_update_user_managed_buffer": fail_fx(),
+    "test_upper_bound_i64": fail_fx(),
+    "test_using_model_name_for_files": fail_fx(),
+    "test_view_outputs": fail_fx(),
+    "test_weight_on_disk_legacy": fail_fx(),
+    "test_with_cudagraphs": fail_fx(),
+    "test_with_no_triton_profiler": fail_fx(),
+    "test_with_offset": fail_fx(),
+    "test_with_profiler": fail_fx(),
+    "test_zero_grid_with_backed_symbols": fail_fx(),
+    "test_zero_grid_with_unbacked_symbols": fail_fx(),
+    "test_zero_size_buffer": fail_fx(),
+    "test_zero_size_weight": fail_fx(),
+    "test_symbool_item": fail_fx(),
+    "test_size_with_unbacked_add_and_mul_expr": fail_fx(),
+    "test_symfloat_item": fail_fx(),
+    "test_symint_item": fail_fx(),
+    "test_size_with_unbacked_add_expr": fail_fx(),
+    "test_sympy_cpp_printer_min_max_minmax0": fail_fx(),
+    "test_size_with_unbacked_add_expr_transitive": fail_fx(),
+    "test_sympy_cpp_printer_min_max_minmax1": fail_fx(),
+    "test_torchvision_transforms_functional_tensor_resize": fail_fx(),
+    "test_same_backing": fail_fx(),
+    "test_scatter_fallback": fail_fx(),
+    "test_scatter_reduce_fallback": fail_fx(),
+    "test_sdpa_2": fail_fx(),
+    "test_sdpa": fail_fx(),
+    # quantized unsupported for GPU
+    "test_quanatized_int8_linear": fail_fx(),
+    "test_quantized_linear_bias_none": fail_fx(),
+    "test_quantized_linear": fail_fx(),
+}
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -7045,6 +7219,24 @@ copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleGpu,
     GPU_TYPE,
+    GPU_TEST_FAILURES,
+)
+
+
+class AOTInductorTestFX(TestCase):
+    device = "cuda"
+    device_type = "cuda"
+    check_model = check_model_fx
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs_fx
+    code_check_count = code_check_count
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestFX,
+    "fx",
     GPU_TEST_FAILURES,
 )
 
