@@ -26,7 +26,7 @@ echo Copying over test times file
 robocopy /E "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.additional_ci_files" "%PROJECT_DIR_WIN%\.additional_ci_files"
 
 echo Run inductor tests
-python run_test.py --include inductor/test dynamo/test --exclude inductor/test_aot_inductor --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
+python run_test.py --include inductor/test_torchinductor dynamo/test_autograd_function --exclude inductor/test_aot_inductor --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
 if ERRORLEVEL 1 goto fail
 
 popd
