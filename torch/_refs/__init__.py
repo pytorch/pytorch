@@ -2780,10 +2780,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2837,7 +2834,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
                 # through), and is load bearing for our Inductor lowerings
                 # (which assume that size oblivious tests are OK to determine
                 # if a shape is permissibly zero.)
-                guard_size_oblivious(tensor.shape[0] == 0),
+                guard_or_false(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
