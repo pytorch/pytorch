@@ -311,6 +311,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a
 
     @make_test
+    def test_itertools_filterfalse_basic(a, b):
+        for x in itertools.filterfalse(lambda x: x > 0, [-0.5, 0, 0.5]):
+            a += x
+        return a
+
+    @make_test
     def test_itertools_chain(a, b):
         v = a
         for x in itertools.chain([a, b], [1, 2]):
