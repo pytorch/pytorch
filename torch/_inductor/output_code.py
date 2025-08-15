@@ -581,6 +581,12 @@ class CompiledFxGraph(OutputCode):
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
+        from . import debug
+
+        graph_id = self.fx_kwargs.get("graph_id")
+        name = f"graph_{graph_id}" if graph_id is not None else "unknown"
+        if config.log_tlparse:
+            debug.log_graph_execution(name)
         try:
             with record_function(
                 f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
