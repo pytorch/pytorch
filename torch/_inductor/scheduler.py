@@ -2073,6 +2073,7 @@ class Scheduler:
         )
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -2396,11 +2397,11 @@ class Scheduler:
                     for fs in s.free_symbols:
                         unbacked_symbol_to_origin_node[fs] = None
 
+        has_non_input_unbacked_defs = False
         for node in self.nodes:
-            log.debug("scheduling %s", node.node)
+            assert node.node is not None
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            assert node.node is not None
             unbacked_symbol_defs = sorted(
                 node.node.get_unbacked_symbol_defs(), key=lambda x: x.name
             )
@@ -2409,20 +2410,28 @@ class Scheduler:
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
+                has_non_input_unbacked_defs = True
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
-            unbacked_symbol_uses = sorted(
-                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
-            )
-            # if a kernel takes unbacked symints, register dependencies
-            for s in unbacked_symbol_uses:
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node}"
+        for node in self.nodes:
+            log.debug("scheduling %s", node.node)
+
+            if has_non_input_unbacked_defs:
+                assert node.node is not None
+
+                unbacked_symbol_uses = sorted(
+                    node.node.get_free_symbol_uses(unbacked_only=True),
+                    key=lambda x: x.name,
                 )
-                if (r := unbacked_symbol_to_origin_node[s]) is not None:
-                    for buf in self.name_to_node[r].get_outputs():
-                        node.add_fake_dep(StarDep(buf.get_name()))
+                # if a kernel takes unbacked symints, register dependencies
+                for s in unbacked_symbol_uses:
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node}"
+                    )
+                    if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                        for buf in self.name_to_node[r].get_outputs():
+                            node.add_fake_dep(StarDep(buf.get_name()))
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2477,17 +2486,20 @@ class Scheduler:
             add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure unbacked symints aren't dead-code-eliminated
-        for out in V.graph.graph_outputs:
-            for s in out.get_free_symbol_uses(unbacked_only=True):
-                assert s in unbacked_symbol_to_origin_node, (
-                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                )
-                if r := unbacked_symbol_to_origin_node[s]:
-                    for buf_name in self.name_to_node[r].get_buffer_names():
-                        log.debug(
-                            "scheduling output %s for unbacked symint %s", buf_name, s
-                        )
-                        add_user(buf_name, OutputNode(StarDep(buf_name)))
+        if has_non_input_unbacked_defs:
+            for out in V.graph.graph_outputs:
+                for s in out.get_free_symbol_uses(unbacked_only=True):
+                    assert s in unbacked_symbol_to_origin_node, (
+                        f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                    )
+                    if r := unbacked_symbol_to_origin_node[s]:
+                        for buf_name in self.name_to_node[r].get_buffer_names():
+                            log.debug(
+                                "scheduling output %s for unbacked symint %s",
+                                buf_name,
+                                s,
+                            )
+                            add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -4978,6 +4990,7 @@ class Scheduler:
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
 
+            self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():

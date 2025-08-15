@@ -315,7 +315,7 @@ def enable_aot_logging() -> Iterator[None]:
 # Used for provenance tracking
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
-_inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
@@ -758,18 +758,16 @@ save_args_cnt = itertools.count()
 def create_mapping_pre_post_grad_nodes(
     pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, list[str]]]:
     """
     Create bidirectional mappings between pre_grad graph nodes
     and post_grad graph code nodes, and vice versa.
     """
     # return a dummy dict if there's any error
-    empty_return: dict[str, dict[str, Any]] = {
+    empty_return: dict[str, dict[str, list[str]]] = {
         "preToPost": {},
         "postToPre": {},
     }
-
-    log.info("Creating node mappings for provenance tracking")
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
         log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
@@ -860,8 +858,6 @@ def create_node_mapping_kernel_to_post_grad(
         "postToCppCode": {},
     }
 
-    log.info("Creating node mappings for provenance tracking")
-
     if not isinstance(triton_kernel_to_post_grad_json, dict):
         log.error(
             "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
@@ -905,28 +901,36 @@ def create_node_mapping_kernel_to_post_grad(
 def dump_inductor_provenance_info(
     filename: str = "inductor_generated_kernel_to_post_grad_nodes.json",
 ) -> dict[str, Any]:
-    global _pre_grad_graph_id
-    global _inductor_post_to_pre_grad_nodes
-    global _inductor_triton_kernel_to_post_grad_node_info
-    if config.trace.enabled:
-        with V.debug.fopen(filename, "w") as fd:
-            log.info("Writing provenance tracing debugging info to %s", fd.name)
-            json.dump(_inductor_triton_kernel_to_post_grad_node_info, fd)
-    node_mapping = {}
-    if _pre_grad_graph_id:
-        node_mapping_kernel = create_node_mapping_kernel_to_post_grad(
-            _inductor_triton_kernel_to_post_grad_node_info
-        )
-        node_mapping = {
-            **_inductor_post_to_pre_grad_nodes,
-            **node_mapping_kernel,
-        }
+    try:
+        global _pre_grad_graph_id
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_triton_kernel_to_post_grad_node_info
         if config.trace.enabled:
-            with V.debug.fopen(
-                "inductor_provenance_tracking_node_mappings.json", "w"
-            ) as fd:
-                json.dump(node_mapping, fd)
-    return node_mapping
+            with V.debug.fopen(filename, "w") as fd:
+                log.info("Writing provenance tracing debugging info to %s", fd.name)
+                json.dump(_inductor_triton_kernel_to_post_grad_node_info, fd)
+        node_mapping = {}
+        if _pre_grad_graph_id:
+            node_mapping_kernel = create_node_mapping_kernel_to_post_grad(
+                _inductor_triton_kernel_to_post_grad_node_info
+            )
+            node_mapping = {
+                **_inductor_post_to_pre_grad_nodes,
+                **node_mapping_kernel,
+            }
+            if config.trace.enabled:
+                with V.debug.fopen(
+                    "inductor_provenance_tracking_node_mappings.json", "w"
+                ) as fd:
+                    json.dump(node_mapping, fd)
+        return node_mapping
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        # TODO: log the error to scuba table for better signal
+        log.error("Unexpected error in dump_inductor_provenance_info: %s", e)
+        log.error(traceback.format_exc())
+        return {}
 
 
 def set_kernel_post_grad_provenance_tracing(
@@ -934,42 +938,49 @@ def set_kernel_post_grad_provenance_tracing(
     kernel_name: str,
     is_extern: bool = False,
 ) -> None:
-    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    try:
+        from .codegen.simd_kernel_features import DisableReduction, EnableReduction
 
-    global _inductor_triton_kernel_to_post_grad_node_info
-    if is_extern:
-        assert isinstance(node_schedule, ExternKernelOut)
-        curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
-            kernel_name, []
-        )
-        # 'origins' on IR nodes gives what FX IR nodes contributed to any given fused kernel.
-        # "origin_node" is more precise and says that the contents of this node corresponds
-        # EXACTLY to the output of a particular FX node, but it's not always available
-        if node_schedule.origin_node:
-            origin_node_name = node_schedule.origin_node.name
-            if origin_node_name not in curr_node_info:
-                curr_node_info.append(origin_node_name)
-        else:
-            curr_node_info.extend(
-                origin.name
-                for origin in node_schedule.origins
-                if origin.name not in curr_node_info
+        global _inductor_triton_kernel_to_post_grad_node_info
+        if is_extern:
+            assert isinstance(node_schedule, ExternKernelOut)
+            curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                kernel_name, []
             )
-    else:
-        assert isinstance(node_schedule, list)
-        for snode in node_schedule:
-            if snode not in (EnableReduction, DisableReduction):
-                if snode.node is not None:
-                    curr_node_info = (
-                        _inductor_triton_kernel_to_post_grad_node_info.setdefault(
-                            kernel_name, []
+            # 'origins' on IR nodes gives what FX IR nodes contributed to any given fused kernel.
+            # "origin_node" is more precise and says that the contents of this node corresponds
+            # EXACTLY to the output of a particular FX node, but it's not always available
+            if node_schedule.origin_node:
+                origin_node_name = node_schedule.origin_node.name
+                if origin_node_name not in curr_node_info:
+                    curr_node_info.append(origin_node_name)
+            else:
+                curr_node_info.extend(
+                    origin.name
+                    for origin in node_schedule.origins
+                    if origin.name not in curr_node_info
+                )
+        else:
+            assert isinstance(node_schedule, list)
+            for snode in node_schedule:
+                if snode not in (EnableReduction, DisableReduction):
+                    if snode.node is not None:
+                        curr_node_info = (
+                            _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                                kernel_name, []
+                            )
                         )
-                    )
-                    curr_node_info.extend(
-                        origin.name
-                        for origin in snode.node.origins
-                        if origin.name not in curr_node_info
-                    )
+                        curr_node_info.extend(
+                            origin.name
+                            for origin in snode.node.origins
+                            if origin.name not in curr_node_info
+                        )
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        # TODO: log the error to scuba table for better signal
+        log.error("Unexpected error in set_kernel_post_grad_provenance_tracing: %s", e)
+        log.error(traceback.format_exc())
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
