@@ -111,12 +111,14 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         os=OperatingSystem.LINUX,
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX
+            OperatingSystem.LINUX,
+            use_sequential=True,
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
         ),
+        use_sequential=True,
     ),
     # See https://github.com/pytorch/pytorch/issues/138750
     #   BinaryBuildWorkflow(
@@ -171,16 +173,16 @@ ROCM_SMOKE_WORKFLOWS = [
 ]
 
 LINUX_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX,
-            arches=["12.6", "12.8", "12.9"],
-            python_versions=["3.9"],
-        ),
-        branches="main",
-    ),
+    # BinaryBuildWorkflow(
+    #     os=OperatingSystem.LINUX,
+    #     package_type="manywheel",
+    #     build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+    #         OperatingSystem.LINUX,
+    #         arches=["12.9"],
+    #         python_versions=["3.9"],
+    #     ),
+    #     branches="main",
+    # ),
     # See https://github.com/pytorch/pytorch/issues/138750
     # BinaryBuildWorkflow(
     #     os=OperatingSystem.LINUX,
@@ -403,35 +405,35 @@ def main() -> None:
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             LINUX_BINARY_BUILD_WORFKLOWS,
         ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            AARCH64_BINARY_BUILD_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            S390X_BINARY_BUILD_WORKFLOWS,
-        ),
-        (
-            # Give rocm it's own workflow file
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            ROCM_SMOKE_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
-            LINUX_BINARY_SMOKE_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
-            WINDOWS_BINARY_BUILD_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
-            WINDOWS_BINARY_SMOKE_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("macos_binary_build_workflow.yml.j2"),
-            MACOS_BINARY_BUILD_WORKFLOWS,
-        ),
+        # (
+        #     jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+        #     AARCH64_BINARY_BUILD_WORKFLOWS,
+        # ),
+        # (
+        #     jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+        #     S390X_BINARY_BUILD_WORKFLOWS,
+        # ),
+        # (
+        #     # Give rocm it's own workflow file
+        #     jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+        #     ROCM_SMOKE_WORKFLOWS,
+        # ),
+        # (
+        #     jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+        #     LINUX_BINARY_SMOKE_WORKFLOWS,
+        # ),
+        # (
+        #     jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
+        #     WINDOWS_BINARY_BUILD_WORKFLOWS,
+        # ),
+        # (
+        #     jinja_env.get_template("windows_binary_build_workflow.yml.j2"),
+        #     WINDOWS_BINARY_SMOKE_WORKFLOWS,
+        # ),
+        # (
+        #     jinja_env.get_template("macos_binary_build_workflow.yml.j2"),
+        #     MACOS_BINARY_BUILD_WORKFLOWS,
+        # ),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
