@@ -378,7 +378,8 @@ jobs:
         run: |
           src="${{ steps.build-external-packages.outputs.output_dir }}"
           if [ -d "$src" ]; then
-            cp -r "$src"/* dist/ || true
+            mkdir -p "dist/$(dirname "$src")"
+            mv "$src" "dist/$(dirname "$src")/"
           fi
 
       - name: Stop monitoring script
