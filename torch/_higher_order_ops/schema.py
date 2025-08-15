@@ -18,7 +18,7 @@ class HopArgumentInfo:
     example_value: Any
     # Provide an default_value
     default_value: Any
-    # Whether this arugment gets mutated in the hop subgraph.
+    # Whether this argument gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
     kw_only: bool
@@ -65,6 +65,8 @@ class CTypeGen:
             return torch._C.AnyType.get()
         elif isinstance(obj, torch.SymInt):
             return torch._C.SymIntType.get()
+        elif isinstance(obj, torch.SymBool):
+            return torch._C.SymBoolType.get()
         return torch._C._jit_try_infer_type(obj).type()
 
 

@@ -1,5 +1,3 @@
-# mypy: allow-untyped-decorators
-
 """
 This module implements TorchDynamo's core frame conversion functionality, transforming Python
 frames into FX graphs. It handles:
@@ -142,6 +140,7 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
+    get_hook_for_recompile_user_context,
     get_metrics_context,
     increment_frame,
     is_namedtuple,
@@ -224,6 +223,36 @@ def fx_forward_from_src_skip_result(
     result = original_forward_from_src(src, globals, co_fields)
     skip_code(result.__code__)
     return result
+
+
+def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
+    convert_frame_intern = structured.intern_string(__file__)
+    # Extract and filter the stack
+    stack = list(
+        itertools.takewhile(
+            lambda f: f["filename"] != convert_frame_intern,
+            structured.from_traceback(
+                CapturedTraceback.extract(skip=4 + skip).summary()
+            ),
+        )
+    ) + [
+        {
+            "line": code.co_firstlineno,
+            "name": code.co_name,
+            "filename": structured.intern_string(code.co_filename),
+        }
+    ]
+    # Initialize the ChromiumEventLogger on start
+    torch._logging.trace_structured(
+        "dynamo_start",
+        lambda: {"stack": stack},
+    )
+
+    stack_strings = [
+        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
+        for frame in stack
+    ]
+    return stack_strings
 
 
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -494,6 +523,29 @@ def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
     return tx.error_on_graph_break
 
 
+def get_compile_id(
+    frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+) -> CompileId:
+    global FRAME_COUNTER
+    if "_id" not in frame_state:
+        frame_state["_id"] = FRAME_COUNTER
+        FRAME_COUNTER += 1
+    frame_id = frame_state["_id"]
+    assert isinstance(frame_id, int)
+
+    frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
+    FRAME_COMPILE_COUNTER[frame_id] += 1
+
+    compiled_autograd_id = None
+    if prior := CompileContext.current_compile_id():
+        compiled_autograd_id = prior.compiled_autograd_id
+    return CompileId(
+        compiled_autograd_id=compiled_autograd_id,
+        frame_id=frame_id,
+        frame_compile_id=frame_compile_id,
+    )
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -609,24 +661,8 @@ class ConvertFrameAssert:
         global initial_global_state
         initial_global_state = GlobalStateGuard()
 
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
-        frame_id = frame_state["_id"]
-        assert isinstance(frame_id, int)
-
-        frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
-        FRAME_COMPILE_COUNTER[frame_id] += 1
-
-        compiled_autograd_id = None
-        if prior := CompileContext.current_compile_id():
-            compiled_autograd_id = prior.compiled_autograd_id
-        compile_id = CompileId(
-            compiled_autograd_id=compiled_autograd_id,
-            frame_id=frame_id,
-            frame_compile_id=frame_compile_id,
-        )
+        compile_id = get_compile_id(frame_state)
+        frame_id = compile_id.frame_id
 
         signpost_event(
             "dynamo",
@@ -1044,7 +1080,40 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        metrics_context.update_outer({"recompile_reason": recompile_reason})
+        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
+        inline_inbuilt_nn_modules_candidate = False
+        if not config.inline_inbuilt_nn_modules and frame:
+            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, skip_logging=True
+            )
+            inbuilt_nn_recompile_reason = (
+                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
+            )
+
+            if (
+                inbuilt_nn_recompile_reason is not None
+                and "[inline-inbuilt-nn-modules-candidate]"
+                in inbuilt_nn_recompile_reason
+            ):
+                inline_inbuilt_nn_modules_candidate = True
+
+        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
+        # regardless of whether inline_inbuilt_nn_modules is set or not
+        metrics_context.update_outer(
+            {
+                "recompile_reason": recompile_reason,
+                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+            }
+        )
+
+        recompile_user_contexts = get_hook_for_recompile_user_context()
+        if recompile_user_contexts:
+            # cap each user context to N chars for data retention purposes. N=256
+            # is chosen to be large enough to capture the most important info.
+            user_contexts_msg = {
+                user_context()[:256] for user_context in recompile_user_contexts
+            }
+            metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
@@ -1053,7 +1122,7 @@ def _compile(
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             # NS: Don't add period at the end of string, as it'll be added to URL
-            # renderring it incorrect
+            # rendering it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
@@ -1120,28 +1189,7 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
-        convert_frame_intern = structured.intern_string(__file__)
-        # Initialize the ChromiumEventLogger on start
-        torch._logging.trace_structured(
-            "dynamo_start",
-            lambda: {
-                "stack": list(
-                    itertools.takewhile(
-                        lambda f: f["filename"] != convert_frame_intern,
-                        structured.from_traceback(
-                            CapturedTraceback.extract(skip=4 + skip).summary()
-                        ),
-                    )
-                )
-                + [
-                    {
-                        "line": code.co_firstlineno,
-                        "name": code.co_name,
-                        "filename": structured.intern_string(code.co_filename),
-                    }
-                ]
-            },
-        )
+        stack_trace = log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -1237,6 +1285,7 @@ def _compile(
                 shape_env_guard_count = len(output.shape_env.guards)
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
+                graph_node_shapes = output.get_graph_sizes_structured()
                 graph_input_count = len(output.placeholders)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
@@ -1248,6 +1297,7 @@ def _compile(
                 shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                graph_node_shapes = {}
                 graph_input_count = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
@@ -1276,13 +1326,13 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "config_suppress_errors": config.suppress_errors,
-                "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
+                "stack_trace": stack_trace,
+                "graph_node_shapes": str(graph_node_shapes),
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
@@ -1575,9 +1625,10 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_backend(
+            result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
+            return result
 
 
 def catch_errors_wrapper(

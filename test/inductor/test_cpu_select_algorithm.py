@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     skipIfWindows,
     TEST_MKL,
@@ -51,7 +52,7 @@ aten = torch.ops.aten
 
 
 def patches(fn):
-    def skip_cache(self, choices, name, key, benchmark):
+    def skip_cache(self, choices, name, key, benchmark, hint_override=None):
         if benchmark is None:
             return {}
         timings = benchmark(choices)
@@ -3094,5 +3095,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if HAS_CPU and not (IS_MACOS or IS_WINDOWS):
         run_tests()

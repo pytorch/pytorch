@@ -12,6 +12,8 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -29,6 +31,23 @@ class TestMode(BaseTorchFunctionMode):
 
         if func == torch.add:
             return torch.zeros(2, 2)
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class HopDetectionError(Exception):
+    pass
+
+
+class TestModeRaises(BaseTorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        import torch._higher_order_ops
+
+        if func == torch._higher_order_ops.flex_attention:
+            raise HopDetectionError("test")
 
         return super().__torch_function__(func, types, args, kwargs)
 
@@ -504,11 +523,13 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
+        from torch._dynamo.variables.builtin import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+        )
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
             bin_ops,
-            BUILTIN_TO_TENSOR_FN_MAP,
-            BUILTIN_TO_TENSOR_RFN_MAP,
             tensor_and_int_ops,
             un_int_ops,
             un_ops,
@@ -657,6 +678,51 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
+
+    @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
+    def test_hop(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device(GPU_TYPE):
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                # This runs in fullgraph already
+                with TestModeRaises():
+                    flex_attention(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
+
+    @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
+    def test_hop_eager(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device(GPU_TYPE):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                with TestModeRaises():
+                    flex_attention_eager(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
 
 
 if __name__ == "__main__":

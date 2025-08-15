@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import hashlib
 import importlib.util
@@ -12,6 +13,7 @@ import re
 import sys
 import tempfile
 import time
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Optional, Union
@@ -252,6 +254,7 @@ def set_logs(
     graph_region_expansion: bool = False,
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
+    compute_dependencies: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -565,6 +568,7 @@ def set_logs(
         graph_region_expansion=graph_region_expansion,
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
+        compute_dependencies=compute_dependencies,
     )
 
 
@@ -722,8 +726,49 @@ Valid settings:
     return msg
 
 
+def process_env_var_string_for_windows(env_var_str: str) -> str:
+    """
+    When we setup logging config as guide: https://docs.pytorch.org/docs/stable/logging.html
+    Such as:
+        TORCH_LOGS="+schedule,+inductor,+output_code"
+
+    On Linux, it shows as:
+        declare -x SSH_TTY="/dev/pts/0"
+        declare -x TERM="xterm"
+        declare -x TORCH_LOGS="+schedule,+inductor,+output_code"
+        declare -x USER="xu"
+
+    On Windows, it shows as:
+        TORCHINDUCTOR_WINDOWS_TESTS=1
+        TORCH_LOGS="+schedule,+inductor,+output_code"
+        UCRTVersion=10.0.22000.0
+
+    For Linux, it shows quotes by default, And Windows is not shows quotes.
+    Besides that, Windows would auto assemble quotes when env var processing.
+    On Linux, we will get variable: "+schedule,+inductor,+output_code"
+    On Windows, we will get variable: '"+schedule,+inductor,+output_code"'
+
+    So, we need remove the outer quotes for Windows.
+    """
+    _IS_WINDOWS = sys.platform == "win32"
+
+    def remove_outer_quotes(s: str) -> str:
+        if len(s) >= 2 and (
+            (s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")
+        ):
+            return s[1:-1]
+        return s
+
+    if _IS_WINDOWS:
+        env_var_str = remove_outer_quotes(env_var_str)
+
+    return env_var_str
+
+
 @functools.lru_cache
 def _parse_log_settings(settings):
+    settings = process_env_var_string_for_windows(settings)
+
     if settings == "":
         return {}
 
@@ -1154,6 +1199,45 @@ def warning_once(logger_obj, *args, **kwargs) -> None:
     logger_obj.warning(*args, **kwargs)
 
 
+def safe_grad_filter(message, category, filename, lineno, file=None, line=None) -> bool:
+    return "The .grad attribute of a Tensor" not in str(message)
+
+
+def user_warning_filter(
+    message, category, filename, lineno, file=None, line=None
+) -> bool:
+    return not category == UserWarning
+
+
+@contextlib.contextmanager
+def hide_warnings(filter_fn=lambda *args, **kwargs: True):
+    """
+    A context manager that temporarily suppresses warnings,
+    using public API: https://docs.python.org/3/library/warnings.html#warnings.showwarning.
+
+    Useful to hide warnings without mutating warnings module state, see:
+    https://github.com/pytorch/pytorch/issues/128427#issuecomment-2161496162.
+
+    NOTE: Warnings issued under this context will still be cached in the __warningregistry__
+    and count towards the once/default rule. So you should NEVER use this on a user-land function.
+
+    Filter must implement the showwarning API:
+    def filter_fn(message, category, filename, lineno, file=None, line=None) -> bool:
+        return True  # show this warning entry
+    """
+    prior = warnings.showwarning
+
+    def _showwarning(*args, **kwargs):
+        if filter_fn(*args, **kwargs):
+            prior(*args, **kwargs)
+
+    try:
+        warnings.showwarning = _showwarning
+        yield
+    finally:
+        warnings.showwarning = prior
+
+
 class LazyString(Generic[_P]):
     def __init__(
         self, func: Callable[_P, str], *args: _P.args, **kwargs: _P.kwargs
@@ -1205,6 +1289,7 @@ def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    compile_id: Optional[CompileId] = None,
 ) -> None:
     trace_structured(
         "artifact",
@@ -1213,6 +1298,7 @@ def trace_structured_artifact(
             "encoding": encoding,
         },
         payload_fn=payload_fn,
+        compile_id=compile_id,
     )
 
 
@@ -1235,12 +1321,16 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in [
+    assert name not in [
         "rank",
         "compiled_autograd_id",
         "frame_id",
         "frame_compile_id",
         "attempt",
+        "severity",
+        "timestamp",
+        "pathname",
+        "thread",
     ]
     assert callable(metadata_fn), (
         f"metadata_fn should be callable, but got {type(metadata_fn)}"
