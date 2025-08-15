@@ -36,6 +36,7 @@ class Bernoulli(ExponentialFamily):
     Args:
         probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
+        validate_args (bool, optional): whether to validate arguments, None by default
     """
 
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}

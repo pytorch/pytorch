@@ -200,7 +200,12 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
         while True:
             page += 1
             url = f"{url_prefix}?per_page=100&page={page}"
-            response = json.loads(_read_url(Request(url, headers=headers)))
+            try:
+                response = json.loads(_read_url(Request(url, headers=headers)))
+            except HTTPError:
+                # Retry without token in case it had insufficient permissions.
+                del headers["Authorization"]
+                response = json.loads(_read_url(Request(url, headers=headers)))
             # Empty response means no more data to process
             if not response:
                 break
@@ -267,7 +272,7 @@ def _get_cache_or_reload(
         except HTTPError as err:
             if err.code == 300:
                 # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
-                # in the repo. This can be disambiguated by explicitely using refs/heads/ or refs/tags
+                # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
                 # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
                 # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
                 warnings.warn(

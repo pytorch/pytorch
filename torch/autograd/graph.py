@@ -194,6 +194,9 @@ class GradientEdge(NamedTuple):
 
     node: Node
     output_nr: int
+    # This token can be used to ensure the graph stays alive when it cannot be
+    # done via the node field
+    ownership_token: Optional[Node] = None
 
 
 def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
@@ -209,9 +212,18 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
         )
     grad_fn = _get_grad_fn_or_grad_acc(tensor)
 
+    # Python-based Node are owned by the C++ side meaning the python grad_fn
+    # object we hold here does NOT keep the C++ graph alive.
+    # Create an ownership token by creating a new C++ node that own the graph
+    # we care about here.
+    token = None
+    if isinstance(grad_fn, torch._C._FunctionBase):
+        with torch.enable_grad():
+            token = tensor.view_as(tensor).grad_fn
+
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
-    return GradientEdge(grad_fn, tensor.output_nr)
+    return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
 def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
@@ -241,7 +253,7 @@ class saved_tensors_hooks:
     Use this context-manager to define how intermediary results of an operation
     should be packed before saving, and unpacked on retrieval.
 
-    In that context, the ``pack_hook`` function will be called everytime an
+    In that context, the ``pack_hook`` function will be called every time an
     operation saves a tensor for backward (this includes intermediary results
     saved using
     :func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` but
@@ -272,7 +284,7 @@ class saved_tensors_hooks:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
         >>> def pack_hook(x):
         ...     print("Packing", x)
-        ...     return x
+        ...     return x.detach()
         >>>
         >>> def unpack_hook(x):
         ...     print("Unpacking", x)
@@ -295,6 +307,11 @@ class saved_tensors_hooks:
     .. warning ::
         Only one pair of hooks is allowed at a time. When recursively nesting this
         context-manager, only the inner-most pair of hooks will be applied.
+
+    .. warning ::
+        To avoid reference cycle, the return value of ``pack_hook`` cannot hold a
+        reference to the input tensor. For example, use `lambda x: x.detach()`
+        instead of `lambda x: x` as the pack hook.
     """
 
     def __init__(
@@ -504,9 +521,9 @@ def register_multi_grad_hook(
             def inner_hook(grad: torch.Tensor) -> None:
                 nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
-                assert (
-                    id != -1
-                ), "expected this hook to be called inside a backward call"
+                assert id != -1, (
+                    "expected this hook to be called inside a backward call"
+                )
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
@@ -715,9 +732,9 @@ class _AllowMutationOnSavedContext:
 
 
 @contextlib.contextmanager
-def allow_mutation_on_saved_tensors() -> (
-    Generator[_AllowMutationOnSavedContext, None, None]
-):
+def allow_mutation_on_saved_tensors() -> Generator[
+    _AllowMutationOnSavedContext, None, None
+]:
     """Context manager under which mutating tensors saved for backward is allowed.
 
     Under this context manager, tensors saved for backward are cloned on mutation,
@@ -791,7 +808,7 @@ def _register_logging_hooks_on_whole_graph(
 
     def fmt(t: Optional[torch.Tensor]) -> str:
         # Avoid circular import
-        from torch.testing._internal.common_utils import dtype_abbrs
+        from torch.utils._dtype_abbrs import dtype_abbrs
 
         if t is None:
             return "None"

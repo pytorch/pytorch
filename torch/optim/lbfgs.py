@@ -231,15 +231,15 @@ class LBFGS(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
-        defaults = dict(
-            lr=lr,
-            max_iter=max_iter,
-            max_eval=max_eval,
-            tolerance_grad=tolerance_grad,
-            tolerance_change=tolerance_change,
-            history_size=history_size,
-            line_search_fn=line_search_fn,
-        )
+        defaults = {
+            "lr": lr,
+            "max_iter": max_iter,
+            "max_eval": max_eval,
+            "tolerance_grad": tolerance_grad,
+            "tolerance_change": tolerance_change,
+            "history_size": history_size,
+            "line_search_fn": line_search_fn,
+        }
         super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
@@ -299,7 +299,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    def step(self, closure):
+    def step(self, closure):  # type: ignore[override]
         """Perform a single optimization step.
 
         Args:

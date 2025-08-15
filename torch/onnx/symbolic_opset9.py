@@ -472,7 +472,7 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
         out = true_divide(g, self, other)
         return g.op("Floor", out)
     else:
-        # Integer division does trunction rounding
+        # Integer division does truncation rounding
         div = g.op("Div", self, other)
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
@@ -3855,7 +3855,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
 @_onnx_symbolic("aten::sort")
 # TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self
@@ -5315,7 +5315,7 @@ def index(g: jit_utils.GraphContext, self, index):
         #   2. prim::Constant[value=...] or tensor output
         #           representing advanced indexing. E.g. tensor[[0, 1], [2, 0]].
         # For more info on advanced indexing,
-        # check https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#advanced-indexing
+        # check https://numpy.org/doc/stable/user/basics.indexing.html#advanced-indexing
 
         # Consider a general case of
         #       t: [x_1, y_1, y_2, ..., x_m, ..., y_n]
@@ -5389,7 +5389,7 @@ def index(g: jit_utils.GraphContext, self, index):
 
             cum_adv_index_shape_tensor = _shape_as_tensor(g, cum_adv_index)
             # check if all advanced indices are consecutive.
-            # Refer to https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#combining-advanced-and-basic-indexing
+            # Refer to https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
             # to understand how the subarray position is decided.
             if adv_idx_indices == list(
                 range(adv_idx_indices[0], adv_idx_indices[-1] + 1)

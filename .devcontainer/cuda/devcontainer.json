@@ -3,16 +3,22 @@
 {
   "name": "PyTorch - CUDA",
   "build": {
-    "context": "../..",
+    "context": "./",
     "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
-      "CUDA_VERSION": "11.8.0",
+      "CUDA_VERSION": "12.8.0",
       "CLANG_VERSION": ""
     }
   },
-  "runArgs": ["--gpus", "all"],
+  "runArgs": ["--runtime", "nvidia", "--gpus", "all"],
+  // Mount the full repo only after the container starts
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace/pytorch",
+  "containerEnv": {
+    "PIP_USER": "0" // <‑‑ disable implicit --user
+  },
 // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
 

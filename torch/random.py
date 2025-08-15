@@ -143,8 +143,8 @@ def fork_rng(
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        device_type (str): device type str, default is `cuda`. As for custom device,
-            see details in [Note: support the custom device with privateuse1]
+        device_type (str): device type str, default is `cuda`. As for supported device,
+            see details in :ref:`accelerator<accelerators>`
     """
 
     if device_type == "meta":

@@ -68,8 +68,7 @@ static_assert(
 } // namespace test_function_traits
 
 struct MovableOnly {
-  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */
-  }
+  constexpr MovableOnly(int val_) : val(val_) { /* no default constructor */ }
   MovableOnly(const MovableOnly&) = delete;
   MovableOnly(MovableOnly&&) = default;
   MovableOnly& operator=(const MovableOnly&) = delete;

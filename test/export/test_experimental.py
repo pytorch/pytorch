@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import types
 import unittest
 from typing import Dict, List, Tuple
 
@@ -8,101 +9,13 @@ import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export, export_for_training
-from torch.export._trace import _convert_ts_to_export_experimental
-from torch.export.experimental import _export_forward_backward
+from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
-    def test_torchscript_module_export(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x.cos() + x.sin()
-
-        model_to_trace = M()
-        inps = (torch.randn(4, 4),)
-        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
-
-        exported_module = _convert_ts_to_export_experimental(
-            traced_module_by_torchscript, inps
-        )
-
-        self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
-
-    def test_torchscript_module_export_single_input(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x.cos() + x.sin()
-
-        model_to_trace = M()
-        inps = torch.randn(4, 4)
-        traced_module_by_torchscript = torch.jit.trace(M(), example_inputs=inps)
-
-        exported_module = _convert_ts_to_export_experimental(
-            traced_module_by_torchscript, inps
-        )
-
-        self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
-
-    def test_torchscript_module_export_various_inputs_with_annotated_input_names(self):
-        def _check_equality_and_annotations(m_func, inps):
-            # Original module.
-            model_to_trace = m_func()
-
-            # ExportedProgram from TorchScript module.
-            traced_module_by_torchscript = torch.jit.trace(
-                m_func(), example_inputs=inps
-            )
-            exported_module = _convert_ts_to_export_experimental(
-                traced_module_by_torchscript, inps
-            )
-
-            # ExportedProgram from original module.
-            original_exported_module = torch.export.export_for_training(
-                m_func(), inps, strict=True
-            )
-
-            # Check whether input annotations are the same as tracing the original module.
-            orig_ph_name_list = [
-                n.name
-                for n in original_exported_module.graph.nodes
-                if n.op == "placeholder"
-            ]
-            ph_name_list = [
-                n.name for n in exported_module.graph.nodes if n.op == "placeholder"
-            ]
-            self.assertEqual(orig_ph_name_list, ph_name_list)
-
-            # Check results equality.
-            self.assertTrue(
-                torch.allclose(exported_module(*inps), model_to_trace(*inps))
-            )
-
-        # Tuple
-        class MTuple(torch.nn.Module):
-            def forward(self, x: Tuple[torch.Tensor]):
-                return x[0] + x[1]
-
-        _check_equality_and_annotations(MTuple, ((torch.randn(4), torch.randn(4)),))
-
-        # List
-        class MList(torch.nn.Module):
-            def forward(self, x: List[torch.Tensor]):
-                return x[0] + x[1]
-
-        _check_equality_and_annotations(MList, ([torch.randn(4), torch.randn(4)],))
-
-        # Dict
-        class MDict(torch.nn.Module):
-            def forward(self, x: Dict[str, torch.Tensor]):
-                return x["0"] + x["1"]
-
-        _check_equality_and_annotations(
-            MDict, ({"0": torch.randn(4), "1": torch.randn(4)},)
-        )
-
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -332,6 +245,114 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             ep_joint.graph_signature.output_specs[2].kind,
             OutputKind.LOSS_OUTPUT,
         )
+
+    def test_sticky_export(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *args, **kwargs):
+                return self.model(*args, **kwargs)
+
+        inp = torch.randn(4, 4)
+
+        p = Pipeline(Model())
+        orig_forward = p.model.forward
+        p.model.forward = _sticky_export(p.model.forward)
+        res = p.generate(inp)
+
+        p.model.forward = orig_forward
+        res2 = p.generate(inp)
+        self.assertTrue(torch.allclose(res, res2))
+
+    def test_sticky_export_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                if x.shape[0] < 5:
+                    return self.linear(x)
+                return x.sin()
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *args, **kwargs):
+                return self.model(*args, **kwargs)
+
+        inp = torch.randn(4, 4)
+
+        def callback(*args, **kwargs):
+            # I think it is bit weird to use the forward arg name here, so
+            # lets just use ShapeCollections
+
+            flat_args, _ = torch.utils._pytree.tree_flatten((args, kwargs))
+            collections = torch.export.ShapesCollection()
+            for arg in flat_args:
+                if isinstance(arg, torch.Tensor):
+                    collections[arg] = {
+                        i: torch.export.Dim.AUTO for i in range(len(arg.shape))
+                    }
+            return collections
+
+        p = Pipeline(Model())
+        p.model.forward = _sticky_export(
+            p.model.forward, dynamic_shapes_callback=callback
+        )
+        _ = p.generate(inp)
+        self.assertExpectedInline(
+            str(p.model.forward._exported_artifact.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    linear_weight = self.linear.weight
+    linear_bias = self.linear.bias
+    sym_size_int_2 = torch.ops.aten.sym_size.int(x, 1)
+    linear = torch.ops.aten.linear.default(x, linear_weight, linear_bias);  x = linear_weight = linear_bias = None
+    eq = sym_size_int_2 == 4;  sym_size_int_2 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
+    return pytree.tree_unflatten((linear,), self._out_spec)""",
+        )
+
+    def test_sticky_export_nested_inp(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, *, inputs):
+                return self.linear(inputs[0]) + self.linear(inputs[1])
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+
+            def generate(self, *, input_tensor, input_tensor2):
+                inputs = [input_tensor, input_tensor2]
+                return self.model(inputs=inputs)
+
+        inp = torch.randn(4, 4)
+        inp2 = torch.randn(4, 4)
+
+        p = Pipeline(Model())
+        orig_forward = p.model.forward
+        p.model.forward = _sticky_export(p.model.forward)
+        res = p.generate(input_tensor=inp, input_tensor2=inp2)
+
+        p.model.forward = orig_forward
+        res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
+        self.assertTrue(torch.allclose(res, res2))
 
 
 if __name__ == "__main__":

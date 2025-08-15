@@ -30,7 +30,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 # Override buffers; should not cause breakage
                 # but skip the marking static here since
-                # named_buffers is overriden
+                # named_buffers is overridden
                 self.register_buffer("B", torch.ones(3, 3))
                 self.named_buffers = []
 

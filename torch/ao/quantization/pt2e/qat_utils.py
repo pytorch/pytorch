@@ -876,14 +876,18 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
             m, F.conv_transpose2d, _quantized_conv2d_bn_example_inputs, is_cuda=is_cuda
         )
 
-    # remove in place add from batchnorm tracking traning stats
+    # remove in place add from batchnorm tracking training stats
     for node in m.graph.nodes:
         if (
             node.target == torch.ops.aten.add_.Tensor
             and node.args[0].op == "get_attr"
             and node.args[1] == 1
-            and torch.nn.modules.batchnorm.BatchNorm2d
-            in [val[1] for val in node.meta["source_fn_stack"]]
+            and (
+                torch.nn.modules.batchnorm.BatchNorm2d
+                in [val[1] for val in node.meta["source_fn_stack"]]
+                or torch.nn.modules.batchnorm.BatchNorm1d
+                in [val[1] for val in node.meta["source_fn_stack"]]
+            )
         ):
             m.graph.erase_node(node)
 

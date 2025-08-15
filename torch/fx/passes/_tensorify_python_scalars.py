@@ -17,7 +17,11 @@ from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import (  # noqa: TCH001
+    guard_scalar,
+    has_free_symbols,
+    ShapeEnv,
+)
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
@@ -31,7 +35,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 __all__: list[str] = []
 
 log = logging.getLogger(__name__)
-graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 # The general shape of this transformation is to look for Tensor operations
 # that take a backed SymFloat as an argument, and then redo them as tensor
@@ -60,8 +64,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # manage to eliminate all float compute, this ends up being equivalent, but
 # there is a critical difference when some floats cannot be eliminated: when
 # we call item() on them, what should it's SymFloat be? Ideally, it would
-# be the same backed SymFloat we had before. But without symbolic expresssion
-# propogation on tensor quantities, repropagating would instead give you an
+# be the same backed SymFloat we had before. But without symbolic expression
+# propagation on tensor quantities, repropagating would instead give you an
 # unbacked SymFloat. Maybe it is a good idea to implement symbolic propagation
 # on 0d scalar tensors, but I decided to go for something simpler to start.
 #
@@ -186,6 +190,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
+    failed_tensorify_ops: set[str] = set()
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
@@ -198,7 +203,7 @@ def tensorify_python_scalars(
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
                 dtype = node.args[0].meta["val"].dtype
-                if dtype != torch.float64:
+                if not dtype.is_floating_point:
                     continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]
@@ -206,6 +211,10 @@ def tensorify_python_scalars(
                 s = node.meta["val"].node.expr
                 expr_to_tensor_proxy[s] = MetaProxy(
                     node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                # Upcast the float tensor to torch.float64 to avoid precision problem
+                expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
+                    expr_to_tensor_proxy[s], torch.float64
                 )
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
@@ -298,8 +307,15 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
-
-    failed_tensorify_ops: set[str] = set()
+            else:
+                for a in node.args:
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    ):
+                        failed_tensorify_ops.update(str(node.target))
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -316,7 +332,7 @@ def tensorify_python_scalars(
                 (val := node.meta.get("val")),
                 (torch.SymFloat, torch.SymInt, torch.SymBool),
             ):
-                if all(
+                if has_free_symbols(val.node.expr) and all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
                     # If all symbols are backed symfloats, we can just specialize the whole node
@@ -328,15 +344,13 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
-
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
-    # symfloat and thus we need to deduce specializations have happend
+    # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
     for k, v in shape_env.var_to_val.items():
