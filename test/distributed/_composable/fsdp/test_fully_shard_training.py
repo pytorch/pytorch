@@ -74,12 +74,12 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
                 assert x.device == device, f"Expects {device} but got {x.device}"
-                assert ys[0].device == device, (
-                    f"Expects {device} but got {ys[0].device}"
-                )
-                assert ys[1].device == device, (
-                    f"Expects {device} but got {ys[1].device}"
-                )
+                assert (
+                    ys[0].device == device
+                ), f"Expects {device} but got {ys[0].device}"
+                assert (
+                    ys[1].device == device
+                ), f"Expects {device} but got {ys[1].device}"
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -424,14 +424,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model)
-        if device_type == device_type:
-            replicate(
-                ref_model.to(device_type),
-                device_ids=[self.rank],
-            )
-        else:
-            gloo_pg = dist.new_group(backend="gloo")
-            replicate(ref_model, process_group=gloo_pg)
+        replicate(
+            ref_model.to(device_type),
+            device_ids=[self.rank],
+        )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         mesh = init_device_mesh(device_type, (self.world_size,))
         fully_shard_fn = functools.partial(
@@ -1360,6 +1356,10 @@ class TestFullyShardHSDPTraining(FSDPTest):
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
                 "sync_gradients_at_last_batch": [True, False],
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
         )
@@ -1371,6 +1371,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         use_activation_checkpointing: bool,
         mlp_dim: int,
         sync_gradients_at_last_batch: bool,
+        offload_policy: CPUOffloadPolicy,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -1389,10 +1390,16 @@ class TestFullyShardHSDPTraining(FSDPTest):
             if use_activation_checkpointing:
                 checkpoint(mlp)
             fully_shard(
-                mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+                mlp,
+                mesh=global_mesh,
+                reshard_after_forward=reshard_after_forward,
+                offload_policy=offload_policy,
             )
         fully_shard(
-            model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+            model,
+            mesh=global_mesh,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         check_sharded_parity(self, ref_model, model)
