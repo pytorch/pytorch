@@ -2210,6 +2210,77 @@ class TestCutlassBackend(TestCase):
         (
             (
                 512,
+                1024,
+            ),
+        ),
+    )
+    @parametrize("use_fast_accum", (True,))
+    def test_fp8_rowwise_scaling_multiple_linear(
+        self,
+        float8_dtype: torch.dtype,
+        shape: tuple[int, int],
+        use_fast_accum: bool,
+    ):
+        """
+        This test is meant to simulate a more realistic scenario.
+        """
+        # Only bf16 output type is supported for row-wise scaling, not fp32
+        output_dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        M, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, N, dtype=output_dtype, device=device)
+        w1 = torch.randn(N, N, dtype=output_dtype, device=device)
+        w2 = torch.randn(N, N, dtype=output_dtype, device=device)
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, w1, w2, float8_dtype):
+                super().__init__()
+                w1_fp8, self.w1_inverse_scale = _quantize_rowwise(w1, float8_dtype)
+                w2_fp8, self.w2_inverse_scale = _quantize_rowwise(w2, float8_dtype)
+
+                self.w1_t_fp8 = w1_fp8.t()
+                self.w2_t_fp8 = w2_fp8.t()
+
+                self.float8_dtype = float8_dtype
+
+            def forward(self, x):
+                x_fp8, x_inverse_scale = _quantize_rowwise(x, self.float8_dtype)
+                y1 = torch._scaled_mm(
+                    x_fp8,
+                    self.w1_t_fp8,
+                    x_inverse_scale.view(-1, 1),
+                    self.w1_inverse_scale.view(1, -1),
+                    out_dtype=output_dtype,
+                    use_fast_accum=use_fast_accum,
+                )
+
+                y1_fp8, y1_inverse_scale = _quantize_rowwise(y1, self.float8_dtype)
+                y2 = torch._scaled_mm(
+                    y1_fp8,
+                    self.w2_t_fp8,
+                    y1_inverse_scale.view(-1, 1),
+                    self.w2_inverse_scale.view(1, -1),
+                    out_dtype=output_dtype,
+                    use_fast_accum=use_fast_accum,
+                )
+                return y2
+
+        model = TestModule(w1, w2, float8_dtype).cuda()
+        compiled_model = torch.compile(model, fullgraph=True)
+
+        expected = model(x)
+        actual = compiled_model(x)
+        torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @fp8_config
+    @parametrize("float8_dtype", (torch.float8_e4m3fn,))
+    @parametrize(
+        "shape",
+        (
+            (
+                512,
                 128,
                 64,
             ),
