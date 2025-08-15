@@ -1632,7 +1632,7 @@ class SIMDScheduling(BaseScheduling):
         # finalize must be called after adding epilogue above
 
         with V.set_kernel_handler(kernel):
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes.keys():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"

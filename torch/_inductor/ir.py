@@ -4890,7 +4890,7 @@ class ChoiceCaller:
     During autotuning, self.benchmark() is first called to get benchmark result,
     and if this choice is selected, self.output_node() is called to get the output_node.
 
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    Children classes: TritonTemplateCaller, CUTLASSTemplateCaller.
     """
 
     def __init__(
@@ -5036,7 +5036,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
 
 
-class CUDATemplateBuffer(TemplateBuffer):
+class CUTLASSTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
