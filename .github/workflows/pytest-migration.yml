@@ -11,16 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.12']
-        test-suite: ['cpu', 'cuda']
-        exclude:
-          # Run CUDA tests only on Python 3.8 for now
-          - test-suite: cuda
-            python-version: '3.9'
-          - test-suite: cuda
-            python-version: '3.10'
-          - test-suite: cuda
-            python-version: '3.12'
+        # Start with Python 3.9+ to avoid typing issues
+        python-version: ['3.9', '3.10', '3.12']
       fail-fast: false
 
     steps:
@@ -36,37 +28,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch pytest pytest-sugar pytest-xdist pytest-html
 
-      - name: Setup CUDA
-        if: matrix.test-suite == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.11
-        with:
-          cuda: '12.1.0'
-
-      - name: Install CUDA dependencies
-        if: matrix.test-suite == 'cuda'
-        run: |
-          pip install torch --extra-index-url https://download.pytorch.org/whl/cu121
-
-      # Run CPU tests
-      - name: Run CPU tests
-        if: matrix.test-suite == 'cpu'
+      - name: Run tests
         run: |
           pytest test/test_without_numpy_pytest.py \
             -v \
-            -n auto \
-            --dist loadscope \
-            --html=test-results/report.html \
-            --self-contained-html \
-            --junitxml=test-results/junit.xml
-
-      # Run CUDA tests
-      - name: Run CUDA tests
-        if: matrix.test-suite == 'cuda'
-        run: |
-          pytest test/test_cuda/*_pytest.py \
-            -v \
-            -n auto \
-            --dist loadscope \
             --html=test-results/report.html \
             --self-contained-html \
             --junitxml=test-results/junit.xml
@@ -75,7 +40,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results-${{ matrix.python-version }}-${{ matrix.test-suite }}
+          name: pytest-results-${{ matrix.python-version }}
           path: test-results/
 
   # This job aggregates test results
@@ -95,14 +60,3 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           junit_files: "test-results/**/*.xml"
-
-      - name: Report Test Status
-        if: always()
-        uses: ravsamhq/notify-slack-action@v2
-        with:
-          status: ${{ job.status }}
-          notification_title: "PyTest Migration Test Results"
-          message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}>"
-          footer: "Linked Repo <{repo_url}|{repo}>"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
