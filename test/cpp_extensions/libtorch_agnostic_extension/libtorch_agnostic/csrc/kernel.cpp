@@ -273,13 +273,18 @@ Tensor my_empty_like(Tensor t) {
   return empty_like(t);
 }
 
+void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_empty_like(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 bool my_is_cpu(Tensor t) {
   return t.is_cpu();
 }
 
 
-void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_empty_like(to<Tensor>(stack[0]));
+void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_is_cpu(to<Tensor>(stack[0]));
   stack[0] = from(res);
 }
 
@@ -306,6 +311,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
   m.impl("my_empty_like", &boxed_empty_like);
   m.impl("fill_infinity", &boxed_fill_infinity);
+  m.impl("my_is_cpu", &boxed_my_is_cpu);
 }
 
 
@@ -318,11 +324,6 @@ void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs
   stack[0] = from(res);
 }
 
-void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_is_cpu(to<Tensor>(stack[0]));
-  stack[0] = from(res);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_is_cpu(Tensor t) -> bool");
@@ -331,9 +332,4 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
-  m.impl("my_is_cpu", &boxed_my_is_cpu);
-}
-
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("my_is_cpu", &boxed_my_is_cpu);
 }
