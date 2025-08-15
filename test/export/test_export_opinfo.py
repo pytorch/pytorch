@@ -76,9 +76,7 @@ def _test_export_helper(self, dtype, op):
     target_device = "cuda:1"
 
     def to_fake_device(x):
-        x = converter.from_real_tensor(mode, x)
-        x.fake_device = torch.device(target_device)
-        return x
+        return x.to(target_device)
 
     # Limit to first 100 inputs so tests don't take too long
     for sample_input in itertools.islice(sample_inputs_itr, 100):
