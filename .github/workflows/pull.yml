@@ -251,7 +251,6 @@ jobs:
       build-environment: linux-jammy-py3.13-clang12
       docker-image: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.test-matrix }}
-      timeout-minutes: 600
     secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_9-clang12-build:
