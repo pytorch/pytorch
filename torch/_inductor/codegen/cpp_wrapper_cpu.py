@@ -237,6 +237,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "linux",
             "win32",
         ]
+        if enable_kernel_profile:
+            self.header.splice(
+                "#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>"
+            )
         if config.profiler_mark_wrapper_call or enable_kernel_profile:
             # No C shim for profiling APIs, assuming profiling is a debugging feature which
             # does not provide any ABI compatibility promise.
@@ -1228,6 +1232,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         device: str,
         *,
         debug_args: Optional[list[str]] = None,
+        stack_traces: Optional[dict[str, str]] = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1248,12 +1253,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
             if enable_kernel_profile:
+                stack_trace_str = 'R"('
+                if stack_traces:
+                    for stack_trace in stack_traces.values():
+                        for line in stack_trace.split("\n"):
+                            stack_trace_str += f"\n// {line}"
+                        stack_trace_str += "\n"
+                stack_trace_str += ')"'
+
                 shim_fn_codes = textwrap.dedent(
                     f"""
-                    {{
-                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
-                      {shim_fn_codes}
-                    }}
+    {{
+        KernelContextGuard _ctx("{shim_fn}", {stack_trace_str});
+        RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+        {shim_fn_codes}
+    }}
                     """
                 )
             self.writeline(shim_fn_codes)
@@ -1347,6 +1361,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        stack_traces: Optional[dict[str, str]] = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1355,7 +1370,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             args.insert(0, out)
 
-        self.generate_c_shim_extern_kernel_call(kernel, args, device)
+        self.generate_c_shim_extern_kernel_call(
+            kernel, args, device, stack_traces=stack_traces
+        )
 
     def generate_scatter_fallback(
         self,

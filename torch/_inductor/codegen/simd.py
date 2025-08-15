@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import textwrap
 from collections import Counter
 from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
@@ -1433,6 +1434,9 @@ class SIMDScheduling(BaseScheduling):
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
+        """
+        Generate code for nodes in kernel_features
+        """
         node_schedule = kernel_features.node_schedule
 
         tiling, tiling_score = self.get_tiling_and_scores(
@@ -1474,7 +1478,21 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         self.codegen_comment(node_schedule)
+
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+
+        if enable_kernel_profile:
+            V.graph.wrapper_code.writeline("{")
+            V.graph.wrapper_code.write_kernel_context_guard(
+                final_kernel.kernel_name,
+                node_schedule,  # type: ignore[arg-type]
+            )
         final_kernel.call_kernel(final_kernel.kernel_name)
+        if enable_kernel_profile:
+            V.graph.wrapper_code.writeline("}")
 
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
