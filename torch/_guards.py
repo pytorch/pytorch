@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from torch._dynamo.backends.distributed import DDPOptimizerCtx
+    from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -862,7 +862,7 @@ class TracingContext:
         # this is only set after aot_autograd
         self.fw_metadata: Optional[ViewAndMutationMeta] = None
         # this is only set when the DDPOptimizer is used
-        self.ddp_optimizer_ctx: Optional[DDPOptimizerCtx] = None
+        self.ddp_optimizer_ctx: Optional[DDPOptimizerContext] = None
         # this is only set after aot_autograd
         self.aot_graph_name: Optional[list[str]] = None
         self.params_flat: Optional[list[Any]] = None
