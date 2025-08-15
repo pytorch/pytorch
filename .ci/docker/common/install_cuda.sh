@@ -62,12 +62,13 @@ function install_nvshmem {
   mkdir -p "${tmpdir}" && cd "${tmpdir}"
 
   # nvSHMEM license: https://docs.nvidia.com/nvshmem/api/sla.html
-  filename="libnvshmem_cuda${cuda_major_version}-linux-${arch_path}-${nvshmem_version}"
-  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}.tar.xz"
+  # This pattern is a lie as it is not consistent across versions, for 3.3.9 it was cuda_ver-arch-nvshhem-ver
+  filename="libnvshmem-linux-${arch_path}-${nvshmem_version}-cuda${cuda_major_version}-archive.tar.gz"
+  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}"
 
   # download, unpack, install
   wget -q "${url}"
-  tar xf "${filename}.tar.xz"
+  tar xf "${filename}"
   cp -a "libnvshmem/include/"* /usr/local/cuda/include/
   cp -a "libnvshmem/lib/"*     /usr/local/cuda/lib64/
 
