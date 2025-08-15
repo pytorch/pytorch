@@ -369,7 +369,7 @@ class Node : public c10::IntrusiveListHook {
 class Graph {
  public:
   static std::unique_ptr<Graph> createGraph() {
-    return std::make_unique<Graph>();
+    return std::unique_ptr<Graph>(new Graph());
   }
 
   Graph(const Graph&) = delete;
