@@ -3642,6 +3642,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
+
+
+        memory_stats = self.features.memory_stats(self.tiling)
+
+        # Bail on 3d tiling, which has more complicated coalesce patterns, and we dont want to use 
+        # all resources on rblock
+        if V.kernel.features.is_reduction() and not self.persistent_reduction and len(self.tiling) == 2:
+            dim_stats = memory_stats.persistent.memory.dim[0]
+            mem_ops_per_thread = dim_stats.count_per_thread
+            
+            # Check memory savings
+            # TODO : more detailed register usage analysis
+            looped_mem = memory_stats.looped.memory.bytes
+            persistent_mem = memory_stats.persistent.memory.bytes
+            saved_bytes_ratio = V.graph.sizevars.size_hint(looped_mem, fallback=config.unbacked_symint_fallback) / V.graph.sizevars.size_hint(persistent_mem, fallback=config.unbacked_symint_fallback)
+
+            if (
+                saved_bytes_ratio >= 1.3 # At least 30% memory bandwidth savings
+                and V.graph.sizevars.statically_known_leq(self.features.reduction_numel, 8192)
+                and mem_ops_per_thread <= 4 
+            ):
+                inductor_meta["add_persistent_rblock"] = True
+
         if self.tiling_scores:
             inductor_meta["tiling_scores"] = self.tiling_scores
 

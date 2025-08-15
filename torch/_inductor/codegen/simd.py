@@ -407,6 +407,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_cooperative_reduction()
         )
         self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
+        self.tiling = tiling
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -1368,9 +1369,8 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
         schedule_log.debug("Schedule:\n %s", node_schedule)
 
-        return self.codegen_node_schedule(
-            SIMDKernelFeatures(node_schedule, numel, rnumel, coalesce_analysis)
-        )
+        features = SIMDKernelFeatures(node_schedule, numel, rnumel, coalesce_analysis)
+        return self.codegen_node_schedule(features)
 
     @staticmethod
     def can_use_32bit_indexing(
@@ -1411,6 +1411,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
+        memory_stats = kernel_features.memory_stats(tiling)
         kernels = self.create_kernel_choices(
             kernel_features,
             [tiling],
