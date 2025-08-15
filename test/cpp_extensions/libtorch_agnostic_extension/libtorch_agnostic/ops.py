@@ -166,6 +166,18 @@ def my_amax(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_amax.default(t)
 
 
+def my_amax_vec(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
+
+
 def fill_infinity(t) -> Tensor:
     """
     Fills the tensor with inf.

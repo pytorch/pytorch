@@ -355,13 +355,13 @@ Tensor my_zero_(Tensor t) {
   return zero_(t);
 }
 
-Tensor my_amax(Tensor t) {
-  return amax(t, 0, false);
-}
-
 void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   auto res = my_zero_(to<Tensor>(stack[0]));
   stack[0] = from(res);
+}
+
+Tensor my_amax(Tensor t) {
+  return amax(t, 0, false);
 }
 
 void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
@@ -369,18 +369,32 @@ void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs)
   stack[0] = from(res);
 }
 
+Tensor my_amax_vec(Tensor t) {
+  std::vector<int64_t> v = {0};
+  return amax(t, v, false);
+}
+
+void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax_vec(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_amax(Tensor a) -> Tensor");
+  m.def("my_amax_vec(Tensor a) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("my_zero_", &boxed_my_zero_);
   m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
   m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 bool test_default_constructor(bool defined) {
