@@ -462,9 +462,8 @@ class UnflattenedModule(torch.nn.Module):
         # add constants that are aliased and don't appear in graph signature
         for const_name, const in export_module.constants.items():
             if const_name not in consts_targets:
-                assert id(const) in consts_map, (
-                    "Constants should be either aliased or appear in graph signature"
-                )
+                if id(const) not in consts_map:
+                    continue
                 ph_name, _ = consts_map[id(const)][0]
                 add_to_consts_map(id(const), ph_name, const_name)
                 added_params_buffers.add(s.target)

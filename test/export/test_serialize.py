@@ -635,6 +635,30 @@ def forward(self, x):
             if "aten.sum.dim_IntList" in node.target:
                 self.assertEqual(node.inputs[1].arg.type, "as_ints")
 
+    def test_param_buffer_constant(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(8, 8)
+                self.register_buffer("buffer1", torch.randn(8, 8))
+                self.register_buffer("buffer2", torch.randn(8, 8), persistent=False)
+                self.const = torch.ones(8, 8)
+
+            def forward(self, x):
+                return self.fc1(x) + self.buffer1 + self.buffer2 + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(1, 8),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        eager_out = m(*sample_inputs)
+        ep_out = loaded_ep.module()(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -1592,12 +1616,21 @@ class TestSaveLoad(TestCase):
                 f.seek(0)
                 file_prefix = f.name.split("/")[2].split(".")[0]
 
-                # Modify the version
-                with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
+                # Create a new file and copy things over, but modify the
+                # archive version
+                with tempfile.NamedTemporaryFile(suffix=".pt2") as fnew:
+                    with zipfile.ZipFile(f, "r") as zin:
+                        with zipfile.ZipFile(fnew, "w") as zout:
+                            for item in zin.infolist():
+                                if (
+                                    item.filename
+                                    != f"{file_prefix}/{ARCHIVE_VERSION_PATH}"
+                                ):
+                                    zout.writestr(item, zin.read(item.filename))
+                            zout.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
 
-                f.seek(0)
-                load(f.name)
+                    f.seek(0)
+                    load(fnew.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
