@@ -318,7 +318,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
 
-  auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
+  auto pr = std::make_unique<ProfilingRecord>(new_g);
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);
   unprofileBlock(new_g->block());

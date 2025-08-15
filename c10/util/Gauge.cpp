@@ -33,8 +33,8 @@ class GaugeImpl {
         return implIt->second.get();
       }
 
-      auto [implIt, emplaceSuccess] = implMap.emplace(
-          std::string{key}, std::unique_ptr<GaugeImpl>(new GaugeImpl(key)));
+      auto [implIt, emplaceSuccess] =
+          implMap.emplace(std::string{key}, std::make_unique<GaugeImpl>(key));
 
       assert(emplaceSuccess);
 
