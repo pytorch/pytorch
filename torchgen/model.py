@@ -347,6 +347,13 @@ def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
     }
 
 
+# MPS specific dispatch keys
+def is_mps_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.MPS,
+    }
+
+
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
@@ -358,7 +365,11 @@ def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     return dk in UFUNC_DISPATCH_KEYS
 
 
-dispatch_device_map = {is_cuda_dispatch_key: "cuda", is_xpu_dispatch_key: "xpu"}
+dispatch_device_map = {
+    is_cuda_dispatch_key: "cuda",
+    is_xpu_dispatch_key: "xpu",
+    is_mps_dispatch_key: "mps",
+}
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
