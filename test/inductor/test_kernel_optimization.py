@@ -2,7 +2,7 @@
 
 import torch
 import torch._inductor
-from torch._dynamo.utils import counters
+from torch._inductor.fx_passes.kernel_optimization import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
@@ -26,6 +26,22 @@ class TestEinsumtoPointwise(torch.nn.Module):
         output2 = torch.functional.einsum("bni, bnio -> bno", input2, weights2)
         add2 = output2 + bias2
         return add1 + add2
+
+
+class TestLayerNorm(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor,
+    ) -> torch.Tensor:
+        normalized_shape = [input.shape[-1]]
+        return torch.nn.functional.layer_norm(
+            input, normalized_shape, weight=weight, bias=bias
+        )
 
 
 class TestKernelOptimization(TestCase):
@@ -85,6 +101,36 @@ class TestKernelOptimization(TestCase):
         self.compare_gradients(module, traced)
         self.assertEqual(
             counters["inductor"]["einsum_to_pointwise_pass"],
+            1,
+        )
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "replace_layer_norm_pass": {"rmsnorm": True},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_replace_layer_norm(self):
+        counters.clear()
+        module = TestLayerNorm().to(GPU_TYPE)
+        dtype = torch.bfloat16
+        input = [
+            torch.randn(585936, 384, device=GPU_TYPE, requires_grad=True, dtype=dtype),
+            torch.randn(384, device=GPU_TYPE, requires_grad=True, dtype=dtype),
+            torch.randn(384, device=GPU_TYPE, requires_grad=True, dtype=dtype),
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_pred(module, traced, input, rtol=5, atol=5)
+        self.compare_parameters(module, traced, rtol=0.1, atol=0.1)
+        self.compare_gradients(module, traced, rtol=0.1, atol=0.1)
+        self.assertEqual(
+            counters["inductor"]["replace_layer_norm_pass"],
             1,
         )
         counters.clear()
