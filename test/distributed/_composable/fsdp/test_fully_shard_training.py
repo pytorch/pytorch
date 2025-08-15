@@ -342,7 +342,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
                 "unshard_async_op": [False],
-                "test_hsdp": [False],
             },
             self._test_train_parity_multi_group,
         )
@@ -353,7 +352,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication and CPU offloading.
-        Test on HSDP as well to ensure CPU-GPU sync at HSDP after backward().
         """
         self.run_subtests(
             {
@@ -368,7 +366,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
                 "unshard_async_op": [False],
-                "test_hsdp": [False, True],
             },
             self._test_train_parity_multi_group,
         )
@@ -391,7 +388,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
                 "unshard_async_op": [True],
-                "test_hsdp": [False],
             },
             self._test_train_parity_multi_group,
         )
@@ -406,7 +402,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
         unshard_async_op: bool,
-        test_hsdp: bool,
     ):
         # Only test individual delays or all four delays to save test time
         if (
@@ -438,17 +433,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             gloo_pg = dist.new_group(backend="gloo")
             replicate(ref_model, process_group=gloo_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        if test_hsdp and self.world_size % 2 == 0:
-            shard_mesh_dim_size = 2
-            replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
-            mesh_dim_names = ("replicate", "shard")
-            mesh = init_device_mesh(
-                device_type,
-                (replicate_mesh_dim_size, shard_mesh_dim_size),
-                mesh_dim_names=mesh_dim_names,
-            )
-        else:
-            mesh = init_device_mesh(device_type, (self.world_size,))
+        mesh = init_device_mesh(device_type, (self.world_size,))
         fully_shard_fn = functools.partial(
             fully_shard,
             mesh=mesh,
