@@ -195,7 +195,7 @@ inline void {{kernel_name}}(
     ALLOCATE_WEIGHT_BUFFER = r"""
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
-    std::unique_ptr<{{buffer_dtype}}[]> heap_deq_b_buf_ptr(new {{buffer_dtype}}[{{buffer_size}}]);
+    auto heap_deq_b_buf_ptr = std::make_unique<{{buffer_dtype}}[]>({{buffer_size}});
     {{buffer_dtype}}* {{buffer_name}} = heap_deq_b_buf_ptr.get();
     {%- else %}
     // It's safe to use a stack-allocated array since the blocking strategy would

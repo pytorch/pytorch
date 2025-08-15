@@ -647,8 +647,8 @@ _vec_softmax(
   parallel_for(
       0, outer_size * inner_size, 0, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
-        std::unique_ptr<float[]> temp_vec_input(new float[dim_size*vectorized_step]());
-        std::unique_ptr<float[]> temp_vec_output(new float[dim_size*vectorized_step]());
+        auto temp_vec_input = std::make_unique<float[]>(dim_size * vectorized_step);
+        auto temp_vec_output = std::make_unique<float[]>(dim_size * vectorized_step);
         float* temp_vec_input_data = temp_vec_input.get();
         float* temp_vec_output_data = temp_vec_output.get();
         while (idx < end) {

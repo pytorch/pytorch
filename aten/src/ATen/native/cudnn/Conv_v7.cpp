@@ -285,7 +285,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution forward algorithms");
     int perf_count;
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    auto perf_results = std::make_unique<perf_t[]>(num_algos);
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionForwardAlgorithm_v7(
@@ -369,7 +369,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution backward data algorithms.");
     int perf_count;
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    auto perf_results = std::make_unique<perf_t[]>(num_algos);
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionBackwardDataAlgorithm_v7(
@@ -456,7 +456,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     static_assert(
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution backward filter algorithms.");
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    auto perf_results = std::make_unique<perf_t[]>(num_algos);
     int perf_count;
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
