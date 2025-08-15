@@ -1418,7 +1418,6 @@ def forward(self, x_1: "f32[2][1]cpu"):
                             }
                         )
 
-                # Expect a single compute op producing the final output with shape [2], contiguous stride, dtype float16
                 self.assertExpectedInline(
                     {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
                     """{'ops': [{'type': 'compute', 'outputs': [{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}""",
