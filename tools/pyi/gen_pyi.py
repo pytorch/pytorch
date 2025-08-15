@@ -28,7 +28,6 @@ import argparse
 import collections
 import importlib
 import inspect
-import re
 import sys
 import textwrap
 from typing import TYPE_CHECKING
@@ -262,7 +261,7 @@ def sig_for_ops(opname: str) -> list[str]:
         return [
             # unsafe override https://github.com/python/mypy/issues/5704
             f"def {opname}(self, other: Tensor | Number | _complex) -> Self: ...  # type: ignore[overload-overlap]",
-            f"def {opname}(self, other: object) -> Any: ...", # Returns NotImplemented, not _bool
+            f"def {opname}(self, other: object) -> Any: ...",  # Returns NotImplemented, not _bool
         ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Self: ..."]
@@ -1383,14 +1382,25 @@ def gen_pyi(
             "numpy": [
                 defs("numpy", ["self", "*", "force: _bool = False"], "numpy.ndarray")
             ],
-            "apply_": [defs("apply_", ["self", "callable: Callable[[Any], Any]"], "Self")],
+            "apply_": [
+                defs("apply_", ["self", "callable: Callable[[Any], Any]"], "Self")
+            ],
             "map_": [
-                defs("map_", ["self", "other: Tensor", "callable: Callable[[Any, Any], Any]"], "Self")
+                defs(
+                    "map_",
+                    ["self", "other: Tensor", "callable: Callable[[Any, Any], Any]"],
+                    "Self",
+                )
             ],
             "map2_": [
                 defs(
                     "map2_",
-                    ["self", "x: Tensor", "y: Tensor", "callable: Callable[[Any, Any, Any], Any]"],
+                    [
+                        "self",
+                        "x: Tensor",
+                        "y: Tensor",
+                        "callable: Callable[[Any, Any, Any], Any]",
+                    ],
                     "Self",
                 )
             ],
@@ -1534,16 +1544,44 @@ def gen_pyi(
                 )
             ],
             "true_divide": [
-                defs("true_divide", ["self", "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat"], "Self"),
+                defs(
+                    "true_divide",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
             ],
             "floor_divide": [
-                defs("floor_divide", ["self", "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat"], "Self"),
+                defs(
+                    "floor_divide",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
             ],
             "true_divide_": [
-                defs("true_divide_", ["self", "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat"], "Self"),
+                defs(
+                    "true_divide_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
             ],
             "floor_divide_": [
-                defs("floor_divide_", ["self", "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat"], "Self"),
+                defs(
+                    "floor_divide_",
+                    [
+                        "self",
+                        "other: Tensor | Number | _complex | torch.SymInt | torch.SymFloat",
+                    ],
+                    "Self",
+                ),
             ],
             "mul": [
                 defs(
@@ -1647,26 +1685,32 @@ def gen_pyi(
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
         type_hints = generate_type_hints(group)
-        
+
         # the functions in native_functions.yaml all use a variation of Tensor as the return type
         # we need to change the return type to Self for most of them here
-        updated_type_hints:list[str] = []
+        updated_type_hints: list[str] = []
         for hint in type_hints:
             # sparse tensors have their own return type
             if "sparse" in hint or "to_dense" in hint:
                 updated_type_hints.append(hint)
                 continue
             # these are sparse tensor methods
-            if "sspaddmm" in hint or "smm" in hint or "row_indices" in hint or "indices" in hint or "crow_indices" in hint:
+            if (
+                "sspaddmm" in hint
+                or "smm" in hint
+                or "row_indices" in hint
+                or "indices" in hint
+                or "crow_indices" in hint
+            ):
                 updated_type_hints.append(hint)
                 continue
-            
+
             if "-> Tensor" in hint:
                 hint = hint.replace("-> Tensor", "-> Self")
             if "-> Tuple[Tensor, ...]" in hint:
                 hint = hint.replace("-> Tuple[Tensor, ...]", "-> Tuple[Self, ...]")
             updated_type_hints.append(hint)
-            
+
         unsorted_tensor_method_hints[name] += updated_type_hints
 
         structseq = returns_structseq_pyi(group.signature)
