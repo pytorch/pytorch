@@ -92,7 +92,7 @@
     "def CppWrapperCpuArrayRef.generate_return()": 127,
     "def CppWrapperCpuArrayRef.write_wrapper_decl()": 208
   },
-  "torch/_inductor/codegen/cuda/cutlass_lib_extensions/gemm_operation_extensions.py": {
+  "torch/_inductor/codegen/cutlass/lib_extensions/gemm_operation_extensions.py": {
     "def EmitGemmUniversal3xInstanceWithEVT.emit()": 98
   },
   "torch/_inductor/codegen/cuda/device_op_overrides.py": {
