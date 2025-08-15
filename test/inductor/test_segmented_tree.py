@@ -1,9 +1,9 @@
 # Owner(s): ["module: inductor"]
 
-from torch._inductor.test_case import TestCase, run_tests
 from hypothesis import given, strategies as st
 
 from torch._inductor.codegen.segmented_tree import SegmentedTree
+from torch._inductor.test_case import run_tests, TestCase
 
 
 # Helper functions for operations
@@ -48,11 +48,9 @@ class TestSegmentedTree(TestCase):
         tree = SegmentedTree(values, add_op, max_op, 0)
         assert tree.summarize_range(0, 4) == 9
 
-
     def test_empty_array(self):
         with self.assertRaises(ValueError):
             SegmentedTree([], add_op, max_op, 0)
-
 
     # Property-based tests
     @given(values=positive_integers)
@@ -67,8 +65,9 @@ class TestSegmentedTree(TestCase):
                     f"Range [{start}:{end}] expected {expected}, got {actual}"
                 )
 
-
-    @given(values=positive_integers, range_indices=st.data(), update_value=update_values)
+    @given(
+        values=positive_integers, range_indices=st.data(), update_value=update_values
+    )
     def test_range_update(self, values, range_indices, update_value):
         # Create a copy for naive implementation
         naive_values = values.copy()
@@ -91,7 +90,6 @@ class TestSegmentedTree(TestCase):
                 assert actual == expected, (
                     f"After update, range [{i}:{j}] expected {expected}, got {actual}"
                 )
-
 
     @given(values=positive_integers, range_data=st.data())
     def test_multiple_operations(self, values, range_data):
@@ -117,7 +115,6 @@ class TestSegmentedTree(TestCase):
                 tree.update_range(start, end, update_value)
                 naive_range_update(naive_values, start, end, update_value)
 
-
     def test_single_element_ranges(self):
         values = [1, 3, 5, 7, 9]
         tree = SegmentedTree(values, add_op, max_op, 0)
@@ -126,7 +123,6 @@ class TestSegmentedTree(TestCase):
             assert tree.summarize_range(i, i) == values[i], (
                 f"Single element range at index {i} failed"
             )
-
 
     def test_full_array_range(self):
         values = [1, 3, 5, 7, 9]
@@ -140,7 +136,6 @@ class TestSegmentedTree(TestCase):
         tree.update_range(0, len(values) - 1, update_value)
         expected = max([v + update_value for v in values])
         assert tree.summarize_range(0, len(values) - 1) == expected
-
 
     def test_boundary_conditions(self):
         values = [1, 3, 5, 7, 9]
@@ -156,8 +151,9 @@ class TestSegmentedTree(TestCase):
         assert tree.summarize_range(0, 1) == max(values[0:2])
 
         # Test last two elements
-        assert tree.summarize_range(len(values) - 2, len(values) - 1) == max(values[-2:])
-
+        assert tree.summarize_range(len(values) - 2, len(values) - 1) == max(
+            values[-2:]
+        )
 
     def test_invalid_ranges(self):
         values = [1, 3, 5, 7, 9]
@@ -169,7 +165,6 @@ class TestSegmentedTree(TestCase):
 
         with self.assertRaises(ValueError):
             tree.update_range(4, 2, 10)
-
 
     def test_out_of_bounds(self):
         values = [1, 3, 5, 7, 9]
@@ -196,7 +191,6 @@ class TestSegmentedTree(TestCase):
         with self.assertRaises(ValueError):
             tree.update_range(0, len(values), 10)
 
-
     def test_overlapping_updates(self):
         values = [1, 3, 5, 7, 9]
         naive_values = values.copy()
@@ -217,7 +211,6 @@ class TestSegmentedTree(TestCase):
                 assert actual == expected, (
                     f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
                 )
-
 
     def test_sequential_updates_and_queries(self):
         values = [2, 4, 6, 8, 10, 12, 14]
