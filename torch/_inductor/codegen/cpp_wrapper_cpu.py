@@ -1575,11 +1575,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_size(),
             buffer.get_stride(),
             V.graph.get_allocation_size(buffer),
-            buffer.get_is_pinned(),
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, stride, allocation_shape=None, is_pinned=False
+        self, name, device, dtype, shape, stride, allocation_shape=None
     ):
         if allocation_shape is None:
             allocation_shape = shape
@@ -1631,9 +1630,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         ]
 
         self.wrapper_call.writeline(f"AtenTensorHandle {handle_name};")
-        pinned_str = "_pinned" if is_pinned else ""
         self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided{pinned_str}({', '.join(args)}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
         )
 
         if allocation_size != size:
@@ -1651,9 +1649,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
-    def codegen_alloc_from_pool(
-        self, name, offset, dtype, shape, stride
-    ) -> tuple[str, list[str]]:
+    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(stride)
         tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1670,14 +1666,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        # We return the lines instead of writing here because writing here is bug prune.
-        # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
-        # as well, otherwise you get memory leaks
-        allocations_to_write = [
-            f"AtenTensorHandle {tmp_name};",
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));",
-        ]
-        return f"RAIIAtenTensorHandle({tmp_name})", allocations_to_write
+        self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
+        self.wrapper_call.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
+        )
+        return f"RAIIAtenTensorHandle({tmp_name})"
 
     def codegen_reinterpret_view(
         self,

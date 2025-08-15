@@ -81,11 +81,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# Configurable compile worker logging path for subproc_pool
-worker_log_path = (
-    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
-)
-
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
@@ -95,8 +90,6 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
-
-remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -387,16 +380,6 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
-reorder_iterative_debug_memory_recompute: bool = False
-reorder_iterative_debug_limit_to_reorder: Optional[int] = (
-    None
-    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
-    else int(env_str)
-)
-sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
-    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
-)
-
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -447,11 +430,7 @@ max_autotune_report_choices_stats = (
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition: bool = (
-    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
-    == "1"
-)
-
+graph_partition = False
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1028,24 +1007,6 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
-
-
-def get_worker_log_path() -> Optional[str]:
-    log_loc = None
-    if is_fbcode():
-        mast_job_name = os.environ.get("MAST_HPC_JOB_NAME", None)
-        global_rank = os.environ.get("ROLE_RANK", "0")
-
-        if mast_job_name is not None:
-            log_loc = f"/logs/dedicated_log_torch_compile_worker_rank{global_rank}"
-
-    return log_loc
-
-
-torchinductor_worker_logpath: str = Config(
-    env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
-    default="",
-)
 
 
 # config specific to codegen/cpp.py

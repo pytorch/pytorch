@@ -15,14 +15,12 @@ struct AllocationRef : public c10::intrusive_ptr_target {
   HandleType handle;
   size_t block_size;
   int device_idx;
-  bool is_multicast;
 
   AllocationRef(
       void* ptr,
       HandleType handle,
       size_t block_size,
-      int device_idx,
-      bool is_multicast = false);
+      int device_idx);
 
   ~AllocationRef();
 };
