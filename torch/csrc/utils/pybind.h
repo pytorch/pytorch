@@ -255,6 +255,25 @@ struct type_caster<c10::Stream> {
 };
 
 template <>
+struct type_caster<c10::DispatchKey>
+    : public type_caster_enum_type<c10::DispatchKey> {
+  using base = type_caster_enum_type<c10::DispatchKey>;
+
+  // Override the load member for this enum to accept str as an input.
+  bool load(handle src, bool convert) {
+    if (py::isinstance<py::str>(src)) {
+      c10::DispatchKey val{c10::parseDispatchKey(src.cast<std::string>())};
+      // It would be cleaner to not do the cast-to-object maneuver here, but key
+      // class members for type_caster_enum_type are private, so there's no way
+      // around this without relying on internal implementation details.
+      py::object tmp_object = py::cast(val);
+      return base::load(tmp_object, convert);
+    }
+    return base::load(src, convert);
+  }
+};
+
+template <>
 struct TORCH_PYTHON_API type_caster<c10::Scalar> {
  public:
   PYBIND11_TYPE_CASTER(
