@@ -1134,6 +1134,24 @@ REGISTER_CPU_KERNEL(
     })
 
 REGISTER_CPU_KERNEL(
+    "torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight.default",
+    _quantized_wrapped_fbgemm_linear_fp16_weight,
+    {
+      const auto& in_0 = KernelInput(0).toTensor();
+      const auto& weight = KernelInput(1).toTensor();
+      const auto& bias = KernelInput(2).toTensor();
+
+      if (auto& out_0 = KernelOutput(0); out_0.isNone()) {
+        out_0 = create_empty_from(in_0, at::kFloat);
+      }
+
+      auto& out_0 = KernelOutput(0).toTensor();
+      fastResizeToZero(out_0);
+
+      at::native::fbgemm_linear_fp16_weight(in_0, weight, bias, out_0);
+    })
+
+REGISTER_CPU_KERNEL(
     "torch.ops.quantized.linear_relu_dynamic_fp16.default",
     quantized_linear_relu_dynamic_fp16,
     {
