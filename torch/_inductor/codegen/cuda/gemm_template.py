@@ -1495,7 +1495,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
 
-        for name in list(V.graph.constants.keys()):
+        for name in V.graph.constants.keys():
             name_to_buffer[name] = V.graph.add_tensor_constant(
                 V.graph.constants[name], name
             )
