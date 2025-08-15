@@ -146,12 +146,19 @@ def has_higher_order_op(gm):
     return False
 
 
+class DDPOptimizerContext:
+    curr_bucket = -1
+    metadata_per_bucket = []
+
+
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
     def __init__(self, module, compiler, fake_mode) -> None:
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
+        # See Note [DDPOptimizer and fw_metadata]
+        torch._guards.TracingContext.try_get().ddp_optimizer_ctx = DDPOptimizerContext()
 
     def compile_submod(self, input_mod, args, kwargs):
         """
@@ -300,6 +307,14 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
             ):
                 if has_tracing_context and invoked_aot_autograd:
+                    # DDPOptimizer maintains 1 dynamo graph -> N AOT graphs
+                    # Dynamo only has 1 tracing context, so it needs to maintain all N AOT metadata instances
+                    ddp_ctx = torch._guards.TracingContext.try_get().ddp_optimizer_ctx
+                    ddp_ctx.curr_bucket += 1
+                    ddp_ctx.metadata_per_bucket.append(
+                        torch._guards.TracingContext.try_get().fw_metadata
+                    )
+
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     assert all(

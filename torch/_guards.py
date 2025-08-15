@@ -817,6 +817,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set when the DDPOptimizer is used
+        self.ddp_optimizer_ctx = None
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
