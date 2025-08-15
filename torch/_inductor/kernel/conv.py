@@ -85,7 +85,7 @@ LOOP_BODY_2D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
 """
 
 """
@@ -214,7 +214,7 @@ LOOP_BODY_3D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
 """
 
 conv3d_template = TritonTemplate(
