@@ -721,6 +721,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
+    fx_wrapper: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -742,6 +743,7 @@ def compile_fx_inner(
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
     kwargs.setdefault("cpp_wrapper", False)
+    kwargs.setdefault("fx_wrapper", False)
     kwargs.setdefault("is_inference", False)
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
@@ -837,7 +839,9 @@ def _compile_fx_inner(
     backends_support_caching = all(
         backend.supports_caching
         for backend in (
-            get_wrapper_codegen_for_device(device.type, config.cpp_wrapper)
+            get_wrapper_codegen_for_device(
+                device.type, config.cpp_wrapper, config.fx_wrapper
+            )
             for device in get_all_devices(gm)
         )
         if backend is not None
@@ -1175,6 +1179,7 @@ class _InProcessFxCompile(FxCompile):
         is_backward: bool = graph_kwargs.get("is_backward", False)
         graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
+        fx_wrapper: bool = graph_kwargs.get("fx_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
         extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]] = (
@@ -1387,6 +1392,7 @@ class _InProcessFxCompile(FxCompile):
                         is_inference=is_inference,
                         is_backward=is_backward,
                         is_const_graph=True,
+                        fx_wrapper=fx_wrapper,
                     )
                     with V.set_graph_handler(const_graph):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
@@ -1417,6 +1423,7 @@ class _InProcessFxCompile(FxCompile):
                     ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
+                    fx_wrapper=fx_wrapper,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -1454,7 +1461,10 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        if graph.aot_mode:
+                        if graph.aot_mode and graph.fx_wrapper:
+                            compiled_fn = graph.codegen_with_cpp_wrapper()[0].gm  # type: ignore[attr-defined]
+
+                        elif graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
                             assert graph.cpp_wrapper, (
@@ -1568,7 +1578,9 @@ class _InProcessFxCompile(FxCompile):
                             V.graph.disable_cudagraphs_reason = disable
 
                     if V.aot_compilation:
-                        assert isinstance(compiled_fn, (str, list))
+                        assert isinstance(
+                            compiled_fn, (str, list, torch.fx.GraphModule)
+                        ), type(compiled_fn)
                         return CompiledAOTI(compiled_fn)
 
                     # TODO: Hoist this above V.aot_compilation
@@ -1849,7 +1861,7 @@ def compile_fx_aot(
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
-) -> Union[list[Union[str, Weights]], str]:
+) -> Union[list[Union[str, Weights]], str, GraphModule]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
@@ -2171,7 +2183,9 @@ def compile_fx(
                 return compile_fx(
                     patched_mod,
                     fake_args,
-                    inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                    inner_compile=functools.partial(
+                        inner_compile, cpp_wrapper=True, fx_wrapper=config.fx_wrapper
+                    ),
                     decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
                 )
