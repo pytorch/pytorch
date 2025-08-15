@@ -2509,7 +2509,7 @@ def error_inputs_cat(op_info, device, **kwargs):
                      error_regex='zero-dimensional.*cannot be concatenated')
 
     # error inputs for different dtype of out tensors
-    d = make_tensor((2, 3), device=device, dtype=torch.double)
+    d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
                      error_regex='invalid combination of arguments')
@@ -6525,6 +6525,8 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
     make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+    other_dtype = torch.float16 if device.startswith("mps") else torch.float64
+    other_dtype_name = "Half" if device.startswith("mps") else "Double"
 
     if is_ref:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
@@ -6532,16 +6534,16 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
         error_out = "Expected out tensor to have dtype torch.complex128 but got torch.complex64 instead"
     else:
         error_float = "Expected both inputs to be Half, Float or Double tensors but got Float and Int"
-        error_dtype = "Expected object of scalar type Float but got scalar type Double for second argument"
-        error_out = "Expected object of scalar type ComplexDouble but got scalar type ComplexFloat for argument 'out'"
+        error_dtype = f"Expected object of scalar type Float but got scalar type {other_dtype_name} for second argument"
+        error_out = f"Expected object of scalar type Complex{other_dtype_name} but got scalar type ComplexFloat for argument 'out'"
 
     yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
                      error_type=RuntimeError, error_regex=error_float)
 
-    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.float64)),
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=other_dtype)),
                      error_type=RuntimeError, error_regex=error_dtype)
 
-    yield ErrorInput(SampleInput(make_arg(M, S, dtype=torch.float64), make_arg(M, S, dtype=torch.float64),
+    yield ErrorInput(SampleInput(make_arg(M, S, dtype=other_dtype), make_arg(M, S, dtype=other_dtype),
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
