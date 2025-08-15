@@ -255,33 +255,6 @@ struct type_caster<c10::Stream> {
 };
 
 template <>
-struct type_caster<c10::DispatchKey>
-    : public type_caster_base<c10::DispatchKey> {
-  using base = type_caster_base<c10::DispatchKey>;
-  c10::DispatchKey tmp{};
-
- public:
-  bool load(handle src, bool convert) {
-    if (base::load(src, convert)) {
-      return true;
-    } else if (py::isinstance(
-                   src, py::module_::import("builtins").attr("str"))) {
-      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
-      value = &tmp;
-      return true;
-    }
-    return false;
-  }
-
-  static handle cast(
-      c10::DispatchKey src,
-      return_value_policy policy,
-      handle parent) {
-    return base::cast(src, policy, parent);
-  }
-};
-
-template <>
 struct TORCH_PYTHON_API type_caster<c10::Scalar> {
  public:
   PYBIND11_TYPE_CASTER(
