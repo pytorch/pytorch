@@ -644,7 +644,6 @@ class CompilePackage:
                     check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                         target_code,
                         guards_state.output_graph,
-                        guards_serialization_mode="load",
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
                     )
