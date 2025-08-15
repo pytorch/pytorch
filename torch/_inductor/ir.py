@@ -3947,13 +3947,14 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
+    def __init__(self, view: Union[BaseView, TensorBox], offset: _IntLike = 0) -> None:
         layout = view.get_layout()
         super().__init__(
             layout.device,
             layout.dtype,
             layout.size,
             layout.stride,
+            offset=offset,
         )
         self.view = view
 
@@ -4085,7 +4086,7 @@ def mutate_into(src: IRNode, dst: IRNode, unsafe_alias: bool = False) -> IRNode:
     assert hasattr(src, "data"), src
     assert isinstance(src.data.layout, FlexibleLayout), type(src.data.layout)
     V.graph.mark_buffer_mutated(dst.get_name())
-    src.data.layout = NonOwningLayout(dst)
+    src.data.layout = NonOwningLayout(dst, dst.layout.offset)
     src.data.mutation_target = dst.get_name()
     return src.data
 
