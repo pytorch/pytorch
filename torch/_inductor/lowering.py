@@ -1245,7 +1245,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             sym_storage = sym
 
     def compute_slice_index(index, size):
-        fn = lambda x: V.graph.sizevars.statically_known_true(x)  # noqa: E731
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
 
         if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
             return index
@@ -1255,11 +1255,13 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             return size
         elif fn(sympy.Lt(index, -size)):
             return 0
-        raise AssertionError("slice index should be statically known")
-
-    if sym_size is None:  # no unbacked binding; we're able to compute this statically
-        start_index = compute_slice_index(start, size)
-        end_index = compute_slice_index(end, size)
+        return None
+        
+    start_index = compute_slice_index(start, size)
+    end_index = compute_slice_index(end, size)
+    if start_index is not None and end_index is not None:
+        # we shouldn't have allocated size symbol, if output size was determinable from input indices
+        assert sym_size is None
         new_size = sympy.Max(0, end_index - start_index)
     else:
         b_size = ir.DynamicSliceSize(
@@ -1272,8 +1274,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         V.graph.register_operation(b_size)
         new_size = sym_size
 
-    if sym_storage is None:
-        start_index = compute_slice_index(start, size)
+    if start_index is not None:
+        # we shouldn't have allocated storage offset symbol if start index was determinable
+        assert sym_storage is None
         new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
     else:
         b_storage = ir.DynamicSelectStorageOffset(

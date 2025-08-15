@@ -772,7 +772,7 @@ def slice_forward(
     step: int = 1,
 ):
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false, 
+        guard_or_false,
         statically_known_true,
     )
 
