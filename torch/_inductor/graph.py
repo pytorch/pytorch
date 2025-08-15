@@ -1429,7 +1429,7 @@ class GraphLowering(torch.fx.Interpreter):
             value = value.data
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
-                ir.MutationLayoutSHOULDREMOVE.realize_into(
+                ir.mutate_into(
                     value, self.graph_inputs_original[name]
                 )
                 # replace output with mutated input

@@ -3947,13 +3947,14 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
+    def __init__(self, view: Union[BaseView, TensorBox], offset=0) -> None:
         layout = view.get_layout()
         super().__init__(
             layout.device,
             layout.dtype,
             layout.size,
             layout.stride,
+            offset=offset,
         )
         self.view = view
 
@@ -4036,93 +4037,58 @@ class NoneLayout(OutputSpec):
         return self.device
 
 
-class MutationLayoutSHOULDREMOVE(Layout):
-    def __init__(self, target: IRNode) -> None:
-        super().__init__(
-            target.get_device_or_error(),
-            target.get_dtype(),
-            target.get_size(),
-            None,
+def create_computed_mutated_buffer(target: IRNode, data: IRNode) -> Buffer:
+    """Create and register a buffer that mutates an existing node"""
+    V.graph.mark_buffer_mutated(target.get_name())
+    
+    buffer = ComputedBuffer(
+        name=None,
+        layout=NonOwningLayout(target),
+        data=operation,
+    )
+    buffer.mutation_target = target
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+    return buffer
+
+def mutate_into(src: IRNode, dst: IRNode, unsafe_alias: bool = False) -> IRNode:
+    dst.realize()
+    # NOTE: We must realize users of `dst` before we realize `src`, since
+    # realization order determines scheduling order. Otherwise, src's
+    # mutation would be scheduled before the existing users of dst!
+    V.graph.mark_buffer_mutated(dst.get_name())
+
+    if isinstance(src, TensorBox):
+        src = src.data
+
+    # We copy the contents of src into dst. In most cases this should
+    # be fused into a single kernel by the scheduler.
+    # NOTE: We cannot change src's layout to mutate dst directly as this
+    # would alias src to dst, which is not correct as further mutations to
+    # dst would effect users of src. However if there are no more users of
+    # dst, we can alias src to dst.
+    src.realize_hint()
+
+    if not unsafe_alias:
+        node = Pointwise.create(
+            device=src.get_device(),
+            dtype=src.get_dtype(),
+            inner_fn=src.make_loader(),
+            ranges=[
+                V.graph.sizevars.check_equals_and_simplify(a, b)
+                for a, b in zip(src.get_size(), dst.get_size())
+            ],
         )
-        self.target = target
-        name = self.get_buffer().get_name()
-        V.graph.mark_buffer_mutated(name)
+        assert isinstance(node, (BaseView, MutableBox))
+        src = node.data
 
-    @property
-    def stride(self) -> Sequence[Expr]:  # type: ignore[override]
-        return self.real_layout().stride
-
-    @stride.setter  # type: ignore[override]
-    def stride(self, value: Never) -> None:
-        pass  # ignore setting of stride
-
-    def storage_size(self) -> Expr:
-        return self.real_layout().storage_size()
-
-    def get_buffer(self) -> Buffer:
-        def unwrap_views(target: Any) -> Any:
-            if isinstance(target, MutationLayoutSHOULDREMOVE):
-                return unwrap_views(target.target)
-            if isinstance(target, BaseView):
-                return unwrap_views(target.unwrap_view())
-            if isinstance(target, MutableBox):
-                return unwrap_views(target.data)
-            return target
-
-        result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), type(result)
-        return result
-
-    def real_layout(self) -> Layout:
-        layout = self.get_buffer().layout
-        assert isinstance(layout, Layout)
-        return layout
-
-    @classmethod
-    def realize_into(
-        cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
-    ) -> IRNode:
-        dst.realize()
-        # NOTE: We must realize users of `dst` before we realize `src`, since
-        # realization order determines scheduling order. Otherwise, src's
-        # mutation would be scheduled before the existing users of dst!
-        V.graph.mark_buffer_mutated(dst.get_name())
-
-        if isinstance(src, TensorBox):
-            src = src.data
-
-        # We copy the contents of src into dst. In most cases this should
-        # be fused into a single kernel by the scheduler.
-        # NOTE: We cannot change src's layout to mutate dst directly as this
-        # would alias src to dst, which is not correct as further mutations to
-        # dst would effect users of src. However if there are no more users of
-        # dst, we can alias src to dst.
-        src.realize_hint()
-
-        if not unsafe_alias:
-            node = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.check_equals_and_simplify(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            )
-            assert isinstance(node, (BaseView, MutableBox))
-            src = node.data
-
-        src.realize()
-        assert hasattr(src, "data"), src
-        assert isinstance(src.data.layout, FlexibleLayout), type(src.data.layout)
-        src.data.layout = MutationLayoutSHOULDREMOVE(dst)
-        return src.data
-
-    def as_fixed(self) -> Self:  # type: ignore[override]
-        return self
-
-    def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
-        return self.target.make_indexer()
+    src.realize()
+    assert hasattr(src, "data"), src
+    assert isinstance(src.data.layout, FlexibleLayout), type(src.data.layout)
+    V.graph.mark_buffer_mutated(dst.get_name())
+    src.data.layout = NonOwningLayout(dst, dst.layout.offset)
+    src.data.mutation_target = dst.get_name()
+    return src.data
 
 
 @ir_dataclass(frozen=False)
@@ -4131,12 +4097,13 @@ class Buffer(IRNode, CodegenSymbol):
     # a meaningful name
     name: Optional[str]
     layout: OutputSpec
+    mutation_target: Optional[str] = dataclasses.field(default=None, init=False)
 
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        super().__post_init__() 
         self._post_init_setattr("origin_node", None)
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -4235,8 +4202,8 @@ class Buffer(IRNode, CodegenSymbol):
         return ()
 
     def get_mutation_names(self) -> Sequence[str]:
-        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
-            return [self.layout.target.get_name()]
+        if self.mutation_target is not None:
+            return [self.mutation_target]
         return ()
 
     def get_read_names(self) -> OrderedSet[str]:
@@ -4690,11 +4657,12 @@ class ComputedBuffer(OperationBuffer):
         return self.data.is_zero_elements()
 
     def should_allocate(self) -> bool:
-        return True
+        return self.mutation_target is None
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         return self.data.constant_to_device(device)
+
 
 
 class TemplateBuffer(OperationBuffer):
@@ -5809,25 +5777,6 @@ class ExternKernel(InputsKernel):
                     if exact_strides is not None
                     else x
                 )
-            elif isinstance(
-                (mutation_layout := x.get_layout()), MutationLayoutSHOULDREMOVE
-            ):
-                if isinstance(
-                    (real_layout := mutation_layout.real_layout()), FlexibleLayout
-                ):
-                    raise AssertionError(
-                        "the MutationLayoutSHOULDREMOVE's real layout shouldn't be FlexibleLayout"
-                    )
-                elif isinstance(real_layout, FixedLayout) and (
-                    (order and real_layout.is_stride_ordered(order))
-                    or (
-                        exact_strides
-                        and significant_strides_equal(
-                            exact_strides, real_layout.stride, x.get_size()
-                        )
-                    )
-                ):
-                    return x
 
         # TODO - Storage to InputBuffer
         if isinstance(x, InputBuffer) and (
@@ -7638,6 +7587,9 @@ class FallbackKernel(ExternKernelAlloc):
             # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
             device = torch.device("cpu")
 
+        # breakpoint()
+        if isinstance(example_output, torch.Tensor):
+            print(example_output.storage_offset())
         if example_output is None:
             packed = cls(
                 NoneLayout(device=device),
@@ -7647,7 +7599,21 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings=unbacked_bindings,
             )
-
+        # elif (
+        #     not isinstance(example_output, (tuple, list))
+        #     and hasattr(kernel, "tags")
+        #     and torch.Tag.dynamic_output_shape not in kernel.tags
+        # ):
+        #     packed = cls(
+        #         cls.tensor_to_layout(example_output),
+        #         kernel,
+        #         tensor_args,
+        #         non_tensor_args,
+        #         unflatten_args,
+        #         unbacked_bindings=unbacked_bindings,
+        #     )
+        #     packed.outputs = [packed]
+        #     return packed
         else:
             assert device, "Not sure where to find device info"
             packed = cls(
