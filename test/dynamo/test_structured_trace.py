@@ -22,13 +22,12 @@ from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import requires_cuda
 
 
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
-
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_distributed = functools.partial(
