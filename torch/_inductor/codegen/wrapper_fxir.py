@@ -267,10 +267,7 @@ class FxConverter:
         Converts graph inputs to FX placeholders.
         """
 
-        for node in V.graph.module.graph.nodes:  # type: ignore[union-attr]
-            if node.op != "placeholder":
-                continue
-
+        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
             if name in V.graph.graph_inputs:
                 ir_node = V.graph.graph_inputs[name]
