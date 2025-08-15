@@ -97,8 +97,8 @@ class TORCH_API KernelFunction final {
   KernelFunction();
   ~KernelFunction();
 
-  KernelFunction(const KernelFunction&) = default;
-  KernelFunction& operator=(const KernelFunction&) = default;
+  KernelFunction(const KernelFunction& other);
+  KernelFunction& operator=(const KernelFunction& other);
 
   KernelFunction(KernelFunction&&) noexcept = default;
 
@@ -277,8 +277,8 @@ class TORCH_API KernelFunction final {
   void registerToken(std::weak_ptr<KernelToken> token) const;
 
   // List of tokens that need to be invalidated when this KernelFunction is
-  // destroyed
-  mutable std::vector<std::weak_ptr<KernelToken>> tokens_;
+  // destroyed (lazy allocation to save memory when empty)
+  mutable std::unique_ptr<std::vector<std::weak_ptr<KernelToken>>> tokens_;
 
  private:
   explicit KernelFunction(
