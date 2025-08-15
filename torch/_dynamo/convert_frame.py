@@ -225,29 +225,34 @@ def fx_forward_from_src_skip_result(
     return result
 
 
-def log_dynamo_start(code: CodeType, skip: int = 0) -> None:
+def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
+    # Extract and filter the stack
+    stack = list(
+        itertools.takewhile(
+            lambda f: f["filename"] != convert_frame_intern,
+            structured.from_traceback(
+                CapturedTraceback.extract(skip=4 + skip).summary()
+            ),
+        )
+    ) + [
+        {
+            "line": code.co_firstlineno,
+            "name": code.co_name,
+            "filename": structured.intern_string(code.co_filename),
+        }
+    ]
     # Initialize the ChromiumEventLogger on start
     torch._logging.trace_structured(
         "dynamo_start",
-        lambda: {
-            "stack": list(
-                itertools.takewhile(
-                    lambda f: f["filename"] != convert_frame_intern,
-                    structured.from_traceback(
-                        CapturedTraceback.extract(skip=4 + skip).summary()
-                    ),
-                )
-            )
-            + [
-                {
-                    "line": code.co_firstlineno,
-                    "name": code.co_name,
-                    "filename": structured.intern_string(code.co_filename),
-                }
-            ]
-        },
+        lambda: {"stack": stack},
     )
+
+    stack_strings = [
+        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
+        for frame in stack
+    ]
+    return stack_strings
 
 
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -1160,7 +1165,7 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
-        log_dynamo_start(code, skip)
+        stack_trace = log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -1256,6 +1261,7 @@ def _compile(
                 shape_env_guard_count = len(output.shape_env.guards)
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
+                graph_node_shapes = output.get_graph_sizes_structured()
                 graph_input_count = len(output.placeholders)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
@@ -1267,6 +1273,7 @@ def _compile(
                 shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                graph_node_shapes = {}
                 graph_input_count = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
@@ -1300,6 +1307,8 @@ def _compile(
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
+                "stack_trace": stack_trace,
+                "graph_node_shapes": str(graph_node_shapes),
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
