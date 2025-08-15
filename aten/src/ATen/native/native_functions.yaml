@@ -7135,6 +7135,7 @@
   variants: function
   dispatch:
     CPU: _scaled_mm_cpu
+    XPU: _scaled_mm_xpu
     CUDA: _scaled_mm_cuda
   tags: needs_exact_strides
 
@@ -7142,6 +7143,7 @@
   variants: function
   dispatch:
     CPU: _scaled_mm_out_cpu
+    XPU: _scaled_mm_out_xpu
     CUDA: _scaled_mm_out_cuda
   tags: needs_exact_strides
 
