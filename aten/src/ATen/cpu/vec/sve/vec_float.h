@@ -299,9 +299,45 @@ class Vectorized<float> {
   inline Vectorized<float> expm1() const {
     return USE_SLEEF(Sleef_expm1fx_u10sve(*this), map(std::expm1));
   }
+  // Implementation copied from Arm Optimized Routines: 
+  // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/sve/expf.c
   inline Vectorized<float> exp_u20() {
-    return exp();
+    
+  // Load values into an SVE vector
+  svfloat32_t val_vec = svld1(svptrue_b32(), values);  // 'values' is float*
+
+  // Check for special case: |x| >= 87.3...
+  svbool_t is_special_case = svacgt(svptrue_b32(), val_vec, 0x1.5d5e2ap+6f);
+  if (svptest_any(svptrue_b32(), is_special_case)) {
+      return exp(); // fallback to scalar exp() for special cases
   }
+
+  // Constants
+  const svfloat32_t ln2_hi = svdup_f32(0x1.62e4p-1f);    
+  const svfloat32_t ln2_lo = svdup_f32(0x1.7f7d1cp-20f);    
+  const svfloat32_t c1      = svdup_f32(0.5f);    
+  const svfloat32_t inv_ln2 = svdup_f32(0x1.715476p+0f);
+  const svfloat32_t shift_vec = svdup_f32(0x1.803f8p17f);  // scalar to vector
+
+  // n = round(x / ln2)
+  svfloat32_t z = svmad_x(svptrue_b32(), inv_ln2, val_vec, shift_vec);
+  svfloat32_t n = svsub_x(svptrue_b32(), z, shift_vec);
+
+  // r = x - n * ln2
+  svfloat32_t r = svsub_x(svptrue_b32(), val_vec, svmul_x(svptrue_b32(), n, ln2_hi));
+  r = svsub_x(svptrue_b32(), r, svmul_x(svptrue_b32(), n, ln2_lo));
+
+  // scale = 2^(n)
+  svfloat32_t scale = svexpa(svreinterpret_u32(z));
+
+  // poly(r) = exp(r) - 1 ≈ r + 0.5 * r^2
+  svfloat32_t r2 = svmul_x(svptrue_b32(), r, r);
+  svfloat32_t poly = svmla_x(svptrue_b32(), r, r2, c1);
+
+  // return scale * (1 + poly)
+  return svmla_x(svptrue_b32(), scale, scale, poly);
+  }
+
   inline Vectorized<float> fexp_u20() {
     return exp();
   }
