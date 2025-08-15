@@ -476,6 +476,15 @@ def add(
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
+
+    if x.ndim == 0 and y.ndim == 0:
+        return NotImplemented
+
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+
     z = y
     if alpha is not None:
         z = alpha * y
@@ -503,10 +512,7 @@ def add(
     # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
     x = x + 0
     z = z + 0
-    if x.ndim == 0:
-        x = x.reshape(1)
-    if z.ndim == 0:
-        z = z.reshape(1)
+
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
