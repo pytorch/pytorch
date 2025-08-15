@@ -2,8 +2,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -141,6 +143,49 @@ TORCH_IMPL_FUNC(topk_out_mps)
   }
 }
 
+static void cat_out_mps_new(std::vector<Tensor>& inputs, int64_t dimension, const Tensor& out) {
+  using namespace mps;
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  auto device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  auto mpsdimension = out.dim() - dimension - 1;
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      auto computeEncoder = mpsStream->commandEncoder();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      auto outNDArray = getMPSNDArray(out, out.sizes(), out.strides());
+      int offset_index = 0;
+      auto key = "mps_cat_out_" + getTensorsStringKey(inputs, true, true); //+"dim_"+std::to_string(dimension);
+
+      auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
+          key, [&]() { return [[MPSNDArrayIdentity alloc] initWithDevice:device]; });
+      auto kernel = cachedKernel->kernel<MPSNDArrayIdentity>();
+      getMPSProfiler().beginProfileKernel(kernel, "cat_out_mps", {out});
+      for (int i = 0; i < inputs.size(); ++i) {
+        auto& tensor = inputs[i];
+        auto ndarray = getMPSNDArray(tensor, tensor.sizes(), tensor.strides());
+
+        auto length = tensor.size(dimension);
+        auto desc = outNDArray.descriptor;
+
+        [desc
+            sliceDimension:mpsdimension
+              withSubrange:{.start = static_cast<NSUInteger>(offset_index), .length = static_cast<NSUInteger>(length)}];
+        offset_index += length;
+
+        auto slice_out = [outNDArray arrayViewWithDescriptor:desc];
+        [kernel encodeToCommandEncoder:computeEncoder
+                         commandBuffer:commandBuffer
+                          sourceArrays:@[ ndarray ]
+                      destinationArray:slice_out];
+      }
+      getMPSProfiler().endProfileKernel(kernel);
+    }
+  });
+}
+
 TORCH_IMPL_FUNC(cat_out_mps)
 (const ITensorListRef& inputs,
  int64_t dimension,
@@ -247,6 +292,12 @@ TORCH_IMPL_FUNC(cat_out_mps)
     out.resize_(size, MemoryFormat::Contiguous);
   }
   if (out.numel() == 0) {
+    return;
+  }
+
+  bool is_macos_15_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  if (is_macos_15_or_newer) {
+    cat_out_mps_new(input_tensors, dimension, out);
     return;
   }
 
