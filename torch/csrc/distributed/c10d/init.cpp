@@ -255,32 +255,39 @@ class PythonStore : public ::c10d::Store {
   }
 
   int64_t add(const std::string& key, int64_t value) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
   int64_t getNumKeys() override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
   }
 
   bool deleteKey(const std::string& key) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
   }
 
   bool check(const std::vector<std::string>& keys) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
 
   void wait(const std::vector<std::string>& keys) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys);
   }
 
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
 
   c10::intrusive_ptr<Store> clone() override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_PURE(c10::intrusive_ptr<Store>, ::c10d::Store, clone);
   }
 
@@ -334,6 +341,7 @@ class PythonStore : public ::c10d::Store {
   }
 
   bool hasExtendedApi() const override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERLOAD_NAME(
         bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
   }
@@ -342,12 +350,14 @@ class PythonStore : public ::c10d::Store {
 class PythonRequest : public ::c10d::control_plane::Request {
  public:
   const std::string& body() const override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERRIDE_PURE(
         const std::string&, ::c10d::control_plane::Request, body);
   }
 
   const std::multimap<std::string, std::string>& params() const override {
     using MultiMap = const std::multimap<std::string, std::string>&;
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERRIDE_PURE(MultiMap, ::c10d::control_plane::Request, params);
   }
 };
@@ -356,6 +366,7 @@ class PythonResponse : public ::c10d::control_plane::Response {
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   void setContent(std::string&& content, const std::string& content_type)
       override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERRIDE_PURE_NAME(
         void,
         ::c10d::control_plane::Response,
@@ -365,6 +376,7 @@ class PythonResponse : public ::c10d::control_plane::Response {
         content_type);
   }
   void setStatus(int status) override {
+    // NOLINTNEXTLINE(modernize-type-traits)
     PYBIND11_OVERRIDE_PURE_NAME(
         void, ::c10d::control_plane::Response, "set_status", setStatus, status);
   }
@@ -438,6 +450,7 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.name = "torch._C._distributed_c10d._ReduceOpMeta";
     // NOLINTNEXTLINE(*-narrowing-conversions)
     spec.basicsize = base_metaclass->tp_basicsize;
+    // NOLINTNEXTLINE(misc-redundant-expression)
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
     PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
@@ -548,10 +561,12 @@ Returns:
 Replaces the tensor in the bucket with the input tensor buffer.
 )");
 
-  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+  py::native_enum<::c10d::BuiltinCommHookType>(
+      module, "BuiltinCommHookType", "enum.Enum", R"(
 An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
       .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
-      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS)
+      .finalize();
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -778,7 +793,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
+  py::native_enum<::c10d::DebugLevel>(module, "DebugLevel", "enum.Enum", R"(
       An enum whose values correspond to different debug levels of the
       torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
       which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
@@ -786,7 +801,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   )")
       .value("OFF", ::c10d::DebugLevel::Off)
       .value("INFO", ::c10d::DebugLevel::Info)
-      .value("DETAIL", ::c10d::DebugLevel::Detail);
+      .value("DETAIL", ::c10d::DebugLevel::Detail)
+      .finalize();
 
   module
       .def(
@@ -906,7 +922,8 @@ This class does not support ``__members__`` property.)");
             }
           }));
 
-  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
+  py::native_enum<::c10d::ReduceOp::RedOpType>(
+      reduce_op, "RedOpType", "enum.Enum")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::RedOpType::PRODUCT)
@@ -916,7 +933,8 @@ This class does not support ``__members__`` property.)");
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
       .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
-      .export_values();
+      .export_values()
+      .finalize();
 
   // note(crcrpar): This could be removed because users will not pass
   // `RedOpType` to reduce collective ops Ref: [Implicit
@@ -2673,9 +2691,10 @@ Arguments:
   module.def("_set_process_group", &::c10d::setProcessGroup);
   module.def("_current_process_group", &::c10d::currentProcessGroup);
 
-  py::enum_<::c10d::ProcessGroup::BackendType>(
+  py::native_enum<::c10d::ProcessGroup::BackendType>(
       processGroup,
       "BackendType",
+      "enum.Enum",
       R"(The type of the backend used for the process group.)")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
       .value("GLOO", ::c10d::ProcessGroup::BackendType::GLOO)
@@ -2684,7 +2703,8 @@ Arguments:
       .value("UCC", ::c10d::ProcessGroup::BackendType::UCC)
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
-      .export_values();
+      .export_values()
+      .finalize();
 
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
@@ -3542,7 +3562,7 @@ Example::
               py::arg("timeout") = kProcessGroupDefaultTimeout);
 #endif
 
-  py::enum_<::c10d::OpType>(module, "OpType")
+  py::native_enum<::c10d::OpType>(module, "OpType", "enum.IntEnum")
       .value("BROADCAST", ::c10d::OpType::BROADCAST)
       .value("ALLREDUCE", ::c10d::OpType::ALLREDUCE)
       .value("ALLREDUCE_COALESCED", ::c10d::OpType::ALLREDUCE_COALESCED)
@@ -3562,19 +3582,22 @@ Example::
       .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
       .value("COALESCED", ::c10d::OpType::COALESCED)
       .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
-      .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
+      .value("UNKNOWN", ::c10d::OpType::UNKNOWN)
+      .finalize();
 
-  py::enum_<::c10d::WorkResult>(module, "WorkResult")
+  py::native_enum<::c10d::WorkResult>(module, "WorkResult", "enum.IntEnum")
       .value("SUCCESS", ::c10d::WorkResult::SUCCESS)
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
-      .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+      .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN)
+      .finalize();
 
-  py::enum_<::c10d::ErrorType>(module, "ErrorType")
+  py::native_enum<::c10d::ErrorType>(module, "ErrorType", "enum.Enum")
       .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
       .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
       .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
-      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
+      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR)
+      .finalize();
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")

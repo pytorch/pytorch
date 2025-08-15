@@ -20,7 +20,7 @@ hipError_t hipReturnSuccess() {
 } // namespace
 #endif
 
-void initCudartBindings(PyObject* module) {
+extern void initCudartBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cudart = m.def_submodule("_cudart", "libcudart.so bindings");
@@ -31,19 +31,23 @@ void initCudartBindings(PyObject* module) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
   // cudaOutputMode_t is used in cudaProfilerInitialize only. The latter is gone
   // in CUDA 12.
-  py::enum_<cudaOutputMode_t>(
+  py::native_enum<cudaOutputMode_t>(
       cudart,
       "cuda"
-      "OutputMode")
+      "OutputMode",
+      "enum.IntEnum")
       .value("KeyValuePair", cudaKeyValuePair)
-      .value("CSV", cudaCSV);
+      .value("CSV", cudaCSV)
+      .finalize();
 #endif
 
-  py::enum_<cudaError_t>(
+  py::native_enum<cudaError_t>(
       cudart,
       "cuda"
-      "Error")
-      .value("success", cudaSuccess);
+      "Error",
+      "enum.IntEnum")
+      .value("success", cudaSuccess)
+      .finalize();
 
   cudart.def(
       "cuda"

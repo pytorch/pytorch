@@ -254,7 +254,8 @@ void initONNXBindings(PyObject* module) {
       py::arg("proto_string"));
 
   auto onnx = m.def_submodule("_onnx");
-  py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")
+  py::native_enum<::ONNX_NAMESPACE::TensorProto_DataType>(
+      onnx, "TensorProtoDataType", "enum.Enum")
       .value("UNDEFINED", ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED)
       .value("FLOAT", ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT)
       .value("UINT8", ::ONNX_NAMESPACE::TensorProto_DataType_UINT8)
@@ -277,18 +278,21 @@ void initONNXBindings(PyObject* module) {
           "FLOAT8E4M3FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FNUZ)
       .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2)
       .value(
-          "FLOAT8E5M2FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ);
+          "FLOAT8E5M2FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ)
+      .finalize();
 
-  py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
+  py::native_enum<OperatorExportTypes>(onnx, "OperatorExportTypes", "enum.Enum")
       .value("ONNX", OperatorExportTypes::ONNX)
       .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
       .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
-      .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
+      .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH)
+      .finalize();
 
-  py::enum_<TrainingMode>(onnx, "TrainingMode")
+  py::native_enum<TrainingMode>(onnx, "TrainingMode", "enum.Enum")
       .value("EVAL", TrainingMode::EVAL)
       .value("PRESERVE", TrainingMode::PRESERVE)
-      .value("TRAINING", TrainingMode::TRAINING);
+      .value("TRAINING", TrainingMode::TRAINING)
+      .finalize();
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 }
