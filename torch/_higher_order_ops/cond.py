@@ -292,8 +292,14 @@ class CondAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
+        from torch._higher_order_ops.utils import _is_float_tensor
+
+        # This is a workaround for the fact that even for int tensors, autograd.Function
+        # will generate a gradient tensor but int tensors are not differentiable so
+        # we need to filter them out.
+        float_grads = tuple(grad for grad in flat_grads if _is_float_tensor(grad))
         operands = saved_tensors_and_symints(ctx)
-        args = operands + flat_grads
+        args = operands + float_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
 
