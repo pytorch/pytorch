@@ -6,13 +6,11 @@ import unittest.mock
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase
 import torch
 
 device_type = torch.accelerator.current_accelerator().type
 
-requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU_AND_TRITON, "requires cuda or xpu")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

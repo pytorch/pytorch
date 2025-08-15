@@ -1129,7 +1129,7 @@ def skip_if_not_support_multithread():
         return cls
     return decorator
 
-@skip_if_not_support_multithread()
+@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):

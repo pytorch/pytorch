@@ -2,7 +2,7 @@
 import os
 
 from torch._inductor import pattern_matcher
-from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes import joint_graph, post_grad
 
 
 if __name__ == "__main__":
@@ -17,3 +17,4 @@ if __name__ == "__main__":
     # to serialize the patterns as it goes.
     os.environ["PYTORCH_GEN_PATTERNS"] = "1"
     joint_graph.lazy_init()
+    post_grad.lazy_init()

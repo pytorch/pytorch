@@ -654,7 +654,7 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
-        if chunks_volume != tensor_volume:
+        if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """
                     key:%s invalid fill tensor-volume:

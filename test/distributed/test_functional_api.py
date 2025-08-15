@@ -24,7 +24,7 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    skip_but_pass_in_sandcastle_if,
+    requires_accelerator_dist_backend,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
@@ -32,7 +32,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfHpu,
+    TEST_CUDA,
     TEST_HPU,
+    TEST_XPU,
     TestCase,
 )
 
@@ -60,9 +62,14 @@ from torch.testing._internal.common_utils import (
 
 DEVICE = "cuda"
 devices = ["cpu"]
-if torch.accelerator.is_available():
-    devices.append(torch.accelerator.current_accelerator().type)
-    DEVICE = torch.accelerator.current_accelerator().type
+if TEST_HPU:
+    devices.append("hpu")
+    DEVICE = "hpu"
+elif TEST_XPU:
+    devices.append("xpu")
+    DEVICE = "xpu"
+elif TEST_CUDA:
+    devices.append("cuda")
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -471,18 +478,17 @@ BACKEND = dist.Backend.default_device_backend_map[DEVICE] if torch.accelerator.i
 # And then set the BACKEND variable appropriately.
 if TEST_HPU:
     BACKEND = dist.Backend.HCCL
+elif TEST_XPU:
+    BACKEND = dist.Backend.XCCL
 
 
 # allows you to check for multiple accelerator irrespective of device type
 # to add new device types to this check simply follow the same format
 # and append an elif with the conditional and appropriate device count function for your new device
 def exit_if_lt_x_accelerators(x):
-    if TEST_HPU:
-        if torch.hpu.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
-    elif torch.accelerator.is_available():
+    if torch.accelerator.is_available():
         if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-accelerator-{x}"].exit_code)
 
 
 def with_comms(func=None):
@@ -491,7 +497,9 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL) and torch.accelerator.device_count() < self.world_size:
+        if (
+            BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
+        ) and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         kwargs["device"] = DEVICE
@@ -569,10 +577,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         self.assertEqual(y, expected)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
-        "c10d was not compiled with the accelerator backend",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -599,10 +604,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_but_pass_in_sandcastle_if(
-        not c10d.is_nccl_available() and not c10d.is_xccl_available(),
-        "c10d was not compiled with the accelerator backend",
-    )
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
@@ -824,10 +826,16 @@ instantiate_device_type_tests(
     TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
 )
 instantiate_device_type_tests(
-    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE, allow_xpu=True
+    TestDistributedBackendCollectivesWithWorldSize4,
+    globals(),
+    only_for=DEVICE,
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True
+    TestFunctionalAutogradWithDistributedBackend,
+    globals(),
+    only_for=DEVICE,
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
