@@ -409,8 +409,10 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
+            # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
             if is_nested_int(shape[idx]):
-                # maintain nested int behaviour added in PR 145957.
+                # Broadcasting is allowed for (j0, 1) or (j0, j0);
+                # not (j0, j1), (j0, 5), etc.
                 if is_nested_int(common_shape[idx]) and guard_or_false(
                     shape[idx] == common_shape[idx]
                 ):
@@ -3284,6 +3286,8 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     normalized_ndim = len(normalized_shape)
     torch._check(
         normalized_ndim >= 1,
@@ -3295,7 +3299,7 @@ def native_layer_norm(
     # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
     # therefore we use tuple(normalized_shape)
     torch._check(
-        weight is None or weight.shape == tuple(normalized_shape),
+        weight is None or sym_eq(weight.shape, tuple(normalized_shape)),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
         + str(weight.shape)  # type: ignore[union-attr]
@@ -3303,7 +3307,7 @@ def native_layer_norm(
         + str(normalized_shape),
     )
     torch._check(
-        bias is None or bias.shape == tuple(normalized_shape),
+        bias is None or sym_eq(bias.shape, tuple(normalized_shape)),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
         + str(bias.shape)  # type: ignore[union-attr]
@@ -3312,7 +3316,9 @@ def native_layer_norm(
     )
     torch._check(
         input.ndim >= normalized_ndim
-        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        and sym_eq(
+            input.shape[(input.ndim - normalized_ndim) :], tuple(normalized_shape)
+        ),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
         + ", expected input with shape "
