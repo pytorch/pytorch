@@ -4,16 +4,19 @@ import contextlib
 import io
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import torch
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.debug import (
+    create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
 )
@@ -584,6 +587,198 @@ class TestProvenanceTracingStackTraces(TestCase):
                         sorted(expected_lines),
                         f"Mismatch for key: {key}",
                     )
+
+
+@torch._inductor.config.patch("trace.enabled", True)
+class TestKernelInformationAOTI(TestCase):
+    """Test kernel information JSON generation for AOTI packages."""
+
+    def _check_kernel_information_json(self, kernel_info, expected_kernels):
+        """Validate kernel information JSON structure and content."""
+        self.assertIsInstance(kernel_info, dict)
+
+        for expected in expected_kernels:
+            self.assertIn(
+                expected,
+                kernel_info,
+                f"Expected kernel {expected} not found in {list(kernel_info)}",
+            )
+
+        for data in kernel_info.values():
+            self.assertIsInstance(data, dict)
+            for field in ["stack_traces", "post_grad_nodes", "pre_grad_nodes"]:
+                self.assertIn(field, data)
+                self.assertIsInstance(data[field], list)
+                for item in data[field]:
+                    self.assertIsInstance(item, str)
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    def test_kernel_information_generation_basic(self):
+        """Test basic kernel information generation in AOTI packages."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b, c):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                d = a * 3.14
+                y = torch.addmm(c, d, b)
+                z = torch.nn.functional.gelu(y)
+                return x, z
+
+        model = Model().to("cuda")
+        x = torch.randn(8, 10, device="cuda")
+        a = torch.randn(10, 20, device="cuda")
+        b = torch.randn(20, 30, device="cuda")
+        c = torch.randn(10, 30, device="cuda")
+        inputs = (x, a, b, c)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, inputs, strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+
+            # Extract and check kernel_information.json exists in the package
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(pt2_file, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            json_path = os.path.join(extract_dir, "kernel_information.json")
+            self.assertTrue(
+                os.path.exists(json_path),
+                f"kernel_information.json not found in extracted package at {json_path}",
+            )
+
+            with open(json_path) as f:
+                kernel_info = json.load(f)
+
+            expected_kernels = [
+                "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0",
+                "triton_poi_fused_mul_1",
+                "triton_poi_fused_addmm_gelu_2",
+                "extern_kernels.mm",
+            ]
+            self._check_kernel_information_json(kernel_info, expected_kernels)
+
+            # Additional validation on stack traces
+            for kernel_name, kernel_data in kernel_info.items():
+                if kernel_data["stack_traces"]:
+                    stack_traces_str = " ".join(kernel_data["stack_traces"])
+                    if "triton_poi_fused_mul_1" == kernel_name:
+                        self.assertIn(
+                            "3.14",
+                            stack_traces_str,
+                            f"Expected '3.14' in stack traces for {kernel_name}",
+                        )
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 2)
+    def test_kernel_information_generation_complex(self):
+        """Test kernel information generation with a more complex model."""
+        device = "cuda"
+
+        class ComplexModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b):
+                x = self.linear(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                y = a * 3.14
+                z = torch.addmm(b, y, x.T)
+                return torch.nn.functional.gelu(z)
+
+        model = ComplexModel().to(device)
+        x = torch.randn(8, 10, device=device)
+        a = torch.randn(5, 12, device=device)
+        b = torch.randn(5, 16, device=device)
+        example_inputs = (x, a, b)
+
+        # Compile with AOTI
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, example_inputs, strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+
+            # Extract and check kernel_information.json exists in the package
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(pt2_file, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            expected_json_path = os.path.join(extract_dir, "kernel_information.json")
+            self.assertTrue(
+                os.path.exists(expected_json_path),
+                f"kernel_information.json not found in extracted package at {expected_json_path}",
+            )
+
+            # Load and validate the JSON
+            with open(expected_json_path) as f:
+                kernel_info = json.load(f)
+
+            expected_kernels = [
+                "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0",
+                "triton_poi_fused_mul_1",
+                "triton_poi_fused_addmm_gelu_2",
+                "extern_kernels.mm",
+            ]
+            self._check_kernel_information_json(kernel_info, expected_kernels)
+
+            # For complex model, we should have stack traces and node mappings
+            for kernel_data in kernel_info.values():
+                if kernel_data["stack_traces"]:
+                    self.assertGreater(len(kernel_data["stack_traces"]), 0)
+                if kernel_data["post_grad_nodes"]:
+                    self.assertGreater(len(kernel_data["post_grad_nodes"]), 0)
+
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 0)
+    def test_no_kernel_information_without_provenance_tracking(self):
+        """Test that kernel_information.json is not generated without provenance tracking."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x * 2.0
+
+        model = SimpleModel()
+        x = torch.randn(4, 8)
+
+        # Compile with AOTI but without provenance tracking
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, (x,), strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+
+            # Extract and check kernel_information.json was NOT created in the package
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(pt2_file, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            expected_json_path = os.path.join(extract_dir, "kernel_information.json")
+            self.assertFalse(
+                os.path.exists(expected_json_path),
+                "kernel_information.json should not exist in package when provenance tracking is disabled",
+            )
+
+    def test_create_kernel_information_json_function(self):
+        """Test the create_kernel_information_json function directly."""
+        # Test with empty state
+        result = create_kernel_information_json()
+        self.assertIsInstance(result, dict)
+        self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
 
 if __name__ == "__main__":
