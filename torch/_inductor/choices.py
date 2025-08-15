@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -10,8 +10,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
-from .lookup_table import lookup_template_configs
-from .lookup_table_recorder import record
+from .lookup_table_processor import LookupTableProcessor
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -37,6 +36,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .template_config_processor import TemplateConfigProcessor
 
 
 class Sortable(typing.Protocol):
@@ -57,6 +57,27 @@ class InductorChoices:
 
             torch._inductor.virtualized.V.set_choices_handler(MyHeuristics())
     """
+
+    def __init__(self) -> None:
+        # By default, use the LookupTableProcessor to process template configurations
+        self._config_processor: TemplateConfigProcessor = LookupTableProcessor()
+
+    def set_config_processor(self, processor: TemplateConfigProcessor) -> None:
+        """
+        Set the template config processor to use for post-processing template configurations.
+
+        See lookup_table_processor.py for an example of a processor
+        If you want to use your own processor, you can do something like:
+        class MyProcessor(TemplateConfigProcessor):
+            def process(self, kernel_inputs, layout, template_name, op_name, configs):
+                # Do some processing here
+                ...
+        torch._inductor.virtualized.V.choices.set_config_processor(MyProcessor())
+
+        Args:
+            processor: The processor to use. Must be an instance of TemplateConfigProcessor.
+        """
+        self._config_processor = processor
 
     def get_config_heuristics(
         self, device_type: Optional[str] = "cuda"
@@ -102,18 +123,6 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
-    def _get_configs_from_lookup_table(
-        self,
-        input_nodes: list[Any],
-        op_name: str,
-        template_name: str,
-        template_hash: Optional[str] = None,
-    ) -> Optional[list[dict[str, Any]]]:
-        """Get configs from lookup table if available."""
-        return lookup_template_configs(
-            input_nodes, op_name, template_name, template_hash
-        )
-
     def get_mm_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -123,7 +132,8 @@ class InductorChoices:
         template_hash: Optional[str] = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
-        Get generator of template parameters for MM templates using template-specific heuristics.
+        Get generator of template parameters for MM templates using template-specific heuristics
+        and post-processing through the configured processor.
 
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
@@ -139,32 +149,18 @@ class InductorChoices:
         if len(input_nodes) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_nodes)}")
 
-        # Try lookup table first
-        lookup_configs = self._get_configs_from_lookup_table(
-            input_nodes,
-            op_name=op_name,
-            template_name=template_name,
-            template_hash=template_hash,
+        # Get the appropriate template-specific heuristic
+        heuristic = get_template_heuristic(
+            template_name, kernel_inputs.device_type, op_name
         )
-        cgen: Union[
-            list[dict[str, Any]], Generator[dict[str, Any], None, None], None
-        ] = lookup_configs
-        if cgen is None:
-            # Get the appropriate template-specific heuristic, as the lookup table was a miss
-            heuristic = get_template_heuristic(
-                template_name, kernel_inputs.device_type, op_name
-            )
-            cgen = heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
-        for c in cgen:
-            record(
-                kernel_inputs=kernel_inputs,
-                op_name=op_name,
-                template_id=template_name,
-                kwargs=c,
-                template_hash=template_hash,
-            )
-            yield c
+        # Start with heuristic configs
+        configs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        # Process through the configured processor
+        processed_configs = self._config_processor.process(
+            configs, kernel_inputs, layout, op_name, template_name, template_hash
+        )
+        yield from processed_configs
 
     def triton_kernel_kwargs(
         self,
@@ -230,18 +226,6 @@ class InductorChoices:
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
-
-    @staticmethod
-    def want_no_x_dim(features: SIMDKernelFeatures) -> bool:
-        """
-        Heuristic to decide if we should drop the X dimension from a persistent reduction kernel.
-        So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
-        Strangely this is faster than a [1, RBLOCK] block in some cases.
-        """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
 
     @staticmethod
     def reduction_split_factor(

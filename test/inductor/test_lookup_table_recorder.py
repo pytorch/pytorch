@@ -21,7 +21,7 @@ from torch._inductor.lookup_table_recorder import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -59,7 +59,7 @@ def force_recorder_reset():
     recorder_module._lookup_table_recorder = None
 
 
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 class TestLookupTableRecorder(TestCase):
     """Test suite for lookup table recorder functionality"""
 
