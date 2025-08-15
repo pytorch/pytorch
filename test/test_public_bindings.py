@@ -291,7 +291,7 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         # DO NOT add public modules here.
         private_allowlist = {
-            "torch._inductor.codegen.cuda.cuda_kernel",
+            "torch._inductor.codegen.cutlass.kernel",
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
@@ -356,8 +356,8 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
-            "torch._inductor.codegen.cuda.cuda_template",
-            "torch._inductor.codegen.cuda.gemm_template",
+            "torch._inductor.codegen.cutlass.template",
+            "torch._inductor.codegen.cutlass.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
