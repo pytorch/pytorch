@@ -1128,11 +1128,15 @@ void LayerNormKernelImplInternal(
 }
 
 inline bool use_cudnn_layernorm(bool gamma, bool beta, at::ScalarType dtype) {
+#ifndef USE_ROCM
   static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
   // cuDNN only supports bf16, fp16, and fp32
   bool dtype_supported = dtype != at::ScalarType::Double;
   bool ok = enabled && gamma && beta && dtype_supported;
   return ok;
+#else
+  return false;
+#endif
 }
 
 void LayerNormKernelImpl(
@@ -1163,11 +1167,15 @@ void LayerNormKernelImpl(
 }
 
 inline bool use_cudnn_rmsnorm(bool gamma, at::ScalarType dtype) {
+#ifndef USE_ROCM
   static bool enabled = (c10::utils::check_env("TORCH_CUDNN_RMSNORM_ENABLED") == true);
   // cuDNN only supports bf16, fp16, and fp32
   bool dtype_supported = dtype != at::ScalarType::Double;
   bool ok = enabled && gamma && dtype_supported;
   return ok;
+#else
+  return false;
+#endif
 }
 
 void RmsNormKernelImpl(
