@@ -202,6 +202,98 @@ class AOTIRunnerUtil:
         return list_output_tensors
 
 
+def check_model_fx(
+    self: TestCase,
+    model,
+    example_inputs,
+    options=None,
+    dynamic_shapes=None,
+    atol=None,
+    rtol=None,
+):
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                "compile_threads": 1,
+            }
+        ),
+    ):
+        torch.manual_seed(0)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
+
+        # For non mixed device inputs with default "cpu",set the device manually.
+        if all(
+            t.device.type == "cpu"
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        ):
+            example_inputs = tuple(
+                clone_preserve_strides_offset(x, device=self.device)
+                for x in example_inputs
+            )
+
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(example_inputs)
+        expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
+
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
+        ep = torch.export.export(
+            model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        options = options or {}
+        options["fx_wrapper"] = True
+        gm = torch._inductor.aot_compile(ep.module(), example_inputs, options=options)
+        gm.print_readable()
+        actual = gm(*example_inputs)
+
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+
+def check_model_with_multiple_inputs_fx(
+    self: TestCase,
+    model,
+    list_example_inputs,
+    options=None,
+    dynamic_shapes=None,
+):
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                "compile_threads": 1,
+            }
+        ),
+    ):
+        torch.manual_seed(0)
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(list_example_inputs)
+        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
+        example_inputs = list_example_inputs[0]
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
+        ep = torch.export.export(
+            model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        options = options or {}
+        options["fx_wrapper"] = True
+        gm = torch._inductor.aot_compile(ep.module(), example_inputs, options=options)
+        list_actual = [gm(*inputs) for inputs in list_example_inputs]
+
+    self.assertTrue(same(list_actual, list_expected))
+
+
 def check_model(
     self: TestCase,
     model,
