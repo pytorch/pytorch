@@ -108,6 +108,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalCellSource,
     LocalSource,
+    SkipGuardSource,
     Source,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
@@ -145,6 +146,7 @@ from .variables.iter import MAX_ITERATOR_LIMIT
 from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
+    IteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -440,6 +442,15 @@ def stack_op(fn: typing.Callable[..., object]):
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
+
+
+def is_stdlib(mod):
+    if sys.version_info < (3, 10):
+        # For < 3.10, no easy way to identify a stdlib module name.
+        return False
+    if not isinstance(mod, types.ModuleType):
+        return False
+    return mod.__name__.split(".")[0] in sys.stdlib_module_names
 
 
 def _detect_and_normalize_assert_statement(
@@ -3971,7 +3982,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                args = []
+                if not (
+                    isinstance(self.symbolic_result, ConstantVariable)
+                    and self.symbolic_result.value is None
+                ):
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
             else:
                 return self.symbolic_result
         else:
@@ -4099,6 +4116,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Dont use lazy vt because we will do a setattr afterwards
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
+
+        if is_stdlib(fglobals_value):
+            # Users don't inplace mutate a stdlib attribute (like inspect,
+            # collections), skip guards that originate from the stdlib modules.
+            global_source = SkipGuardSource(global_source)  # type: ignore[assignment]
+
         return fglobals_value, fglobals_vt, global_source
 
     def _load_global(self, inst):
@@ -4221,7 +4244,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, (ListIteratorVariable, LocalGeneratorObjectVariable)) or (
+        if isinstance(tos, (IteratorVariable, LocalGeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):

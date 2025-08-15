@@ -126,6 +126,9 @@ class L1Loss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.l1_loss(input, target, reduction=self.reduction)
 
 
@@ -250,6 +253,9 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.nll_loss(
             input,
             target,
@@ -354,6 +360,9 @@ class PoissonNLLLoss(_Loss):
         self.eps = eps
 
     def forward(self, log_input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.poisson_nll_loss(
             log_input,
             target,
@@ -445,6 +454,9 @@ class GaussianNLLLoss(_Loss):
     def forward(
         self, input: Tensor, target: Tensor, var: Union[Tensor, float]
     ) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.gaussian_nll_loss(
             input, target, var, full=self.full, eps=self.eps, reduction=self.reduction
         )
@@ -545,6 +557,9 @@ class KLDivLoss(_Loss):
         self.log_target = log_target
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.kl_div(
             input, target, reduction=self.reduction, log_target=self.log_target
         )
@@ -613,6 +628,9 @@ class MSELoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.mse_loss(input, target, reduction=self.reduction)
 
 
@@ -703,6 +721,9 @@ class BCELoss(_WeightedLoss):
         super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.binary_cross_entropy(
             input, target, weight=self.weight, reduction=self.reduction
         )
@@ -825,6 +846,7 @@ class BCEWithLogitsLoss(_Loss):
         self.pos_weight: Optional[Tensor]
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.binary_cross_entropy_with_logits(
             input,
             target,
@@ -898,6 +920,7 @@ class HingeEmbeddingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.hinge_embedding_loss(
             input, target, margin=self.margin, reduction=self.reduction
         )
@@ -965,6 +988,7 @@ class MultiLabelMarginLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
 
 
@@ -1049,6 +1073,7 @@ class SmoothL1Loss(_Loss):
         self.beta = beta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.smooth_l1_loss(input, target, reduction=self.reduction, beta=self.beta)
 
 
@@ -1110,6 +1135,7 @@ class HuberLoss(_Loss):
         self.delta = delta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
 
 
@@ -1152,6 +1178,7 @@ class SoftMarginLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.soft_margin_loss(input, target, reduction=self.reduction)
 
 
@@ -1260,7 +1287,9 @@ class CrossEntropyLoss(_WeightedLoss):
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
           target data type is required to be long when using class indices. If containing class probabilities, the
           target must be the same shape input, and each value should be between :math:`[0, 1]`. This means the target
-          data type is required to be float when using class probabilities.
+          data type is required to be float when using class probabilities. Note that PyTorch does not strictly enforce
+          probability constraints on the class probabilities and that it is the user's responsibility to ensure
+          ``target`` contains valid probability distributions (see below examples section for more details).
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
@@ -1287,6 +1316,51 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> output = loss(input, target)
         >>> output.backward()
+
+    .. note::
+        When ``target`` contains class probabilities, it should consist of soft labels—that is,
+        each ``target`` entry should represent a probability distribution over the possible classes for a given data sample,
+        with individual probabilities between ``[0,1]`` and the total distribution summing to 1.
+        This is why the :func:`softmax()` function is applied to the ``target`` in the class probabilities example above.
+
+        PyTorch does not validate whether the values provided in ``target`` lie in the range ``[0,1]``
+        or whether the distribution of each data sample sums to ``1``.
+        No warning will be raised and it is the user's responsibility
+        to ensure that ``target`` contains valid probability distributions.
+        Providing arbitrary values may yield misleading loss values and unstable gradients during training.
+
+    Examples:
+        >>> # xdoctest: +SKIP
+        >>> # Example of target with incorrectly specified class probabilities
+        >>> loss = nn.CrossEntropyLoss()
+        >>> torch.manual_seed(283)
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> # Provided target class probabilities are not in range [0,1]
+        >>> target
+        tensor([[ 0.7105,  0.4446,  2.0297,  0.2671, -0.6075],
+                [-1.0496, -0.2753, -0.3586,  0.9270,  1.0027],
+                [ 0.7551,  0.1003,  1.3468, -0.3581, -0.9569]])
+        >>> # Provided target class probabilities do not sum to 1
+        >>> target.sum(axis=1)
+        tensor([2.8444, 0.2462, 0.8873])
+        >>> # No error message and possible misleading loss value
+        >>> loss(input, target).item()
+        4.6379876136779785
+        >>>
+        >>> # Example of target with correctly specified class probabilities
+        >>> # Use .softmax() to ensure true probability distribution
+        >>> target_new = target.softmax(dim=1)
+        >>> # New target class probabilities all in range [0,1]
+        >>> target_new
+        tensor([[0.1559, 0.1195, 0.5830, 0.1000, 0.0417],
+                [0.0496, 0.1075, 0.0990, 0.3579, 0.3860],
+                [0.2607, 0.1355, 0.4711, 0.0856, 0.0471]])
+        >>> # New target class probabilities sum to 1
+        >>> target_new.sum(axis=1)
+        tensor([1.0000, 1.0000, 1.0000])
+        >>> loss(input, target_new).item()
+        2.55349063873291
     """
 
     __constants__ = ["ignore_index", "reduction", "label_smoothing"]
@@ -1307,6 +1381,7 @@ class CrossEntropyLoss(_WeightedLoss):
         self.label_smoothing = label_smoothing
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.cross_entropy(
             input,
             target,
@@ -1368,6 +1443,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multilabel_soft_margin_loss(
             input, target, weight=self.weight, reduction=self.reduction
         )
@@ -1439,6 +1515,7 @@ class CosineEmbeddingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.cosine_embedding_loss(
             input1, input2, target, margin=self.margin, reduction=self.reduction
         )
@@ -1505,6 +1582,7 @@ class MarginRankingLoss(_Loss):
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.margin_ranking_loss(
             input1, input2, target, margin=self.margin, reduction=self.reduction
         )
@@ -1595,6 +1673,7 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.multi_margin_loss(
             input,
             target,
@@ -1702,6 +1781,7 @@ class TripletMarginLoss(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.triplet_margin_loss(
             anchor,
             positive,
@@ -1837,6 +1917,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.triplet_margin_with_distance_loss(
             anchor,
             positive,
@@ -2016,6 +2097,7 @@ class CTCLoss(_Loss):
         input_lengths: Tensor,
         target_lengths: Tensor,
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.ctc_loss(
             log_probs,
             targets,
