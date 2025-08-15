@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
+#include <pybind11/native_enum.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 

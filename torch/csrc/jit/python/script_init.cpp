@@ -2420,10 +2420,12 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
-  py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
+  py::native_enum<logging::LockingLogger::AggregationType>(
+      m, "AggregationType", "enum.IntEnum")
       .value("SUM", logging::LockingLogger::AggregationType::SUM)
       .value("AVG", logging::LockingLogger::AggregationType::AVG)
-      .export_values();
+      .export_values()
+      .finalize();
   py::class_<
       logging::LockingLogger,
       logging::LoggerBase,

@@ -92,7 +92,7 @@ inline bool cudnnv8_use_heur_mode_b() {
   return is_cudnnv8_heuristic_mode_b();
 }
 
-// Keep in sync with py::enum_ in Module.cpp
+// Keep in sync with py::native_enum in Module.cpp
 enum class ConvBackend {
   CudaDepthwise2d,
   CudaDepthwise3d,

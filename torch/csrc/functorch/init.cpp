@@ -563,16 +563,18 @@ void initFuncTorchBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DynamicLayer>(m, "DynamicLayer");
 
-  py::enum_<TransformType>(m, "TransformType")
+  py::native_enum<TransformType>(m, "TransformType", "enum.Enum")
       .value("Torch", TransformType::Torch)
       .value("Grad", TransformType::Grad)
       .value("Jvp", TransformType::Jvp)
       .value("Functionalize", TransformType::Functionalize)
-      .value("Vmap", TransformType::Vmap);
-  py::enum_<RandomnessType>(m, "RandomnessType")
+      .value("Vmap", TransformType::Vmap)
+      .finalize();
+  py::native_enum<RandomnessType>(m, "RandomnessType", "enum.Enum")
       .value("Error", RandomnessType::Error)
       .value("Same", RandomnessType::Same)
-      .value("Different", RandomnessType::Different);
+      .value("Different", RandomnessType::Different)
+      .finalize();
   py::class_<Interpreter>(m, "CInterpreter")
       .def("key", &Interpreter::key)
       .def("level", &Interpreter::level)

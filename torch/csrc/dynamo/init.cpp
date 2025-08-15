@@ -22,13 +22,13 @@ namespace torch::dynamo {
 
 #if IS_PYTHON_3_11_PLUS
 
-std::vector<uint8_t> _PyOpcode_Caches_vec(
+static std::vector<uint8_t> _PyOpcode_Caches_vec(
     THP_PyOpcode_Caches,
     THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
 
 #else
 
-std::vector<uint8_t> _PyOpcode_Caches_vec;
+static std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 #endif
 
@@ -244,10 +244,11 @@ void initDynamoBindings(PyObject* torch) {
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
 
-  py::enum_<FrameAction>(m, "_FrameAction")
+  py::native_enum<FrameAction>(m, "_FrameAction", "enum.IntEnum")
       .value("DEFAULT", FrameAction::DEFAULT)
       .value("SKIP", FrameAction::SKIP)
-      .value("RUN_ONLY", FrameAction::RUN_ONLY);
+      .value("RUN_ONLY", FrameAction::RUN_ONLY)
+      .finalize();
 
   py::class_<FrameExecStrategy>(m, "_FrameExecStrategy")
       .def(py::init([]() {
