@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_tma_device, has_triton_stable_tma_api
 
 
 aten = torch.ops.aten
@@ -160,8 +160,29 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(mm, dynamic=dynamic)(a, b)
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
             c_expected = mm(a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            read_api =  "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check(
+            "triton_tem_fused_mm"
+        ).check(
+            make_desc_api
+        ).check(
+            read_api
+        ).check(
+            write_api
+        ).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
@@ -347,8 +368,29 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            c_actual, code = run_and_get_code(torch.compile(addmm, dynamic=dynamic), x, a, b)
             c_expected = addmm(x, a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            read_api =  "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check(
+            "triton_tem_fused_addmm"
+        ).check(
+            make_desc_api
+        ).check(
+            read_api
+        ).check(
+            write_api
+        ).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
