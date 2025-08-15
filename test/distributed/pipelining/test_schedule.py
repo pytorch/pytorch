@@ -804,7 +804,7 @@ class TestScheduleLowering(TestCase):
             loss_fn=loss_fn,
             scale_grads=False,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
@@ -915,7 +915,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
