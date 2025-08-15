@@ -441,15 +441,11 @@ def handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
     @functools.wraps(func)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        try:
-            it = itertools.chain(zip(names, args), kwargs.items())
-            tensors = [v for k, v in it if k in tensor_args]
-            if has_torch_function_variadic(*tensors):
-                return handle_torch_function(func, tensors, *args, **kwargs)
-            return func(*args, **kwargs)
-        except TypeError as e:
-            # See https://github.com/pytorch/pytorch/issues/75462
-            raise NotImplementedError from e
+        it = itertools.chain(zip(names, args), kwargs.items())
+        tensors = [v for k, v in it if k in tensor_args]
+        if has_torch_function_variadic(*tensors):
+            return handle_torch_function(func, tensors, *args, **kwargs)
+        return func(*args, **kwargs)
 
     return wrapped
 
@@ -459,13 +455,9 @@ def handle_torch_function_unary(
 ) -> Callable[Concatenate[Tensor, _P], _T]:
     @functools.wraps(func)
     def wrapped(input: Tensor, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        try:
-            if has_torch_function_unary(input):
-                return handle_torch_function(func, (input,), *args, **kwargs)
-            return func(input, *args, **kwargs)
-        except TypeError as e:
-            # See https://github.com/pytorch/pytorch/issues/75462
-            raise NotImplementedError from e
+        if has_torch_function_unary(input):
+            return handle_torch_function(func, (input,), input, *args, **kwargs)
+        return func(input, *args, **kwargs)
 
     return wrapped
 
