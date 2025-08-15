@@ -1237,6 +1237,18 @@ REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
   at::native::_stack_out_cpu(inputs, dim, out_t);
 })
 
+REGISTER_CPU_KERNEL("torch.ops.aten.fmod.Scalar", aten_fmod_scalar, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto& other = KernelInput(1).toScalar();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::native::fmod(self, other);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
+  at::native::fmod_out(self, other, out);
+})
+
 class OpKernel_aten__to_copy : public C10Kernel {
  public:
   explicit OpKernel_aten__to_copy(const Node* node)
