@@ -60,6 +60,17 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
                 sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
             )
         )
+
+    Hq = query.get_size()[1]
+    Hkv = kv_indices.get_size()[1]
+    ratio = Hq // Hkv
+    power_of_2 = V.graph.sizevars.evaluate_expr(
+        sympy.And(
+            sympy.Gt(ratio, 0),
+            sympy.Eq(ratio & (ratio - 1), 0)
+        )
+    )
+
     return (
         not force_flex
         and short_query_length
@@ -67,6 +78,7 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa) -> bool:
         and static_num_heads
         and non_zero_length
         and valid_block_mask_num_heads
+        and power_of_2
     )
 
 
