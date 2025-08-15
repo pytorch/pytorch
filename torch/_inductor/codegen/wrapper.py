@@ -3265,6 +3265,15 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop):
+        def codegen_subgraph(subgraph, outer_inputs, outer_outputs):
+            """Helper method to deduplicate subgraph codegen logic"""
+            if V.graph.aot_mode:
+                self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
+            else:
+                self.codegen_subgraph_with_flattened_outputs(
+                    subgraph, outer_inputs, outer_outputs
+                )
+
         name = while_loop.get_name()
         outer_carried_inputs = [
             buf.codegen_reference() for buf in while_loop.carried_inputs
@@ -3290,32 +3299,32 @@ class PythonWrapperCodegen(CodeGen):
         # the carried_inputs part of the inputs, the additional ones
         # are passed in as they're before.
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
+        # Check condition at the beginning and set up flag
+        codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(f"should_loop = {cond_outer_outputs[0]}")
+        self.writeline("if not should_loop:")
+        for i, (carried_input, carried_buf) in enumerate(
+            zip(outer_carried_inputs, while_loop.carried_inputs)
+        ):
+            self.writeline(f"    {name}[{i}] = {carried_input}.clone()")
 
-        self.writeline("while True:")
-        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
-
-        if V.graph.aot_mode:
-            self.codegen_subgraph_by_inlining(
-                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-            )
-        else:
-            self.codegen_subgraph_with_flattened_outputs(
-                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-            )
-        self.writeline(
-            f"if not {cond_outer_outputs[0]}: break"
-        )  # condition doesn't hold
-        self.writeline(ExitSubgraphLine(self))
+        self.writeline("while should_loop:")
+        # Body execution
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-        if V.graph.aot_mode:
-            self.codegen_subgraph_by_inlining(
-                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-            )
-        else:
-            self.codegen_subgraph_with_flattened_outputs(
-                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-            )
+        codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
         self.writeline(ExitSubgraphLine(self))
+
+        # Condition check at end of loop
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
 
     @staticmethod
     def statically_known_int_or_none(x):
