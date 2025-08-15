@@ -22,7 +22,6 @@ from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 if torch.distributed.is_available():
@@ -30,6 +29,7 @@ if torch.distributed.is_available():
 
 
 HAS_TLPARSE = shutil.which("tlparse") is not None
+HAS_CUDA = torch.cuda.is_available()
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
@@ -1339,6 +1339,45 @@ def forward(self, x_1: "f32[2][1]cpu"):
             dist.destroy_process_group()
 
     @requires_tlparse
+    @requires_distributed()
+    @requires_cuda
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_multiple_ops(self):
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = torch.relu(self.linear(x))
+                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
+                y = torch.ops._c10d_functional.wait_tensor.default(y)
+                return y + 1
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+                mod = Mixed().cuda()
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device="cuda"))
+                payload = payload_buffer.getvalue().strip()
+                if payload:
+                    data = json.loads(payload)
+                    types = sorted({op.get("type") for op in data.get("ops", [])})
+                    self.assertExpectedInline(
+                        str(types), """['collective', 'compute']"""
+                    )
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
     @torch._inductor.config.patch("log_tlparse", True)
     def test_tensor_metadata_logging(self):
         """Emit unified runtime+tensor-metadata artifact and assert a stable simplified JSON inline."""
@@ -1379,32 +1418,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                             }
                         )
 
-                simplified = (
-                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []}
-                )
-                actual = json.dumps(simplified, indent=2, sort_keys=True)
-
                 # Expect a single compute op producing the final output with shape [2], contiguous stride, dtype float16
                 self.assertExpectedInline(
-                    actual,
-                    r"""{
-  "ops": [
-    {
-      "outputs": [
-        {
-          "dtype": "float16",
-          "shape": [
-            2
-          ],
-          "stride": [
-            1
-          ]
-        }
-      ],
-      "type": "compute"
-    }
-  ]
-}""",
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    """{'ops': [{'type': 'compute', 'outputs': [{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}""",
                 )
 
             self.assertParses()
@@ -1450,40 +1467,13 @@ def forward(self, x_1: "f32[2][1]cpu"):
                             }
                         )
 
-                simplified = (
-                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []}
-                )
-                actual = json.dumps(simplified, indent=2, sort_keys=True)
-
                 self.assertExpectedInline(
-                    actual,
-                    r"""{
-  "ops": [
-    {
-      "outputs": [
-        {
-          "dtype": "float32",
-          "shape": [
-            2
-          ],
-          "stride": [
-            1
-          ]
-        },
-        {
-          "dtype": "float16",
-          "shape": [
-            2
-          ],
-          "stride": [
-            1
-          ]
-        }
-      ],
-      "type": "compute"
-    }
-  ]
-}""",
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    (
+                        "{'ops': [{'type': 'compute', 'outputs': ["
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float32'}, "
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}"
+                    ),
                 )
 
             self.assertParses()
