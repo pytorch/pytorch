@@ -172,7 +172,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("flops", &LegacyEvent::flops)
       .def("is_async", &LegacyEvent::isAsync);
 
-  py::enum_<c10::DeviceType>(m, "DeviceType")
+  py::native_enum<c10::DeviceType>(m, "DeviceType", "enum.Enum")
       .value("CPU", c10::DeviceType::CPU)
       .value("CUDA", c10::DeviceType::CUDA)
       .value("MKLDNN", c10::DeviceType::MKLDNN)
@@ -193,15 +193,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("VE", c10::DeviceType::VE)
       .value("Lazy", c10::DeviceType::Lazy)
       .value("IPU", c10::DeviceType::IPU)
-      .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+      .value("PrivateUse1", c10::DeviceType::PrivateUse1)
+      .finalize();
 
   using torch::autograd::CreationMeta;
-  py::enum_<CreationMeta>(m, "CreationMeta")
+  py::native_enum<CreationMeta>(m, "CreationMeta", "enum.Enum")
       .value("DEFAULT", CreationMeta::DEFAULT)
       .value("IN_CUSTOM_FUNCTION", CreationMeta::IN_CUSTOM_FUNCTION)
       .value("MULTI_OUTPUT_NODE", CreationMeta::MULTI_OUTPUT_NODE)
       .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
-      .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
+      .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE)
+      .finalize();
 
   py::class_<torch::autograd::InputMetadata>(m, "_InputMetadata")
       .def_property_readonly(
@@ -1366,7 +1368,7 @@ static PyObject* pop_torch_dispatch_stack(
         "Attempted to unset ",
         c10::impl::to_string(mode_key.value()),
         ", but there wasn't one active.");
-    auto mode = maybe_mode.value();
+    const auto& mode = maybe_mode.value();
     r = mode->ptr(getPyInterpreter());
   } else {
     auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
