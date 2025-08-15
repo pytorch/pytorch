@@ -2193,7 +2193,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 if CompiledFunction.compiled_bw is None:
                     assert lazy_backward_info is not None
 
-                    if hasattr(lazy_backward_info, "saved_context"):
+                    if (
+                        hasattr(lazy_backward_info, "saved_context")
+                        and lazy_backward_info.saved_context is not None
+                    ):
                         assert isinstance(
                             lazy_backward_info.saved_context, TracingContext
                         )
