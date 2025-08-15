@@ -92,6 +92,8 @@ def get_freeable_input_buf(
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs:
                 dep_name = dep.name
+                # Subgraphs have a prefix for the name, cleanup the prefix
+                # before checking for known strings.
                 if V.graph.name:
                     dep_name = dep_name.removeprefix(V.graph.name + "_")
                 if not dep_name.startswith(
