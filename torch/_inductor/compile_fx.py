@@ -1464,7 +1464,7 @@ class _InProcessFxCompile(FxCompile):
                     ):
                         if graph.aot_mode and graph.fx_wrapper:
                             assert not graph.cpp_wrapper
-                            compiled_fn = graph.codegen_with_cpp_wrapper()[0].gm  # type: ignore[attr-defined]
+                            compiled_fn = graph.codegen()[0].gm  # type: ignore[attr-defined]
                             output_code_log.debug(
                                 "Output graph module: \n%s",
                                 compiled_fn.print_readable(print_output=False),
