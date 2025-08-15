@@ -480,6 +480,7 @@ def add(
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
+
     # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
     # when broadcasting the add.
     def reshape_tensor_complex(tensor: torch.Tensor) -> torch.Tensor:
@@ -505,7 +506,7 @@ def add(
     if x.ndim == 0:
         x = x.reshape(1)
     if z.ndim == 0:
-        z = z.reshape(1)    
+        z = z.reshape(1)
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
