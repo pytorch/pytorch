@@ -30,7 +30,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest test/test_without_numpy_pytest.py \
+          pytest test/test_*_pytest.py \
             -v \
             --html=test-results/report.html \
             --self-contained-html \
