@@ -1,18 +1,60 @@
-import os
+# mypy: allow-untyped-defs
 import logging
-from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor import config, exc, metrics
-from typing import Optional
+import os
+import shutil
 from pathlib import Path
-from torch._inductor.cpp_builder import (
-    _set_gpu_runtime_env,
-    _transform_cuda_paths,
-)
+from typing import Optional
+
+from torch._inductor import config
+from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.cpp_builder import _set_gpu_runtime_env, _transform_cuda_paths
+from torch._inductor.utils import is_linux
+
+
 if config.is_fbcode():
     from triton.fb.build import build_paths
 
 
 log = logging.getLogger(__name__)
+
+
+def _cutlass_path() -> str:
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        return parutil.get_dir_path("cutlass-4-headers")
+    else:
+        return config.cutlass.cutlass_dir
+
+
+def _cutlass_paths() -> list[str]:
+    return [
+        "include",
+        "tools/library/include",
+        "tools/library/src",
+        "tools/util/include",
+    ]
+
+
+def _clone_cutlass_paths(build_root: str) -> list[str]:
+    paths = _cutlass_paths()
+    cutlass_root = _cutlass_path()
+    for path in _cutlass_paths():
+        old_path = os.path.join(cutlass_root, path)
+        new_path = os.path.join(build_root, path)
+        shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+    return paths
+
+
+def _cutlass_include_paths() -> list[str]:
+    cutlass_path = _cutlass_path()
+    return [
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, path))
+        for path in _cutlass_paths()
+    ]
+
+
 def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
@@ -116,6 +158,7 @@ def _nvcc_compiler_options() -> list[str]:
         )
     return options
 
+
 def use_re_build() -> bool:
     """
     Use for CUTLASS compilation only right now.
@@ -127,8 +170,6 @@ def use_re_build() -> bool:
     return False
 
 
-
-from torch._inductor.codegen.cutlass.utils import _clone_cutlass_paths, _cutlass_include_paths
 def cuda_compile_command(
     src_files: list[str],
     dst_file: str,
@@ -170,6 +211,7 @@ def cuda_compile_command(
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
     log.debug("CUDA command: %s", res)
     return res
+
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
     # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
