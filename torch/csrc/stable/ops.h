@@ -68,12 +68,22 @@ inline Tensor pad(
   return Tensor(ret0);
 }
 
-// We expect this to be the stable version of the amax.default op
+// We expect these to be the stable version of the amax.default op
 // with identical semantics to the existing amax.default op.
-inline Tensor amax(Tensor& self, int64_t* dim, int dim_len, bool keepdim) {
+inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
   AtenTensorHandle ret0 = nullptr;
   TORCH_ERROR_CODE_CHECK(
-      aoti_torch_aten_amax(self.get(), dim, dim_len, keepdim, &ret0));
+      aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret0));
+  return Tensor(ret0);
+}
+
+inline Tensor amax(
+    Tensor& self,
+    std::vector<int64_t> dims,
+    bool keepdim = false) {
+  AtenTensorHandle ret0 = nullptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_amax(
+      self.get(), dims.data(), (int64_t)dims.size(), keepdim, &ret0));
   return Tensor(ret0);
 }
 
