@@ -96,7 +96,6 @@ on:
         required: false
         type: string
         default: ""
-
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
