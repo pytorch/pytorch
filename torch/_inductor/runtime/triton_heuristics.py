@@ -2227,6 +2227,7 @@ def triton_config_reduction(
     num_stages=1,
     num_warps=None,
     register_intensive=False,
+    max_num_warps=16,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2256,7 +2257,7 @@ def triton_config_reduction(
     if num_warps is None:
         num_warps = total_numel() // 128
     num_warps = _num_warps(
-        num_warps, max_num_warps=16, register_intensive=register_intensive
+        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
@@ -2459,7 +2460,7 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], is_dynamic=False
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
@@ -2488,7 +2489,9 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False):
+    def make_config(
+        x, r, num_warps=None, num_stages=1, register_intensive=False, max_num_warps=16
+    ):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
@@ -2510,14 +2513,48 @@ def _reduction_configs(
                 num_warps=num_warps,
                 num_stages=num_stages,
                 register_intensive=register_intensive,
+                max_num_warps=max_num_warps,
             )
+
+    def make_outer_config():
+        max_x_block = 256
+        load_factor = inductor_meta.get("num_load", 0)
+        reduction_factor = inductor_meta.get("num_reduction", 0)
+        x = size_hints["x"]
+
+        if x <= 1024:
+            x_block = 8
+        elif x // 4096 <= 8:
+            x_block = 16
+        else:
+            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), 64)
+
+        if is_dynamic:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 16)
+            )
+        elif reduction_factor >= 3:
+            outer_r_block = 8
+        else:
+            outer_r_block = min(next_power_of_2(rnumel), 128)
+
+        if x_block * outer_r_block >= 4096:
+            x_block = 4096 // outer_r_block
+
+        # Set register intensive to true by default as we try to maximize tiles with heuristic
+        return make_config(
+            x_block, outer_r_block, register_intensive=True, max_num_warps=8
+        )
 
     contiguous_config = make_config(
         1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_config(64, 8, register_intensive=register_intensive)
+    outer_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2642,7 +2679,11 @@ def reduction(
 
     assert triton_meta is not None
 
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    is_dynamic = any("ks" in k for k in triton_meta["signature"].keys())
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, is_dynamic=is_dynamic
+    )
+
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
