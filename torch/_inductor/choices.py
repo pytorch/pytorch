@@ -127,8 +127,9 @@ class InductorChoices:
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
-        template_name: str,
         op_name: str,
+        template_name: str,
+        template_hash: Optional[str] = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get generator of template parameters for MM templates using template-specific heuristics
@@ -137,8 +138,9 @@ class InductorChoices:
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
             layout: Output layout
-            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
+            template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
+            template_hash: Template hash (generated from the template source)
 
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
@@ -156,7 +158,7 @@ class InductorChoices:
         configs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
         # Process through the configured processor
         processed_configs = self._config_processor.process(
-            configs, kernel_inputs, layout, op_name, template_name
+            configs, kernel_inputs, layout, op_name, template_name, template_hash
         )
         yield from processed_configs
 

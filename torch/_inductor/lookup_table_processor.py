@@ -11,7 +11,7 @@ Used as the default processor in InductorChoices for CUDA template autotuning op
 
 import logging
 from collections.abc import Generator
-from typing import Any
+from typing import Any, Optional
 
 from .ir import Layout
 from .kernel_inputs import KernelInputs
@@ -38,6 +38,7 @@ class LookupTableProcessor(TemplateConfigProcessor):
         layout: Layout,  # Unused by lookup table but required by interface
         op_name: str,
         template_name: str,
+        template_hash: Optional[str] = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Process template configurations using lookup table if available.
@@ -58,7 +59,9 @@ class LookupTableProcessor(TemplateConfigProcessor):
         # Try lookup table first
         input_nodes = kernel_inputs.nodes()
         cgen: Generator[dict[str, Any], None, None] = configs
-        lookup_configs = lookup_template_configs(input_nodes, op_name, template_name)
+        lookup_configs = lookup_template_configs(
+            input_nodes, op_name, template_name, template_hash
+        )
         if lookup_configs is not None:
             # lookup table is in use
             cgen = (c for c in lookup_configs)

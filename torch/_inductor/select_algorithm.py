@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import inspect
 import itertools
 import json
@@ -1077,9 +1078,11 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            if record_input_dependent_tracked_event
-            else fn
+            fn.__name__: (
+                self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+            )
             for fn in [
                 self.def_kernel,
                 self.size,
@@ -1357,6 +1360,7 @@ class TritonTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.grid = grid
+        self.src_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self

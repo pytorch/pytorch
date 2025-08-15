@@ -322,6 +322,54 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(len(result3), 1)
             self.assertEqual(len(result4), 1)
 
+    @parametrize(
+        "config_hash,provided_hash,expected_kept",
+        [
+            # hash provided, hash not defined
+            (None, "hash123", True),
+            # hash provided, hash defined
+            ("hash123", "hash123", True),
+            # hash provided, hash defined, mismatch
+            ("hash123", "hash456", False),
+            # hash not provided, hash defined
+            ("hash123", None, True),
+        ],
+    )
+    def test_lookup_configs_hash_filtering(
+        self, config_hash, provided_hash, expected_kept
+    ):
+        """Test hash filtering behavior of lookup_template_configs"""
+        config = self.create_config("triton", BLOCK_M=128, BLOCK_N=64)
+        if config_hash is not None:
+            config["template_hash"] = config_hash
+
+        lookup_table_data = {
+            self.create_lookup_key("NVIDIA H100", "mm", "test_key"): [config]
+        }
+
+        input_nodes = self.create_mock_input_nodes(2)
+
+        with (
+            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
+            patch(
+                "torch._inductor.lookup_table._inputs_lookup_key",
+                return_value="test_key",
+            ),
+            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
+        ):
+            result = lookup_template_configs(
+                input_nodes, "mm", "triton", template_hash=provided_hash
+            )
+
+            if expected_kept:
+                assert result is not None, "Result should not be None"
+                self.assertEqual(len(result), 1)
+                # template_hash should be removed from returned config
+                self.assertNotIn("template_hash", result[0])
+            else:
+                # Config was filtered out due to hash mismatch
+                self.assertEqual(result, [])
+
 
 if __name__ == "__main__":
     if HAS_CUDA_AND_TRITON:

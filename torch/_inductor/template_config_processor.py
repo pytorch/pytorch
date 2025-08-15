@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
-
-from .kernel_inputs import KernelInputs  # noqa: TC001
+from typing import Any, Optional, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from .kernel_inputs import KernelInputs
 
 
 class TemplateConfigProcessor(ABC):
@@ -26,6 +26,7 @@ class TemplateConfigProcessor(ABC):
         layout: Any,
         op_name: str,
         template_name: str,
+        template_hash: Optional[str] = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Process template configurations.

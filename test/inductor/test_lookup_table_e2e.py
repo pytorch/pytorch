@@ -82,8 +82,11 @@ class BaseE2ELookupTableTest(TestCase):
         inductor_config.template_lookup_table = self.original_lookup_table
         clear_preprocessing_fns()
 
-    def create_tensors(self, operation, b=8, m=64, n=64, k=32):
+    def create_tensors(self, operation, b=8, m=64, n=64, k=32, decompose_k=False):
         """Create test tensors for operations with configurable dimensions"""
+        if decompose_k:
+            k = 32 * max(m, n)  # decompose_k needs k to be 32x larger than m or n
+
         if operation in ["mm", "addmm", "mm_plus_mm"]:
             A = torch.randn(m, k, device=self.device, dtype=torch.float16)
             B = torch.randn(k, n, device=self.device, dtype=torch.float16)
@@ -127,7 +130,7 @@ class BaseE2ELookupTableTest(TestCase):
             compiled_model = torch.compile(model.to(self.device), mode="max-autotune")
             return compiled_model(*tensors)
 
-    def create_basic_config(self, template_id):
+    def create_basic_config(self, template_id, include_hash=True):
         """Create basic configuration for template"""
         configs = {
             "mm": {
@@ -141,6 +144,8 @@ class BaseE2ELookupTableTest(TestCase):
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
+                "template_hash": torch._inductor.kernel.mm.mm_template.src_hash,
+                "template_id": torch._inductor.kernel.mm.mm_template.name,
             },
             "mm_plus_mm": {
                 "BLOCK_M": 64,
@@ -153,6 +158,8 @@ class BaseE2ELookupTableTest(TestCase):
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
+                "template_hash": torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.src_hash,
+                "template_id": torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.name,
             },
             "bmm": {
                 "BLOCK_M": 64,
@@ -165,6 +172,8 @@ class BaseE2ELookupTableTest(TestCase):
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
+                "template_hash": torch._inductor.kernel.bmm.bmm_template.src_hash,
+                "template_id": torch._inductor.kernel.bmm.bmm_template.name,
             },
             "mm_persistent_tma": {
                 "BLOCK_M": 64,
@@ -182,11 +191,16 @@ class BaseE2ELookupTableTest(TestCase):
                 "NUM_SMS": get_num_sms(),
                 "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
                 "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+                "template_hash": torch._inductor.kernel.mm.persistent_tma_mm_template.src_hash,
+                "template_id": torch._inductor.kernel.mm.persistent_tma_mm_template.name,
             },
-            "bias_addmm": {},
-            "decompose_k": {"k": 4},
+            "bias_addmm": {"template_id": "bias_addmm"},
+            "decompose_k": {"template_id": "decompose_k", "k": 4},
         }
-        return {"template_id": template_id, **configs.get(template_id, {})}
+        c = configs.get(template_id)
+        if not include_hash:
+            del c["template_hash"]
+        return c
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support lookup table")
@@ -331,6 +345,20 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             partial(verify_choice_names, pattern="triton_", expected_count=2)
         )
         self.run_model("mm", tensors, {"triton.enable_persistent_tma_matmul": True})
+
+    @fresh_cache()
+    def test_mm_without_template_hash_still_works(self):
+        """Test mm operation where config has no template_hash - should still work"""
+        tensors = self.create_tensors("mm")
+
+        # Create config without template_hash
+        config = self.create_basic_config("mm", include_hash=False)
+
+        self.setup_lookup_table("mm", tensors, [config])
+        add_preprocessing_fn(
+            partial(verify_choice_names, pattern="triton_", expected_count=1)
+        )
+        self.run_model("mm", tensors)
 
 
 if __name__ == "__main__":
