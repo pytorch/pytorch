@@ -6,7 +6,7 @@ import unittest.mock
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase
 import torch
 
