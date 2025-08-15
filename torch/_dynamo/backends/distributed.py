@@ -147,8 +147,9 @@ def has_higher_order_op(gm):
 
 
 class DDPOptimizerContext:
-    curr_bucket = -1
-    metadata_per_bucket = []
+    def __init__(self):
+        self.curr_bucket = -1
+        self.metadata_per_bucket = []
 
 
 # compile each of the partitioned submodules using the user-provided compiler
