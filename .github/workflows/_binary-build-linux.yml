@@ -23,7 +23,7 @@ on:
         description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
         required: false
-        default: 240
+        default: 480
         type: number
         description: timeout for the job
       use_split_build:
