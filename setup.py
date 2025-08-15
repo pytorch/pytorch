@@ -1194,16 +1194,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
-        # in system CFLAGS
-        c_flags = os.getenv("CFLAGS", "")
-        if (
-            IS_LINUX
-            and "-fstack-clash-protection" in c_flags
-            and "clang" in os.getenv("CC", "")
-        ):
-            os.environ["CC"] = str(os.environ["CC"])
-
         super().run()
 
         if IS_DARWIN:
@@ -1225,23 +1215,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir = target_lib.parent
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
-
-            # In ROCm on Windows case copy rocblas and hipblaslt files into
-            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            if str2bool(os.getenv("USE_ROCM")):
-                rocm_dir_path = Path(os.environ["ROCM_DIR"])
-                rocm_bin_path = rocm_dir_path / "bin"
-                rocblas_dir = rocm_bin_path / "rocblas"
-                target_rocblas_dir = target_dir / "rocblas"
-                target_rocblas_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(rocblas_dir, str(target_rocblas_dir))
-
-                hipblaslt_dir = rocm_bin_path / "hipblaslt"
-                target_hipblaslt_dir = target_dir / "hipblaslt"
-                target_hipblaslt_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(hipblaslt_dir, str(target_hipblaslt_dir))
-            else:
-                report("The specified environment variable does not exist.")
 
     def build_extensions(self) -> None:
         self.create_compile_commands()
@@ -1615,6 +1588,7 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
+        'intel-openmp==2025.1.1 ;platform_system == "Windows" ',  # for Windows inductor
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
@@ -1686,6 +1660,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
+        "_inductor/kernel/flex/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
