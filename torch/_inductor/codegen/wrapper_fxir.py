@@ -291,10 +291,7 @@ class FxConverter:
             elif isinstance(sym_or_exp, sympy.Expr):
                 self._sympy_interp(sym_or_exp)
 
-        for node in V.graph.module.graph.nodes:  # type: ignore[union-attr]
-            if node.op != "placeholder":
-                continue
-
+        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
             if name in V.graph.graph_inputs:
                 ir_node = V.graph.graph_inputs[name]

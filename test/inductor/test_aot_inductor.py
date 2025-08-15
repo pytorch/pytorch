@@ -118,6 +118,8 @@ try:
             AOTIRunnerUtil,
             check_model,
             check_model_with_multiple_inputs,
+            check_model_fx,
+            check_model_with_multiple_inputs_fx,
             code_check_count,
         )
         from .test_control_flow import (
@@ -133,6 +135,8 @@ try:
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
+            check_model_fx,
+            check_model_with_multiple_inputs_fx,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
