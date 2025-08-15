@@ -12,7 +12,7 @@ import torch
 
 device_type = torch.accelerator.current_accelerator().type
 
-requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
+requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU_AND_TRITON, "requires cuda or xpu")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
