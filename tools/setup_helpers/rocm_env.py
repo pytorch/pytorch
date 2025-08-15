@@ -29,6 +29,20 @@ def read_ck_pin() -> str:
 # Prepares a dependency string for install_requires in setuptools
 # in specific PEP 508 URL format
 def get_ck_dependency_string() -> str:
+    """
+    Generates a PEP 508-compliant dependency string for the ROCm Composable Kernel
+    to be used in setuptools' install_requires.
+
+    The returned string is in the format:
+        " @ git+<repo_url>@<commit_hash>#egg=rocm-composable-kernel"
+    where:
+        - <repo_url> is the GitHub repository URL for ROCm Composable Kernel
+        - <commit_hash> is read from the commit pin file
+        - "#egg=rocm-composable-kernel" specifies the package name for setuptools
+
+    Returns:
+        str: The formatted dependency string for use in install_requires.
+    """
     prefix = " @ git+"
     repo_address = "https://github.com/ROCm/composable_kernel.git"
     commit_pin = "@" + read_ck_pin()
