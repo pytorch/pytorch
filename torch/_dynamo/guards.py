@@ -3495,7 +3495,7 @@ class CheckFunctionManager:
         for source in output_graph.guard_on_key_order:
             prune_variable(source)
 
-        def normalize_create_fn(x: Any) -> Any:
+        def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
             if isinstance(x, functools.partial):
 
                 def _ref(x: Any) -> Any:
