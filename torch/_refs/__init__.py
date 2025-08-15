@@ -385,7 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -396,10 +396,12 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    # Type checking
-    # TODO: make common validations available as utils
     for shape in shapes:
-        assert isinstance(shape, Sequence)
+        if not isinstance(shape, Sequence):
+            raise RuntimeError(
+                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
+                shape,
+            )
 
     # Computes common shape
     common_shape: list[Union[int, torch.SymInt]] = [
@@ -407,16 +409,26 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            # if both 1, or statically known the same, we rather pick non-broadcast path.
-            if guard_or_false(common_shape[idx] == shape[idx]):
-                continue
-            elif guard_or_false(common_shape[idx] == 1):
+            # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
+            if is_nested_int(shape[idx]):
+                # Broadcasting is allowed for (j0, 1) or (j0, j0);
+                # not (j0, j1), (j0, 5), etc.
+                if is_nested_int(common_shape[idx]) and guard_or_false(
+                    shape[idx] == common_shape[idx]
+                ):
+                    continue
+            else:
+                if guard_or_false(shape[idx] == common_shape[idx]):
+                    continue
+
+            if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_or_false(shape[idx] == 1):
+
+            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
                 # broadcast case .
                 continue
             else:
