@@ -1,11 +1,12 @@
 # Stub file for torch.linalg module
 # Type annotations for PyTorch Linear Algebra functions
 
-from typing import Optional, Union
+from typing import Literal, Optional, Union, Sequence
 
-from torch import Tensor
+from torch import Tensor, SymInt
 from torch._C import dtype
 from torch.types import _float, _int
+import torch.return_types
 
 # Exception class
 class LinAlgError(RuntimeError): ...
@@ -26,7 +27,7 @@ def cholesky_ex(
     upper: bool = False,
     check_errors: bool = False,
     out: Optional[tuple[Tensor, Tensor]] = None,
-) -> tuple[Tensor, Tensor]: ...
+) -> torch.return_types._lu_with_info: ...
 def cond(
     A: Tensor,
     p: Optional[Union[_int, _float, str]] = None,
@@ -111,7 +112,7 @@ def matrix_exp(A: Tensor, *, out: Optional[Tensor] = None) -> Tensor: ...
 def matrix_norm(
     A: Tensor,
     ord: Union[_int, _float, str] = "fro",
-    dim: Union[int, tuple[int, int]] = (-2, -1),
+    dim: Union[int, tuple[int, int], Sequence[Union[int, SymInt]]] = (-2, -1),
     keepdim: bool = False,
     *,
     dtype: Optional[dtype] = None,
@@ -129,7 +130,7 @@ def multi_dot(tensors: list[Tensor], *, out: Optional[Tensor] = None) -> Tensor:
 def norm(
     A: Tensor,
     ord: Optional[Union[_int, _float, str]] = None,
-    dim: Optional[Union[int, tuple[int, ...]]] = None,
+    dim: Optional[Union[int, Sequence[Union[int, SymInt]]]] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[dtype] = None,
@@ -143,11 +144,11 @@ def pinv(
     out: Optional[Tensor] = None,
 ) -> Tensor: ...
 def qr(
-    A: Tensor, mode: str = "reduced", *, out: Optional[tuple[Tensor, Tensor]] = None
-) -> tuple[Tensor, Tensor]: ...
+    A: Tensor, mode: Literal["reduced", "complete", "r"] = "reduced", *, out: Optional[tuple[Tensor, Tensor]] = None
+) -> torch.return_types.qr: ...
 def slogdet(
     A: Tensor, *, out: Optional[tuple[Tensor, Tensor]] = None
-) -> tuple[Tensor, Tensor]: ...
+) -> torch.return_types.slogdet: ...
 def solve(
     A: Tensor, B: Tensor, *, left: bool = True, out: Optional[Tensor] = None
 ) -> Tensor: ...
@@ -182,7 +183,7 @@ def tensorinv(A: Tensor, ind: int = 2, *, out: Optional[Tensor] = None) -> Tenso
 def tensorsolve(
     A: Tensor,
     B: Tensor,
-    dims: Optional[tuple[int, ...]] = None,
+    dims: Optional[Sequence[int]] = None,
     *,
     out: Optional[Tensor] = None,
 ) -> Tensor: ...
@@ -194,8 +195,8 @@ def vecdot(
 ) -> Tensor: ...
 def vector_norm(
     x: Tensor,
-    ord: Union[_int, _float] = 2,
-    dim: Optional[Union[int, tuple[int, ...]]] = None,
+    ord: Optional[Union[_int, _float, complex]] = 2,
+    dim: Optional[Union[int, Sequence[Union[int, SymInt]]]] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[dtype] = None,
