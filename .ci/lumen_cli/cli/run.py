@@ -5,6 +5,7 @@ import logging
 
 from cli.build_cli.register_build import register_build_commands
 from cli.lib.common.logger import setup_logging
+from cli.test_cli.register_test import register_test_commands
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ def main():
 
     # registers second-level subcommands
     register_build_commands(subparsers)
+    register_test_commands(subparsers)
 
     # parse args after all options are registered
     args = parser.parse_args()
