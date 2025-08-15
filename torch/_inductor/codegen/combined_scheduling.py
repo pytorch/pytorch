@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     _IntLike: TypeAlias = Union[int, Expr]
 
 
-class CUDACombinedScheduling(BaseScheduling):
+class CombinedScheduling(BaseScheduling):
     """
     Scheduler for CUDA Kernels, which delegates calls as appropriate
     to the CUDA-C++ and Triton Schedulers, which both work for CUDA devices
@@ -49,7 +49,7 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
-        if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
+        if self._cuda_cpp_scheduling.is_cutlass_template(node):
             return self._cuda_cpp_scheduling
         if self._rocm_cpp_scheduling.is_rocm_cpp_template(node):
             return self._rocm_cpp_scheduling
@@ -60,9 +60,9 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> bool:
         if self._cuda_cpp_scheduling.can_fuse_vertical(node1, node2):
             return True
-        elif self._cuda_cpp_scheduling.is_cuda_cpp_template(
+        elif self._cuda_cpp_scheduling.is_cutlass_template(
             node1
-        ) or self._cuda_cpp_scheduling.is_cuda_cpp_template(node2):
+        ) or self._cuda_cpp_scheduling.is_cutlass_template(node2):
             return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
@@ -70,7 +70,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         for node in (node1, node2):
-            if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
+            if self._cuda_cpp_scheduling.is_cutlass_template(node):
                 return self._cuda_cpp_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
@@ -87,7 +87,7 @@ class CUDACombinedScheduling(BaseScheduling):
         epilogue_nodes: Sequence[BaseSchedulerNode],
         prologue_nodes: Sequence[BaseSchedulerNode],
     ) -> Optional[str]:
-        if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
+        if self._cuda_cpp_scheduling.is_cutlass_template(template_node):
             assert not prologue_nodes
             return self._cuda_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
