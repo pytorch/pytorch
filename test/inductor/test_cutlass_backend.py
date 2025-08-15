@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor.codegen.cutlass.serialization import get_cutlass_operation_serializer
+from torch._inductor.codegen.cutlass.serialization import (
+    get_cutlass_operation_serializer,
+)
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
