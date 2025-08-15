@@ -4006,13 +4006,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             # Check memory savings  
             # TODO: check if majority of reads are coalesced by the rblock
+            r_coalesce_ratio = self.tiling_scores["r0_"] / self.tiling_scores["x"]
             looped_mem = memory_stats.looped.memory.bytes
             persistent_mem = memory_stats.persistent.memory.bytes
             saved_bytes_ratio = V.graph.sizevars.size_hint(looped_mem, fallback=config.unbacked_symint_fallback) / V.graph.sizevars.size_hint(persistent_mem, fallback=config.unbacked_symint_fallback)
 
-            # TODO - need more detailed register analysis
             if (
-                saved_bytes_ratio >= 1.3 # At least 30% memory bandwidth savings
+                # significant memory bandwidth savings
+                saved_bytes_ratio >= 1.3
+                # large rblock inhibits xblock size, dont attempt if there is a decent amount of 
+                # reads coalesced by xblock
+                and r_coalesce_ratio >= 8.0
+                # TODO - need more detailed register analysis
                 and V.graph.sizevars.statically_known_leq(self.features.reduction_numel, 16384)
                 and mem_ops_per_thread <= 5
             ):
