@@ -23,6 +23,7 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.export import Dim
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -427,9 +428,9 @@ class FxirTestCase(InductorTestCase):
         self.assertIn("xnumel", triton_node.kwargs["kwargs"])
         self.assertIn("XBLOCK", triton_node.kwargs["kwargs"])
         grid = triton_node.kwargs["grid"][0]
-        xblock = triton_node.kwargs["kwargs"]["XBLOCK"]
-        xnumel = triton_node.kwargs["kwargs"]["xnumel"]
-        self.assertEqual(grid[0].node.expr, ((xnumel + xblock - 1) // xblock))
+        self.assertEqual(
+            grid[0].target, operator.floordiv
+        )  # ((xnumel + 127) // xblock))
         self.assertEqual(grid[1], 1)
         self.assertEqual(grid[2], 1)
 
@@ -541,6 +542,8 @@ class FxirTestCase(InductorTestCase):
             op="call_function", target=torch.empty_strided
         )
         (shape, stride) = empty_strided.args
+        if use_dynamic_shapes:
+            self.assertEqual(type(shape[0]), torch.fx.Node)
 
 
 class AOTFxirTestCase(InductorTestCase):
@@ -587,6 +590,21 @@ class AOTFxirTestCase(InductorTestCase):
 
         inp = (torch.ones(3, 3, device=self.device),)
         self.check(M().to(self.device), inp)
+
+    def test_aoti_fx_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
+        self.check(
+            M().to(device=self.device),
+            inp,
+            dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
+        )
 
 
 if __name__ == "__main__":
