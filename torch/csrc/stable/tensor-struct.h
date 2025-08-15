@@ -6,11 +6,12 @@
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
+
+#include <torch/csrc/stable/accelerator.h>
+
 namespace torch::stable {
 
-// this is bigger than DeviceIndex in c10/core/Device.h but it is the type we
-// can converge on in this world as DeviceIndex in libtorch is not stable.
-using DeviceIndex = int32_t;
+using accelerator::DeviceIndex;
 using torch::headeronly::ScalarType;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
