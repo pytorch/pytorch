@@ -25,13 +25,12 @@ from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+requires_cuda_and_triton = unittest.skipUnless(HAS_CUDA, "requires cuda")
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
-
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -238,7 +237,7 @@ class StructuredTraceTest(TestCase):
             with self.assertRaises(ValueError):
                 torch._guards.CompileId.from_string(bad_cid)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device="cuda"))
@@ -270,7 +269,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_cudagraphs(self):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
@@ -528,7 +527,7 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_ddp_graphs(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -1199,13 +1198,13 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @contextmanager
     def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
         payload_buffer = io.StringIO()
         payload_handler = logging.StreamHandler(payload_buffer)
         payload_handler.setLevel(logging.DEBUG)
         payload_handler.setFormatter(StructuredTracePayloadFormatter())
         payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_tlparse_runtime")
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
         )
         trace_log.addHandler(payload_handler)
         try:
@@ -1215,7 +1214,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_simple(self):
@@ -1246,8 +1245,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1272,7 +1273,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_mixed(self):
@@ -1311,8 +1312,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1333,6 +1336,145 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 self.assertParses()
         finally:
             dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_multiple_ops(self):
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = torch.relu(self.linear(x))
+                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
+                y = torch.ops._c10d_functional.wait_tensor.default(y)
+                return y + 1
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+                mod = Mixed().cuda()
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device="cuda"))
+                payload = payload_buffer.getvalue().strip()
+                if payload:
+                    data = json.loads(payload)
+                    types = sorted({op.get("type") for op in data.get("ops", [])})
+                    self.assertExpectedInline(
+                        str(types), """['collective', 'compute']"""
+                    )
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging(self):
+        """Emit unified runtime+tensor-metadata artifact and assert a stable simplified JSON inline."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
+
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
+
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled(torch.ones(2, 3))
+
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
+
+            payload = payload_buffer.getvalue().strip()
+            if payload:
+                data = json.loads(payload)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                self.assertExpectedInline(
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    """{'ops': [{'type': 'compute', 'outputs': [{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}""",
+                )
+
+            self.assertParses()
+
+    @requires_tlparse
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_dynamic_shapes(self):
+        """Same as test_tensor_metadata_logging, but with dynamic shapes enabled to cover to_size_hints."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
+
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
+
+            compiled = torch.compile(f, backend="inductor", dynamic=True)
+            compiled(torch.ones(2, 3))
+
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
+
+            payload = payload_buffer.getvalue().strip()
+            if payload:
+                data = json.loads(payload)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                self.assertExpectedInline(
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    (
+                        "{'ops': [{'type': 'compute', 'outputs': ["
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float32'}, "
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}"
+                    ),
+                )
+
+            self.assertParses()
 
 
 if __name__ == "__main__":
