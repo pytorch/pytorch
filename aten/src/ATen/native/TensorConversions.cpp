@@ -206,6 +206,14 @@ void reshape_2d_sparse_compressed_members_to_nd_batched(
   // only
   values = values.unflatten(0, batchsize_infer_last);
 }
+
+inline constexpr bool cuda_enabled() {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
 } // namespace
 
 // Take a Device that may not have device_index set (i.e., having it as -1
@@ -216,6 +224,14 @@ static inline Device ensure_has_index(Device device) {
   if (device.is_cpu() || device.has_index()) {
     return device;
   }
+
+  if (device.is_cuda() && !cuda_enabled()) {
+    // If CUDA is not available, we should not try to access the current
+    // device index.
+    device.set_index(0);
+    return device;
+  }
+
   const c10::impl::DeviceGuardImplInterface* impl =
       c10::impl::getDeviceGuardImpl(device.type());
   return impl->getDevice();

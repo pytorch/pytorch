@@ -360,6 +360,18 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
   auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFF].load();
 
+  if (type == DeviceType::CUDA) {
+    if (p == nullptr) {
+      // Trying to get a cuda device guard on a cpu-only build. Return a
+      // no-op device guard.
+      return new NoOpDeviceGuardImpl<DeviceType::CUDA>();
+    } else if (p != nullptr && p->deviceCount() == 0) {
+      // cuda build enabled, but no cuda devices available. Return a
+      // no-op device guard.
+      return new NoOpDeviceGuardImpl<DeviceType::CUDA>();
+    }
+  }
+
   // This seems to be the first place where you make use of a device
   // when you pass devices to factory functions.  Give a nicer error
   // message in this case.
