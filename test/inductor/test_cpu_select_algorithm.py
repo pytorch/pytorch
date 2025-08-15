@@ -2783,7 +2783,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
             def forward(self, x, y):
                 # y_with_offset: contiguous, but has non-zero storage offset
-                y_with_offset = torch.empty((3, *y.shape), dtype=y.dtype, device=y.device)[2].copy_(y)
+                y_with_offset = torch.empty(
+                    (3, *y.shape), dtype=y.dtype, device=y.device
+                )[2].copy_(y)
                 return x @ y_with_offset
 
         counters.clear()
