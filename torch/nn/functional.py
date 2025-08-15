@@ -6,7 +6,7 @@ import itertools
 import math
 import warnings
 from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -440,12 +440,32 @@ def handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
     assert tensor_args, f"{func} does not have any tensor arguments"
 
     @functools.wraps(func)
-    def wrapped(*args, **kwargs) -> _T:
-        it = itertools.chain(zip(names, args), kwargs.items())
-        tensors = [v for k, v in it if k in tensor_args]
-        if has_torch_function_variadic(*tensors):
-            return handle_torch_function(func, tensors, *args, **kwargs)
-        return func(*args, **kwargs)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        try:
+            it = itertools.chain(zip(names, args), kwargs.items())
+            tensors = [v for k, v in it if k in tensor_args]
+            if has_torch_function_variadic(*tensors):
+                return handle_torch_function(func, tensors, *args, **kwargs)
+            return func(*args, **kwargs)
+        except TypeError as e:
+            # See https://github.com/pytorch/pytorch/issues/75462
+            raise NotImplementedError from e
+
+    return wrapped
+
+
+def handle_torch_function_unary(
+    func: Callable[Concatenate[Tensor, _P], _T],
+) -> Callable[Concatenate[Tensor, _P], _T]:
+    @functools.wraps(func)
+    def wrapped(input: Tensor, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        try:
+            if has_torch_function_unary(input):
+                return handle_torch_function(func, (input,), *args, **kwargs)
+            return func(input, *args, **kwargs)
+        except TypeError as e:
+            # See https://github.com/pytorch/pytorch/issues/75462
+            raise NotImplementedError from e
 
     return wrapped
 
@@ -932,6 +952,7 @@ def _unpool_output_size(
     return ret
 
 
+@handle_torch_function_unary
 def max_unpool1d(
     input: Tensor,
     indices: Tensor,
@@ -944,17 +965,6 @@ def max_unpool1d(
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool1d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _single(kernel_size)
     if stride is not None:
         _stride = _single(stride)
@@ -971,6 +981,7 @@ def max_unpool1d(
     ).squeeze(-1)
 
 
+@handle_torch_function_unary
 def max_unpool2d(
     input: Tensor,
     indices: Tensor,
@@ -983,17 +994,6 @@ def max_unpool2d(
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool2d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _pair(kernel_size)
     if stride is not None:
         _stride = _pair(stride)
@@ -1004,6 +1004,7 @@ def max_unpool2d(
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
+@handle_torch_function_unary
 def max_unpool3d(
     input: Tensor,
     indices: Tensor,
@@ -1016,17 +1017,6 @@ def max_unpool3d(
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool3d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _triple(kernel_size)
     if stride is not None:
         _stride = _triple(stride)
@@ -1037,6 +1027,7 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
+@handle_torch_function_unary
 def lp_pool3d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1052,16 +1043,6 @@ def lp_pool3d(
 
     See :class:`~torch.nn.LPPool3d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool3d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     kd, kw, kh = _triple(kernel_size)
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -1075,6 +1056,7 @@ def lp_pool3d(
     )
 
 
+@handle_torch_function_unary
 def lp_pool2d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1090,16 +1072,6 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool2d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     kw, kh = _pair(kernel_size)
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -1111,6 +1083,7 @@ def lp_pool2d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
+@handle_torch_function_unary
 def lp_pool1d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1125,16 +1098,6 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool1d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1147,6 +1110,7 @@ def lp_pool1d(
     )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
@@ -1164,14 +1128,6 @@ def adaptive_max_pool1d_with_indices(
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool1d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     return torch.adaptive_max_pool1d(input, output_size)
 
 
@@ -1202,6 +1158,7 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
@@ -1219,14 +1176,6 @@ def adaptive_max_pool2d_with_indices(
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool2d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
@@ -1258,6 +1207,7 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
@@ -1276,14 +1226,6 @@ def adaptive_max_pool3d_with_indices(
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool3d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
@@ -1331,6 +1273,7 @@ Args:
 )
 
 
+@handle_torch_function_unary
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1340,12 +1283,11 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
+@handle_torch_function_unary
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
     r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1355,13 +1297,12 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
 
 # Activation functions
+@handle_torch_function_unary
 def dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1379,10 +1320,6 @@ def dropout(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1390,6 +1327,7 @@ def dropout(
     )
 
 
+@handle_torch_function_unary
 def alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1400,10 +1338,6 @@ def alpha_dropout(
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1413,6 +1347,7 @@ def alpha_dropout(
     )
 
 
+@handle_torch_function_unary
 def dropout1d(
     input: Tensor,
     p: float = 0.5,
@@ -1433,10 +1368,6 @@ def dropout1d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout1d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1464,6 +1395,7 @@ def dropout1d(
     return result
 
 
+@handle_torch_function_unary
 def dropout2d(
     input: Tensor,
     p: float = 0.5,
@@ -1484,10 +1416,6 @@ def dropout2d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout2d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1523,6 +1451,7 @@ def dropout2d(
     return result
 
 
+@handle_torch_function_unary
 def dropout3d(
     input: Tensor,
     p: float = 0.5,
@@ -1543,10 +1472,6 @@ def dropout3d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout3d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1575,6 +1500,7 @@ def dropout3d(
     return result
 
 
+@handle_torch_function_unary
 def feature_alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1600,15 +1526,6 @@ def feature_alpha_dropout(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            feature_alpha_dropout,
-            (input,),
-            input,
-            p=p,
-            training=training,
-            inplace=inplace,
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1654,14 +1571,13 @@ In-place version of :func:`~threshold`.
 )
 
 
+@handle_torch_function_unary
 def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.relu_(input)
     else:
@@ -1679,6 +1595,7 @@ In-place version of :func:`~relu`.
 )
 
 
+@handle_torch_function_unary
 def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     r"""
     glu(input, dim=-1) -> Tensor
@@ -1697,8 +1614,6 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
         input (Tensor): input tensor
         dim (int): dimension on which to split the input. Default: -1
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(glu, (input,), input, dim=dim)
     if input.dim() == 0:
         raise RuntimeError(
             "glu does not support scalars because halving size must be even"
@@ -1706,6 +1621,7 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     return torch._C._nn.glu(input, dim)
 
 
+@handle_torch_function_unary
 def hardtanh(
     input: Tensor,
     min_val: float = -1.0,
@@ -1718,10 +1634,6 @@ def hardtanh(
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace
-        )
     if min_val > max_val:
         raise ValueError("min_val cannot be greater than max_val")
     if inplace:
@@ -1741,6 +1653,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
+@handle_torch_function_unary
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu6(input, inplace=False) -> Tensor
 
@@ -1748,8 +1661,6 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu6, (input,), input, inplace=inplace)
     if inplace:
         result = torch._C._nn.relu6_(input)
     else:
@@ -1757,13 +1668,12 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     return result
 
 
+@handle_torch_function_unary
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     r"""Apply the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
@@ -1781,6 +1691,7 @@ In-place version of :func:`~elu`.
 )
 
 
+@handle_torch_function_unary
 def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""selu(input, inplace=False) -> Tensor
 
@@ -1791,8 +1702,6 @@ def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
 
     See :class:`~torch.nn.SELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(selu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.selu_(input)
     else:
@@ -1810,6 +1719,7 @@ In-place version of :func:`~selu`.
 )
 
 
+@handle_torch_function_unary
 def celu(
     input: Tensor,
     alpha: float = 1.0,
@@ -1822,10 +1732,6 @@ def celu(
 
     See :class:`~torch.nn.CELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            celu, (input,), input, alpha=alpha, inplace=inplace
-        )
     if inplace:
         result = torch.celu_(input, alpha)
     else:
@@ -1843,6 +1749,7 @@ In-place version of :func:`~celu`.
 )
 
 
+@handle_torch_function_unary
 def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
@@ -1856,10 +1763,6 @@ def leaky_relu(
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace
-        )
     if inplace:
         result = torch._C._nn.leaky_relu_(input, negative_slope)
     else:
@@ -1898,6 +1801,7 @@ See :class:`~torch.nn.PReLU` for more details.
 )
 
 
+@handle_torch_function_unary
 def rrelu(
     input: Tensor,
     lower: float = 1.0 / 8,
@@ -1911,16 +1815,6 @@ def rrelu(
 
     See :class:`~torch.nn.RReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            rrelu,
-            (input,),
-            input,
-            lower=lower,
-            upper=upper,
-            training=training,
-            inplace=inplace,
-        )
     if inplace:
         result = torch.rrelu_(input, lower, upper, training)
     else:
@@ -1979,6 +1873,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 )
 
 
+@handle_torch_function_unary
 def tanhshrink(input):  # noqa: D400,D402
     r"""tanhshrink(input) -> Tensor
 
@@ -1986,11 +1881,10 @@ def tanhshrink(input):  # noqa: D400,D402
 
     See :class:`~torch.nn.Tanhshrink` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(tanhshrink, (input,), input)
     return input - input.tanh()
 
 
+@handle_torch_function_unary
 def softsign(input):  # noqa: D400,D402
     r"""softsign(input) -> Tensor
 
@@ -1998,8 +1892,6 @@ def softsign(input):  # noqa: D400,D402
 
     See :class:`~torch.nn.Softsign` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(softsign, (input,), input)
     return input / (input.abs() + 1)
 
 
@@ -2031,6 +1923,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     return ret
 
 
+@handle_torch_function_unary
 def softmin(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2051,10 +1944,6 @@ def softmin(
           If specified, the input tensor is casted to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
     if dtype is None:
@@ -2064,6 +1953,7 @@ def softmin(
     return ret
 
 
+@handle_torch_function_unary
 def softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2094,10 +1984,6 @@ def softmax(
         Use log_softmax instead (it's faster and has better numerical properties).
 
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
     if dtype is None:
@@ -2107,6 +1993,7 @@ def softmax(
     return ret
 
 
+@handle_torch_function_unary
 def gumbel_softmax(
     logits: Tensor,
     tau: float = 1,
@@ -2153,10 +2040,6 @@ def gumbel_softmax(
     .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
-    if has_torch_function_unary(logits):
-        return handle_torch_function(
-            gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim
-        )
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
@@ -2181,6 +2064,7 @@ def gumbel_softmax(
     return ret
 
 
+@handle_torch_function_unary
 def log_softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2202,10 +2086,6 @@ def log_softmax(
           If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
     if dtype is None:
@@ -2248,6 +2128,7 @@ def sigmoid(input):  # noqa: D400,D402
     return input.sigmoid()
 
 
+@handle_torch_function_unary
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Hardsigmoid function element-wise.
 
@@ -2263,8 +2144,6 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.hardsigmoid_(input)
     return torch._C._nn.hardsigmoid(input)
@@ -2317,6 +2196,7 @@ Shape:
 )
 
 
+@handle_torch_function_unary
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
 
@@ -2335,13 +2215,12 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.SiLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(silu, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.silu_(input)
     return torch._C._nn.silu(input)
 
 
+@handle_torch_function_unary
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Mish function, element-wise.
 
@@ -2355,13 +2234,12 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.Mish` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(mish, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.mish_(input)
     return torch._C._nn.mish(input)
 
 
+@handle_torch_function_unary
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply hardswish function, element-wise.
 
@@ -2380,8 +2258,6 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.hardswish_(input)
     return torch._C._nn.hardswish(input)
@@ -4216,6 +4092,7 @@ def interpolate(  # noqa: F811
     pass
 
 
+@handle_torch_function_unary
 def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
@@ -4293,18 +4170,6 @@ def interpolate(  # noqa: F811
     Note:
         {backward_reproducibility_note}
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            interpolate,
-            (input,),
-            input,
-            size=size,
-            scale_factor=scale_factor,
-            mode=mode,
-            align_corners=align_corners,
-            recompute_scale_factor=recompute_scale_factor,
-            antialias=antialias,
-        )
 
     if mode in ("nearest", "area", "nearest-exact"):
         if align_corners is not None:
@@ -4788,6 +4653,7 @@ def grid_sample(
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
 
 
+@handle_torch_function_unary
 def affine_grid(
     theta: Tensor,
     size: list[int],
@@ -4839,10 +4705,6 @@ def affine_grid(
         along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
-    if has_torch_function_unary(theta):
-        return handle_torch_function(
-            affine_grid, (theta,), theta, size, align_corners=align_corners
-        )
     if align_corners is None:
         warnings.warn(
             "Default grid_sample and affine_grid behavior has changed "
@@ -4890,6 +4752,7 @@ def affine_grid(
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
+@handle_torch_function_unary
 def pad(
     input: Tensor,
     pad: list[int],
@@ -4956,10 +4819,6 @@ def pad(
         >>> print(out.size())
         torch.Size([3, 9, 7, 3])
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
-        )
     if not torch.jit.is_scripting():
         if torch.are_deterministic_algorithms_enabled() and (
             input.is_cuda or input.is_xpu
@@ -5230,6 +5089,7 @@ def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
+@handle_torch_function_unary
 def unfold(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -5253,21 +5113,12 @@ def unfold(
 
     See :class:`torch.nn.Unfold` for details
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            unfold,
-            (input,),
-            input,
-            kernel_size,
-            dilation=dilation,
-            padding=padding,
-            stride=stride,
-        )
     return torch._C._nn.im2col(
         input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
     )
 
 
+@handle_torch_function_unary
 def fold(
     input: Tensor,
     output_size: BroadcastingList2[int],
@@ -5283,17 +5134,6 @@ def fold(
 
     See :class:`torch.nn.Fold` for details
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            fold,
-            (input,),
-            input,
-            output_size,
-            kernel_size,
-            dilation=dilation,
-            padding=padding,
-            stride=stride,
-        )
     return torch._C._nn.col2im(
         input,
         _pair(output_size),
