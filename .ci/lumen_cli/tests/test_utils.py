@@ -10,18 +10,46 @@ class EnvIsolatedTestCase(unittest.TestCase):
     """Base class that snapshots os.environ and CWD for isolation."""
 
     def setUp(self):
+        import os
+        import tempfile
+
         self._env_backup = dict(os.environ)
-        self._cwd_backup = os.getcwd()
+
+        # Snapshot/repair CWD if it's gone
+        try:
+            self._cwd_backup = os.getcwd()
+        except FileNotFoundError:
+            # If CWD no longer exists, switch to a safe place and record that
+            self._cwd_backup = tempfile.gettempdir()
+            os.chdir(self._cwd_backup)
+
+        # Create a temporary directory for the test to run in
+        self._temp_dir = tempfile.mkdtemp()
+        os.chdir(self._temp_dir)
 
     def tearDown(self):
+        import os
+        import shutil
+        import tempfile
+
+        # Restore cwd first (before cleaning up temp dir)
+        try:
+            os.chdir(self._cwd_backup)
+        except OSError:
+            os.chdir(tempfile.gettempdir())
+
+        # Clean up temporary directory
+        try:
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+        except Exception:
+            pass  # Ignore cleanup errors
+
         # Restore env
         to_del = set(os.environ.keys()) - set(self._env_backup.keys())
         for k in to_del:
             os.environ.pop(k, None)
         for k, v in self._env_backup.items():
             os.environ[k] = v
-        # Restore cwd (in case a test forgot)
-        os.chdir(self._cwd_backup)
 
 
 class TestTempEnviron(EnvIsolatedTestCase):
@@ -75,7 +103,7 @@ class TestWorkingDirectory(EnvIsolatedTestCase):
             target.mkdir()
 
             with working_directory(str(target)):
-                self.assertEqual(Path.cwd(), target)
+                self.assertEqual(Path.cwd().resolve(), target.resolve())
 
         self.assertEqual(Path.cwd(), start)
 
@@ -87,16 +115,18 @@ class TestWorkingDirectory(EnvIsolatedTestCase):
 
     def test_restores_on_exception(self):
         start = Path.cwd()
+
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "wd_exc"
             target.mkdir()
 
             with self.assertRaises(ValueError):
                 with working_directory(str(target)):
-                    self.assertEqual(Path.cwd(), target)
+                    # Normalize both sides to handle /var -> /private/var
+                    self.assertEqual(Path.cwd().resolve(), target.resolve())
                     raise ValueError("boom")
 
-        self.assertEqual(Path.cwd(), start)
+        self.assertEqual(Path.cwd().resolve(), start.resolve())
 
     def test_raises_for_missing_dir(self):
         start = Path.cwd()
