@@ -1861,7 +1861,7 @@ def compile_fx_aot(
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
-) -> Union[list[Union[str, Weights]], str]:
+) -> Union[list[Union[str, Weights]], str, GraphModule]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT

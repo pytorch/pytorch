@@ -266,16 +266,36 @@ class FxConverter:
         """
         Converts graph inputs to FX placeholders.
         """
-        for name, ir_node in V.graph.graph_inputs.items():
-            # Introduce a new symbol for constant inputs.
-            buffer = (
-                SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
-                else self._get_buffer(ir_node)
-            )
-            node = self.gm.graph.placeholder(buffer.get_name())
-            self._create_meta_from_buffer(node, buffer)
-            self._record_allocation(buffer, node)
+
+        V.graph.module.print_readable()
+        for node in V.graph.module.graph.nodes:  # type: ignore[union-attr]
+            if node.op != "placeholder":
+                continue
+
+            name = node.name
+            if name in V.graph.graph_inputs:
+                ir_node = V.graph.graph_inputs[name]
+
+                # Introduce a new symbol for constant inputs.
+                buffer = (
+                    SymbolBuffer(sympy.Symbol(name, is_integer=True))
+                    if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                    else self._get_buffer(ir_node)
+                )
+                placeholder_node = self.gm.graph.placeholder(buffer.get_name())
+                self._create_meta_from_buffer(placeholder_node, buffer)
+                self._record_allocation(buffer, placeholder_node)
+
+            elif V.aot_compilation:
+                # Create dummy input nodes to match the input signature
+                self.gm.graph.placeholder(name)
+
+    def _generate_graph_constants(self) -> None:
+        for name, value in V.graph.constants.items():
+            node = self.gm.graph.get_attr(name)
+            node.meta["val"] = value
+            setattr(self.gm, name, value)
+            self.buffer_to_node[name] = node
 
     def _generate_graph_constants(self) -> None:
         for name, value in V.graph.constants.items():
