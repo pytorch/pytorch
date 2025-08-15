@@ -938,6 +938,27 @@ auto FunctionParameter::check(
     std::vector<PyObject*>& overloaded_args,
     int argnum,
     int64_t* failed_idx) -> bool {
+  if (_check(obj, overloaded_args, argnum, failed_idx)) {
+    return true;
+  }
+  // NB: This will not detect torch function inside elements of a list.  So
+  // you still have to handle that manually
+  // NB: torch function on Tensor subclasses NOT eligible here, you handled
+  // that internally
+  if (check_has_torch_function(obj, /*ignore_mode*/ true) &&
+      !THPVariable_Check(obj)) {
+    // unrelated objects with __torch_function__
+    append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
+    return true;
+  }
+  return false;
+}
+
+auto FunctionParameter::_check(
+    PyObject* obj,
+    std::vector<PyObject*>& overloaded_args,
+    int argnum,
+    int64_t* failed_idx) -> bool {
   switch (type_) {
     case ParameterType::TENSOR: {
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
@@ -1013,15 +1034,7 @@ auto FunctionParameter::check(
     case ParameterType::PYOBJECT:
       return true;
     case ParameterType::SCALARTYPE:
-      if (THPDtype_Check(obj) || THPPythonScalarType_Check(obj)) {
-        return true;
-      }
-      if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
-        // tensor subclasses and unrelated objects with __torch_function__
-        append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
-        return true;
-      }
-      return false;
+      return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
     case ParameterType::LAYOUT:
       return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT:
@@ -1788,21 +1801,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
-    int overflow = -1;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (value == -1 && PyErr_Occurred()) {
-      throw python_error();
-    }
-    if (overflow != 0) {
-      // try unsigned
-      unsigned long long value = PyLong_AsUnsignedLongLong(obj);
-      if (value == static_cast<unsigned long long>(-1) && PyErr_Occurred()) {
-        throw python_error();
-      }
-      scalar = at::Scalar(static_cast<uint64_t>(value));
-    } else {
-      scalar = at::Scalar(static_cast<int64_t>(value));
-    }
+    scalar = THPUtils_unpackInteger<at::Scalar>(obj);
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {

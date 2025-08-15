@@ -288,7 +288,6 @@ kernel void layer_norm_looped(
 #define instantiate_layer_norm(DTYPE) \
   instantiate_layer_norm_single_row(DTYPE) instantiate_layer_norm_looped(DTYPE)
 
-instantiate_layer_norm(float) instantiate_layer_norm(half)
-#if __METAL_VERSION__ >= 310
-    instantiate_layer_norm(bfloat)
-#endif
+instantiate_layer_norm(float);
+instantiate_layer_norm(half);
+instantiate_layer_norm(bfloat);

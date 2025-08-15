@@ -1320,7 +1320,9 @@ def aot_dispatch_subclass(
     )
 
 
-def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
+def create_functional_call(
+    mod, params_spec, params_len, store_orig_mod=False, strict_out_tuple=True
+):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
@@ -1351,7 +1353,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
             else:
                 out = mod(*args[params_len:], **kwargs)
 
-        if not isinstance(out, (tuple, list)):
+        if strict_out_tuple and not isinstance(out, (tuple, list)):
             raise RuntimeError(
                 "Graph output must be a (). This is so that we can avoid "
                 "pytree processing of the outputs. Please change the module to "

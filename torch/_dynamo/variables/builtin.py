@@ -46,6 +46,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
     Unsupported,
@@ -109,6 +110,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
@@ -1808,7 +1810,18 @@ class BuiltinVariable(VariableTracker):
             # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
             # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
             # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
-            return obj.call_method(tx, "__iter__", args, kwargs)
+            # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
+            # with an integer argument starting at 0, until __getitem__ raises IndexError
+            ret = variables.UserFunctionVariable(
+                polyfills.builtins.iter_
+            ).call_function(tx, [obj, *args], {})
+
+            if len(args):
+                # iter(obj, sentinel) returns an object that implements
+                # __iter__ and __next__ methods (UserDefinedObjectVariable)
+                # Wrap the return value in a IteratorVariable subclass (LazyObjectIteratorVariable)
+                # that forwards the next_variable call to the object.
+                ret = variables.ObjectIteratorVariable(ret)
         return ret
 
     call_tuple = _call_tuple_list
@@ -1853,6 +1866,12 @@ class BuiltinVariable(VariableTracker):
             explanation="Dynamo expects exactly 2 args to builtin cast().",
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
+
+    def call_dir(self, tx: "InstructionTranslator", arg):
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            return VariableTracker.build(tx, dir(arg.value))
+        if isinstance(arg, BuiltinVariable):
+            return VariableTracker.build(tx, dir(arg.fn))
 
     def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
@@ -2122,9 +2141,14 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx: "InstructionTranslator", a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def call_next(self, tx: "InstructionTranslator", *args):
+        arg = args[0]
         try:
             return arg.next_variable(tx)
+        except ObservedUserStopIteration:
+            if len(args) == 2:
+                return args[1]
+            raise
         except Unsupported as ex:
             if isinstance(arg, variables.BaseListVariable):
                 ex.remove_from_stats()
@@ -2244,7 +2268,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2526,6 +2549,13 @@ class BuiltinVariable(VariableTracker):
                 (operator.neg)(a.as_proxy()),
                 sym_num=None,
             )
+
+        if (
+            isinstance(a, UserDefinedObjectVariable)
+            and a.call_obj_hasattr(tx, "__neg__").value  # type: ignore[attr-defined]
+        ):
+            return a.call_method(tx, "__neg__", [], {})
+
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -2731,6 +2761,7 @@ class BuiltinVariable(VariableTracker):
             (
                 ConstDictVariable,
                 DictKeysVariable,
+                MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
                 UserDefinedSetVariable,
@@ -2759,7 +2790,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} |= {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                MutableMappingVariable,
+                SetVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
 

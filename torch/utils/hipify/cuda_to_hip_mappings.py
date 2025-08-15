@@ -607,9 +607,12 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
             "channel_descriptor.h",
             ("hip/channel_descriptor.h", CONV_INCLUDE, API_RUNTIME),
         ),
-        ("device_functions.h", ("hip/device_functions.h", CONV_INCLUDE, API_RUNTIME)),
-        ("driver_types.h", ("hip/driver_types.h", CONV_INCLUDE, API_RUNTIME)),
-        ("library_types.h", ("hip/library_types.h", CONV_INCLUDE, API_RUNTIME)),
+        ('include "device_functions.h', ('include "hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <device_functions.h', ('include <hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "driver_types.h', ('include "hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <driver_types.h', ('include <hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "library_types.h', ('include "hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <library_types.h', ('include <hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
         ("cuComplex.h", ("hip/hip_complex.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_fp16.h", ("hip/hip_fp16.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_bf16.h", ("hip/hip_bf16.h", CONV_INCLUDE, API_RUNTIME)),
@@ -9148,6 +9151,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
         ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
         ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
+        ("c10::cuda::get_cuda_error_help", ("c10::hip::get_hip_error_help", API_C10)),
     ]
 )
 

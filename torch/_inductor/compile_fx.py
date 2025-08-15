@@ -64,7 +64,10 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
 )
-from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.debug import (
+    create_mapping_pre_post_grad_nodes,
+    save_args_for_compile_fx_inner,
+)
 from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
@@ -1055,19 +1058,18 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    if config.trace.provenance_tracking:
-        # Dump provenance artifacts for debugging trace
-        provenance_info = torch._inductor.debug.dump_inductor_provenance_info()
-        # provenance_info might be None if trace.provenance_tracking is not set
-        if provenance_info:
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "inductor_provenance_tracking_node_mappings",
-                    "encoding": "json",
-                },
-                payload_fn=lambda: json.dumps(provenance_info),
-            )
+    # Dump provenance artifacts for debugging trace
+    if config.trace.provenance_tracking_level != 0:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(
+                torch._inductor.debug.dump_inductor_provenance_info()
+            ),
+        )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1310,20 +1312,10 @@ class _InProcessFxCompile(FxCompile):
                     },
                     payload_fn=lambda: inductor_post_grad_graph_str,
                 )
-                if config.trace.provenance_tracking:
+                if config.trace.provenance_tracking_level != 0:
                     provenance_tracking_json = (
                         torch.fx.traceback.get_graph_provenance_json(gm.graph)
                     )
-                    trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "inductor_post_to_pre_grad_nodes",
-                            "encoding": "json",
-                        },
-                        payload_fn=lambda: json.dumps(provenance_tracking_json),
-                    )
-                    from torch._inductor.debug import create_mapping_pre_post_grad_nodes
-
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
                         create_mapping_pre_post_grad_nodes(
                             torch._inductor.debug._pre_grad_graph_id,
@@ -1509,6 +1501,7 @@ class _InProcessFxCompile(FxCompile):
                                 compiled_module, "runner", None
                             )
 
+                    node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                         metrics.num_bytes_accessed += num_bytes
@@ -1522,6 +1515,14 @@ class _InProcessFxCompile(FxCompile):
                                 "node_runtimes": node_runtimes,
                             },
                         )
+
+                    # Collect and dump op runtimes for TLParse
+                    if config.log_tlparse:
+                        _, _, node_runtimes = graph.count_bytes()
+                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
+
+                    # Collect and dump collective-op schedule for external diagnostics
+                    torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
                     if (
                         cudagraphs
@@ -2043,6 +2044,34 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
     )
 
 
+def partition_fn(
+    gm: GraphModule,
+    joint_inputs: Sequence[object],
+    **kwargs: object,
+) -> tuple[GraphModule, GraphModule]:
+    cuda_context = get_cuda_device_context(gm)
+    with cuda_context:
+        # We can skip the invoke_subgraph because the
+        # entire_partition_fn is called recursively for invoke_subgraph
+        # in partitioning.
+        _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
+
+    static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
+        "static_lifetime_input_indices", None
+    )
+
+    with dynamo_utils.dynamo_timed(
+        "min_cut_rematerialization_partition", log_pt2_compile_event=True
+    ):
+        return min_cut_rematerialization_partition(
+            gm,
+            joint_inputs,
+            compiler="inductor",
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2168,7 +2197,9 @@ def compile_fx(
     with (
         _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
         enable_python_dispatcher(),
-        torch.fx.traceback.preserve_node_meta(config.trace.provenance_tracking),
+        torch.fx.traceback.preserve_node_meta(
+            config.trace.provenance_tracking_level == 1
+        ),
         torch._inductor.debug.reset_provenance_globals(),
     ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
@@ -2202,7 +2233,7 @@ def compile_fx(
             )
             torch._inductor.debug._pre_grad_graph_id = id(model_.graph)
 
-            if config.trace.provenance_tracking:
+            if config.trace.provenance_tracking_level == 1:
                 for node in model_.graph.nodes:
                     if node.stack_trace:
                         torch._inductor.debug._inductor_pre_grad_node_stack_trace[
@@ -2360,33 +2391,6 @@ def compile_fx(
             inference_compiler = SerializableAOTDispatchCompiler(
                 OutputCode, inference_compiler
             )
-
-        def partition_fn(
-            gm: GraphModule,
-            joint_inputs: Sequence[object],
-            **kwargs: object,
-        ) -> tuple[GraphModule, GraphModule]:
-            cuda_context = get_cuda_device_context(gm)
-            with cuda_context:
-                # We can skip the invoke_subgraph because the
-                # entire_partition_fn is called recursively for invoke_subgraph
-                # in partitioning.
-                _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
-
-            static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
-                "static_lifetime_input_indices", None
-            )
-
-            with dynamo_utils.dynamo_timed(
-                "min_cut_rematerialization_partition", log_pt2_compile_event=True
-            ):
-                return min_cut_rematerialization_partition(
-                    gm,
-                    joint_inputs,
-                    compiler="inductor",
-                    static_lifetime_input_indices=static_lifetime_input_indices,
-                    **kwargs,
-                )
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
