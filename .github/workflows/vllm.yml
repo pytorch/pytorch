@@ -27,11 +27,11 @@ jobs:
       opt_out_experiments: lf
 
   torch-build-sm89:
-    name: sm89-vllm-test
+    name: ci-vllm-test-sm89
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-additional-packages: "vision audio torchao"
+      build-additional-packages: "vision audio"
       build-external-packages: "vllm"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
@@ -41,5 +41,50 @@ jobs:
         { include: [
           { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu"  },
           { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_entrypoints_test", shard: 1, num_shards: 1,runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
+    secrets: inherit
+
+  vllm-test-sm89:
+      name: ci-vllm-test-sm89
+      uses: ./.github/workflows/_linux-test.yml
+      needs: [
+        torch-build-sm89,
+      ]
+      with:
+        build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
+        docker-image: ${{ needs.torch-build-sm89.outputs.docker-image }}
+        test-matrix: ${{ needs.torch-build-sm89.outputs.test-matrix }}
+      secrets: inherit
+
+  torch-build-sm80:
+    name: ci-vllm-test-sm80
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-additional-packages: "vision audio"
+      build-external-packages: "vllm"
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
+      cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "vllm_entrypoints_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+        ]}
+    secrets: inherit
+
+  vllm-test-sm80:
+    name: ci-vllm-test-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: [
+      torch-build-sm80,
+    ]
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
+      docker-image: ${{ needs.torch-build-sm80.outputs.docker-image }}
+      test-matrix: ${{ needs.torch-build-sm80.outputs.test-matrix }}
     secrets: inherit
