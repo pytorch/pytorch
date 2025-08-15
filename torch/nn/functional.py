@@ -1,9 +1,11 @@
 """Functional interface."""
 
+import functools
 import importlib
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -40,7 +42,6 @@ except ModuleNotFoundError:
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
-_U = TypeVar("_U")
 
 
 conv1d = _add_docstr(
@@ -437,7 +438,7 @@ def handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
     tensor_args = [k for k, v in it if Tensor in (v, *getattr(v, "__args__", ()))]
     assert tensor_args, f"{func} does not have any tensor arguments"
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapped(*args, **kwargs) -> _T:
         ka = zip(names, args) | kwargs
         tensors = [ka[a] for a in tensor_args]
