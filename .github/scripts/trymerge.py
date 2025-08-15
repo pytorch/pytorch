@@ -108,6 +108,10 @@ GH_CHECKSUITES_FRAGMENT = """
 fragment PRCheckSuites on CheckSuiteConnection {
   edges {
     node {
+      app {
+        name
+        databaseId
+      }
       workflowRun {
         workflow {
           name

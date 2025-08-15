@@ -264,14 +264,7 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
-        super().__init__(msg)
-        self.msg = msg
-        self.real_stack = (
-            real_stack
-            if real_stack is not None
-            else torch._guards.TracingContext.extract_stack()
-        )
+    pass
 
 
 class IncorrectUsage(Exception):

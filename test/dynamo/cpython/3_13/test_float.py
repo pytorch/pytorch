@@ -222,10 +222,9 @@ class GeneralFloatCases(__TestCase):
     def test_non_numeric_input_types(self):
         # Test possible non-numeric types for the argument x, including
         # subclasses of the explicitly documented accepted types.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class CustomStr(str): pass
-            class CustomBytes(bytes): pass
-            class CustomByteArray(bytearray): pass
+        class CustomStr(str): pass
+        class CustomBytes(bytes): pass
+        class CustomByteArray(bytearray): pass
 
         factories = [
             bytes,
@@ -312,31 +311,30 @@ class GeneralFloatCases(__TestCase):
 
     def test_floatconversion(self):
         # Make sure that calls to __float__() work properly
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Foo1(object):
-                def __float__(self):
-                    return 42.
+        class Foo1(object):
+            def __float__(self):
+                return 42.
 
-            class Foo2(float):
-                def __float__(self):
-                    return 42.
+        class Foo2(float):
+            def __float__(self):
+                return 42.
 
-            class Foo3(float):
-                def __new__(cls, value=0.):
-                    return float.__new__(cls, 2*value)
+        class Foo3(float):
+            def __new__(cls, value=0.):
+                return float.__new__(cls, 2*value)
 
-                def __float__(self):
-                    return self
+            def __float__(self):
+                return self
 
-            class Foo4(float):
-                def __float__(self):
-                    return 42
+        class Foo4(float):
+            def __float__(self):
+                return 42
 
-            # Issue 5759: __float__ not called on str subclasses (though it is on
-            # unicode subclasses).
-            class FooStr(str):
-                def __float__(self):
-                    return float(str(self)) + 1
+        # Issue 5759: __float__ not called on str subclasses (though it is on
+        # unicode subclasses).
+        class FooStr(str):
+            def __float__(self):
+                return float(str(self)) + 1
 
         self.assertEqual(float(Foo1()), 42.)
         self.assertEqual(float(Foo2()), 42.)
@@ -345,17 +343,15 @@ class GeneralFloatCases(__TestCase):
         self.assertRaises(TypeError, float, Foo4(42))
         self.assertEqual(float(FooStr('8')), 9.)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class Foo5:
-                def __float__(self):
-                    return ""
+        class Foo5:
+            def __float__(self):
+                return ""
         self.assertRaises(TypeError, time.sleep, Foo5())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            # Issue #24731
-            class F:
-                def __float__(self):
-                    return OtherFloatSubclass(42.)
+        # Issue #24731
+        class F:
+            def __float__(self):
+                return OtherFloatSubclass(42.)
         with self.assertWarns(DeprecationWarning):
             self.assertEqual(float(F()), 42.)
         with self.assertWarns(DeprecationWarning):
@@ -365,20 +361,18 @@ class GeneralFloatCases(__TestCase):
         with self.assertWarns(DeprecationWarning):
             self.assertIs(type(FloatSubclass(F())), FloatSubclass)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class MyIndex:
-                def __init__(self, value):
-                    self.value = value
-                def __index__(self):
-                    return self.value
+        class MyIndex:
+            def __init__(self, value):
+                self.value = value
+            def __index__(self):
+                return self.value
 
         self.assertEqual(float(MyIndex(42)), 42.0)
         self.assertRaises(OverflowError, float, MyIndex(2**2000))
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class MyInt:
-                def __int__(self):
-                    return 42
+        class MyInt:
+            def __int__(self):
+                return 42
 
         self.assertRaises(TypeError, float, MyInt())
 
@@ -387,30 +381,27 @@ class GeneralFloatCases(__TestCase):
             float(x='3.14')
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass(float):
-                pass
+        class subclass(float):
+            pass
         u = subclass(2.5)
         self.assertIs(type(u), subclass)
         self.assertEqual(float(u), 2.5)
         with self.assertRaises(TypeError):
             subclass(x=0)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass_with_init(float):
-                def __init__(self, arg, newarg=None):
-                    self.newarg = newarg
+        class subclass_with_init(float):
+            def __init__(self, arg, newarg=None):
+                self.newarg = newarg
         u = subclass_with_init(2.5, newarg=3)
         self.assertIs(type(u), subclass_with_init)
         self.assertEqual(float(u), 2.5)
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class subclass_with_new(float):
-                def __new__(cls, arg, newarg=None):
-                    self = super().__new__(cls, arg)
-                    self.newarg = newarg
-                    return self
+        class subclass_with_new(float):
+            def __new__(cls, arg, newarg=None):
+                self = super().__new__(cls, arg)
+                self.newarg = newarg
+                return self
         u = subclass_with_new(2.5, newarg=3)
         self.assertIs(type(u), subclass_with_new)
         self.assertEqual(float(u), 2.5)
@@ -746,12 +737,11 @@ class GeneralFloatCases(__TestCase):
     def test_hash_nan(self):
         value = float('nan')
         self.assertEqual(hash(value), object.__hash__(value))
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class H:
-                def __hash__(self):
-                    return 42
-            class F(float, H):
-                pass
+        class H:
+            def __hash__(self):
+                return 42
+        class F(float, H):
+            pass
         value = F('nan')
         self.assertEqual(hash(value), object.__hash__(value))
 
@@ -1664,19 +1654,17 @@ class HexFloatTestCase(__TestCase):
                 self.identical(x, fromHex(toHex(x)))
 
     def test_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class F(float):
-                def __new__(cls, value):
-                    return float.__new__(cls, value + 1)
+        class F(float):
+            def __new__(cls, value):
+                return float.__new__(cls, value + 1)
 
         f = F.fromhex((1.5).hex())
         self.assertIs(type(f), F)
         self.assertEqual(f, 2.5)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            class F2(float):
-                def __init__(self, value):
-                    self.foo = 'bar'
+        class F2(float):
+            def __init__(self, value):
+                self.foo = 'bar'
 
         f = F2.fromhex((1.5).hex())
         self.assertIs(type(f), F2)
