@@ -74,6 +74,7 @@ class CUTLASSTemplate(KernelTemplate):
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
+        self.device_type = device_type
 
     @classmethod
     @functools.lru_cache(None)
