@@ -13746,6 +13746,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         has_lowered = not re.search(r"repeat_interleave.Tensor", code)
         self.assertEqual(has_lowered, can_lower)
 
+    @staticmethod
+    def _is_triggering_buffer_reuse(fn, *inputs):
+        with config.patch(allow_buffer_reuse=True):
+            _, (code_allowed,) = run_and_get_code(fn, *inputs)
+        with config.patch(allow_buffer_reuse=False):
+            _, (code_disallowed,) = run_and_get_code(fn, *inputs)
+        code_allowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_allowed)
+        code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
+        return code_allowed != code_disallowed
+
+    def test_allow_reuse_disable_if_exceed_peak(self):
+        @torch.compile
+        def fn(inp):  # 1*N^2
+            a = inp.mean(-1)  # 1*N^2 + N
+            b = (inp - a) ** 2  # 2*N^2 + N
+            c = b @ b  # 3*N^2 (!!) since this is the peak, can not reuse across
+            d = c.mean(-1)  # 2*N^2 + N
+            return d  # 1*N^2 + N
+
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertFalse(CommonTemplate._is_triggering_buffer_reuse(fn, inp))
+
+    def test_allow_reuse_active_if_under_peak(self):
+        def g(inp):
+            return (inp - torch.logsumexp(inp, -1)) ** 2
+
+        @torch.compile
+        def fn(m, inp):
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            return inp
+
+        m = torch.randn(100, 100, device=self.device)
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
+
     # end of class CommonTemplate - add new tests here
 
 
