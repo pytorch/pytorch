@@ -77,6 +77,7 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
+from .functions import bind_args_cached
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -412,12 +413,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0], args[1].as_python_constant()
             )
         elif self.value is torch.nn.attention.sdpa_kernel:
-            assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
-            backends = args[0] if len(args) == 1 else kwargs["backends"]
-            set_priority = kwargs["set_priority"] if "set_priority" in kwargs else False
-            return SDPAKernelVariable.create(
-                tx, backends.as_python_constant(), set_priority
+            source = AttrSource(self.source, "__wrapped__") if self.source else None
+            name_to_arg_map = bind_args_cached(
+                self.value.__wrapped__, tx, source, args, kwargs
             )
+            backends = name_to_arg_map["backends"].as_python_constant()
+            set_priority = name_to_arg_map["set_priority"].as_python_constant()
+            return SDPAKernelVariable.create(tx, backends, set_priority)
         elif self.value is torch.nn.attention._sdpa_kernel_variadic:
             return SDPAKernelVariable.create(
                 tx, [arg.as_python_constant() for arg in args]
