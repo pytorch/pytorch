@@ -20,7 +20,6 @@ from ...ir import (
     get_fill_order,
     InputBuffer,
     IRNode,
-    MutationLayoutSHOULDREMOVE,
     Scatter,
     ShapeAsConstantBuffer,
     StorageBox,
@@ -77,10 +76,9 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
         scatter_mode="atomic_add",
     )
 
-    buffer = ComputedBuffer(
-        name=grad.data.data.name,  # type: ignore[attr-defined]
-        layout=MutationLayoutSHOULDREMOVE(grad),
-        data=scatter,
+    buffer = ir.create_computed_mutated_buffer(
+        target=grad.data,
+        data=scatter
     )
     return buffer
 

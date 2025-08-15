@@ -549,8 +549,11 @@ class BaseSchedulerNode:
                             (
                                 ir.NoneLayout,
                                 ir.MultiOutputLayout,
-                                ir.MutationLayoutSHOULDREMOVE,
                             ),
+                        )
+                        and not (
+                            isinstance(input_buf.node.get_output_spec(), ir.NonOwningLayout)
+                            and input_buf.get_mutation_names()
                         )
                         and not (
                             input_buf.defining_op
@@ -4426,9 +4429,6 @@ class Scheduler:
                     | free_symbols(layout.stride)
                     | free_symbols(layout.offset)
                 )
-                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                    # symint may be used as index in layout.target
-                    free_symbol_uses.update(get_layout_symints(layout.target))
             else:
                 assert layout is None, (
                     f"Expect layout to be None but found layout={layout}"
