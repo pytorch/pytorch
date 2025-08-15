@@ -107,7 +107,7 @@ if HAS_GPU:
     from torch._library import capture_triton
 
 try:
-    from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
+    from torchrec.sparse.jagged_tensor import JaggedTensor, KeyedJaggedTensor
 
     HAS_TORCHREC = True
 except ImportError:
@@ -1319,6 +1319,48 @@ graph():
         ]
         for vr_upper in vr_upper_bounds:
             self.assertEqual(vr_upper, 1)
+
+    def test_detect_leak_strict(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        global_list = []
+
+        class ReferenceControl:
+            def __init__(self, mod):
+                self.bank = []
+                self.bank_dict = {}
+                self.mod = mod
+
+                def hacked_up_forward(self_, x, y):
+                    self.bank.append(x.clone())
+                    self.bank_dict["x"] = x.clone()
+                    global_list.append(x.clone())
+                    return x + y
+
+                self.mod.forward = hacked_up_forward.__get__(self.mod, Foo)
+
+            def __call__(self, x, y):
+                ep = torch.export.export(self.mod, (x, y), strict=True).module()
+                out = ep(x, y)
+                return out
+
+            def update(self):
+                print(self.bank)
+
+        foo = Foo()
+        ref = ReferenceControl(foo)
+        with self.assertWarnsRegex(
+            UserWarning,
+            "While exporting, we found certain side effects happened in the model.forward. "
+            "Here are the list of potential sources you can double check: "
+            "\[\"L\['global_list'\]\", \"L\['self'\].bank\", \"L\['self'\].bank_dict\"",
+        ):
+            ref(torch.randn(4, 4), torch.randn(4, 4))
 
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):
@@ -15989,6 +16031,26 @@ def forward(self, x):
         ep = export(N(), inp)
         ep = move_to_device_pass(ep, {"cuda:0": "cuda"})
         ep.module()(torch.randn(3, device="cuda:0"), torch.randn(3, device="cuda:0"))
+
+    @unittest.skipIf(not HAS_TORCHREC, "only run when there is torchrec imported")
+    def test_torchrec_jagged_tensor(self):
+        class Foo(torch.nn.Module):
+            def forward(self, jt) -> torch.Tensor:
+                vals = jt.lengths().view(-1).long()
+                return vals + 4
+
+        foo = Foo()
+        jt = JaggedTensor(
+            values=torch.Tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            lengths=torch.IntTensor([0, 2, 0, 1, 1, 1, 0, 3]),
+            offsets=torch.IntTensor([0, 0, 2, 2, 3, 4, 5, 5, 8]),
+        )
+        with self.assertWarnsRegex(
+            UserWarning,
+            "While exporting, we found certain side effects happened in the model.forward. "
+            "Here are the list of potential sources you can double check: \[\"L\['jt'\]\"\]",
+        ):
+            _ = torch.export.export(foo, (jt,), strict=True)
 
     def test_input_output_no_stacktrace(self):
         class M(torch.nn.Module):
