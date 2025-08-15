@@ -7,7 +7,6 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 
 import sympy
@@ -21,7 +20,6 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
-from ..cpp_utils import DTYPE_TO_CPP
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -32,6 +30,43 @@ ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int
 XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
     [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
 )
+
+
+def _cutlass_path() -> str:
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        return parutil.get_dir_path("cutlass-4-headers")
+    else:
+        return config.cutlass.cutlass_dir
+
+
+def _cutlass_paths() -> list[str]:
+    return [
+        "include",
+        "tools/library/include",
+        "tools/library/src",
+        "tools/util/include",
+    ]
+
+
+def _clone_cutlass_paths(build_root: str) -> list[str]:
+    paths = _cutlass_paths()
+    cutlass_root = _cutlass_path()
+    for path in _cutlass_paths():
+        old_path = os.path.join(cutlass_root, path)
+        new_path = os.path.join(build_root, path)
+        shutil.copytree(old_path, new_path, dirs_exist_ok=True)
+    return paths
+
+
+def _cutlass_include_paths() -> list[str]:
+    cutlass_path = _cutlass_path()
+    return [
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, path))
+        for path in _cutlass_paths()
+    ]
 
 
 @atexit.register
@@ -293,6 +328,9 @@ def gen_ops() -> dict[Any, Any]:
         return _gen_ops_cached(arch, version)
 
 
+from ..cpp_utils import DTYPE_TO_CPP
+
+
 DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
@@ -447,46 +485,3 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         ):
             return alignment
     return 1
-
-
-class CUDACompileSourceCapturingContext:
-    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
-
-    def __init__(self):
-        self.sources = []
-        self._compile_patch = None
-
-    def __enter__(self, *args, **kwargs):
-        import unittest.mock as mock
-
-        import torch._inductor.codecache
-
-        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
-
-        def my_compile(
-            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
-        ):
-            self.sources.append(source_code)
-            return _compile_method_orig(source_code, dst_file_ext)
-
-        self._compile_patch = mock.patch(
-            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
-        )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
-
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-    from torch._inductor.codecache import cuda_compile_command
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command
