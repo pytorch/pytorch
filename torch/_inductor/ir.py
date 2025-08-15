@@ -3563,10 +3563,9 @@ def is_contiguous_strides_for_shape(
         if x == 1:
             continue
 
-        if (
-            not V.graph.sizevars.statically_known_equals(y, expected_stride)
-            and not V.graph.sizevars.statically_known_equals(y, expected_stride_max)
-        ):
+        if not V.graph.sizevars.statically_known_equals(
+            y, expected_stride
+        ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
             return False
 
         expected_stride_max *= sympy.Max(1, x)
