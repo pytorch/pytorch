@@ -17,7 +17,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_WITH_SLOW_GRADCHECK,
+)
 
 
 # Make the helper files in test/ importable
@@ -510,7 +515,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -555,7 +560,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == GPU_TYPE:
+            if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
                 ).check_not("frozen_param").check_next("return").run(code[0])
@@ -785,6 +790,10 @@ class OptimizeForInferenceTemplate(TestCase):
 
     @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(
+        TEST_WITH_SLOW_GRADCHECK,
+        "Failing in slow gradcheck on cuda12.8, see https://github.com/pytorch/pytorch/pull/156731 for example",
+    )
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -879,7 +888,7 @@ class OptimizeForInferenceTemplate(TestCase):
         # in the joint graph rather than torch.ops.aten.convolution.default.
         # Currently we only handle aten.convolution.default in layout
         # optimization. That's why the count may be 0 here for CPU.
-        if self.device == GPU_TYPE:
+        if self.device == "cuda":
             self.assertTrue(nconv == 1)
 
     def test_unequal_bias_horizontal_addmm_fusion(self):

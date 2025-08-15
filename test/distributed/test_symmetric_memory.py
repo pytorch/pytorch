@@ -10,7 +10,7 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._inductor.utils import fresh_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -34,9 +34,9 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     parametrize,
     requires_cuda,
+    requires_cuda_p2p_access,
     run_tests,
     runOnRocmArch,
-    skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
@@ -48,27 +48,6 @@ test_contexts = [nullcontext, _test_mode]
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
-
-
-def requires_cuda_p2p_access():
-    cuda_p2p_access_available = (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (8, 0)
-        and torch.cuda.device_count() >= 2
-    )
-    num_devices = torch.cuda.device_count()
-    for i in range(num_devices - 1):
-        for j in range(i + 1, num_devices):
-            if not torch.cuda.can_device_access_peer(i, j):
-                cuda_p2p_access_available = False
-                break
-        if not cuda_p2p_access_available:
-            break
-
-    return skip_but_pass_in_sandcastle_if(
-        not cuda_p2p_access_available,
-        "cuda p2p access is not available",
-    )
 
 
 @instantiate_parametrized_tests
@@ -87,6 +66,14 @@ class SymmetricMemoryTest(MultiProcContinousTest):
         # validate that has_multicast_support() returns "false" instead of throwing
         self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
         # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_get_backend(self) -> None:
+        backend = symm_mem.get_backend(torch.device("cuda"))
+        self.assertIsNotNone(backend)
+        backend = symm_mem.get_backend("cuda")
+        self.assertIsNotNone(backend)
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -677,7 +664,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -703,7 +690,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -732,7 +719,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
     # These timeout tests are skipped on ROCm because timeout calls trap(), which
     # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The funcitonality
+    # the linux kernel to create a core dump of the host application. The functionality
     # is there, meaning timeout is happening correctly. However, there isn't a nice way
     # to test it as the current executing thread will coredump and exit.
     @skipIfRocm
@@ -974,7 +961,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
                 gathered_res[i],
                 sum_inps[..., i * slice_width : (i + 1) * slice_width],
                 rtol=1e-01,
-                atol=1e-01,
+                atol=1.1e-01,
             )
 
     @skip_if_lt_x_gpu(4)
@@ -1020,7 +1007,7 @@ class LoweringTest(MultiProcContinousTest):
     @skip("Fails with 'one_shot_all_reduce' not found in AOT graph, TODO: fix")
     @skipIfRocm  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_lowering_one_shot_all_reduce(self):
         self._init_process()
         arg = torch.rand(4, 4, device=self.device)
@@ -1077,10 +1064,6 @@ class SymmMemSingleProcTest(TestCase):
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
-    )
-    @skipIf(
-        _get_torch_cuda_version() == (12, 6),
-        "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):

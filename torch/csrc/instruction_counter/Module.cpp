@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #if defined(__linux__)
+#include <fmt/printf.h>
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
@@ -36,7 +37,7 @@ static long start() {
 
   long fd = syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0);
   if (fd == -1) {
-    fprintf(
+    fmt::fprintf(
         stderr,
         "Failed to open instruction count event: %s.\n",
         c10::utils::str_error(errno).c_str());
@@ -54,7 +55,7 @@ static uint64_t end(int fd) {
 #else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
-    fprintf(
+    fmt::fprintf(
         stderr,
         "Error disabling perf event (fd: %d): %s\n",
         fd,
@@ -67,7 +68,7 @@ static uint64_t end(int fd) {
   // Read results
   long ret_val = read(fd, &total_instructions, sizeof(total_instructions));
   if (ret_val == -1) {
-    fprintf(
+    fmt::fprintf(
         stderr,
         "Error reading perf event results: %s\n",
         c10::utils::str_error(errno).c_str());

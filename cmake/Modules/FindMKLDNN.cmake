@@ -45,19 +45,13 @@ IF(NOT MKLDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
-    if(XPU_DEVICE_CXX_FLAGS)
-      set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=${XPU_DEVICE_CXX_FLAGS}")
-    else()
-      set(DNNL_CXX_FLAGS "")
-    endif()
     ExternalProject_Add(xpu_mkldnn_proj
       GIT_REPOSITORY https://github.com/oneapi-src/oneDNN
-      GIT_TAG v3.7.1
+      GIT_TAG v3.8.1
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
-      ${DNNL_CXX_FLAGS}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
@@ -91,8 +85,12 @@ IF(NOT MKLDNN_FOUND)
   ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
 
   IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
-    MESSAGE("-- Will build oneDNN UKERNEL")
-    SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    IF(CPU_POWER)
+      SET(DNNL_EXPERIMENTAL_UKERNEL OFF CACHE BOOL "" FORCE)
+    ELSE()
+      MESSAGE("-- Will build oneDNN UKERNEL")
+      SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    ENDIF()
   ENDIF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
   FIND_PACKAGE(BLAS)

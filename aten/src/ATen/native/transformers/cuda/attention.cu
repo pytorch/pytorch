@@ -849,16 +849,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     // TODO(eqy): support debug_attn_mask
     return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   } else {
-    //auto [
-    //    query_buffer_reshaped,
-    //    key_buffer_reshaped,
-    //    value_buffer_reshaped,
-    //    cumulative_sequence_length_q,
-    //    cumulative_sequence_length_kv,
-    //    max_seqlen_batch_q,
-    //    max_seqlen_batch_kv,
-    //    output_shape] = preprocessing::sdpa_nested_preprocessing(query, key, value);
-    // C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
     // TODO(eqy): debug mask support
     // BHSD ...
     const int64_t batch_size = cumulative_sequence_length_q.value().size(0) - 1;
@@ -968,8 +958,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   int64_t batch_size = query.size(0);
 
   if (batch_size > MAX_BATCH_SIZE) {
-    TORCH_CHECK(!compute_log_sumexp && (dropout_p == 0.0),
-                "Efficient attention cannot produce valid seed, logsumexp and offset outputs when "
+    TORCH_CHECK(dropout_p == 0.0,
+                "Efficient attention cannot produce valid seed and offset outputs when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
   auto process_chunk = [&](const Tensor& q_chunk,
@@ -1030,6 +1020,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     }
     Tensor final_attention = at::empty_strided(sizes, attn.strides(), attn.options());
     final_attention.slice(0, start, end).copy_(attn);
+    Tensor final_log_sumexp;
+    if (compute_log_sumexp && log_sumexp.numel() > 0) {
+      std::vector<int64_t> lse_sizes;
+      lse_sizes.reserve(log_sumexp.dim());
+      lse_sizes.push_back(batch_size);
+      for (int i = 1; i < log_sumexp.dim(); i++) {
+        lse_sizes.push_back(log_sumexp.size(i));
+      }
+      final_log_sumexp = at::empty(std::move(lse_sizes), log_sumexp.options());
+      final_log_sumexp.slice(0, start, end).copy_(log_sumexp);
+    }
 
     for (start = end; start < batch_size; start += MAX_BATCH_SIZE) {
       end = std::min(start + MAX_BATCH_SIZE, batch_size);
@@ -1045,10 +1046,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       auto [chunk_attn, chunk_log_sumexp, chunk_seed, chunk_offset] =
           process_chunk(query_chunk, key_chunk, value_chunk, bias_chunk);
       final_attention.slice(0, start, end).copy_(chunk_attn);
+      if (compute_log_sumexp && chunk_log_sumexp.numel() > 0) {
+        final_log_sumexp.slice(0, start, end).copy_(chunk_log_sumexp);
+      }
     }
 
     return std::make_tuple(std::move(final_attention),
-              std::move(log_sumexp),
+              std::move(final_log_sumexp),
               std::move(seed),
               std::move(offset));
   }
@@ -1099,8 +1103,10 @@ _flash_attention_forward(
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
   const float softcap = 0.0;
 
-  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
-  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
+#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+  const int non_null_window_left = window_size_left.value_or(-1);
+  const int non_null_window_right = window_size_right.value_or(-1);
+#endif
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -1137,8 +1143,13 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
+#ifdef USE_ROCM
+            window_size_left,
+            window_size_right,
+#else
             non_null_window_left,
             non_null_window_right,
+#endif
             softcap,
             return_debug_mask,
             std::nullopt /*gen_*/);
@@ -1161,8 +1172,13 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
+#ifdef USE_ROCM
+            window_size_left,
+            window_size_right,
+#else
             non_null_window_left,
             non_null_window_right,
+#endif
             softcap,
             return_debug_mask, /*return_softmax (this is used for testing)*/
             std::nullopt);
@@ -1320,7 +1336,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   if(at::globalContext().getROCmFAPreferredBackend() ==
     at::ROCmFABackend::Ck) {
 
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
     std::optional<Tensor> out(res);
     std::optional<Tensor> seqused_k = std::nullopt;
     std::optional<Tensor> alibi_slopes = std::nullopt;

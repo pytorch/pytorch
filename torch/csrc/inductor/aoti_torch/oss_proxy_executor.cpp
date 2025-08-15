@@ -445,10 +445,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   // If an argument is not filled and has a default value, we should
   // also prefill the default value.
   for (size_t index = 0; index < schema_args.size(); index++) {
-    if (!filled[index] && schema_args[index].default_value()) {
-      // @lint-ignore CLANGTIDY bugprone-unchecked-optional-access
-      auto default_value = *schema_args[index].default_value();
-      op_kernel.stack_.at(index) = default_value;
+    auto default_value = schema_args[index].default_value();
+    if (!filled[index] && default_value.has_value()) {
+      op_kernel.stack_.at(index) = std::move(default_value.value());
     }
   }
 }
@@ -534,6 +533,17 @@ void OSSProxyExecutor::get_output_info_from_serialized(
                 "Only as_none or as_tensor is supported for as_optional_tensor");
           }
         }
+        break;
+      }
+      case c10::TypeKind::IntType: {
+        TORCH_CHECK(
+            serialized_output_type == "as_int",
+            "Expected extern kernel ",
+            serialized_node["target"],
+            " to have serialized output type as_int, ",
+            " but got ",
+            serialized_output_type);
+        outputs.emplace_back(output_index, DynamicArgType::IntType, 1);
         break;
       }
       default: {
@@ -800,12 +810,14 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors - num_output_tensors);
+
+  int num_output_ints = op_kernel->num_output_ints();
   TORCH_CHECK(
-      int_id == num_ints,
+      int_id == num_ints - num_output_ints,
       "Mismatch between ints consumed and num_ints, got int_id = ",
       int_id,
       ", num_ints = ",
-      num_ints);
+      num_ints - num_output_ints);
 
   // Call the op with the prepared stack.
   op_kernel->run(stack);
@@ -849,8 +861,20 @@ void OSSProxyExecutor::call_function(
           TORCH_CHECK(false, "Expected tensor, got None");
         }
       } else {
-        continue;
+        index++;
       }
+    } else if (schema_return.real_type()->kind() == c10::TypeKind::IntType) {
+      // need to use real_type() to differentiate between IntType and SymIntType
+      // for int type, it is already specialized in downstream kernels. So we
+      // don't need to do anything here.
+      auto returned_int_value = stack[index++].toInt();
+      auto serialized_int_value = flatten_int_args[int_id++];
+      TORCH_CHECK(
+          returned_int_value == serialized_int_value,
+          "Expect returned int value to match the serialized int value, but got returned int value: ",
+          returned_int_value,
+          " and serialized int value: ",
+          serialized_int_value);
     } else {
       TORCH_CHECK(
           false,
@@ -865,6 +889,13 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors);
+
+  TORCH_CHECK(
+      int_id == num_ints,
+      "Mismatch between tensors consumed and num_ints, got tensor_id = ",
+      int_id,
+      ", expected num = ",
+      num_ints);
 }
 
 } // namespace torch::aot_inductor

@@ -45,14 +45,14 @@ std::string toString(const Scalar& s) {
 
 namespace at {
 
-std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
+std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
 
 enum class FormatType {
-  Default,     // 'g' format (defaultfloat equivalent)
-  Scientific,  // 'e' format with precision 4
-  Fixed        // 'f' format with precision 4
+  Default, // 'g' format (defaultfloat equivalent)
+  Scientific, // 'e' format with precision 4
+  Fixed // 'f' format with precision 4
 };
 
 struct PrintFormat {
@@ -61,12 +61,12 @@ struct PrintFormat {
   FormatType type;
 
   PrintFormat(double s, int w, FormatType t = FormatType::Default)
-    : scale(s), width(w), type(t) {}
+      : scale(s), width(w), type(t) {}
 };
 
 static PrintFormat __printFormat(const Tensor& self) {
   auto size = self.numel();
-  if(size == 0) {
+  if (size == 0) {
     return PrintFormat(1., 0);
   }
 
@@ -74,8 +74,8 @@ static PrintFormat __printFormat(const Tensor& self) {
   auto self_p = self.const_data_ptr<double>();
   for (const auto i : c10::irange(size)) {
     auto z = self_p[i];
-    if(std::isfinite(z)) {
-      if(z != std::ceil(z)) {
+    if (std::isfinite(z)) {
+      if (z != std::ceil(z)) {
         intMode = false;
         break;
       }
@@ -83,28 +83,28 @@ static PrintFormat __printFormat(const Tensor& self) {
   }
 
   int64_t offset = 0;
-  while(offset < size && !std::isfinite(self_p[offset])) {
+  while (offset < size && !std::isfinite(self_p[offset])) {
     offset = offset + 1;
   }
 
   double expMin = 1;
   double expMax = 1;
-  if(offset != size) {
+  if (offset != size) {
     expMin = std::fabs(self_p[offset]);
     expMax = std::fabs(self_p[offset]);
     for (const auto i : c10::irange(offset, size)) {
       double z = std::fabs(self_p[i]);
-      if(std::isfinite(z)) {
+      if (std::isfinite(z)) {
         expMin = std::min(expMin, z);
         expMax = std::max(expMax, z);
       }
     }
-    if(expMin != 0) {
+    if (expMin != 0) {
       expMin = std::floor(std::log10(expMin)) + 1;
     } else {
       expMin = 1;
     }
-    if(expMax != 0) {
+    if (expMax != 0) {
       expMax = std::floor(std::log10(expMax)) + 1;
     } else {
       expMax = 1;
@@ -114,8 +114,8 @@ static PrintFormat __printFormat(const Tensor& self) {
   double scale = 1;
   int sz = 11;
 
-  if(intMode) {
-    if(expMax > 9) {
+  if (intMode) {
+    if (expMax > 9) {
       sz = 11;
       return PrintFormat(scale, sz, FormatType::Scientific);
     } else {
@@ -123,19 +123,19 @@ static PrintFormat __printFormat(const Tensor& self) {
       return PrintFormat(scale, sz, FormatType::Default);
     }
   } else {
-    if(expMax-expMin > 4) {
+    if (expMax - expMin > 4) {
       sz = 11;
-      if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
+      if (std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
       return PrintFormat(scale, sz, FormatType::Scientific);
     } else {
-      if(expMax > 5 || expMax < 0) {
+      if (expMax > 5 || expMax < 0) {
         sz = 7;
-        scale = std::pow(10, expMax-1);
+        scale = std::pow(10, expMax - 1);
         return PrintFormat(scale, sz, FormatType::Fixed);
       } else {
-        if(expMax == 0) {
+        if (expMax == 0) {
           sz = 7;
         } else {
           sz = static_cast<int>(expMax) + 6;
@@ -147,9 +147,9 @@ static PrintFormat __printFormat(const Tensor& self) {
 }
 
 // Precompiled format specs
-static constexpr auto FMT_G   = FMT_COMPILE("{:>{}g}");
-static constexpr auto FMT_E4  = FMT_COMPILE("{:>{}.4e}");
-static constexpr auto FMT_F4  = FMT_COMPILE("{:>{}.4f}");
+static constexpr auto FMT_G = FMT_COMPILE("{:>{}g}");
+static constexpr auto FMT_E4 = FMT_COMPILE("{:>{}.4e}");
+static constexpr auto FMT_F4 = FMT_COMPILE("{:>{}.4f}");
 
 // Print a single value directly into the stream buffer with no temporaries
 static void printValue(std::ostream& stream, double v, const PrintFormat& pf) {
@@ -157,7 +157,7 @@ static void printValue(std::ostream& stream, double v, const PrintFormat& pf) {
   double val = v / pf.scale;
   switch (pf.type) {
     case FormatType::Default:
-      fmt::format_to(out_it, FMT_G,  val, pf.width);
+      fmt::format_to(out_it, FMT_G, val, pf.width);
       break;
     case FormatType::Scientific:
       fmt::format_to(out_it, FMT_E4, val, pf.width);
@@ -168,57 +168,60 @@ static void printValue(std::ostream& stream, double v, const PrintFormat& pf) {
   }
 }
 
-static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent) {
+static void __printMatrix(
+    std::ostream& stream,
+    const Tensor& self,
+    int64_t linesize,
+    int64_t indent) {
   auto printFmt = __printFormat(self);
 
   int64_t nColumnPerLine = (linesize - indent) / (printFmt.width + 1);
   int64_t firstColumn = 0;
   int64_t lastColumn = -1;
 
-  while(firstColumn < self.size(1)) {
-    if(firstColumn + nColumnPerLine <= self.size(1)) {
+  while (firstColumn < self.size(1)) {
+    if (firstColumn + nColumnPerLine <= self.size(1)) {
       lastColumn = firstColumn + nColumnPerLine - 1;
     } else {
       lastColumn = self.size(1) - 1;
     }
 
-    if(nColumnPerLine < self.size(1)) {
-      if(firstColumn != 0) {
-     stream.put('\n');
+    if (nColumnPerLine < self.size(1)) {
+      if (firstColumn != 0) {
+        stream.put('\n');
       }
       fmt::print(
           stream,
           "Columns {} to {}{:>{}s}",
           firstColumn + 1,
           lastColumn + 1,
-          "",          // empty string to pad
-          indent       // width to pad to
+          "", // empty string to pad
+          indent // width to pad to
       );
     }
 
-    if(printFmt.scale != 1) {
-      fmt::print(stream, "{} *\n{:>{}s}",
-                 printFmt.scale, "", indent);
+    if (printFmt.scale != 1) {
+      fmt::print(stream, "{} *\n{:>{}s}", printFmt.scale, "", indent);
     }
 
     for (const auto l : c10::irange(self.size(0))) {
       Tensor row = self.select(0, l);
-      const double *row_ptr = row.const_data_ptr<double>();
+      const double* row_ptr = row.const_data_ptr<double>();
 
-      for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
+      for (const auto c : c10::irange(firstColumn, lastColumn + 1)) {
         printValue(stream, row_ptr[c], printFmt);
 
-        if(c == lastColumn) {
+        if (c == lastColumn) {
           stream.put('\n');
-          if(l != self.size(0)-1) {
-            if(printFmt.scale != 1) {
+          if (l != self.size(0) - 1) {
+            if (printFmt.scale != 1) {
               fmt::print(stream, "{:>{}s} ", "", indent);
             } else {
               fmt::print(stream, "{:>{}s}", "", indent);
             }
           }
         } else {
-      stream.put(' ');
+          stream.put(' ');
         }
       }
     }
@@ -226,18 +229,21 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
   }
 }
 
-static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) {
-  std::vector<int64_t> counter(self.ndimension()-2, 0);
+static void __printTensor(
+    std::ostream& stream,
+    Tensor& self,
+    int64_t linesize) {
+  std::vector<int64_t> counter(self.ndimension() - 2, 0);
   counter[0] = -1;
 
   bool start = true;
   bool finished = false;
 
-  while(true) {
-    for(int64_t i = 0; self.ndimension()-2; i++) {
+  while (true) {
+    for (int64_t i = 0; self.ndimension() - 2; i++) {
       counter[i] = counter[i] + 1;
-      if(counter[i] >= self.size(i)) {
-        if(i == self.ndimension()-3) {
+      if (counter[i] >= self.size(i)) {
+        if (i == self.ndimension() - 3) {
           finished = true;
           break;
         }
@@ -246,10 +252,10 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) 
         break;
       }
     }
-    if(finished) {
+    if (finished) {
       break;
     }
-    if(start) {
+    if (start) {
       start = false;
     } else {
       stream.put('\n');
@@ -257,21 +263,24 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) 
 
     stream.put('(');
     Tensor tensor = self;
-    for (const auto i : c10::irange(self.ndimension()-2)) {
+    for (const auto i : c10::irange(self.ndimension() - 2)) {
       tensor = tensor.select(0, counter[i]);
-      fmt::print(stream, "{},", counter[i]+1);
+      fmt::print(stream, "{},", counter[i] + 1);
     }
     fmt::print(stream, ".,.) = \n");
     __printMatrix(stream, tensor, linesize, 1);
   }
 }
 
-void print(const Tensor & t, int64_t linesize) {
+void print(const Tensor& t, int64_t linesize) {
   print(std::cout, t, linesize);
 }
 
-std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
-  if(!tensor_.defined()) {
+std::ostream& print(
+    std::ostream& stream,
+    const Tensor& tensor_,
+    int64_t linesize) {
+  if (!tensor_.defined()) {
     fmt::print(stream, "[ Tensor (undefined) ]");
     return stream;
   }
@@ -299,15 +308,16 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     tensor = tensor_.to(kCPU, kDouble).contiguous();
   }
 
-  if(tensor.ndimension() == 0) {
-    fmt::print(stream,
-          "{}\n[ {}{{}}",
-          tensor.const_data_ptr<double>()[0],
-          tensor_.toString());
-  } else if(tensor.ndimension() == 1) {
+  if (tensor.ndimension() == 0) {
+    fmt::print(
+        stream,
+        "{}\n[ {}{{}}",
+        tensor.const_data_ptr<double>()[0],
+        tensor_.toString());
+  } else if (tensor.ndimension() == 1) {
     if (tensor.numel() > 0) {
       auto printFmt = __printFormat(tensor);
-      if(printFmt.scale != 1) {
+      if (printFmt.scale != 1) {
         fmt::print(stream, "{} *\n", printFmt.scale);
       }
       const double* tensor_p = tensor.const_data_ptr<double>();
@@ -317,12 +327,16 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       }
     }
     fmt::print(stream, "[ {}{{{}}}", tensor_.toString(), tensor.size(0));
-  } else if(tensor.ndimension() == 2) {
+  } else if (tensor.ndimension() == 2) {
     if (tensor.numel() > 0) {
       __printMatrix(stream, tensor, linesize, 0);
     }
-    fmt::print(stream, "[ {}{{{},{}}}",
-               tensor_.toString(), tensor.size(0), tensor.size(1));
+    fmt::print(
+        stream,
+        "[ {}{{{},{}}}",
+        tensor_.toString(),
+        tensor.size(0),
+        tensor.size(1));
   } else {
     if (tensor.numel() > 0) {
       __printTensor(stream, tensor, linesize);
@@ -338,10 +352,14 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   if (tensor_.is_quantized()) {
     fmt::print(stream, ", qscheme: {}", toString(tensor_.qscheme()));
     if (tensor_.qscheme() == c10::kPerTensorAffine) {
-      fmt::print(stream, ", scale: {}, zero_point: {}",
-                 tensor_.q_scale(), tensor_.q_zero_point());
-    } else if (tensor_.qscheme() == c10::kPerChannelAffine ||
-               tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
+      fmt::print(
+          stream,
+          ", scale: {}, zero_point: {}",
+          tensor_.q_scale(),
+          tensor_.q_zero_point());
+    } else if (
+        tensor_.qscheme() == c10::kPerChannelAffine ||
+        tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
       fmt::print(stream, ", scales: ");
       print(stream, tensor_.q_per_channel_scales(), linesize);
       fmt::print(stream, ", zero_points: ");
@@ -363,4 +381,4 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   return stream;
 }
 
-}
+} // namespace at
