@@ -187,6 +187,8 @@ cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
 
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
+
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
 # controlled by a separate flag.
