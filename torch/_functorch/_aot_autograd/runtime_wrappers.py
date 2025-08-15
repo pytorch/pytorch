@@ -2347,6 +2347,44 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         lazy_backward_info, AutogradLazyBackwardCompileInfo
                     )
 
+                    if (
+                        hasattr(lazy_backward_info, "saved_context")
+                        and lazy_backward_info.saved_context is not None
+                    ):
+                        assert isinstance(
+                            lazy_backward_info.saved_context, TracingContext
+                        )
+                        ddp_ctx = lazy_backward_info.saved_context.ddp_optimizer_ctx
+                        if ddp_ctx is not None:
+                            assert ddp_ctx.curr_bucket >= 0, (
+                                f"expected same # of fw and bw compiles, but found bucket {ddp_ctx.curr_bucket}"
+                            )
+                            curr_fw_meta = ddp_ctx.metadata_per_bucket[
+                                ddp_ctx.curr_bucket
+                            ]
+                            # Note [DDPOptimizer and fw_metadata]
+                            # When using the DDPOptimizer, we have a single dynamo graph (and TracingContext),
+                            # but multiple AOTDispatcher graph.
+                            #
+                            # One consequence is that there will be **multiple** fw_metadata objects, one per AOT graph,
+                            # which we stash the fw_metadata on the TracingContext.
+                            #
+                            # Normally what happens is that as we compile AOT graphs 1...N, we clobber the fw_metadata
+                            # for graph i-1 when we start running AOT for graph i.
+                            # Ordinarily this is fine, because inductor no longer needs the metadata from graph i-1.
+                            #
+                            # However, this is a problem for lazy compilation of the backward. During backward compilation,
+                            # we compile the backward lazily at backward runtime, meaning that we will first compile
+                            # backward graph N, N-1, ..., 1.
+                            # We need to ensure that at the time inductor compiles bw graph N-1, it can access
+                            # the corresponding fw_metadta for graph N-1.
+                            #
+                            # We do this by stashing a DDPOptimizerContext, which tracks:
+                            # - the metadata of all N graphs
+                            # - the graph we are currently compiling in our DDPOptimizer region.
+                            ddp_ctx.curr_bucket -= 1
+                            lazy_backward_info.saved_context.fw_metadata = curr_fw_meta
+
                     if not saved_tensors_use_once:
                         fw_metadata.bw_donated_idxs = []
                         # Update bw_donated_idxs if using lazy_backward_info from `aot_dispatch_autograd`
