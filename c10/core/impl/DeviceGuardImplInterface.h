@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/Stream.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
@@ -359,6 +360,26 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   // for more details
   static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
   auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFF].load();
+
+  if (type == DeviceType::CUDA) {
+    if (p == nullptr || (p && p->deviceCount() == 0)) {
+      // In following cases, we override CUDA guard interface with a no-op
+      // device guard.
+      // 1. p == nullptr; Trying to get a cuda device guard on a cpu-only build.
+      // 2. p->deviceCount() == 0; cuda build enabled, but no cuda devices
+      // available.
+
+      static c10::once_flag flag;
+      static DeviceGuardImplInterface* impl = nullptr;
+      c10::call_once(flag, [&]() {
+        impl = new NoOpDeviceGuardImpl<DeviceType::CUDA>();
+        device_guard_impl_registry[static_cast<size_t>(type)].store(impl);
+        delete p;
+      });
+
+      return impl;
+    }
+  }
 
   // This seems to be the first place where you make use of a device
   // when you pass devices to factory functions.  Give a nicer error
