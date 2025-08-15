@@ -1,4 +1,5 @@
 import random
+from re import L
 from typing import List, Tuple
 
 import torch
@@ -58,6 +59,9 @@ def fuzz_op(target_spec: Spec, depth, stack_size) -> Tuple[str, List[Spec]]:
         describes the layout requirements for the operation's inputs
     """
     if isinstance(target_spec, ScalarSpec):
+        if target_spec.constant is not None:
+                # At depth 0, only allow constant operation
+                return _get_constant_args_specs(target_spec)
         if depth == 0:
             # At depth 0, only allow leaf operations
             ops = ["constant", "arg"]
@@ -358,6 +362,10 @@ def _get_aten_cat_args_specs(target_spec: TensorSpec) -> Tuple[str, List[Spec]]:
         raise RuntimeError("torch.cat does not support 0-dimensional tensors")
 
     # Choose a random dimension to concatenate along
+    # Make sure we don't choose a dimension that's out of range
+    if len(target_size) == 0:
+        raise RuntimeError("torch.cat does not support 0-dimensional tensors")
+    
     cat_dim = random.randint(0, len(target_size) - 1)
     target_cat_size = target_size[cat_dim]
 
@@ -409,7 +417,23 @@ def _get_aten_cat_args_specs(target_spec: TensorSpec) -> Tuple[str, List[Spec]]:
         # Use same dtype as target (cat preserves dtype)
         arg_specs.append(TensorSpec(input_size, input_stride, target_dtype))
 
-    # Add dimension spec at the end (fixed constant for the cat dimension)
+    # Verify that all input tensors have compatible shapes
+    # (same shape except in cat dimension)
+    for i in range(len(target_size)):
+        if i == cat_dim:
+            continue  # Skip cat dimension, it can vary
+        else:
+            sz = target_size[i]
+            for j in range(len(arg_specs)):
+                # Check that dimension i of tensor j matches target
+                if i < len(arg_specs[j].size):  # Make sure dimension exists
+                    assert arg_specs[j].size[i] == sz, f"Tensor {j} dim {i}: expected {sz}, got {arg_specs[j].size[i]}"
+    
+    # Ensure cat_dim is valid (should already be, but double-check)
+    if cat_dim >= len(target_size) or cat_dim < 0:
+        print(f"ERROR: cat_dim {cat_dim} is out of range for target tensor with {len(target_size)} dimensions")
+        cat_dim = 0  # Fallback to dimension 0
+    
     dim_spec = ScalarSpec(
         dtype=torch.int64, constant=cat_dim
     )  # concatenate along the chosen dimension

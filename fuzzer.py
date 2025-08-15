@@ -733,10 +733,10 @@ def convert_stack_to_python_code(
             "        print('❌ Results differ between original and compiled (fullgraph=False)')",
             "        print(f'Original result: {result_original}')",
             "        print(f'Compiled result: {result_compiled}')",
+            "        sys.exit(1)",
             "except Exception as e:",
             "    print(f'❌ Compiled execution failed: {e}')",
             "    # Exit with non-zero code to signal compile failure",
-            "    import sys",
             "    sys.exit(1)",
             "",
             "# Execute compiled version 2",
@@ -754,6 +754,7 @@ def convert_stack_to_python_code(
             "        print('❌ Results differ between original and compiled (fullgraph=False, dynamic=True)')",
             "        print(f'Original result: {result_original}')",
             "        print(f'Compiled result: {result_compiled}')",
+            "        sys.exit(1)",
             "except Exception as e:",
             "    print(f'❌ Compiled execution 2 failed: {e}')",
             "    # Exit with non-zero code to signal compile failure",
@@ -776,6 +777,7 @@ def convert_stack_to_python_code(
             "           print('❌ Results differ between original and compiled (fullgraph=False, dynamic=True, capture_scalar_outputs=True)')",
             "           print(f'Original result: {result_original}')",
             "           print(f'Compiled result: {result_compiled}')",
+            "           sys.exit(1)",
             "except Exception as e:",
             "    print(f'❌ Compiled execution 3 failed: {e}')",
             "    # Exit with non-zero code to signal compile failure",
@@ -824,7 +826,7 @@ def generate_simple_operation_code(
         # torch.cat takes a sequence of tensors and a dimension
         # With flattened structure: [tensor1, tensor2, tensor3, ..., dim]
         # All args except the last are tensor variables, last arg is dimension
-        
+
         if len(input_vars) >= 2:
             # All variables except the last are tensors
             tensor_vars = input_vars[:-1]
@@ -833,7 +835,9 @@ def generate_simple_operation_code(
             return [f"{output_var} = torch.ops.aten.cat({tensor_list}, dim={dim_var})"]
         else:
             # Fallback for degenerate case
-            return [f"# Error: cat operation requires at least 2 arguments (tensors + dim)"]
+            return [
+                f"# Error: cat operation requires at least 2 arguments (tensors + dim)"
+            ]
 
     elif op_name == "torch.ops.aten.item":
         return [f"{output_var} = {input_vars[0]}.item()"]
@@ -1189,12 +1193,13 @@ def test_reproducible_generation():
         print(f"❌ Third generation failed: {e}")
 
 
-def fuzz_and_test(starting_seed: Optional[int] = None):
+def fuzz_and_test(starting_seed: Optional[int] = None, max_depth: Optional[int] = None):
     """
     Test the new fuzz_and_execute function with seed and max_depth arguments.
 
     Args:
         starting_seed: If provided, use this as the base seed and increment for each iteration
+        max_depth: If provided, use this fixed max_depth for all iterations
     """
     print("=== Testing fuzz_and_execute with arguments ===")
 
@@ -1204,9 +1209,9 @@ def fuzz_and_test(starting_seed: Optional[int] = None):
         # Use starting_seed + iteration number if provided, otherwise use random seed
         if starting_seed is not None:
             iteration_seed = starting_seed + i
-            seed, success = fuzz_and_execute(seed=iteration_seed)
+            seed, success = fuzz_and_execute(seed=iteration_seed, max_depth=max_depth)
         else:
-            seed, success = fuzz_and_execute()
+            seed, success = fuzz_and_execute(max_depth=max_depth)
 
         if not success:
             return
@@ -1264,8 +1269,27 @@ def main():
         default=False,
         help="Run the initial tensor fuzzing tests (skipped by default)",
     )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        help="Maximum depth for operation generation (1-20, default is random)",
+    )
+    parser.add_argument(
+        "--avoid-complex",
+        action="store_true",
+        default=False,
+        help="Avoid complex number dtypes (torch.complex64, torch.complex128) in fuzzing",
+    )
 
     args = parser.parse_args()
+
+    # Set fuzzer configuration based on command line arguments
+    from tensor_fuzzer import FuzzerConfig
+    if args.avoid_complex:
+        FuzzerConfig.avoid_complex = True
+        print("🚫 Avoiding complex number dtypes (torch.complex64, torch.complex128)")
+    else:
+        FuzzerConfig.avoid_complex = False
 
     # Print configuration
     if args.seed is not None:
@@ -1280,9 +1304,14 @@ def main():
         test_fuzzing_tensors()
         print()
 
-    # Run main fuzzing with optional starting seed
+    # Run main fuzzing with optional starting seed and max_depth
     print("🚀 Starting main fuzzing loop...")
-    fuzz_and_test(starting_seed=args.seed)
+    if args.max_depth is not None:
+        print(f"🔧 Using fixed max_depth: {args.max_depth}")
+    else:
+        print("🔧 Using random max_depth (1-20) for each iteration")
+    
+    fuzz_and_test(starting_seed=args.seed, max_depth=args.max_depth)
 
 
 if __name__ == "__main__":
