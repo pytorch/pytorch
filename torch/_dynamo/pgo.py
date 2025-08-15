@@ -520,6 +520,24 @@ def process_automatic_dynamic(
         return res
 
 
+def get_extra_pgo_cache_key(key: str) -> Optional[str]:
+    # TODO: info versions of these logs that log only once
+    if torch.compiler.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+        )
+        return None
+
+    # NB: We always use global rank for keys, even though they are overkill
+    # for local only cache
+    rank = None
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+
+    tag = torch.compiler.config.cache_key_tag
+    return f"sticky_pgo:{key}:{rank}:{tag}"
+
+
 def get_cache_key() -> Optional[str]:
     # TODO: info versions of these logs that log only once
     if torch.compiler.config.force_disable_caches:
@@ -686,6 +704,123 @@ class PGOCacheArtifact(CacheArtifact):
         return original_key
 
 
+def hit(path: str, ty: str) -> defaultdict[CodeId, CodeState]:
+    global _CODE_STATE, _INIT_CODE_STATE
+    assert isinstance(_CODE_STATE, defaultdict)
+    log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
+    trace_structured_artifact(
+        f"get_{ty}_code_state",
+        "string",
+        lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
+    )
+    set_feature_use("pgo", True)
+    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+    return _CODE_STATE
+
+
+def get_local_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    path = code_state_path(cache_key)
+    if path is not None and os.path.exists(path):
+        with dynamo_timed(
+            name := "pgo.get_local_code_state", log_pt2_compile_event=True
+        ):
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
+            # Read lock not necessary as we always write atomically write to
+            # the actual location
+            with open(path, "rb") as f:
+                try:
+                    content = f.read()
+                    return pickle.loads(content)
+                    CompileEventLogger.pt2_compile(name, cache_size_bytes=f.tell())
+                except Exception:
+                    log.warning(
+                        "get_code_state failed while reading %s", path, exc_info=True
+                    )
+                else:
+                    CacheArtifactManager.record_artifact(
+                        PGOCacheArtifact.type(), cache_key, content
+                    )
+                    return hit("local")
+    return None
+
+
+def _get_remote_code_state(remote_cache: RemoteCache[JsonDataTy], cache_key: str, event_name: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    code_state = None
+    # TODO: I don't really understand why there's a JSON container format
+    try:
+        cache_data = remote_cache.get(cache_key)
+    except Exception:
+        log.warning(
+            "get_code_state failed remote read on %s", cache_key, exc_info=True
+        )
+    else:
+        if cache_data is not None:
+            try:
+                assert isinstance(cache_data, dict)
+                data = cache_data["data"]
+                assert isinstance(data, str)
+                payload = base64.b64decode(data)
+                CompileEventLogger.pt2_compile(
+                    event_name, cache_size_bytes=len(payload)
+                )
+                code_state = pickle.loads(payload)
+            except Exception:
+                log.warning(
+                    "get_code_state failed parsing remote result on %s",
+                    cache_key,
+                    exc_info=True,
+                )
+            else:
+                CacheArtifactManager.record_artifact(
+                    PGOCacheArtifact.type(), cache_key, payload
+                )
+        else:
+            log.info("get_code_state remote miss on %s", cache_key)
+    return code_state
+
+
+def get_remote_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    global _CODE_STATE
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        with dynamo_timed(
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
+        ):
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
+            cs = _get_remote_code_state(remote_cache, cache_key, name)
+            if cs is not None:
+                _CODE_STATE = cs
+                return _CODE_STATE
+    return _CODE_STATE
+
+
+def get_extra_remote_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        with dynamo_timed(
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
+        ):
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
+            return _get_remote_code_state(remote_cache, cache_key, name)
+    return None
+
+
+def update_code_state(code_state: defaultdict[CodeId, CodeState]) -> None:
+    global _CODE_STATE
+    assert _CODE_STATE is not None
+
+    for code_id, state in code_state.items():
+        if code_id in _CODE_STATE:
+            for src, entry in state.automatic_dynamic.items():
+                _CODE_STATE[code_id].automatic_dynamic[src] |= entry
+        else:
+            _CODE_STATE[code_id] = state
+
+
 def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
@@ -698,85 +833,20 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     if cache_key is None:
         return _CODE_STATE
 
-    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
-        global _INIT_CODE_STATE
-        assert isinstance(_CODE_STATE, defaultdict)
-        log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
-        trace_structured_artifact(
-            f"get_{ty}_code_state",
-            "string",
-            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
-        )
-        set_feature_use("pgo", True)
-        _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
-        return _CODE_STATE
-
     # Attempt local
-    path = code_state_path(cache_key)
-    if path is not None and os.path.exists(path):
-        with dynamo_timed(
-            name := "pgo.get_local_code_state", log_pt2_compile_event=True
-        ):
-            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-            # Read lock not necessary as we always write atomically write to
-            # the actual location
-            with open(path, "rb") as f:
-                try:
-                    content = f.read()
-                    _CODE_STATE = pickle.loads(content)
-                    CompileEventLogger.pt2_compile(name, cache_size_bytes=f.tell())
-                except Exception:
-                    log.warning(
-                        "get_code_state failed while reading %s", path, exc_info=True
-                    )
-                else:
-                    CacheArtifactManager.record_artifact(
-                        PGOCacheArtifact.type(), cache_key, content
-                    )
-                    return hit("local")
+    local_code_state = get_local_code_state(cache_key)
 
     # Attempt remote
-    remote_cache = get_remote_cache()
-    if remote_cache is not None:
-        with dynamo_timed(
-            name := "pgo.get_remote_code_state",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
-        ):
-            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-            # TODO: I don't really understand why there's a JSON container format
-            try:
-                cache_data = remote_cache.get(cache_key)
-            except Exception:
-                log.warning(
-                    "get_code_state failed remote read on %s", cache_key, exc_info=True
-                )
-            else:
-                if cache_data is not None:
-                    try:
-                        assert isinstance(cache_data, dict)
-                        data = cache_data["data"]
-                        assert isinstance(data, str)
-                        payload = base64.b64decode(data)
-                        CompileEventLogger.pt2_compile(
-                            name, cache_size_bytes=len(payload)
-                        )
-                        _CODE_STATE = pickle.loads(payload)
-                    except Exception:
-                        log.warning(
-                            "get_code_state failed parsing remote result on %s",
-                            cache_key,
-                            exc_info=True,
-                        )
-                    else:
-                        CacheArtifactManager.record_artifact(
-                            PGOCacheArtifact.type(), cache_key, payload
-                        )
-                        return hit("remote")
-                else:
-                    log.info("get_code_state remote miss on %s", cache_key)
+    if local_code_state is None:
+        get_remote_code_state(cache_key)
 
-    log.info("get_code_state using default")
+    if (
+        (r := torch.compiler.config.sticky_pgo_read) is not None
+        and (extra_cache_key := get_extra_pgo_cache_key(r)) is not None
+    ):
+        extra_code_state = get_extra_remote_code_state(extra_cache_key)
+        if extra_code_state is not None:
+            update_code_state(extra_code_state)
 
     assert _CODE_STATE is not None
     return _CODE_STATE
@@ -798,6 +868,11 @@ def put_code_state() -> None:
 
     put_local_code_state(cache_key)
     put_remote_code_state(cache_key)
+    if (
+        (r := torch.compiler.config.sticky_pgo_write) is not None
+        and (extra_cache_key := get_extra_pgo_cache_key(r)) is not None
+    ):
+        put_remote_code_state(extra_cache_key)
 
 
 def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str, int]]:
@@ -826,6 +901,7 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
 
 
 def put_local_code_state(cache_key: str) -> None:
+    print("put_local_code_state", cache_key)
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None

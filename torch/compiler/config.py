@@ -59,6 +59,9 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
+sticky_pgo_read: Optional[str] = Config(env_name_default="STICKY_PGO_READ", default=None)
+sticky_pgo_write: Optional[str] = Config(env_name_default="STICKY_PGO_WRITE", default=None)
+
 
 cache_key_tag: str = Config(env_name_default="TORCH_COMPILE_CACHE_KEY_TAG", default="")
 """
