@@ -138,6 +138,17 @@ fi
 
 echo "Calling setup.py bdist at $(date)"
 
+setup_ccache() {
+    echo "Installing ccache"
+    retry dnf install -y ccache
+    ccache_path=$(which ccache)
+    export CMAKE_CUDA_COMPILER_LAUNCHER="${ccache_path}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${ccache_path}"
+    export CMAKE_C_COMPILER_LAUNCHER="${ccache_path}"
+    export CMAKE_OBJC_COMPILER_LAUNCHER="${ccache_path}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${ccache_path}"
+}
+
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
     time EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
@@ -153,6 +164,19 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
     CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
+elif [[ "${USE_SEQUENTIAL:-0}" = "1" ]]; then
+    setup_ccache
+
+    # NOTE: We log directly to PYTORCH_FINAL_PACKAGE_DIR to ensure logs upload
+    # as part of the artifacts
+    time CMAKE_ARGS=${CMAKE_ARGS[@]} \
+        EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
+        BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
+        USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
+        python3 tools/packaging/build_wheel.py \
+          --find-python manylinux \
+          --log-destination "${PYTORCH_FINAL_PACKAGE_DIR}" \
+          -d "/tmp/${WHEELHOUSE_DIR}"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
