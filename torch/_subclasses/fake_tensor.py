@@ -15,12 +15,14 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
 import torch._library.utils as library_utils
+import torch.utils._cxx_pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
@@ -41,12 +43,19 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
 from torch.utils._backport_slots import dataclass_slots
+from torch.utils._cxx_pytree import (
+    KeyPath,
+    keystr,
+    PyTree,
+    tree_map,
+    tree_map_,
+    TreeSpec,
+)
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -77,7 +86,6 @@ except ValueError as e:
 
 DimList = list
 
-pytree = torch.utils._pytree
 T = TypeVar("T")
 
 aten = torch._ops.ops.aten
@@ -145,6 +153,17 @@ fake_tensor_tls = FakeTensorTLS()
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
     return dict.fromkeys(items, True)
+
+
+# list of ops which can have args(tensor/tensorList) in mixed device
+_MIXED_DEVICE_FNS = ordered_set(
+    aten._foreach_copy.default,
+)
+
+# list of ops not using zero dim cpu tensor logic to align with the eager mode.
+_BYPASS_ZERO_DIM_CPU_TENSOR_CHECK_FNS = ordered_set(
+    aten.nextafter.default,
+)
 
 
 @contextlib.contextmanager
@@ -884,16 +903,6 @@ class FakeTensor(Tensor):
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
-        # list of ops which can have args(tensor/tensorList) in mixed device
-        mixed_device_fns = ordered_set(
-            aten._foreach_copy.default,
-        )
-
-        # list of ops not using zero dim cpu tensor logic to align with the eager mode.
-        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
-            aten.nextafter.default,
-        )
-
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
@@ -918,7 +927,7 @@ class FakeTensor(Tensor):
                 return
 
             is_bypass_zero_dim_cpu_tensor_check_op = (
-                func in bypass_zero_dim_cpu_tensor_check_ops
+                func in _BYPASS_ZERO_DIM_CPU_TENSOR_CHECK_FNS
             )
 
             # mismatching devices !
@@ -936,7 +945,7 @@ class FakeTensor(Tensor):
             # on different devices for ex. _foreach_copy, and one of the
             # device must be cpu in this case we will return from here without
             # throwing an error
-            if func in mixed_device_fns:
+            if func in _MIXED_DEVICE_FNS:
                 if any(map(check_cpu_device, (common_device, t.device))):
                     return
 
@@ -1343,7 +1352,7 @@ class FakeTensorMode(TorchDispatchMode):
     # - We change the torch.tensor ctor contract to never materialize
     #   tensors on device
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
-    @property
+    @cached_property
     def avoid_device_init(self) -> bool:
         if torch.xpu._is_compiled():
             assert not torch.cuda._is_compiled()
@@ -1380,8 +1389,6 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self) -> Self:
-        import torch.nested._internal.nested_tensor
-
         prev_only_lift_cpu_tensors = None
         if self.avoid_device_init:
             # See NOTE: [torch.tensor, lift_fresh, and device movement]

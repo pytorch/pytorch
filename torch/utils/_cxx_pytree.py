@@ -446,6 +446,11 @@ def tree_leaves(
     )
 
 
+def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> list[Any]:
+    """Get a flat list of arguments to this function."""
+    return tree_leaves((args, kwargs))
+
+
 def tree_structure(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
