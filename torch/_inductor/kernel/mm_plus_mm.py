@@ -188,5 +188,4 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     # Safe noop if lookup table is not in use
     choices = lookup_table_extract_choices(choices, add_aten)
-
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout1)
