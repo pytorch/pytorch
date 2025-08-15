@@ -2,6 +2,7 @@
 
 import functools
 import importlib
+import itertools
 import math
 import warnings
 from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -440,8 +441,8 @@ def handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs) -> _T:
-        ka = zip(names, args) | kwargs
-        tensors = [ka[a] for a in tensor_args]
+        it = itertools.chain(zip(names, args), kwargs.items())
+        tensors = [v for k, v in it if k in tensor_args]
         if has_torch_function_variadic(*tensors):
             return handle_torch_function(func, tensors, *args, **kwargs)
         return func(*args, **kwargs)
