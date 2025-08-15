@@ -141,7 +141,7 @@ echo "Calling setup.py bdist at $(date)"
 setup_ccache() {
     echo "Installing ccache"
     retry dnf install -y ccache
-
+    ccache_path=$(which ccache)
     export CMAKE_CUDA_COMPILER_LAUNCHER="${ccache_path}"
     export CMAKE_HIP_COMPILER_LAUNCHER="${ccache_path}"
     export CMAKE_C_COMPILER_LAUNCHER="${ccache_path}"
