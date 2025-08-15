@@ -780,7 +780,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
-        elif SideEffects.cls_supports_mutation_side_effects(self.value):
+        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
             with do_not_convert_to_tracable_parameter():
                 return tx.inline_user_function_return(
                     VariableTracker.build(
@@ -2072,7 +2072,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
-            elems = init_args[0].force_unpack_var_sequence(tx)
+            elems = init_args[0].unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
