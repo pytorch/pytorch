@@ -249,3 +249,13 @@ def wrap_inline_with_set_fullgraph(
                 return fn(*args, **kwargs)
 
     return wrapper
+
+
+def call_input_buffer_accumulate(
+    old_grad: Optional[torch.Tensor], grad: Optional[torch.Tensor]
+) -> Optional[torch.Tensor]:
+    if old_grad is None:
+        return grad
+    if grad is None:
+        return old_grad
+    return torch.add(old_grad, grad)

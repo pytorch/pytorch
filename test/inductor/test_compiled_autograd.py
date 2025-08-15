@@ -3880,12 +3880,12 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = cos_backward0[0];  cos_backward0 = None
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_27], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_8, unwrap_maybe_dynamic_int_9], False)]);  getitem_27 = unwrap_maybe_dynamic_int_8 = unwrap_maybe_dynamic_int_9 = None
         getitem_28 = validate_outputs_3[0];  validate_outputs_3 = None
-        add = torch.add(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
+        call_input_buffer_accumulate = torch__dynamo_external_utils_call_input_buffer_accumulate(getitem_23, getitem_28);  getitem_23 = getitem_28 = None
 
         getitem_29 = hooks[3];  hooks = None
         getitem_30 = packed_data[3];  packed_data = None
         call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_29, getitem_30, hook_type = 'unpack_hook');  getitem_29 = getitem_30 = None
-        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
+        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([call_input_buffer_accumulate], [True], call_hook_3);  call_input_buffer_accumulate = call_hook_3 = None
         getitem_31 = sin_backward0[0];  sin_backward0 = None
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
@@ -5021,6 +5021,35 @@ new_empty_strided.default
 copy_.default""",
         )  # noqa: B950
 
+    def test_undefined_input_buffer_accumulate(self):
+        class UndefinedGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return None
+
+        class DefinedGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        def fn():
+            x = torch.randn(5, requires_grad=True)
+            out = UndefinedGrad.apply(x) + DefinedGrad.apply(x)
+            out2 = DefinedGrad.apply(x) + UndefinedGrad.apply(x)
+            loss = out.sum() + out2.sum()
+            loss.backward()
+            yield x.grad
+
+        self.check_output_and_recompiles(fn)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -5219,10 +5248,8 @@ xfail_by_backend = {
         "test_node_post_hook_registered_during_unpack_hook",  # 'NoneType' object has no attribute 'register_hook'
         "test_custom_function_error",  # forward AD
         "test_custom_function_save_for_forward",  # forward AD
-        "test_dont_materialize_grads",  # undefined grad
         "test_no_grad_copy",  # setting static member in lifted backward
         "test_no_grad_copy_sparse",  # setting static member in lifted backward
-        "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
         "test_save_output_nr",  # output_nr grad passed as None
         # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
         "test_grad_nonleaf_register_hook",
@@ -5237,7 +5264,6 @@ xfail_by_backend = {
         # Uncategorized
         "test_lobpcg",  # NaNs
         "test_autograd_simple_views_python",  # gradient is None
-        "test_function_returns_undefined_tensor",  # gradient is None
         "test_input_buffer_accum",  # add(sparse, dense)
         "test_return_duplicate",  # batched gradients
         "test_return_duplicate_inplace",  # batched gradients
@@ -5267,6 +5293,7 @@ xfail_by_backend = {
         "test_graph_save_on_cpu",  # torch.save should no-op and be recorded in the graph
         "test_saving_variable_to_disk",  # torch.save should no-op and be recorded in the graph
         "test_nested_checkpoint_early_stop_False",  # AOT backward higher order gradients
+        "test_autograd_simple_views_python",  # Data-dependent branching
         # Slow tests, these tests are close to CI timeout if we try to torch.compile them
         "test_checkpointing",
         "test_checkpointing_without_reentrant_memory_savings",
