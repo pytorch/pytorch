@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import enum
 import functools
 import io
@@ -1462,7 +1463,12 @@ class _InProcessFxCompile(FxCompile):
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
                         if graph.aot_mode and graph.fx_wrapper:
+                            assert not graph.cpp_wrapper
                             compiled_fn = graph.codegen_with_cpp_wrapper()[0].gm  # type: ignore[attr-defined]
+                            output_code_log.debug(
+                                "Output graph module: \n%s",
+                                compiled_fn.print_readable(print_output=False),
+                            )
 
                         elif graph.aot_mode:
                             from .codecache import AotCodeCompiler
@@ -1867,11 +1873,11 @@ def compile_fx_aot(
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    config_patches: dict[str, Any] = (
-        {"cpp_wrapper": True}
-        if config_patches is None
-        else {**config_patches, "cpp_wrapper": True}
-    )
+    config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
+
+    if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
+        # If fx_wrapper is not set, then set cpp_wrapper
+        config_patches["cpp_wrapper"] = True
 
     output_path = config_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
@@ -2133,11 +2139,15 @@ def compile_fx(
             )
 
     # TODO: This probably shouldn't be a recursive call
-    if config.cpp_wrapper:
+    if config.cpp_wrapper or config.fx_wrapper:
+        cpp_wrapper_config = config.cpp_wrapper
+        fx_wrapper_config = config.fx_wrapper
+
         with (
             config.patch(
                 {
                     "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    "fx_wrapper": False,  # reset to break recursive call to compile_fx
                     **get_cpp_wrapper_config(),
                 }
             ),
@@ -2184,7 +2194,9 @@ def compile_fx(
                     patched_mod,
                     fake_args,
                     inner_compile=functools.partial(
-                        inner_compile, cpp_wrapper=True, fx_wrapper=config.fx_wrapper
+                        inner_compile,
+                        cpp_wrapper=cpp_wrapper_config,
+                        fx_wrapper=fx_wrapper_config,
                     ),
                     decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
