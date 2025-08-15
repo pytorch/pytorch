@@ -120,6 +120,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -258,6 +261,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -396,6 +402,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -534,6 +543,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -672,6 +684,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -810,6 +825,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -948,6 +966,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
@@ -1086,6 +1107,9 @@ jobs:
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
             3.14)
               EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
               desired_python="3.14.0rc1"
