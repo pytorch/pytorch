@@ -656,12 +656,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     # At this point `fn` is the "unwrapped" version of the
                     # context-managerified function.
                     if fn is torch.nn.attention.sdpa_kernel.__wrapped__:
-                        source = (
-                            AttrSource(fn_source, "__wrapped__") if fn_source else None
-                        )
                         args, kwargs = args[1], args[2]
                         name_to_arg_map = bind_args_cached(
-                            fn, tx, source, args.items, kwargs.items
+                            fn, tx, fn_source, args.items, kwargs.items
                         )
                         backends = name_to_arg_map["backends"].as_python_constant()
                         set_priority = name_to_arg_map[
