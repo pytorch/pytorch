@@ -35,6 +35,40 @@ if [ "$DESIRED_CUDA" = "cpu" ]; then
 else
     echo "BASE_CUDA_VERSION is set to: $DESIRED_CUDA"
     export USE_SYSTEM_NCCL=1
+    
+    # Check if we should use NVIDIA libs from PyPI (similar to x86 build_cuda.sh logic)
+    if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
+        echo "Bundling CUDA libraries with wheel for aarch64."
+    else
+        echo "Using nvidia libs from pypi for aarch64."
+        CUDA_RPATHS=(
+            '$ORIGIN/../../nvidia/cublas/lib'
+            '$ORIGIN/../../nvidia/cuda_cupti/lib'
+            '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
+            '$ORIGIN/../../nvidia/cuda_runtime/lib'
+            '$ORIGIN/../../nvidia/cudnn/lib'
+            '$ORIGIN/../../nvidia/cufft/lib'
+            '$ORIGIN/../../nvidia/curand/lib'
+            '$ORIGIN/../../nvidia/cusolver/lib'
+            '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../nvidia/cusparselt/lib'
+            '$ORIGIN/../../cusparselt/lib'
+            '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/nvshmem/lib'
+            '$ORIGIN/../../nvidia/nvtx/lib'
+            '$ORIGIN/../../nvidia/cufile/lib'
+        )
+        CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
+        export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
+        export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
+        export FORCE_RPATH="--force-rpath"
+        export USE_STATIC_NCCL=0
+        export ATEN_STATIC_CUDA=0
+        export USE_CUDA_STATIC_LINK=0
+        export USE_CUPTI_SO=1
+        export USE_NVIDIA_PYPI_LIBS=1
+    fi
+    
     #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
     USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
 fi
