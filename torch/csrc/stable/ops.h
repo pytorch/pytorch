@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
 #include <optional>

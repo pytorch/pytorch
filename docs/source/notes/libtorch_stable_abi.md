@@ -9,8 +9,9 @@ This note will eventually contain more details on how to use the APIs in torch/c
 |  type in custom extension    |   StableIValue representation   |   type in libtorch  |   Schema Type  |
 | -------- | ------- | ------- | ------- |
 | std::optional\<S> | if there is a value, raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue representing S. if there is no value, nullptr. | std::optional\<T> | Type? |
-| RAIIATH | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
-| int32_t | raw bitwise copy into leading bytes of uint64_t | at::ScalarType | ScalarType |
+| torch::stable::Tensor | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
+| RAIIATH (outdated) | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
+| torch::headeronly::ScalarType | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | torch::headeronly::ScalarType | ScalarType |
 | int32_t | raw bitwise copy into leading bytes of uint64_t | at::Layout | Layout |
 | int32_t | raw bitwise copy into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
 | bool | raw bitwise copy into leading bytes of uint64_t | bool | bool |
