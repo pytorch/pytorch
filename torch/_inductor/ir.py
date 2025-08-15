@@ -8656,7 +8656,6 @@ class WhileLoop(ExternKernel):
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device(), (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         assert device is not None
         while_loop = WhileLoop(
