@@ -112,6 +112,7 @@ jobs:
           SMOKE_TEST_PARAMS=""
 
           EXTRA_CONDA_INSTALL_FLAGS=""
+          CONDA_ENV_CREATE_FLAGS=""
           case $DESIRED_PYTHON in
             3.14t)
               CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -132,7 +133,7 @@ jobs:
               ;;
           esac
 
-          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS
+          conda create -yn "test_conda_env" python="$desired_python" $CONDA_ENV_CREATE_FLAGS $EXTRA_CONDA_INSTALL_FLAGS
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
