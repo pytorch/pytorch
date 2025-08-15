@@ -21,7 +21,7 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
 }
 
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
+  c10::call_once(mpsdev_init, [] { mps_device = std::make_unique<MPSDevice>(); });
   return mps_device.get();
 }
 

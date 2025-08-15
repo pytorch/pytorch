@@ -97,8 +97,7 @@ class WaitCounterImpl {
       }
 
       auto [implIt, emplaceSuccess] = implMap.emplace(
-          std::string{key},
-          std::unique_ptr<WaitCounterImpl>(new WaitCounterImpl(key)));
+          std::string{key}, std::make_unique<WaitCounterImpl>(key));
 
       assert(emplaceSuccess);
 
