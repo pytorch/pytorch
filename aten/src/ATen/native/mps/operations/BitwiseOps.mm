@@ -5,7 +5,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/bitwise_and_native.h>
-#include <ATen/ops/bitwise_not_native.h>
 #include <ATen/ops/bitwise_or_native.h>
 #include <ATen/ops/bitwise_xor_native.h>
 #include <ATen/ops/logical_not_native.h>
@@ -100,11 +99,6 @@ kernel void bitwise_rshift_scalar_tensor(device {0}  *out [[buffer(0)]],
   out[offset] = static_cast<{0}>(a) >> b[offset];
 }}
 
-kernel void bitwise_not(device {0}  *out [[buffer(0)]],
-                         constant {1}  *a [[buffer(1)]],
-                         uint offset [[thread_position_in_grid]]) {{
-  out[offset] = ~a[offset];
-}}
 )METAL",
                               3);
 
@@ -200,54 +194,6 @@ static void _bitwise_op_out_mps(const Tensor& self,
   return;
 }
 
-static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
-  // Handle boolean tensor using logical not
-  if (self.scalar_type() == c10::ScalarType::Bool) {
-    logical_not_out_mps(self, const_cast<Tensor&>(output_));
-    return;
-  }
-
-  Tensor output = output_;
-  bool needs_output_copy = false;
-
-  resize_output(output, self.sizes());
-  if (needsGather(output)) {
-    output = output.contiguous();
-    needs_output_copy = true;
-  }
-  if (self.dim() == 0) {
-    if (self.scalar_type() == c10::ScalarType::Byte) {
-      // Unsigned types need a special handling to keep result of operation in 0..255 output
-      output.fill_(c10::Scalar(static_cast<uint8_t>(~self.item<uint8_t>())));
-    } else {
-      output.fill_(c10::Scalar(~self.item<int64_t>()));
-    }
-    return;
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-  using namespace at::mps;
-  MPSStream* stream = getCurrentMPSStream();
-  auto cplState = getCPLState(output, self, self, "bitwise_not");
-  dispatch_sync(stream->queue(), ^() {
-    getMPSProfiler().beginProfileKernel(cplState, "bitwise_not", {self});
-
-    id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
-
-    [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
-    [commandEncoder setComputePipelineState:cplState];
-    mtl_setArgs(commandEncoder, output, self);
-    mtl_dispatch1DJob(commandEncoder, cplState, length);
-
-    getMPSProfiler().endProfileKernel(cplState);
-  });
-  if (needs_output_copy) {
-    output_.copy_(output);
-  }
-}
-
 } // namespace mps
 namespace {
 void lshift_kernel_mps(TensorIteratorBase& iter) {
@@ -270,10 +216,6 @@ TORCH_IMPL_FUNC(bitwise_or_out_mps)(const Tensor& self, const Tensor& other, con
 
 TORCH_IMPL_FUNC(bitwise_xor_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::_bitwise_op_out_mps(self, other, output, "xor");
-}
-
-TORCH_IMPL_FUNC(bitwise_not_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::_bitwise_not_out_mps(self, output);
 }
 
 REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps)

@@ -25,7 +25,7 @@ TEST(TestHalf, Arithmetic) {
   ASSERT_EQ(one + one, 2);
 }
 
-TEST(TestHalf, Comparisions) {
+TEST(TestHalf, Comparisons) {
   Half zero = 0;
   Half one = 1;
   ASSERT_LT(zero, one);

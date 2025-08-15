@@ -240,7 +240,7 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
     TORCH_CHECK(
-        unpacked_linear_context.size() > 0u,
+        !unpacked_linear_context.empty(),
         "unpacked_linear_context does not have any elements!");
 
     params_cpu.emplace_back(

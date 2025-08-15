@@ -721,22 +721,26 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     intersect = set(except_for if except_for else []) & set(
         only_for if only_for else []
     )
-    assert (
-        not intersect
-    ), f"device ({intersect}) appeared in both except_for and only_for"
+    assert not intersect, (
+        f"device ({intersect}) appeared in both except_for and only_for"
+    )
 
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+
+        def func_replace(x: str):
+            return x.replace(privateuse1_backend_name, "privateuse1")
+
         except_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in except_for]
-            if except_for is not None
-            else None
+            ([func_replace(x) for x in except_for] if except_for is not None else None)
+            if not isinstance(except_for, str)
+            else func_replace(except_for)
         )
         only_for = (
-            ["privateuse1" if x == privateuse1_backend_name else x for x in only_for]
-            if only_for is not None
-            else None
+            ([func_replace(x) for x in only_for] if only_for is not None else None)
+            if not isinstance(only_for, str)
+            else func_replace(only_for)
         )
 
     if except_for:
@@ -873,7 +877,7 @@ def instantiate_device_type_tests(
     ):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        # type set to Any and suppressed due to unsupport runtime class:
+        # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
 
@@ -1316,7 +1320,7 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     size may be a number of bytes, a string of the form "N GB", or a callable
 
     If the test is a device generic test, available memory on the primary device will be checked.
-    It can also be overriden by the optional `device=` argument.
+    It can also be overridden by the optional `device=` argument.
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
@@ -1403,9 +1407,9 @@ class deviceCountAtLeast:
         self.num_required_devices = num_required_devices
 
     def __call__(self, fn):
-        assert not hasattr(
-            fn, "num_required_devices"
-        ), f"deviceCountAtLeast redefinition for {fn.__name__}"
+        assert not hasattr(fn, "num_required_devices"), (
+            f"deviceCountAtLeast redefinition for {fn.__name__}"
+        )
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
@@ -1470,13 +1474,13 @@ def onlyNativeDeviceTypesAnd(devices=None):
 # self.precision *2, max(1, self.precision)).
 class precisionOverride:
     def __init__(self, d):
-        assert isinstance(
-            d, dict
-        ), "precisionOverride not given a dtype : precision dict!"
+        assert isinstance(d, dict), (
+            "precisionOverride not given a dtype : precision dict!"
+        )
         for dtype in d.keys():
-            assert isinstance(
-                dtype, torch.dtype
-            ), f"precisionOverride given unknown dtype {dtype}"
+            assert isinstance(dtype, torch.dtype), (
+                f"precisionOverride given unknown dtype {dtype}"
+            )
 
         self.d = d
 
@@ -1509,12 +1513,12 @@ class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
-            assert isinstance(
-                dtype, torch.dtype
-            ), f"toleranceOverride given unknown dtype {dtype}"
-            assert isinstance(
-                prec, tol
-            ), "toleranceOverride not given a dtype : tol dict!"
+            assert isinstance(dtype, torch.dtype), (
+                f"toleranceOverride given unknown dtype {dtype}"
+            )
+            assert isinstance(prec, tol), (
+                "toleranceOverride not given a dtype : tol dict!"
+            )
 
         self.d = d
 
@@ -1542,13 +1546,13 @@ class dtypes:
                     "all dtype variants must be. "
                     f"Received non-list non-tuple dtype {str(arg)}"
                 )
-                assert all(
-                    isinstance(dtype, torch.dtype) for dtype in arg
-                ), f"Unknown dtype in {str(arg)}"
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), (
+                    f"Unknown dtype in {str(arg)}"
+                )
         else:
-            assert all(
-                isinstance(arg, torch.dtype) for arg in args
-            ), f"Unknown dtype in {str(args)}"
+            assert all(isinstance(arg, torch.dtype) for arg in args), (
+                f"Unknown dtype in {str(args)}"
+            )
 
         self.args = args
         self.device_type = device_type

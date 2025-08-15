@@ -414,7 +414,7 @@ class DDP_TP_Test(InductorTestCase):
             # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
             with self.assertRaisesRegex(
                 AssertionError,
-                "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
+                "Expected ProxyTensor, got <class 'torch.distributed.tensor.DTensor'>",
             ):
                 loss.backward()
 

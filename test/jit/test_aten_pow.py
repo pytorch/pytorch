@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class TestAtenPow(TestCase):
@@ -99,3 +99,7 @@ class TestAtenPow(TestCase):
         self.assertEqual(fn_float_float(0.0, -0.0), 0.0 ** (-0.0))
         # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_float_float, 0.0, -2.0)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

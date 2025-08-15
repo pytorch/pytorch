@@ -26,7 +26,7 @@ template <typename scalar_t>
 inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
 #if defined(__HIPCC__)
   // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  //       https://github.com/ROCm/hip/issues/2209
   scalar_t max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max(a, b));
 #else
   scalar_t max = at::_isnan(b) ? b : std::max(a, b);
@@ -37,7 +37,7 @@ template <typename scalar_t>
 inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
 #if defined(__HIPCC__)
   // TODO: remove this special case for HIP when issue is fixed:
-  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+  //       https://github.com/ROCm/hip/issues/2209
   scalar_t min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min(a, b));
 #else
   scalar_t min = at::_isnan(b) ? b : std::min(a, b);

@@ -128,9 +128,17 @@ class TCPClient {
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
-    if (!socket_.waitForInput(timeout))
+    if (!socket_.waitForInput(timeout)) {
       return {};
-    return tcputil::recvValue<T>(socket_.handle());
+    }
+
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING(
+          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   void setTimeout(std::chrono::milliseconds value);
 
@@ -415,8 +423,14 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
-  TORCH_INTERNAL_ASSERT(
-      nonce == returnedNonce, "Ping failed, invalid nonce returned");
+  if (nonce != returnedNonce) {
+    C10_THROW_ERROR(
+        DistNetworkError,
+        fmt::format(
+            "Ping failed, invalid value returned from server. Expected: {}, Got: {}",
+            nonce,
+            returnedNonce));
+  }
 }
 
 void TCPStore::_splitSet(
@@ -668,7 +682,7 @@ void TCPStore::queuePush(
   buffer.flush();
 }
 
-std::vector<uint8_t> TCPStore::queuePop(const std::string& key) {
+std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
   TORCH_CHECK_WITH(
       NotImplementedError,
       usingLibUv_,
@@ -678,14 +692,16 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key) {
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
-  doWait(keyPrefix_ + key, timeout_);
+  if (block) {
+    doWait(keyPrefix_ + key, timeout_);
+  }
+
   detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_POP);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
 
   auto keys = client_->receiveValue<int64_t>();
-  C10D_CHECK_WITH(
-      QueueEmptyError, keys > 0, "expected one key to be ready in queuePop");
+  TORCH_CHECK_WITH(DistQueueEmptyError, keys > 0, "queue is empty");
 
   return client_->receiveBits();
 }

@@ -86,7 +86,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/)  const override {
     return false;
   }
 
@@ -115,6 +115,14 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
   virtual bool hasROCM() const {
+    return false;
+  }
+
+  virtual bool hasCKSDPA() const {
+    return false;
+  }
+
+  virtual bool hasCKGEMM() const {
     return false;
   }
 
@@ -160,6 +168,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
 
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionMIOpen() const {
+    TORCH_CHECK(false, "Cannot query MIOpen version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual long versionCUDART() const {
