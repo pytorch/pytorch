@@ -2884,7 +2884,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         layout = buffer.get_output_spec()
-        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+        if isinstance(layout, ir.NonOwningLayout) and buffer.get_mutation_names():
             return
         if isinstance(layout, ir.NoneLayout):
             return

@@ -3799,13 +3799,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         output_indexer=inner_fn,
         scatter_mode="atomic_add" if accumulate else None,
     )
-    buffer = ir.ComputedBuffer(
-        name=None,
-        layout=ir.MutationLayoutSHOULDREMOVE(self),
-        data=scatter,
-    )
-    buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
+    ir.create_computed_mutated_buffer(self, scatter)
 
     if x_ndim == 0:
         self = view(self, [])
@@ -4025,13 +4019,8 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             output_indexer=output_indexer,
             scatter_mode=None,
         )
-        buffer = ir.ComputedBuffer(
-            name=None,
-            layout=ir.MutationLayoutSHOULDREMOVE(self),
-            data=zero_out,
-        )
-        buffer.name = V.graph.register_buffer(buffer)
-        V.graph.register_operation(buffer)
+
+        ir.create_computed_mutated_buffer(self, zero_out)
 
     # self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
     # self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
@@ -4044,13 +4033,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         output_indexer=output_indexer,
         scatter_mode=backend_reduce_str(reduce),
     )
-    buffer = ir.ComputedBuffer(
-        name=None,
-        layout=ir.MutationLayoutSHOULDREMOVE(self),
-        data=scatter,
-    )
-    buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
+    ir.create_computed_mutated_buffer(self, data)
 
     if ndim == 0:
         self = view(self, [])
@@ -6152,6 +6135,7 @@ def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(val, TensorBox):
         val = val.data
 
+    # breakpoint()
     if not isinstance(val, ir.StorageBox):
         # introduce a copy to handle views
         node = Pointwise.create(
@@ -6175,7 +6159,7 @@ def mutate_to(changed, val, unsafe_alias=False):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayoutSHOULDREMOVE.realize_into(
+    ir.mutate_into(
         val, changed_data, unsafe_alias=unsafe_alias
     )
     return changed
@@ -6194,6 +6178,7 @@ def copy_(dst, src, non_blocking=False):
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
+
     return mutate_to(dst, src)
 
 
@@ -6749,8 +6734,10 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
     def fn(*args, **kwargs):
         results = outplace_op(*args, **kwargs)
         mut_results = []
+        breakpoint()
         for arg, result in zip(args[0], results):
-            mut_results.append(mutate_to(arg, result, unsafe_alias=True))
+            
+            mut_results.append(mutate_to(arg, result, unsafe_alias=False))
 
         return mut_results
 
