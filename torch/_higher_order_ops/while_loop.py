@@ -200,8 +200,17 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
-    while pred := cond_fn(*carried_vals, *additional_inputs):
-        _validate_cond_output(pred)
+    # Check condition and set up flag
+    should_loop = cond_fn(*carried_vals, *additional_inputs)
+    _validate_cond_output(should_loop)
+
+    if not should_loop:
+        return tuple(
+            val.clone() if isinstance(val, torch.Tensor) else val
+            for val in carried_vals + additional_inputs
+        )
+
+    while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(out, tuple), (
             f"body_fn should return a tuple but got {type(out)}"
@@ -210,6 +219,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             "body_fn should return the same number of elements as carried_inputs"
         )
         carried_vals = out
+
+        should_loop = cond_fn(*carried_vals, *additional_inputs)
+
     return carried_vals
 
 
