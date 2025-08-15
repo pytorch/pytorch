@@ -1,12 +1,12 @@
 # Build System requirements
-setuptools>=70.1.0
-cmake>=3.27
-ninja
-numpy==2.0.2 ; python_version == "3.9""
-numpy==2.1.2 ; python_version > "3.9"
-packaging
-pyyaml
-requests
-six  # dependency chain: NNPACK -> PeachPy -> six
-typing-extensions>=4.10.0
 pip  # not technically needed, but this makes setup.py invocation work
+setuptools>=70.1.0,<80.0  # setuptools develop deprecated on 80.0
+cmake>=3.31.4
+ninja==1.11.1.3
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9"
+packaging==25.0
+pyyaml==6.0.2
+requests==2.32.4
+six==1.17.0  # dependency chain: NNPACK -> PeachPy -> six
+typing-extensions==4.14.1

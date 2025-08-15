@@ -5,15 +5,18 @@
 
 # Install / Development extra requirements
 build[uv]  # for building sdist and wheel
-expecttest>=0.3.0
-filelock
-fsspec>=0.8.5
-hypothesis
-jinja2
-lintrunner ; platform_machine != "s390x" and platform_machine != "riscv64"
-networkx>=2.5.1
-optree>=0.13.0
-psutil
-sympy>=1.13.3
-typing-extensions>=4.13.2
-wheel
+expecttest==0.3.0
+filelock==3.18.0
+fsspec==2025.7.0
+hypothesis==5.35.1
+jinja2==3.1.6
+lintrunner==0.12.7 ; platform_machine != "s390x"
+networkx==2.8.8
+ninja==1.11.1.3
+numpy==2.0.2 ; python_version == "3.9"
+numpy==2.1.2 ; python_version > "3.9"
+optree==0.13.0
+psutil==7.0.0
+sympy==1.13.3
+typing-extensions==4.14.1
+wheel==0.45.1
