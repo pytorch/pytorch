@@ -1926,8 +1926,7 @@ def use_ck_template(layout: Layout) -> bool:
     if not config.rocm.ck_dir:
         config.rocm.ck_dir = ck_package_dirname
         log.warning(
-            "TorchInductor's config.rocm.ck_dir was not set. "
-            "Updating to: %s",
+            "TorchInductor's config.rocm.ck_dir was not set. Updating to: %s",
             ck_package_dirname,
         )
 
