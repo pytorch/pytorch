@@ -2360,6 +2360,12 @@ def _reduction_configs(
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
+
+    configs = []
+
+    if inductor_meta.get("add_persistent_rblock") and not register_intensive:
+        configs.append(make_config(1, rnumel, register_intensive=register_intensive))
+
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:
         pass
@@ -2368,14 +2374,14 @@ def _reduction_configs(
     ):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
-        return [contiguous_config]
+        return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
-        return [outer_config]
+        return configs + [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
-        return [tiny_config]
+        return configs + [tiny_config]
     if disable_pointwise_autotuning(inductor_meta):
-        return [make_config(32, 128)]
-    return [
+        return configs + [make_config(32, 128)]
+    return configs + [
         contiguous_config,
         outer_config,
         tiny_config,
