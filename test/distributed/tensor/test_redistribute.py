@@ -705,9 +705,11 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((8, 8, 8), device=self.device_type)
         sharding_src_dst_pairs_with_order = [
-            # after reodering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
+            # after reordering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
             # I_{0,1,2}->I_{1,2}). 2: S0->R, 1: S0->R, 0: S0->R, 1: R->S0, 2:
-            # R->S0
+            # R->S0. Note that [0, 1, 2] device order will trigger the
+            # generate_greedy_transform_infos() without using the device_order
+            # information.
             (
                 ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
@@ -718,27 +720,26 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 ([Shard(0), Shard(0), Shard(0)], None),
                 ([Replicate(), Shard(0), Shard(0)], None),
             ),
-            # after reodering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
-            # I_{1,0,2}->I_{1,2}). 2: S0->R, 0: S0->R, 2: R->S0
+            # after reordering: S(0)S(0)S(0) -> RS(0)S(0) (S(0) to mesh axis
+            # I_{1,0,2}->I_{1,2}).
             (
                 ([Shard(0), Shard(0), Shard(0)], [1, 0, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
             ),
-            # after reodering: S(0)S(0)S(0) -> S(0)S(0)R (S(0) to mesh axis
-            # I_{0,1,2}->I_{0,1}). 2: S0->R
+            # after reordering: S(0)S(0)S(0) -> S(0)S(0)R (S(0) to mesh axis
+            # I_{0,1,2}->I_{0,1}).
             (
                 ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [2, 0, 1]),
             ),
-            # after reodering: RS(0)S(0) -> RS(1)S(0). (S(0) to mesh axis
-            # I_{1,2}->I_{2}) 2: S0->R, 1: S0->R, 2: R->S0, 1: R->S1
-            # TODO: this can be optimized to replace one allreduce to alltoall.
+            # after reordering: RS(0)S(0) -> RS(1)S(0). (S(0) to mesh axis
+            # I_{1,2}->I_{2})
             (
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
             ),
         ]
-        excepted_comm_counts = [3, 3, 2, 1, 2]
+        excepted_comm_counts = [5, 5, 4, 3, 2]
         comm_mode = CommDebugMode()
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
             sharding_src_dst_pairs_with_order
@@ -756,9 +757,9 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 self.assertEqual(
                     comm_mode.get_total_counts(), excepted_comm_counts[idx]
                 )
-                local_out_dt = out_dt.to_local()
-                local_expected_dt = expected_dt.to_local()
-                self.assertEqual(local_out_dt, local_expected_dt)
+            local_out_dt = out_dt.to_local()
+            local_expected_dt = expected_dt.to_local()
+            self.assertEqual(local_out_dt, local_expected_dt)
 
 
 if __name__ == "__main__":

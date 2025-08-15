@@ -561,6 +561,7 @@ class DTensor(torch.Tensor):
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
+        device_order = tuple(device_order) if device_order is not None else None
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
             self,
@@ -770,26 +771,27 @@ def distribute_tensor(
     local_tensor = tensor.detach()
 
     placements = list(placements)
-    device_order = device_order or list(range(device_mesh.ndim))
+    device_order = device_order or tuple(range(device_mesh.ndim))
     assert len(device_order) == device_mesh.ndim
-    for idx, placement in zip(device_order, placements):
+    sorted_placements = sorted(enumerate(placements), key=lambda x: device_order[x[0]])
+    for mesh_dim, placement in sorted_placements:
         if placement.is_shard():
             placement = cast(Shard, placement)
             if placement.dim < 0:
                 # normalize shard placement dim
                 placement = Shard(placement.dim + tensor.ndim)
-                placements[idx] = placement
+                placements[mesh_dim] = placement
             local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+                local_tensor, device_mesh, mesh_dim, src_data_rank
             )
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+                local_tensor, device_mesh, mesh_dim, src_data_rank
             )
         else:
             raise RuntimeError(
-                f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
+                f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {mesh_dim}!"
             )
     placements = tuple(placements)
 
