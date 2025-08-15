@@ -3261,7 +3261,6 @@ class CheckFunctionManager:
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
     ):
-
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
@@ -3483,7 +3482,7 @@ class CheckFunctionManager:
         for source in output_graph.guard_on_key_order:
             prune_variable(source)
 
-        def normalize_create_fn(x: Any) -> Any:
+        def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
             if isinstance(x, functools.partial):
 
                 def _ref(x: Any) -> Any:
