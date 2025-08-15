@@ -1888,6 +1888,37 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_return_size(self):
+        def run(dynamic):
+            torch.compiler.reset()
+
+            @nested_compile_region
+            def gn(x):
+                y = x + 1
+                z = x.shape
+                return y, z
+
+            def fn(x):
+                z0 = gn(x)
+                z1 = gn(x)
+                return z0[0] + z1[0], z0[1]
+
+            x = torch.randn(8, 8, requires_grad=True)
+            x_clone = x.detach().clone().requires_grad_(True)
+            ref = fn(x)
+            opt_fn = torch.compile(
+                fn, backend="inductor", fullgraph=True, dynamic=dynamic
+            )
+            res = opt_fn(x_clone)
+            self.assertEqual(ref, res)
+
+            ref[0].sum().backward()
+            res[0].sum().backward()
+            self.assertEqual(x.grad, x_clone.grad)
+
+        run(dynamic=True)
+        run(dynamic=False)
+
     def test_different_symint(self):
         """
         Tests check that the same subgraph called with different symints use different graphs

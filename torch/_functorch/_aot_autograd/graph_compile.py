@@ -546,7 +546,9 @@ def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
                 *old_outputs[-num_fw_outputs:],
                 *old_outputs[:-num_fw_outputs],
             )
-            new_outputs = [env[n] if n else None for n in new_outputs]
+            new_outputs = [
+                env[n] if isinstance(n, torch.fx.Node) else None for n in new_outputs
+            ]
             new_graph.output(tuple(new_outputs))
         else:
             env[node] = new_graph.node_copy(node, lambda n: env[n])
