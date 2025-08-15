@@ -191,7 +191,9 @@ def cond(
     ):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             if metadata_mode:
-                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                backend: Union[str, Callable[..., Any]] = (
+                    make_eager_backend_with_torch_function_mode(metadata_mode)
+                )
             else:
                 backend = "eager"
             return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
