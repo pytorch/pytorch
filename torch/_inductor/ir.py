@@ -4039,7 +4039,7 @@ class NoneLayout(OutputSpec):
 def create_computed_mutated_buffer(target: IRNode, data: IRNode) -> Buffer:
     """Create and register a buffer that mutates an existing node"""
     V.graph.mark_buffer_mutated(target.get_name())
-    
+
     buffer = ComputedBuffer(
         name=None,
         layout=NonOwningLayout(target),
@@ -4102,7 +4102,7 @@ class Buffer(IRNode, CodegenSymbol):
     # MultiOutput does NOT define this!
 
     def __post_init__(self) -> None:
-        super().__post_init__() 
+        super().__post_init__()
         self._post_init_setattr("origin_node", None)
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -6257,7 +6257,9 @@ class ExternKernelAlloc(ExternKernel):
 
 class MutationOutput(Buffer):
     """
-    An output buffer that represents the mutation of a pre-existing buffer
+    An output buffer that represents the mutation of a pre-existing buffer.
+
+    These are used for dependency tracking of Extern Kernels.
     """
 
     def __init__(
@@ -7586,9 +7588,6 @@ class FallbackKernel(ExternKernelAlloc):
             # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
             device = torch.device("cpu")
 
-        # breakpoint()
-        if isinstance(example_output, torch.Tensor):
-            print(example_output.storage_offset())
         if example_output is None:
             packed = cls(
                 NoneLayout(device=device),
@@ -7598,21 +7597,6 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings=unbacked_bindings,
             )
-        # elif (
-        #     not isinstance(example_output, (tuple, list))
-        #     and hasattr(kernel, "tags")
-        #     and torch.Tag.dynamic_output_shape not in kernel.tags
-        # ):
-        #     packed = cls(
-        #         cls.tensor_to_layout(example_output),
-        #         kernel,
-        #         tensor_args,
-        #         non_tensor_args,
-        #         unflatten_args,
-        #         unbacked_bindings=unbacked_bindings,
-        #     )
-        #     packed.outputs = [packed]
-        #     return packed
         else:
             assert device, "Not sure where to find device info"
             packed = cls(

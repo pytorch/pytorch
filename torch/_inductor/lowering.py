@@ -6736,7 +6736,7 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
         mut_results = []
         breakpoint()
         for arg, result in zip(args[0], results):
-            
+
             mut_results.append(mutate_to(arg, result, unsafe_alias=False))
 
         return mut_results

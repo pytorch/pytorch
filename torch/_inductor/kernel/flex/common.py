@@ -77,7 +77,7 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
     )
 
     buffer = ir.create_computed_mutated_buffer(
-        target=grad.data, 
+        target=grad.data,
         data=scatter
     )
     return buffer
