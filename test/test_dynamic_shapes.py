@@ -3616,6 +3616,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_unbacked_select_index_cpp_wrapper(self):
         self.test_unbacked_select_index()
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select2(self):
+        def f(idx, x):
+            x = x.select(0, idx.item())
+            return x @ x
+
+        x = torch.randn(3, 3, 3)
+        idx = torch.tensor(1, dtype=torch.int64)
+        out = torch.compile(f)(idx, x)
+        self.assertEqual(out, f(idx, x))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 

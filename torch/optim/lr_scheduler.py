@@ -1344,7 +1344,7 @@ class ReduceLROnPlateau(LRScheduler):
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
         self.last_epoch = epoch
 
-        if self.is_better(current, self.best):
+        if self._is_better(current, self.best):
             self.best = current
             self.num_bad_epochs = 0
         else:
@@ -1386,7 +1386,7 @@ class ReduceLROnPlateau(LRScheduler):
     def in_cooldown(self):  # noqa: D102
         return self.cooldown_counter > 0
 
-    def is_better(self, a, best):  # noqa: D102
+    def _is_better(self, a, best):  # noqa: D102
         if self.mode == "min" and self.threshold_mode == "rel":
             rel_epsilon = 1.0 - self.threshold
             return a < best * rel_epsilon
@@ -1686,6 +1686,15 @@ class CyclicLR(LRScheduler):
 
     @override
     def state_dict(self) -> dict[str, Any]:  # noqa: D102
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        The learning rate lambda functions will only be saved if they are callable objects
+        and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
+        """
         state = super().state_dict()
         # We are dropping the `_scale_fn_ref` attribute because it is a
         # `weakref.WeakMethod` and can't be pickled.

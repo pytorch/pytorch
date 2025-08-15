@@ -23,6 +23,7 @@ from torch.distributed.tensor._tp_conv import (
 )
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 try:
@@ -138,7 +139,6 @@ class OpDispatcher:
         (2) registered sharding strategy, then rule
         (3) composite implicit autograd decomposition
         """
-
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
@@ -165,7 +165,8 @@ class OpDispatcher:
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
-        if mesh.get_coordinate() is not None:
+        participating = mesh.get_coordinate() is not None
+        if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
@@ -197,8 +198,19 @@ class OpDispatcher:
                     cast(dtensor.DTensor, args[0]),
                     cast(torch.Tensor, local_tensor_args[0]),
                 )
+
+                # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
+                # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
+                # our RNG manager)
+                maybe_user_generator = op_info.local_kwargs.pop("generator", None)
+                assert maybe_user_generator is None or isinstance(
+                    maybe_user_generator, torch.Generator
+                )
+                # maybe_user_generator = None
                 rng_context = (
-                    random._rng_tracker._distribute_region(first_arg._spec)
+                    random._rng_tracker._distribute_region(
+                        first_arg._spec, generator=maybe_user_generator
+                    )
                     if random._rng_tracker and not first_local_arg.is_meta
                     else contextlib.nullcontext()
                 )
@@ -267,7 +279,20 @@ class OpDispatcher:
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
-                return args[0]
+                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
+                # the inplace argument's tensor meta. Here we choose to special case
+                # this op because as far as I know this is the only inplace op that
+                # has such as behavior. We can extend this special case if necessary.
+                if op_call == aten.squeeze_.dim:
+                    output_spec = output_sharding.output_spec
+                    assert isinstance(output_spec, DTensorSpec)
+                    assert isinstance(args[0], dtensor.DTensor)
+                    args[0]._spec = output_spec
+                    # use return_and_correct_aliasing to match the outer and the inner
+                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
+                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
+                else:
+                    return args[0]
             else:
                 return None
         elif op_info.schema.is_out_variant_op():
@@ -289,7 +314,11 @@ class OpDispatcher:
             assert len(out_dts) >= 1, "out variant should have at least one out arg"
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            return self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
+            if participating and op_info.schema.is_view_op():
+                return return_and_correct_aliasing(op_call, args, kwargs, ret)
+            else:
+                return ret
 
     @staticmethod
     def redistribute_local_args(

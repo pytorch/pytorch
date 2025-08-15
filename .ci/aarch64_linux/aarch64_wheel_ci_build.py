@@ -208,7 +208,9 @@ if __name__ == "__main__":
     build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
-        build_vars = "MAX_JOBS=5 " + build_vars
+        build_vars += "MAX_JOBS=5 "
+        # nvshmem is broken for aarch64 see https://github.com/pytorch/pytorch/issues/160425
+        build_vars += "USE_NVSHMEM=OFF "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")

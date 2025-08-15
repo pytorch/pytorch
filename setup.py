@@ -156,6 +156,12 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_ROCM_CK_GEMM=1
+#     Enable building CK GEMM backend in ROCm platform
+#
+#   USE_ROCM_CK_SDPA=1
+#     Enable building CK SDPA backend in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -229,6 +235,11 @@
 #
 #   BUILD_PYTHON_ONLY
 #      Builds pytorch as a wheel using libtorch.so from a separate wheel
+#
+#   USE_NIGHTLY=VERSION
+#      Skip cmake build and instead download and extract nightly PyTorch wheel
+#      matching the specified version (e.g., USE_NIGHTLY="2.8.0.dev20250608+cpu")
+#      into the local directory for development use
 
 from __future__ import annotations
 
@@ -266,8 +277,10 @@ import json
 import shutil
 import subprocess
 import sysconfig
+import tempfile
 import textwrap
 import time
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, ClassVar, IO
@@ -588,9 +601,372 @@ def mirror_files_into_torchgen() -> None:
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 
+# ATTENTION: THIS IS AI SLOP
+def extract_variant_from_version(version: str) -> str:
+    """Extract variant from version string, defaulting to 'cpu'."""
+    import re
+
+    variant_match = re.search(r"\+([^-\s,)]+)", version)
+    return variant_match.group(1) if variant_match else "cpu"
+
+
+# ATTENTION: THIS IS AI SLOP
+def get_nightly_git_hash(version: str) -> str:
+    """Download a nightly wheel and extract the git hash from its version.py file."""
+    # Extract variant from version to construct correct URL
+    variant = extract_variant_from_version(version)
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    torch_version_spec = f"torch=={version}"
+
+    # Create a temporary directory for downloading
+    with tempfile.TemporaryDirectory(prefix="pytorch-hash-extract-") as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Download the wheel
+        report(f"-- Downloading {version} wheel to extract git hash...")
+        download_cmd = [
+            "uvx",
+            "pip",
+            "download",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "--no-deps",
+            "--dest",
+            str(temp_path),
+            torch_version_spec,
+        ]
+
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to download {version} wheel for git hash extraction: {result.stderr}"
+            )
+
+        # Find the downloaded wheel file
+        wheel_files = list(temp_path.glob("torch-*.whl"))
+        if not wheel_files:
+            raise RuntimeError(f"No torch wheel found after downloading {version}")
+
+        wheel_file = wheel_files[0]
+
+        # Extract the wheel and look for version.py
+        with tempfile.TemporaryDirectory(
+            prefix="pytorch-wheel-extract-"
+        ) as extract_dir:
+            extract_path = Path(extract_dir)
+
+            with zipfile.ZipFile(wheel_file, "r") as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            # Find torch directory and version.py
+            torch_dirs = list(extract_path.glob("torch"))
+            if not torch_dirs:
+                torch_dirs = list(extract_path.glob("*/torch"))
+
+            if not torch_dirs:
+                raise RuntimeError(f"Could not find torch directory in {version} wheel")
+
+            version_file = torch_dirs[0] / "version.py"
+            if not version_file.exists():
+                raise RuntimeError(f"Could not find version.py in {version} wheel")
+
+            # Read and parse version.py to extract git_version (nightly branch commit)
+            from ast import literal_eval
+
+            nightly_commit = None
+            with version_file.open(encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("git_version"):
+                        try:
+                            # Parse the git_version assignment, e.g., git_version = "abc123def456"
+                            nightly_commit = literal_eval(
+                                line.partition("=")[2].strip()
+                            )
+                            break
+                        except (ValueError, SyntaxError):
+                            continue
+
+            if not nightly_commit:
+                raise RuntimeError(
+                    f"Could not parse git_version from {version} wheel's version.py"
+                )
+
+            # Now fetch the nightly branch and extract the real source commit from the message
+            report("-- Fetching nightly branch to extract source commit...")
+
+            # Fetch only the nightly branch
+            subprocess.check_call(["git", "fetch", "origin", "nightly"], cwd=str(CWD))
+
+            # Get the commit message from the nightly commit
+            commit_message = subprocess.check_output(
+                ["git", "show", "--no-patch", "--format=%s", nightly_commit],
+                cwd=str(CWD),
+                text=True,
+            ).strip()
+
+            # Parse the commit message to extract the real hash
+            # Format: "2025-08-06 nightly release (74a754aae98aabc2aca67e5edb41cc684fae9a82)"
+            import re
+
+            hash_match = re.search(r"\(([0-9a-fA-F]{40})\)", commit_message)
+            if hash_match:
+                real_commit = hash_match.group(1)
+                report(f"-- Extracted source commit: {real_commit[:12]}...")
+                return real_commit
+            else:
+                raise RuntimeError(
+                    f"Could not parse commit hash from nightly commit message: {commit_message}"
+                )
+
+
+# ATTENTION: THIS IS AI SLOP
+def get_latest_nightly_version(variant: str = "cpu") -> str:
+    """Get the latest available nightly version using pip to query the PyTorch nightly index."""
+    # Get the latest available nightly version for the specified variant
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    # Run pip index to get available versions
+    output = subprocess.check_output(
+        [
+            "uvx",
+            "pip",
+            "index",
+            "versions",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "torch",
+        ],
+        text=True,
+        timeout=30,
+    )
+
+    # Parse the first line to get the latest version
+    # Format: "torch (2.9.0.dev20250806)" or "torch (2.9.0.dev20250806+cpu)"
+    first_line = output.strip().split("\n")[0]
+    if "(" in first_line and ")" in first_line:
+        # Extract version from parentheses exactly as reported
+        version = first_line.split("(")[1].split(")")[0]
+        return version
+
+    raise RuntimeError(f"Could not parse version from pip index output: {first_line}")
+
+
+# ATTENTION: THIS IS AI SLOP
+def download_and_extract_nightly_wheel(version: str) -> None:
+    """Download and extract nightly PyTorch wheel for USE_NIGHTLY=VERSION builds."""
+
+    # Extract variant from version (e.g., cpu, cu121, cu118, rocm5.7)
+    variant = extract_variant_from_version(version)
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    # Construct the full torch version spec
+    torch_version_spec = f"torch=={version}"
+
+    # Create a temporary directory for downloading
+    with tempfile.TemporaryDirectory(prefix="pytorch-nightly-") as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Use pip to download the specific nightly wheel
+        download_cmd = [
+            "uvx",
+            "pip",
+            "download",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "--no-deps",
+            "--dest",
+            str(temp_path),
+            torch_version_spec,
+        ]
+
+        report("-- Downloading nightly PyTorch wheel...")
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            # Try to get the latest nightly version for the same variant to help the user
+            variant = extract_variant_from_version(version)
+            try:
+                report(f"-- Detecting latest {variant} nightly version...")
+                latest_version = get_latest_nightly_version(variant)
+                error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                error_msg += (
+                    f"\n\nLatest available {variant} nightly version: {latest_version}"
+                )
+                error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
+
+                # Also get the git hash for the latest version
+                git_hash = get_nightly_git_hash(latest_version)
+                error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit:\ngit checkout {git_hash}"
+            except Exception:
+                # If we can't get latest for this variant, try CPU as fallback
+                try:
+                    report("-- Detecting latest CPU nightly version...")
+                    latest_version = get_latest_nightly_version("cpu")
+                    error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                    error_msg += f"\n\nCould not find {variant} nightlies. Latest available CPU nightly version: {latest_version}"
+                    error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
+                except Exception:
+                    error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                    error_msg += "\n\nCould not determine latest nightly version. "
+                    error_msg += "Check https://download.pytorch.org/whl/nightly/ for available versions."
+
+            raise RuntimeError(error_msg)
+
+        # Find the downloaded wheel file
+        wheel_files = list(temp_path.glob("torch-*.whl"))
+        if not wheel_files:
+            raise RuntimeError("No torch wheel found after download")
+        elif len(wheel_files) > 1:
+            raise RuntimeError(f"Multiple torch wheels found: {wheel_files}")
+
+        wheel_file = wheel_files[0]
+        report(f"-- Downloaded wheel: {wheel_file.name}")
+
+        # Extract the wheel
+        with tempfile.TemporaryDirectory(
+            prefix="pytorch-wheel-extract-"
+        ) as extract_dir:
+            extract_path = Path(extract_dir)
+
+            # Use Python's zipfile to extract the wheel
+            with zipfile.ZipFile(wheel_file, "r") as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            # Find the torch directory in the extracted wheel
+            torch_dirs = list(extract_path.glob("torch"))
+            if not torch_dirs:
+                # Sometimes the torch directory might be nested
+                torch_dirs = list(extract_path.glob("*/torch"))
+
+            if not torch_dirs:
+                raise RuntimeError("Could not find torch directory in extracted wheel")
+
+            source_torch_dir = torch_dirs[0]
+            target_torch_dir = TORCH_DIR
+
+            report(
+                f"-- Extracting wheel contents from {source_torch_dir} to {target_torch_dir}"
+            )
+
+            # Copy the essential files from the wheel to our local directory
+            # Based on the file listing logic from tools/nightly.py
+            files_to_copy: list[Path] = []
+
+            # Get platform-specific binary files
+            if IS_LINUX:
+                files_to_copy.extend(source_torch_dir.glob("*.so"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.so*")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+            elif IS_DARWIN:
+                files_to_copy.extend(source_torch_dir.glob("*.so"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.dylib")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+            elif IS_WINDOWS:
+                files_to_copy.extend(source_torch_dir.glob("*.pyd"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.lib")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.dll")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+
+            # Add essential directories and files
+            essential_items = ["version.py", "bin", "include", "lib"]
+            for item_name in essential_items:
+                item_path = source_torch_dir / item_name
+                if item_path.exists():
+                    files_to_copy.append(item_path)
+
+            # Add testing internal generated files
+            testing_generated = source_torch_dir / "testing" / "_internal" / "generated"
+            if testing_generated.exists():
+                files_to_copy.append(testing_generated)
+
+            # Copy all the files and directories
+            for src_path in files_to_copy:
+                rel_path = src_path.relative_to(source_torch_dir)
+                dst_path = target_torch_dir / rel_path
+
+                # Copy files and directories, preserving existing subdirectories
+                if src_path.is_dir():
+                    # Create destination directory if it doesn't exist
+                    dst_path.mkdir(parents=True, exist_ok=True)
+                    # Copy individual entries from source directory
+                    for src_item in src_path.iterdir():
+                        dst_item = dst_path / src_item.name
+                        if src_item.is_dir():
+                            # Recursively copy subdirectories (this will preserve existing ones)
+                            shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                        else:
+                            # Copy individual files, overwriting existing ones
+                            shutil.copy2(src_item, dst_item)
+                else:
+                    # For files, remove existing and copy new
+                    if dst_path.exists():
+                        dst_path.unlink()
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+
+                report(f"   Copied {rel_path}")
+
+    report("-- Nightly wheel extraction completed")
+
+
 # all the work we need to do _before_ setup runs
 def build_deps() -> None:
     report(f"-- Building version {TORCH_VERSION}")
+
+    # ATTENTION: THIS IS AI SLOP
+    # Check for USE_NIGHTLY=VERSION to bypass normal build and download nightly wheel
+    nightly_version = os.getenv("USE_NIGHTLY")
+    if nightly_version is not None:
+        import re
+
+        if (
+            nightly_version == ""
+            or nightly_version == "cpu"
+            or re.match(r"^cu\d+$", nightly_version)
+            or re.match(r"^rocm\d+\.\d+$", nightly_version)
+        ):
+            # Empty string or variant-only specification, show error with latest version
+            variant = "cpu" if nightly_version == "" else nightly_version
+            report(f"-- Detecting latest {variant} nightly version...")
+            latest_version = get_latest_nightly_version(variant)
+            # Also get the git hash to tell user which commit to checkout
+            git_hash = get_nightly_git_hash(latest_version)
+
+            if nightly_version == "":
+                error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
+            else:
+                error_msg = (
+                    "USE_NIGHTLY requires a specific version, not just a variant. "
+                    "Latest available {nightly_version} version: {latest_version}\n"
+                )
+
+            error_msg += f'Try: USE_NIGHTLY="{latest_version}"'
+            error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
+            raise RuntimeError(error_msg)
+        else:
+            # Full version specification
+            report(
+                f"-- USE_NIGHTLY={nightly_version} detected, downloading nightly wheel"
+            )
+            download_and_extract_nightly_wheel(nightly_version)
+            return
+
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
@@ -750,7 +1126,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
         # and we can get an accurate report on what is used and what is not.
-        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+        cmake_cache_vars = get_cmake_cache_vars()
         if cmake_cache_vars["USE_NUMPY"]:
             report("-- Building with NumPy bindings")
         else:
@@ -818,16 +1194,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
-        # in system CFLAGS
-        c_flags = os.getenv("CFLAGS", "")
-        if (
-            IS_LINUX
-            and "-fstack-clash-protection" in c_flags
-            and "clang" in os.getenv("CC", "")
-        ):
-            os.environ["CC"] = str(os.environ["CC"])
-
         super().run()
 
         if IS_DARWIN:
@@ -849,23 +1215,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir = target_lib.parent
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
-
-            # In ROCm on Windows case copy rocblas and hipblaslt files into
-            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            if str2bool(os.getenv("USE_ROCM")):
-                rocm_dir_path = Path(os.environ["ROCM_DIR"])
-                rocm_bin_path = rocm_dir_path / "bin"
-                rocblas_dir = rocm_bin_path / "rocblas"
-                target_rocblas_dir = target_dir / "rocblas"
-                target_rocblas_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(rocblas_dir, str(target_rocblas_dir))
-
-                hipblaslt_dir = rocm_bin_path / "hipblaslt"
-                target_hipblaslt_dir = target_dir / "hipblaslt"
-                target_hipblaslt_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(hipblaslt_dir, str(target_hipblaslt_dir))
-            else:
-                report("The specified environment variable does not exist.")
 
     def build_extensions(self) -> None:
         self.create_compile_commands()
@@ -1239,6 +1588,7 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
+        'intel-openmp==2025.1.1 ;platform_system == "Windows" ',  # for Windows inductor
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
@@ -1310,6 +1660,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
+        "_inductor/kernel/flex/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",

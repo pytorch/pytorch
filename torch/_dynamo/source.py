@@ -106,6 +106,13 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
+def _get_source_debug_name(source: Source) -> str:
+    try:
+        return source.name()
+    except NotImplementedError:
+        return "<unknown source>"
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
@@ -400,6 +407,18 @@ class EphemeralSource(Source):
 
     def is_ephemeral(self) -> bool:
         return True
+
+
+@dataclasses.dataclass(frozen=True)
+class SkipGuardSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self.base.reconstruct(codegen)
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return self.base.name()
 
 
 class TensorProperty(enum.Enum):
@@ -1150,4 +1169,15 @@ def is_from_defaults(source: Source) -> bool:
 
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
+    return False
+
+
+@functools.lru_cache
+def is_from_skip_guard_source(source: Source) -> bool:
+    if isinstance(source, SkipGuardSource):
+        return True
+
+    if isinstance(source, ChainedSource):
+        return is_from_skip_guard_source(source.base)
+
     return False

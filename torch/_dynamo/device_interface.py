@@ -17,6 +17,7 @@ specialized implementations for each hardware backend's unique features.
 
 import inspect
 import time
+from collections import namedtuple
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, Union
@@ -544,8 +545,10 @@ class MpsInterface(DeviceInterface):
 
     class Worker:
         @staticmethod
-        def get_device_properties(device: torch.types.Device = None) -> dict[str, Any]:
-            return {}
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            return namedtuple("MPSProperties", ["multi_processor_count"])(
+                torch.backends.mps.get_core_count()  # type: ignore[arg-type]
+            )
 
         @staticmethod
         def current_device() -> int:
@@ -589,6 +592,10 @@ def init_device_reg() -> None:
     register_interface_for_device("xpu", XpuInterface)
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
+
+    register_interface_for_device("mtia", MtiaInterface)
+    for i in range(torch.mtia.device_count()):
+        register_interface_for_device(f"mtia:{i}", MtiaInterface)
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)

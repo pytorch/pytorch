@@ -280,6 +280,25 @@ def forward(self, x):
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
 
+    def test_serialize_param_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.ones(4, 4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.parameter.div_(2)
+                return x + self.parameter
+
+        foo = Foo()
+        ep = torch.export.export(foo, (torch.rand(4, 4),)).run_decompositions()
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+        val = loaded_ep.graph_signature.parameters_to_mutate
+        self.assertEqual({"div": "parameter"}, val)
+
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

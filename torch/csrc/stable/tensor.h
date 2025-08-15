@@ -1,13 +1,16 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
+#include <climits>
 #include <memory>
+
+#include <torch/csrc/stable/accelerator.h>
 
 namespace torch::stable {
 
-using DeviceIndex =
-    int8_t; // this is from c10/core/Device.h and can be header only
+using DeviceIndex = torch::stable::accelerator::DeviceIndex;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
 // the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
@@ -29,7 +32,15 @@ class Tensor {
   std::shared_ptr<AtenTensorOpaque> ath_;
 
  public:
-  Tensor() = delete;
+  // Construct a stable::Tensor with an uninitialized AtenTensorHandle (ATH)
+  // Steals ownership from the ATH
+  Tensor() {
+    AtenTensorHandle ret;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&ret));
+    ath_ = std::shared_ptr<AtenTensorOpaque>(ret, [](AtenTensorHandle ath) {
+      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ath));
+    });
+  }
 
   // Construct a stable::Tensor from an AtenTensorHandle (ATH)
   // Steals ownership from the ATH
@@ -95,11 +106,30 @@ class Tensor {
     return stride;
   }
 
-  DeviceIndex get_device() const {
+  // This is almost the same API as the one in TensorBase.h, except
+  // we add a check that the returned device_index is within the
+  // range of int8_t.
+  int8_t get_device() const {
     int32_t device_index;
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_index(ath_.get(), &device_index));
-    return static_cast<DeviceIndex>(device_index);
+    STD_TORCH_CHECK(
+        device_index >= std::numeric_limits<int8_t>::min() &&
+            device_index <= std::numeric_limits<int8_t>::max(),
+        "Device index is out of range of return type int8_t, please use get_device_index() instead.");
+    return static_cast<int8_t>(device_index);
+  }
+
+  // The same as get_device but with two differences:
+  // 1. it has a more suiting name
+  // 2. it returns a DeviceIndex, which is int32_t in this world
+  //    that should be more stable than the likely shifting
+  //    DeviceIndex in libtorch (it is int8_t that might become int16_t)
+  DeviceIndex get_device_index() const {
+    int32_t device_index;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_device_index(ath_.get(), &device_index));
+    return device_index;
   }
 
   bool is_cuda() const {
@@ -113,6 +143,12 @@ class Tensor {
     int64_t size;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
     return size;
+  }
+
+  bool defined() const {
+    bool defined;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_is_defined(ath_.get(), &defined));
+    return defined;
   }
 
   // =============================================================================

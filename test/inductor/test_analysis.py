@@ -337,6 +337,7 @@ class TestAnalysis(TestCase):
         ],
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_triton_has_metadata(self, device, dtype, maxat):
         """
         make sure that the chrome trace of triton kernels contains certain values
@@ -359,7 +360,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )
@@ -507,6 +507,7 @@ class TestAnalysis(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_pointwise_bandwidth(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
@@ -518,7 +519,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )

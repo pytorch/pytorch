@@ -463,7 +463,12 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     num_tokens = len(gs.output_tokens)
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    end = (
+        len(gs.buffers_to_mutate)
+        + len(gs.parameters_to_mutate)
+        + len(gs.user_inputs_to_mutate)
+        + num_tokens
+    )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
@@ -474,6 +479,13 @@ def _verify_exported_program_signature(exported_program) -> None:
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
                     f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
+                )
+        elif mutation_node in gs.parameters_to_mutate:
+            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+                raise SpecViolationError(
+                    f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
+                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Parameter nodes available: {gs.parameters} \n"
                 )
         elif mutation_node in gs.user_inputs_to_mutate:
             if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:

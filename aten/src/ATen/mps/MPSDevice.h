@@ -18,11 +18,7 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_VER_13_1_PLUS = 0,
-  MACOS_VER_13_2_PLUS,
-  MACOS_VER_13_3_PLUS,
-  MACOS_VER_14_0_PLUS,
-  MACOS_VER_14_4_PLUS,
+  MACOS_VER_14_4_PLUS = 0,
   MACOS_VER_15_0_PLUS,
   MACOS_VER_15_1_PLUS,
   MACOS_VER_15_2_PLUS,
@@ -58,6 +54,17 @@ class TORCH_API MPSDevice {
    * Returns whether running on Ventura or newer
    */
   bool isMacOS13Plus(MacOSVersion version) const;
+
+  /**
+   * Returns device name
+   */
+  std::string getName() const;
+
+  /**
+   * Returns number of GPU cores.
+   * 1 Core = 16 ExecutionUnit x 8 ALU x 24 threads
+   */
+  unsigned getCoreCount() const;
 
   ~MPSDevice();
 

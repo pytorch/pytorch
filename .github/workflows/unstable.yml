@@ -12,7 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
@@ -51,3 +53,27 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-py3_9-clang9-xla-build:
+    name: linux-jammy-py3_9-clang9-xla
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.9-clang9-xla
+      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.3-lite
+      test-matrix: |
+        { include: [
+          { config: "xla", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_9-clang9-xla-test:
+    name: linux-jammy-py3_9-clang9-xla
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_9-clang9-xla-build
+    with:
+      build-environment: linux-jammy-py3.9-clang9-xla
+      docker-image: ${{ needs.linux-jammy-py3_9-clang9-xla-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_9-clang9-xla-build.outputs.test-matrix }}
+    secrets: inherit

@@ -2680,5 +2680,15 @@
         "Use method calls instead of attribute access."
       ]
     }
+  ],
+  "GB0268": [
+    {
+      "Gb_type": "Unsupported kwargs for itertools.product",
+      "Context": "call_function {self} {args} {kwargs}",
+      "Explanation": "Expected kwargs: 'repeat', but got {','.join(set(kwargs.keys()) - {'repeat'})}",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
   ]
 }

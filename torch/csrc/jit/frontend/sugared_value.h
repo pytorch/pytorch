@@ -136,8 +136,7 @@ struct TORCH_API SugaredValue
   // Value *
   virtual Value* len(const SourceRange& loc, GraphFunction& m) {
     throw(
-        ErrorReport(loc) << "'" << kind() << "'"
-                         << " object is not iterable");
+        ErrorReport(loc) << "'" << kind() << "'" << " object is not iterable");
   }
 
   // expression for ith element for iterable value
@@ -856,6 +855,21 @@ struct TORCH_API SliceValue : public SugaredValue {
   Value* start_;
   Value* stop_;
   Value* step_;
+};
+
+struct TORCH_API TorchCheckValue : public SugaredValue {
+  explicit TorchCheckValue() = default;
+
+  std::string kind() const override {
+    return "torch._check sugared value";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      GraphFunction& m,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t n_binders) override;
 };
 
 } // namespace torch::jit

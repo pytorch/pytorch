@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 def my_custom_function(x):
@@ -892,6 +893,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gn(inp), inp + 3)
         self.assertEqual(cnts.frame_count, 1)
 
+    @skipIfWindows(
+        msg="TODO: (xuhancn), confirm if torch.compiler.disable work on Windows."
+    )
     def test_disable_recursive_false(self):
         def fn2(x):
             return x + 1

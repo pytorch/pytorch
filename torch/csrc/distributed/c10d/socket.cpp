@@ -7,7 +7,6 @@
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
-#include <array>
 #include <cstring>
 #include <optional>
 #include <system_error>
@@ -200,18 +199,12 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
   // job, logging IP addresses instead. See
   // https://github.com/pytorch/pytorch/issues/159007
   static bool disable_getnameinfo = false;
-  std::array<char, NI_MAXHOST> host{};
-  std::array<char, NI_MAXSERV> port{};
+
+  char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
   if (!disable_getnameinfo) {
     int err = ::getnameinfo(
-        addr,
-        len,
-        host.data(),
-        NI_MAXHOST,
-        port.data(),
-        NI_MAXSERV,
-        NI_NUMERICSERV);
+        addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV);
     if (err != 0) {
       C10D_WARNING(
           "The hostname of the client socket cannot be retrieved. err={}", err);
@@ -228,17 +221,17 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
   // if we can't resolve the hostname, display the IP address
   if (addr->sa_family == AF_INET) {
     struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
-    std::array<char, INET_ADDRSTRLEN> ip{};
-    if (inet_ntop(
-            addr->sa_family, &(psai->sin_addr), ip.data(), INET_ADDRSTRLEN) !=
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
         nullptr) {
       return fmt::format("{}:{}", ip, psai->sin_port);
     }
   } else if (addr->sa_family == AF_INET6) {
     struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
-    std::array<char, INET6_ADDRSTRLEN> ip{};
-    if (inet_ntop(
-            addr->sa_family, &(psai->sin6_addr), ip.data(), INET6_ADDRSTRLEN) !=
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET6_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
         nullptr) {
       return fmt::format("[{}]:{}", ip, psai->sin6_port);
     }

@@ -1456,6 +1456,7 @@ def transform_code_object(
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code, safe)
+    # propagate line nums again for added instructions
     propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
@@ -1561,6 +1562,8 @@ def _cached_cleaned_instructions(
     code: types.CodeType, safe: bool = False
 ) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    # propagate now in case we remove some instructions
+    propagate_line_nums(instructions)
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
         populate_kw_names_argval(instructions, code.co_consts)

@@ -44,6 +44,8 @@ class _AsyncCheckpointRequest:
     checkpoint_request_id: _CheckpointRequestIdentifier
     storage_writer: Optional[StorageWriter] = None
     planner: Optional[SavePlanner] = None
+    no_dist: bool = False
+    use_collectives: bool = True
 
 
 @dataclass(init=False)
@@ -150,6 +152,8 @@ class _AsyncCheckpointProcess:
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         # Create a unique identifier to locate requests/responses
         # from the checkpoint daemon process.
@@ -159,6 +163,8 @@ class _AsyncCheckpointProcess:
             checkpoint_request_id=checkpoint_request_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         self._send(async_cp_request)
         result = self._wait_for_response()
@@ -172,6 +178,8 @@ class _AsyncCheckpointProcess:
         checkpoint_request_id: _CheckpointRequestIdentifier,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         from torch.distributed.checkpoint.state_dict_saver import save
 
@@ -180,6 +188,8 @@ class _AsyncCheckpointProcess:
             checkpoint_id=checkpoint_request_id.checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         return metadata
 
@@ -239,6 +249,8 @@ class _AsyncCheckpointProcess:
                         checkpoint_request_id=obj.checkpoint_request_id,
                         storage_writer=obj.storage_writer,
                         planner=obj.planner,
+                        no_dist=obj.no_dist,
+                        use_collectives=obj.use_collectives,
                     )
                     parent_conn.send(response)
                     logger.info(
@@ -272,6 +284,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Metadata:
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
@@ -299,6 +313,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
 
     def execute_save(
@@ -309,6 +325,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Future:
         """
         NOTE:
@@ -339,6 +357,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,
+            no_dist=no_dist,
+            use_collectives=use_collectives,
         )
         f.add_done_callback(lambda f: self._executor.shutdown(wait=False))
 

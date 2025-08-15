@@ -264,7 +264,14 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class IncorrectUsage(Exception):
@@ -527,7 +534,7 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
         A string containing the documentation URL if found, otherwise None.
     """
     GRAPH_BREAK_SITE_URL = (
-        "https://pytorch-labs.github.io/compile-graph-break-site/gb/"  # @lint-ignore
+        "https://meta-pytorch.github.io/compile-graph-break-site/gb/"  # @lint-ignore
     )
 
     registry = _load_graph_break_registry()

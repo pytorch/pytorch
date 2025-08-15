@@ -60,7 +60,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu
@@ -82,7 +81,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
@@ -105,7 +103,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
     secrets:
@@ -126,7 +123,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_6
@@ -150,7 +146,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
       build_environment: linux-binary-manywheel
@@ -174,7 +169,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
     secrets:
@@ -195,7 +189,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_8
@@ -219,7 +212,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_8
       build_environment: linux-binary-manywheel
@@ -243,7 +235,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_8
     secrets:
@@ -264,7 +255,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_9
@@ -288,7 +278,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_9
       build_environment: linux-binary-manywheel
@@ -312,7 +301,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_9
     secrets:
@@ -333,7 +321,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_3
@@ -358,7 +345,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm
@@ -426,7 +412,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm6_3
     secrets:
@@ -447,7 +432,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_4
@@ -472,7 +456,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm
@@ -540,7 +523,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm6_4
     secrets:
@@ -560,7 +542,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-xpu
@@ -585,7 +566,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
     permissions:
       id-token: write
@@ -653,7 +633,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-xpu
     secrets:
@@ -673,7 +652,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cpu
@@ -695,7 +673,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
@@ -718,7 +695,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
     secrets:
@@ -739,7 +715,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_6
@@ -763,7 +738,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
@@ -787,7 +761,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_6
     secrets:
@@ -808,7 +781,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_8
@@ -832,7 +804,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
@@ -856,7 +827,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_8
     secrets:
@@ -877,7 +847,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_9
@@ -901,7 +870,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_9
       build_environment: linux-binary-manywheel
@@ -925,7 +893,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_9
     secrets:
@@ -946,7 +913,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-rocm6_3
@@ -971,7 +937,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
@@ -1039,7 +1004,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm6_3
     secrets:
@@ -1060,7 +1024,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-rocm6_4
@@ -1085,7 +1048,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
@@ -1153,7 +1115,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm6_4
     secrets:
@@ -1173,7 +1134,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
@@ -1198,7 +1158,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
     permissions:
       id-token: write
@@ -1266,7 +1225,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-xpu
     secrets:
@@ -1286,7 +1244,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cpu
@@ -1308,7 +1265,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
@@ -1331,7 +1287,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
     secrets:
@@ -1352,7 +1307,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_6
@@ -1376,7 +1330,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
@@ -1400,7 +1353,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6
     secrets:
@@ -1421,7 +1373,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_8
@@ -1445,7 +1396,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
@@ -1469,7 +1419,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_8
     secrets:
@@ -1490,7 +1439,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_8-full
@@ -1513,7 +1461,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_8-full
       build_environment: linux-binary-manywheel
@@ -1537,7 +1484,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_8-full
     secrets:
@@ -1558,7 +1504,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_9
@@ -1582,7 +1527,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_9
       build_environment: linux-binary-manywheel
@@ -1606,7 +1550,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_9
     secrets:
@@ -1627,7 +1570,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-rocm6_3
@@ -1652,7 +1594,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Setup ROCm
@@ -1720,7 +1661,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm6_3
     secrets:
@@ -1741,7 +1681,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-rocm6_4
@@ -1766,7 +1705,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Setup ROCm
@@ -1834,7 +1772,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm6_4
     secrets:
@@ -1854,7 +1791,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
@@ -1879,7 +1815,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
     permissions:
       id-token: write
@@ -1947,7 +1882,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-xpu
     secrets:
@@ -1967,7 +1901,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cpu
@@ -1989,7 +1922,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
@@ -2012,7 +1944,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
     secrets:
@@ -2033,7 +1964,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_6
@@ -2057,7 +1987,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
@@ -2081,7 +2010,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_6
     secrets:
@@ -2102,7 +2030,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_8
@@ -2126,7 +2053,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
@@ -2150,7 +2076,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_8
     secrets:
@@ -2171,7 +2096,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_9
@@ -2195,7 +2119,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_9
       build_environment: linux-binary-manywheel
@@ -2219,7 +2142,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_9
     secrets:
@@ -2240,7 +2162,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-rocm6_3
@@ -2265,7 +2186,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
       - name: Setup ROCm
@@ -2333,7 +2253,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-rocm6_3
     secrets:
@@ -2354,7 +2273,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-rocm6_4
@@ -2379,7 +2297,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
       - name: Setup ROCm
@@ -2447,7 +2364,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-rocm6_4
     secrets:
@@ -2467,7 +2383,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
@@ -2492,7 +2407,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
     permissions:
       id-token: write
@@ -2560,7 +2474,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-xpu
     secrets:
@@ -2580,7 +2493,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cpu
@@ -2602,7 +2514,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
@@ -2625,7 +2536,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
     secrets:
@@ -2646,7 +2556,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_6
@@ -2670,7 +2579,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
@@ -2694,7 +2602,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_6
     secrets:
@@ -2715,7 +2622,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_8
@@ -2739,7 +2645,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
@@ -2763,7 +2668,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_8
     secrets:
@@ -2784,7 +2688,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_9
@@ -2808,7 +2711,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_9
       build_environment: linux-binary-manywheel
@@ -2832,7 +2734,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_9
     secrets:
@@ -2853,7 +2754,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-rocm6_3
@@ -2878,7 +2778,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
     steps:
       - name: Setup ROCm
@@ -2946,7 +2845,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-rocm6_3
     secrets:
@@ -2967,7 +2865,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-rocm6_4
@@ -2992,7 +2889,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
     steps:
       - name: Setup ROCm
@@ -3060,7 +2956,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-rocm6_4
     secrets:
@@ -3080,7 +2975,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-xpu
@@ -3105,7 +2999,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
     permissions:
       id-token: write
@@ -3173,7 +3066,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-xpu
     secrets:
@@ -3193,7 +3085,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cpu
@@ -3215,7 +3106,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu
       build_environment: linux-binary-manywheel
@@ -3238,7 +3128,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu
     secrets:
@@ -3259,7 +3148,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cuda12_6
@@ -3283,7 +3171,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
@@ -3307,7 +3194,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_6
     secrets:
@@ -3328,7 +3214,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cuda12_8
@@ -3352,7 +3237,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
@@ -3376,7 +3260,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_8
     secrets:
@@ -3397,7 +3280,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cuda12_9
@@ -3421,7 +3303,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_9
       build_environment: linux-binary-manywheel
@@ -3445,7 +3326,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_9
     secrets:
@@ -3466,7 +3346,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-rocm6_3
@@ -3491,7 +3370,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
     steps:
       - name: Setup ROCm
@@ -3559,7 +3437,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-rocm6_3
     secrets:
@@ -3580,7 +3457,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-rocm6_4
@@ -3605,7 +3481,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
     steps:
       - name: Setup ROCm
@@ -3673,7 +3548,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-rocm6_4
     secrets:
@@ -3693,7 +3567,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-xpu
@@ -3718,7 +3591,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
     permissions:
       id-token: write
@@ -3786,7 +3658,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-xpu
     secrets:
@@ -3806,7 +3677,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-cpu
@@ -3828,7 +3698,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu
       build_environment: linux-binary-manywheel
@@ -3851,7 +3720,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu
     secrets:
@@ -3872,7 +3740,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-cuda12_6
@@ -3896,7 +3763,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_6
       build_environment: linux-binary-manywheel
@@ -3920,7 +3786,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_6
     secrets:
@@ -3941,7 +3806,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-cuda12_8
@@ -3965,7 +3829,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_8
       build_environment: linux-binary-manywheel
@@ -3989,7 +3852,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_8
     secrets:
@@ -4010,7 +3872,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-cuda12_9
@@ -4034,7 +3895,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_9
       build_environment: linux-binary-manywheel
@@ -4058,7 +3918,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cuda12_9
     secrets:
@@ -4079,7 +3938,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-rocm6_3
@@ -4104,7 +3962,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
     steps:
       - name: Setup ROCm
@@ -4172,7 +4029,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-rocm6_3
     secrets:
@@ -4193,7 +4049,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-rocm6_4
@@ -4218,7 +4073,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
     steps:
       - name: Setup ROCm
@@ -4286,7 +4140,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-rocm6_4
     secrets:
@@ -4306,7 +4159,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14-xpu
@@ -4331,7 +4183,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
     permissions:
       id-token: write
@@ -4399,7 +4250,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-xpu
     secrets:
@@ -4419,7 +4269,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-cpu
@@ -4441,7 +4290,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu
       build_environment: linux-binary-manywheel
@@ -4464,7 +4312,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu
     secrets:
@@ -4485,7 +4332,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-cuda12_6
@@ -4509,7 +4355,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_6
       build_environment: linux-binary-manywheel
@@ -4533,7 +4378,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_6
     secrets:
@@ -4554,7 +4398,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-cuda12_8
@@ -4578,7 +4421,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_8
       build_environment: linux-binary-manywheel
@@ -4602,7 +4444,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_8
     secrets:
@@ -4623,7 +4464,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-cuda12_9
@@ -4647,7 +4487,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_9
       build_environment: linux-binary-manywheel
@@ -4671,7 +4510,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cuda12_9
     secrets:
@@ -4692,7 +4530,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-rocm6_3
@@ -4717,7 +4554,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
     steps:
       - name: Setup ROCm
@@ -4785,7 +4621,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-rocm6_3
     secrets:
@@ -4806,7 +4641,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-rocm6_4
@@ -4831,7 +4665,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
     steps:
       - name: Setup ROCm
@@ -4899,7 +4732,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-rocm6_4
     secrets:
@@ -4919,7 +4751,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_14t-xpu
@@ -4944,7 +4775,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
     permissions:
       id-token: write
@@ -5012,7 +4842,6 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: xpu
-      use_split_build: False
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-xpu
     secrets:

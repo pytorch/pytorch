@@ -302,7 +302,7 @@ def _make_prim(
         else:
             return _prim_impl(*args, **kwargs)
 
-    name = schema.split("(")[0]
+    name = schema.split("(", maxsplit=1)[0]
     schema = schema[len(name) :]
 
     # register non-functional ops with old custom ops API

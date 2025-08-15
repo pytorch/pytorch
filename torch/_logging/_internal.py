@@ -1289,6 +1289,7 @@ def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    compile_id: Optional[CompileId] = None,
 ) -> None:
     trace_structured(
         "artifact",
@@ -1297,6 +1298,7 @@ def trace_structured_artifact(
             "encoding": encoding,
         },
         payload_fn=payload_fn,
+        compile_id=compile_id,
     )
 
 

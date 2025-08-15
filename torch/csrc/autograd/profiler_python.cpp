@@ -674,6 +674,9 @@ struct ThreadLocalResults {
   CallTypeHelper<TraceKeyCacheState>::tuple_type trace_keys_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> exit_times_;
   AppendOnlyList<c10::approx_time_t, BLOCK_SIZE> c_exit_times_;
+
+  int active_frames_{0};
+  int remaining_start_frames_{0};
 };
 
 // ============================================================================
@@ -999,7 +1002,8 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     PyThreadState_Swap(thread_state);
 
     thread_local_results_.emplace_back(thread_state, &value_cache_, this);
-    auto* ctx = thread_local_results_.back().ctx_;
+    auto& tls = thread_local_results_.back();
+    auto* ctx = tls.ctx_;
 
     // When we begin profiling there are already frames on the Python
     // interpreter stack. To ensure a complete trace, we must push calls
@@ -1021,13 +1025,15 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     }
 
     for (auto it = current_stack.rbegin(); it != current_stack.rend(); it++) {
-      recordPyCall(thread_local_results_.back(), it->get(), true);
+      recordPyCall(tls, it->get(), true);
       auto frame_refcount = Py_REFCNT(it->get());
 
       // We hold one reference in `current_stack`, and the interpreter holds
       // another.
       TORCH_INTERNAL_ASSERT(frame_refcount >= 2, frame_refcount);
     }
+
+    tls.remaining_start_frames_ = tls.active_frames_;
 
     // Note:
     //   This profile will not compose with other CPython profilers, and
@@ -1141,6 +1147,7 @@ void PythonTracer::recordPyCall(
   const auto time = c10::getApproximateTime();
   is_startup_frame ? start_frames_.push_back({key, time})
                    : queue_->getSubqueue()->emplace_py_call(key, time);
+  ++tls.active_frames_;
 }
 
 void PythonTracer::recordCCall(
@@ -1160,6 +1167,7 @@ void PythonTracer::recordCCall(
   auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
       arg, (void*)(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
+  ++tls.active_frames_;
 }
 
 // ============================================================================
@@ -1457,11 +1465,20 @@ int PythonTracer::pyProfileFn(
 
     case PyTrace_RETURN:
       local_results.exit_times_.emplace_back(c10::getApproximateTime());
+      local_results.active_frames_--;
+      if (local_results.active_frames_ <
+          local_results.remaining_start_frames_) {
+        local_results.remaining_start_frames_ = local_results.active_frames_;
+      }
       break;
 
     case PyTrace_C_EXCEPTION:
     case PyTrace_C_RETURN:
-      local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+      if (local_results.active_frames_ >
+          local_results.remaining_start_frames_) {
+        local_results.c_exit_times_.emplace_back(c10::getApproximateTime());
+        local_results.active_frames_--;
+      }
       break;
   }
   return 0;

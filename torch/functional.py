@@ -2124,7 +2124,8 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
-        pivot (bool, optional): controls whether pivoting is done. Default: ``True``
+        pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                                decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
                                     Default: ``False``
         out (tuple, optional): optional output tuple. If :attr:`get_infos` is ``True``,

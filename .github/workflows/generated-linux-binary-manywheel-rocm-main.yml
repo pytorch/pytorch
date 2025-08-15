@@ -58,7 +58,6 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_4
@@ -83,7 +82,6 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
-      use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm

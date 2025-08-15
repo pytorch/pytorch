@@ -22,7 +22,12 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -605,8 +610,30 @@ def propagate_shape_and_sharding(
         )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
+
+    def _rewrite_shard_dim(p: Shard):
+        """
+        Rewrite the shard dim to the corresponding tensor dim in output.
+        For ``_StridedShard``, we can safely keep the placement type and
+        ``split_factor`` unchanged and only rewrite the ``dim`` because:
+        1. ``_StridedShard`` has no impact on sharding (i.e. how
+            tensor is partitioned) compared to ``Shard``. It only changes
+            how shards permute across the devices.
+        2. ``view()`` op on DTensor strictly forbids shard redistribution
+            which means if ``view()`` may cause shard permutation across
+            devices, it should be rejected. This is enforced in today's
+            sharding prop for ``view()``.
+        3. Since DTensor ``view()`` won't introduce any redistribution,
+            it's certain that ``placements`` won't change except the
+            inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
+        """
+        if isinstance(p, _StridedShard):
+            return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+        else:
+            return Shard(shard_dim_map[p.dim])
+
     output_placements = [
-        Shard(shard_dim_map[p.dim]) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
         for p in input_tgt_placements
     ]
 
@@ -677,6 +704,9 @@ def register_op_strategy_map(
 
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
+register_op_strategy_map(
+    aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
 register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )

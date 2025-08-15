@@ -1006,7 +1006,8 @@ If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device the
 tensor is constructed using :func:`torch.from_numpy`.
 
 If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
-specifically overwritten by :attr:`device` or a default device.
+specifically overwritten by :attr:`device` or a default device. The device of the CuPy array is inferred from the
+pointer of the array using `cudaPointerGetAttributes` unless :attr:`device` is provided with an explicit device index.
 
 .. seealso::
 
@@ -4741,7 +4742,8 @@ Keyword args:
     edge_order (``int``, optional): 1 or 2, for `first-order
         <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ or
         `second-order <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_
-        estimation of the boundary ("edge") values, respectively.
+        estimation of the boundary ("edge") values, respectively. Note that when :attr:`edge_order` is specified, each
+        dimension size of :attr:`input` should be at least edge_order+1
 
 Examples::
 
@@ -6578,6 +6580,18 @@ max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
+
 Args:
     {input}
 
@@ -6716,8 +6730,12 @@ dimension(s) :attr:`dim`.
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices.
 
-    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
     when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
 
 {keepdim_details}
 
@@ -7196,6 +7214,18 @@ min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
+
 Args:
     {input}
 
@@ -7324,8 +7354,12 @@ dimension(s) :attr:`dim`.
         - ``amax``/``amin`` supports reducing on multiple dimensions,
         - ``amax``/``amin`` does not return indices.
 
-    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    Both ``amax``/``amin`` evenly distribute gradients between equal values
     when there are multiple input elements with the same minimum or maximum value.
+
+    For ``max``/``min``:
+        - If reduce over all dimensions(no dim specified), gradients evenly distribute between equally ``max``/``min`` values.
+        - If reduce over one specified axis, only propagate to the indexed element.
 
 {keepdim_details}
 

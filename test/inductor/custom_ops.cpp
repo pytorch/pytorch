@@ -1,7 +1,7 @@
 #include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/utils.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h> // @manual
+#include <torch/csrc/inductor/aoti_torch/utils.h> // @manual
 
 #include <cstdint>
 #include <iostream>

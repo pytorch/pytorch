@@ -459,6 +459,12 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
+        # Turning off kv cache for torchbench models. This is not the right
+        # thing to do, but the pt2 dashboard is outdated. Real transformers
+        # benchmarks will be added soon using a different infra.
+        if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+            model.config.use_cache = False
+
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 

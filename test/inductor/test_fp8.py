@@ -22,7 +22,7 @@ from torch.testing._internal.inductor_utils import (
     _quantize_tensorwise,
     _to_fp8_saturated,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
 )
 from torch.utils._triton import has_triton_tma_device
 
@@ -766,5 +766,5 @@ class TestFP8Lowering(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA or HAS_CPU:
+    if HAS_CUDA_AND_TRITON or HAS_CPU:
         run_tests()

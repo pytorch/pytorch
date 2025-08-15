@@ -635,6 +635,64 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @skipIfRocm
+    def test_addmm_activation(self):
+        def fn_addmm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.addmm(input, mat1, mat2))
+
+        def fn_addmm_gelu(input, mat1, mat2):
+            return torch.nn.functional.gelu(
+                torch.addmm(input, mat1, mat2), approximate="tanh"
+            )
+
+        def fn_add_mm_relu(input, mat1, mat2):
+            return torch.nn.functional.relu(torch.add(input, torch.mm(mat1, mat2)))
+
+        def fn_add_mm_gelu(input, mat1, mat2):
+            return torch.nn.functional.gelu(
+                torch.add(input, torch.mm(mat1, mat2)), approximate="tanh"
+            )
+
+        args = [
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        for fn, atol in (
+            (fn_addmm_relu, 1e-8),
+            (fn_add_mm_relu, 1e-8),
+            (fn_addmm_gelu, 1e-3),
+            (fn_add_mm_gelu, 1e-3),
+        ):
+            expected = fn(*args)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
+            self.assertTrue("_addmm_activation" in code)
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, options={"max_autotune_gemm": True}), *args
+            )
+            self.assertFalse("_addmm_activation" in code)
+
+        args_not_replaced = [
+            # addmm + activation with a rank-2 input
+            # is not fusable, hence not replaced
+            torch.randn(10, 20, device=GPU_TYPE),  # input
+            torch.randn(10, 15, device=GPU_TYPE),  # mat1
+            torch.randn(15, 20, device=GPU_TYPE),  # mat2
+        ]
+
+        for fn in (fn_addmm_relu, fn_addmm_gelu):
+            actual, (code,) = run_and_get_code(
+                torch.compile(
+                    fn,
+                ),
+                *args_not_replaced,
+            )
+            self.assertFalse("_addmm_activation" in code)
+
     @inductor_config.patch(
         {
             "max_autotune_gemm_backends": "ATEN",
@@ -1355,13 +1413,13 @@ class TestPatternMatcher(TestCase):
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_addmm_dtype_mismatch(self):
-        a = torch.nn.Linear(1024, 1024, bias=False).cuda()
+        a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
         a = a.to(dtype=torch.float16)
 
-        w = torch.randn(1024, 1024, device="cuda")
+        w = torch.randn(1024, 1024, device=GPU_TYPE)
 
         def func():
-            x = torch.ones(1024, 1024, device="cuda", dtype=torch.float16)
+            x = torch.ones(1024, 1024, device=GPU_TYPE, dtype=torch.float16)
             x = a(x)
             x = x + w
             return x

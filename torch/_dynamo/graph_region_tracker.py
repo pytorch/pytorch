@@ -123,6 +123,18 @@ def _normalize_args(
     return (sorted_keys, tuple(_extract_args(arg) for arg in all_args))
 
 
+def _sort_with_ref_region(
+    index_to_rank: dict[int, int], regions: list[list[Any]]
+) -> None:
+    # sort topologically
+    # we need to handle edge cases where some nodes have no dependencies
+    # so first we map each node to its ranking
+    ref_region = regions[0]
+    sorted_indices = sorted(range(len(ref_region)), key=lambda i: index_to_rank[i])
+    for region in regions:
+        region[:] = [region[i] for i in sorted_indices]
+
+
 def get_global_state_key() -> GlobalStateKey:
     return (
         torch.is_grad_enabled(),
@@ -233,13 +245,16 @@ class GraphRegionTracker:
         to track the new node.
         """
         try:
-            duplicates = self.hash_to_duplicates[
-                self._hash_node(
-                    tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
-                )
-            ]
-            duplicates.append(node)
-            self.node_to_duplicates[node] = duplicates
+            if (
+                node not in self.node_to_duplicates
+            ):  # don't allow nodes to be added twice
+                duplicates = self.hash_to_duplicates[
+                    self._hash_node(
+                        tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+                    )
+                ]
+                duplicates.append(node)
+                self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
@@ -327,8 +342,13 @@ class GraphRegionTracker:
                 self._is_identical,
             )
             # sort topologically
-            for region in region_group:
-                region.sort(key=lambda n: topological_ranking[n])
+            # we need to handle edge cases where some nodes have no dependencies
+            # so first we map each node to its ranking,
+            ref_region = region_group[0]
+            index_to_rank = {
+                index: topological_ranking[n] for index, n in enumerate(ref_region)
+            }
+            _sort_with_ref_region(index_to_rank, region_group)
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
@@ -422,6 +442,7 @@ def fully_expand_region_group(
                 candidate not in seen_nodes
                 and candidate not in nodes_to_add
                 and candidate.op != "placeholder"
+                and candidate.op != "get_attr"
                 and is_identical_fn(candidate, current_node)
                 and not region_wrapper.will_inclusion_create_cycle(candidate)
             )

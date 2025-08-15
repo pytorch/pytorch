@@ -2,6 +2,7 @@
 import logging
 import multiprocessing
 import multiprocessing.connection
+import multiprocessing.spawn as mp_spawn
 import os
 import pickle
 import signal
@@ -11,6 +12,11 @@ import time
 import warnings
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
+
+from torch.numa.binding import (
+    maybe_get_temporary_python_executable_with_numa_bindings,
+    NumaOptions,
+)
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
@@ -236,6 +242,7 @@ def start_processes(
     join=True,
     daemon=False,
     start_method="spawn",
+    numa_options: Optional[NumaOptions] = None,
 ):
     # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
     # this func will start processes in parallel if start_method is 'forkserver'.
@@ -251,11 +258,43 @@ def start_processes(
         # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
         start_parallel = False
 
+    if numa_options is not None and start_method != "spawn":
+        raise ValueError("NUMA binding is only compatible with spawn")
+
+    if numa_options is not None and start_parallel:
+        raise ValueError("NUMA binding is not compatible with parallel start")
+
     mp = multiprocessing.get_context(start_method)
     error_files = [None] * nprocs
     processes = [None] * nprocs
+    original_executable = mp_spawn.get_executable()
 
     def start_process(i):
+        # HACK: We want to force Process.start() to kick off the subprocess
+        # using a custom numactl command per rank. However, the API exposed
+        # by multiprocessing only allows us to override the executable for
+        # the entire context, and only with a single str rather than a tuple.
+        # Furthermore, there is no API for passing additional options, e.g.
+        # to make LOCAL_RANK available to the executable.
+        #
+        # In order to get around these limitations, we pre-compute
+        # the appropriate command containing NUMA bindings and store it in a
+        # temporary executable which passes Python args on to the original
+        # executable. Then, we call set_executable before and after each
+        # Process.start() call.
+        #
+        # This assumes that, under the hood, Process.start() for rank n
+        # will not call get_executable after start_process for rank n+1
+        # calls set_executable again. We guarantee this by
+        # raising an exception if `start_parallel`, above. (Not clear
+        # if there would be a race condition otherwise, but we want to be safe.)
+        temporary_executable_path = (
+            maybe_get_temporary_python_executable_with_numa_bindings(
+                python_executable_path=original_executable,
+                gpu_index=i,
+                numa_options=numa_options,
+            )
+        )
         # Each process is assigned a file to write tracebacks to.  We
         # use the file being non-empty to indicate an exception
         # occurred (vs an expected shutdown).  Note: this previously
@@ -267,12 +306,19 @@ def start_processes(
         )
         tf.close()
         os.unlink(tf.name)
-        process = mp.Process(
-            target=_wrap,
-            args=(fn, i, args, tf.name),
-            daemon=daemon,
-        )
-        process.start()
+
+        try:
+            if temporary_executable_path is not None:
+                mp.set_executable(temporary_executable_path)
+            process = mp.Process(
+                target=_wrap,
+                args=(fn, i, args, tf.name),
+                daemon=daemon,
+            )
+            process.start()
+        finally:
+            if temporary_executable_path is not None:
+                mp.set_executable(original_executable)
         return i, process, tf.name
 
     if not start_parallel:
