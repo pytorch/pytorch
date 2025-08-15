@@ -67,6 +67,11 @@ batch_size:
     XGLMForCausalLM: 4
     XLNetLMHeadModel: 2
     YituTechConvBert: 2
+    meta-llama/Llama-3.2-1B: 8
+    google/gemma-2-2b: 8
+    google/gemma-3-4b-it: 8
+    openai/whisper-tiny: 8
+    Qwen/Qwen3-0.6B: 8
 
 
 tolerance:

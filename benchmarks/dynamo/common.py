@@ -1097,14 +1097,27 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
-        if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, args.inductor_compile_mode
-            )
-        elif args.export_nativert:
-            frozen_model_iter_fn = export_nativert(model, example_inputs)
+        use_generate_mode = kwargs.get("use_generate_mode", False)
+        if use_generate_mode:
+            assert not args.training
+
+            if args.export_aot_inductor:
+                model.forward = export_aot_inductor_simple(
+                    model, example_inputs, args.inductor_compile_mode
+                )
+            elif args.export_nativert:
+                frozen_model_iter_fn = export_nativert(model, example_inputs)
+            else:
+                model.forward = torch._dynamo.run(model)
+
+            frozen_model_iter_fn = model_iter_fn
         else:
-            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            if args.export_aot_inductor:
+                frozen_model_iter_fn = export_aot_inductor(
+                    model, example_inputs, args.inductor_compile_mode
+                )
+            else:
+                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1119,15 +1132,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             # interleave the runs to handle frequency scaling and load changes
             with maybe_mark_profile(p=p, mark="expected"):
-                timings[rep, 0], expected_output = timed(
-                    model,
-                    model_iter_fn,
-                    inputs,
-                    return_result=True,
-                    times=times,
-                    collect_outputs=args.collect_outputs,
-                    batch_size=kwargs.get("batch_size"),
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    timings[rep, 0], expected_output = timed(
+                        model,
+                        model_iter_fn,
+                        inputs,
+                        return_result=True,
+                        times=times,
+                        collect_outputs=args.collect_outputs,
+                        batch_size=kwargs.get("batch_size"),
+                    )
 
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
@@ -1517,8 +1531,12 @@ def export_nativert(model, example_inputs):
     return opt_nativert
 
 
+def export_aot_inductor_simple(model, example_inputs, mode):
+    return AOTInductorModelCache.load(model, example_inputs, mode)
+
+
 def export_aot_inductor(model, example_inputs, mode):
-    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
+    optimized = export_aot_inductor_simple(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -2199,11 +2217,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_1st_run_OOM"
@@ -2220,11 +2239,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_rerun_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_2nd_run_OOM"
@@ -2273,6 +2293,11 @@ class BenchmarkRunner:
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
+
+                use_generate_mode = getattr(self, "use_generate_mode", False)
+                if use_generate_mode:
+                    assert not self.args.training
+
                 if (
                     self.args.export
                     or self.args.export_aot_inductor
@@ -2285,12 +2310,23 @@ class BenchmarkRunner:
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                        if use_generate_mode:
+                            new_result = self.model_iter_fn(model_copy, example_inputs)
+                        else:
+                            new_result = optimized_model_iter_fn(
+                                model_copy, example_inputs
+                            )
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    new_result = self.run_n_iterations(
-                        model_copy, example_inputs, optimized_model_iter_fn
-                    )
+                    if use_generate_mode:
+                        optimized_model = optimize_ctx(model_copy)
+                        new_result = self.run_n_iterations(
+                            optimized_model, example_inputs, self.model_iter_fn
+                        )
+                    else:
+                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
             except Exception as e:
                 log.exception("")
                 print(
@@ -2506,14 +2542,22 @@ class BenchmarkRunner:
                         self.model_iter_fn, model, example_inputs, "eager", niters=1
                     )
 
-            baseline_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
-            )
+            with torch.compiler.set_stance("force_eager"):
+                baseline_timings = experiment(
+                    model, example_inputs, mark="expected", **experiment_kwargs
+                )
 
-            if self.args.export_aot_inductor:
-                optimized_model_iter_fn = optimize_ctx
+            use_generate_mode = getattr(self, "use_generate_mode", False)
+            if use_generate_mode:
+                assert not self.args.training
+                optimized_model_iter_fn = self.model_iter_fn
+                model = optimize_ctx(model)
+
             else:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                if self.args.export_aot_inductor:
+                    optimized_model_iter_fn = optimize_ctx
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -2661,22 +2705,37 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, eager_peak_mem, _ = warmup(
+                with torch.compiler.set_stance("force_eager"):
+                    eager_latency, eager_peak_mem, _ = warmup(
                         self.model_iter_fn,
                         copy.deepcopy(model),
                         example_inputs,
                         "eager",
-                        niters=1,
                     )
+                    if self.args.use_warm_peak_memory:
+                        _, eager_peak_mem, _ = warmup(
+                            self.model_iter_fn,
+                            copy.deepcopy(model),
+                            example_inputs,
+                            "eager",
+                            niters=1,
+                        )
 
-            if self.args.export_aot_inductor or self.args.export_nativert:
-                optimized_model_iter_fn = optimize_ctx
+            use_generate_mode = getattr(self, "use_generate_mode", False)
+            experiment_kwargs["use_generate_mode"] = use_generate_mode
+            if use_generate_mode:
+                assert not self.args.training
+                optimized_model_iter_fn = self.model_iter_fn
+                if self.args.export_aot_inductor or self.args.export_nativert:
+                    model.forward = optimize_ctx
+                else:
+                    model.forward = optimize_ctx(model)
+
             else:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                if self.args.export_aot_inductor or self.args.export_nativert:
+                    optimized_model_iter_fn = optimize_ctx
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -4036,8 +4095,6 @@ def run(runner, args, original_dir=None):
         # Overwrite 'translation_validation' config, if specified.
         torch.fx.experimental._config.translation_validation = False
 
-    experiment = functools.partial(experiment, args, runner.model_iter_fn)
-
     if args.only and should_diff_branch(args):
         import git
 
@@ -4225,6 +4282,8 @@ def run(runner, args, original_dir=None):
             inline_ctx = contextlib.nullcontext()
             if name in runner.inline_inbuilt_nn_modules_models:
                 inline_ctx = torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+
+            experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
             with guard_ctx:
                 with inline_ctx:
