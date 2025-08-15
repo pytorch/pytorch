@@ -430,6 +430,16 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THXPModule_xpu_xpuCachingAllocator_set_allocator_settings(
+    PyObject* _unused,
+    PyObject* env) {
+  HANDLE_TH_ERRORS
+  c10::xpu::XPUCachingAllocator::setAllocatorSettings(
+      THPUtils_unpackString(env));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -467,6 +477,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
      nullptr},
     {"_xpu_resetPeakMemoryStats",
      THXPModule_resetPeakMemoryStats,
+     METH_O,
+     nullptr},
+    {"_xpu_xpuCachingAllocator_set_allocator_settings",
+     THXPModule_xpu_xpuCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {nullptr}};
