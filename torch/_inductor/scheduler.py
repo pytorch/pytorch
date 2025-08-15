@@ -552,7 +552,7 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(input_buf.node.get_output_spec(), NonOwningLayout)
+                            isinstance(input_buf.node.get_output_spec(), ir.NonOwningLayout)
                             and input_buf.get_mutation_names()
                         )
                         and not (
