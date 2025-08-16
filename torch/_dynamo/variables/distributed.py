@@ -267,7 +267,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_rank":
-            return ConstantVariable.create(self.value.get_local_rank())
+            return ConstantVariable.create(self.value.get_rank())
         if name == "get_local_rank":
             return ConstantVariable.create(self.value.get_local_rank())
         if name == "get_group":
