@@ -113,7 +113,6 @@ from .user_defined import (
     MutableMappingVariable,
     UserDefinedDictVariable,
     UserDefinedObjectVariable,
-    UserDefinedSetVariable,
     UserDefinedVariable,
 )
 
@@ -2693,19 +2692,19 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_xor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__xor__", [b], {})
 
     def call_ixor(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__ixor__", [b], {})
 
     def call_sub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__sub__", [b], {})
 
     def call_isub(self, tx: "InstructionTranslator", a, b):
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__isub__", [b], {})
 
     def call_and_(self, tx: "InstructionTranslator", a, b):
@@ -2722,7 +2721,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__and__", [b], {})
         # None no-ops this handler and lets the driving function proceed
 
@@ -2740,7 +2739,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
-        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedSetVariable)):
+        if isinstance(a, (DictKeysVariable, SetVariable, UserDefinedObjectVariable)):
             return a.call_method(tx, "__iand__", [b], {})
 
     def call_or_(self, tx: "InstructionTranslator", a, b):
@@ -2767,7 +2766,7 @@ class BuiltinVariable(VariableTracker):
                 MutableMappingVariable,
                 SetVariable,
                 UserDefinedDictVariable,
-                UserDefinedSetVariable,
+                UserDefinedObjectVariable,
             ),
         ):
             return a.call_method(tx, "__or__", [b], {})
@@ -2798,7 +2797,7 @@ class BuiltinVariable(VariableTracker):
                 DictKeysVariable,
                 MutableMappingVariable,
                 SetVariable,
-                UserDefinedSetVariable,
+                UserDefinedObjectVariable,
             ),
         ):
             return a.call_method(tx, "__ior__", [b], {})
