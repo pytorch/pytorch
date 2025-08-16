@@ -10,10 +10,12 @@ from model_registry import MultiMLP
 import torch
 from torch.distributed.pipelining import (
     Schedule1F1B,
+    ScheduleDualPipeV,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
@@ -348,8 +350,89 @@ class TestSchedulePlan(TestCase):
                     num_stages=num_stages,
                 )
 
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleDualPipeV, ScheduleZBVZeroBubble],
+    )
+    def test_pipeline_order_for_v_schedules(self, ScheduleClass):
+        for num_local_stages, num_microbatches, group_size in self.test_cases:
+            with self.subTest(
+                num_local_stages=num_local_stages,
+                num_microbatches=num_microbatches,
+                group_size=group_size,
+            ):
+                num_stages = num_local_stages * group_size
+                stages = [
+                    MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                    for i in range(num_local_stages)
+                ]
+
+                # V schedules only support 2 stages per rank so if num_local_stages is not 2, ensure an error is thrown
+                if num_local_stages != 2:
+                    with self.assertRaises(ValueError):
+                        ScheduleClass(
+                            stages,
+                            num_microbatches,
+                        )
+                    continue
+
+                # DualPipeV requires num_microbatches to be >= num_stages
+                if ScheduleClass == ScheduleDualPipeV and num_microbatches < num_stages:
+                    with self.assertRaises(ValueError):
+                        ScheduleClass(
+                            stages,
+                            num_microbatches,
+                        )
+                    continue
+
+                # Create schedule and validate it
+                schedule = ScheduleClass(stages, num_microbatches)
+                _validate_schedule(
+                    schedule.pipeline_order, group_size, num_stages, num_microbatches
+                )
+
 
 instantiate_parametrized_tests(TestSchedulePlan)
+
+
+class TestScheduleCsv(TestCase):
+    @parametrize(
+        "ScheduleClass,csv_name",
+        [
+            (ScheduleDualPipeV, "dualpipev_4rank_10mb"),
+        ],
+    )
+    def test_csv_compare(self, ScheduleClass, csv_name):
+        """
+        Test that schedules matches the expected CSV.  This is a regression test to ensure that the schedule
+        is not changed unintentionally.
+        """
+        num_local_stages = 2
+        group_size = 4
+        num_stages = num_local_stages * group_size
+        stages = [
+            MockPipelineStage(group_size=group_size, num_stages=num_stages)
+            for _ in range(num_local_stages)
+        ]
+        num_microbatches = 10
+        schedule = ScheduleClass(stages, num_microbatches)
+        comms_csv = os.path.join(ARTIFACTS_DIR, f"{csv_name}.csv")
+        sch = schedule.pipeline_order
+
+        # Uncomment to regenerate reference output
+        # schedule._dump_csv("test.csv", "compute_only")
+
+        sch_ref = {}
+        with open(comms_csv, newline="") as ref:
+            for rank, row in enumerate(csv.reader(ref)):
+                sch_ref[rank] = [_Action.from_str(s) for s in row]
+
+        for rank in sch_ref:
+            for timestep, (a, b) in enumerate(zip(sch[rank], sch_ref[rank])):
+                self.assertEqual(a, b, f"Mismatch at {timestep=}, {a=}, expected {b}")
+
+
+instantiate_parametrized_tests(TestScheduleCsv)
 
 
 class TestScheduleLowering(TestCase):
@@ -721,7 +804,7 @@ class TestScheduleLowering(TestCase):
             loss_fn=loss_fn,
             scale_grads=False,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [
@@ -832,7 +915,7 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
         )
-        schedule._load_actions(
+        schedule._prepare_schedule_with_comms(
             {
                 0: self._parse_actions(
                     [

@@ -233,15 +233,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
 
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if config.profiler_mark_wrapper_call or enable_kernel_profile:
-            # No C shim for profiling APIs, assuming profiling is a debugging feature which
-            # does not provide any ABI compatibility promise.
-            self.header.splice("#include <ATen/record_function.h>")
-
     def _include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
         self.header.splice(f"#include <{header}>")
@@ -1251,7 +1242,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1495,7 +1486,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
-            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
+            'RAIIAtenRecordFunctionHandle record_inductor_wrapper_call_("inductor_wrapper_call", nullptr);'
         )
 
     def generate_start_graph(self):
