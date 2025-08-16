@@ -4,27 +4,19 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_reduced_precision_common_neon.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/Half.h>
 #include <c10/util/irange.h>
+
+#include <arm_neon.h>
+#include <arm_neon_sve_bridge.h>
+#include <arm_sve.h>
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-// Right now contains only aarch64 implementation.
-// Due to follow two reasons aarch32 is not currently supported.
-// 1. Due to difference in ISA been aarch32 and aarch64, intrinsics
-//    that work for aarch64 dont work for aarch32.
-// 2. Android NDK r21 has problems with compiling aarch32.
-//    Clang seg faults.
-//    https://github.com/android/ndk/issues/1248
-//    https://bugs.llvm.org/show_bug.cgi?id=45824
-// Most likely we will do aarch32 support with inline asm.
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE128)
-#if !defined(C10_MOBILE)
+#if !defined(C10_MOBILE) && defined(__aarch64__)
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -140,7 +132,7 @@ class Vectorized<c10::Half> : public Vectorized16<
   // A ctor that accepts c10::Half is needed to fit interface with vec_base.h
   // A second constructor that takes float16_t is also included
   Vectorized(c10::Half val) : Vectorized((float16_t)val) {}
-  Vectorized(float16_t val) : Vectorized16(vdupq_n_f16(val)) {}
+  Vectorized(float16_t val) : Vectorized16(svget_neonq(svdup_n_f16(val))) {}
   Vectorized(
       value_type val0,
       value_type val1,
@@ -152,6 +144,40 @@ class Vectorized<c10::Half> : public Vectorized16<
       value_type val7)
       : Vectorized16(
             float16x8_t{val0, val1, val2, val3, val4, val5, val6, val7}) {}
+
+  Vectorized(svfloat16_t v) : Vectorized16(svget_neonq(v)) {}
+  template <
+      typename... Args,
+      typename = std::enable_if_t<(sizeof...(Args) == size())>>
+  Vectorized(Args... vals) {
+    __at_align__ float16_t buffer[size()] = {vals...};
+    values = vld1q_f16(buffer);
+  }
+  operator svfloat16_t() const {
+    return svset_neonq(svundef_f16(), values);
+  }
+  svfloat16_t valuesAsSve() const {
+    return svset_neonq(svundef_f16(), values);
+  }
+
+  template <int64_t mask>
+  static Vectorized<c10::Half> blend(
+      const Vectorized<c10::Half>& a,
+      const Vectorized<c10::Half>& b) {
+    // Build an array of flags: each bit of element is 1 if the corresponding
+    // bit in 'mask' is set, 0 otherwise.
+    uint16x8_t maskArray = {
+        (mask & 1ULL) ? 0xFFFF : 0,
+        (mask & 2ULL) ? 0xFFFF : 0,
+        (mask & 4ULL) ? 0xFFFF : 0,
+        (mask & 8ULL) ? 0xFFFF : 0,
+        (mask & 16ULL) ? 0xFFFF : 0,
+        (mask & 32ULL) ? 0xFFFF : 0,
+        (mask & 64ULL) ? 0xFFFF : 0,
+        (mask & 128ULL) ? 0xFFFF : 0};
+    // Use BSL to select elements from b where the mask is 1, else from a
+    return vbslq_f16(maskArray, b.values, a.values);
+  }
 
   static Vectorized<c10::Half> blendv(
       const Vectorized<c10::Half>& a,
@@ -166,210 +192,135 @@ class Vectorized<c10::Half> : public Vectorized16<
     // of the mask either all be zeros or all be 1s.
     // We perhaps need some kind of an assert?
     // But that will affect performance.
-
-    // NOTE [vbslq_f16]: vbslq_f16 doesn't work on clang without
-    // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC. vbslq_u16 generates the
-    // same instruction anyway. see https://godbolt.org/z/cY4a55Y7P
-    Vectorized<c10::Half> vec(mask.values);
-    vec.values = vreinterpretq_f16_u16(vbslq_u16(
-        vreinterpretq_u16_f16(vec.values),
-        vreinterpretq_u16_f16(b.values),
-        vreinterpretq_u16_f16(a.values)));
-    return vec;
+    return vbslq_f16(vreinterpretq_u16_f16(mask.values), b.values, a.values);
   }
   static Vectorized<c10::Half> set(
       const Vectorized<c10::Half>& a,
       const Vectorized<c10::Half>& b,
       int64_t count = size()) {
-    uint16_t pre_mask[size()] = {0};
-    for (int i = 0; i < count; i++) {
-      pre_mask[i] = 0xFFFF;
+    if (count == 0) {
+      return a;
+    } else if (count < size()) {
+      return svsel_f16(svwhilelt_b16(0ull, count), b, a);
     }
-    uint16x8_t mask = vld1q_u16(pre_mask);
-
-    // Using blendv is awkward because 0xFFFF is one of many NaN's in FP16
-    // so we directly use vbslq_u16 instead. (See NOTE [vbslq_f16] above.)
-    Vectorized<c10::Half> vec(vreinterpretq_f16_u16(vbslq_u16(
-        mask,
-        vreinterpretq_u16_f16(b.values),
-        vreinterpretq_u16_f16(a.values))));
-
-    return vec;
+    return b;
   }
   static Vectorized<c10::Half> loadu(const void* ptr, int64_t count = size()) {
     if (count == size()) {
       return vld1q_f16(reinterpret_cast<const float16_t*>(ptr));
     }
-    __at_align__ float16_t tmp_values[size()];
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
-    }
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const float16_t*>(ptr),
-        count * sizeof(float16_t));
-    return vld1q_f16(reinterpret_cast<const float16_t*>(tmp_values));
+    svbool_t pg = svwhilelt_b16(0ull, count);
+    return svld1_f16(pg, reinterpret_cast<const float16_t*>(ptr));
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       vst1q_f16(reinterpret_cast<float16_t*>(ptr), values);
       return;
     } else {
-      float16_t tmp_values[size()];
-      vst1q_f16(reinterpret_cast<float16_t*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float16_t));
+      svbool_t pg = svwhilelt_b16(0ull, count);
+      svst1_f16(pg, reinterpret_cast<float16_t*>(ptr), valuesAsSve());
     }
+  }
+  inline c10::Half operator[](int idx) const {
+    return values[idx];
+  }
+  inline c10::Half operator[](int idx) {
+    return values[idx];
   }
   int zero_mask() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    uint16x8_t is_zero_vec = vceqzq_f16(values);
-    const int16x8_t shift = vcombine_s16(
-        vcreate_s16(
-            0x0 | (int64_t(0x1) << 16) | (int64_t(0x2) << 32) |
-            (int64_t(0x3) << 48)),
-        vcreate_s16(
-            0x4 | (int64_t(0x5) << 16) | (int64_t(0x6) << 32) |
-            (int64_t(0x7) << 48)));
-    uint16x8_t bits_vec =
-        vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
-    return vaddvq_u16(bits_vec);
-#else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    // use known working implmentation.
-    __at_align__ value_type tmp[size()];
-    store(tmp);
-    int mask = 0;
-    for (int i = 0; i < size(); ++i) {
-      if (tmp[i] == 0) {
-        mask |= (1 << i);
-      }
-    }
-    return mask;
-#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    uint16x8_t cmpReg = vceqzq_f16(values);
+    uint8x8_t narrowedCmp = vmovn_u16(cmpReg);
+    uint64x2_t extReg = svget_neonq(svbext_u64(
+        svset_neonq(
+            svundef_u64(),
+            vreinterpretq_u64_u8(vcombine_u8(narrowedCmp, vdup_n_u8(0)))),
+        svreinterpret_u64_u8(svdup_u8(1))));
+    return extReg[0];
   }
   Vectorized<c10::Half> isnan() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, values)));
-#else
-    // NOTE: we could make this faster by doing vectorized checks of
-    // exponent/payload bits.
-    __at_align__ c10::Half tmp[size()];
-    __at_align__ c10::Half res[size()];
-    store(tmp);
-    for (const auto i : c10::irange(size())) {
-      if (_isnan(tmp[i])) {
-        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(c10::Half));
-      } else {
-        std::memset(static_cast<void*>(&res[i]), 0, sizeof(c10::Half));
-      }
-    }
-    return loadu(res);
-#endif
   }
   bool has_inf_nan() const {
-    __at_align__ c10::Half tmp[size()];
-    store(tmp);
-    for (const auto i : c10::irange(size())) {
-      if (_isnan(tmp[i]) || _isinf(tmp[i])) {
-        return true;
-      }
-    }
-    return false;
+    return svptest_any(
+        ptrue,
+        svcmpuo_f16(
+            ptrue,
+            svset_neonq(svundef_f16(), vsubq_f16(values, values)),
+            ZERO_F16));
+  }
+  Vectorized<c10::Half> ceil() const {
+    return vrndpq_f16(values);
+  }
+  Vectorized<c10::Half> floor() const {
+    return vrndmq_f16(values);
+  }
+  Vectorized<c10::Half> round() const {
+    return vrndiq_f16(values);
   }
   Vectorized<c10::Half> abs() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(vabsq_f16(values));
-#else
-    return map_with_vec_float_method(&Vectorized<float>::abs);
-#endif
   }
   Vectorized<c10::Half> frac() const;
   Vectorized<c10::Half> neg() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(vnegq_f16(values));
-#else
-    return map_with_vec_float_method(&Vectorized<float>::neg);
-#endif
   }
   Vectorized<c10::Half> trunc() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(vrndq_f16(values));
-#else
-    return map_with_vec_float_method(&Vectorized<float>::trunc);
-#endif
   }
   Vectorized<c10::Half> sqrt() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(vsqrtq_f16(values));
-#else
-    return map_with_vec_float_method(&Vectorized<float>::sqrt);
-#endif
   }
   Vectorized<c10::Half> reciprocal() const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    auto ones = vdupq_n_f16(1.0f);
-    return Vectorized<c10::Half>(vdivq_f16(ones, values));
-#else
-    return map_with_vec_float_method(&Vectorized<float>::reciprocal);
-#endif
+    float16x8_t recip = vrecpeq_f16(values);
+    recip = vmulq_f16(vrecpsq_f16(values, recip), recip);
+    recip = vmulq_f16(vrecpsq_f16(values, recip), recip);
+    return recip;
+  }
+  Vectorized<c10::Half> rsqrt() const {
+    float16x8_t sqrt_reciprocal = vrsqrteq_f16(values);
+    sqrt_reciprocal = vmulq_f16(
+        vrsqrtsq_f16(vmulq_f16(values, sqrt_reciprocal), sqrt_reciprocal),
+        sqrt_reciprocal);
+    sqrt_reciprocal = vmulq_f16(
+        vrsqrtsq_f16(vmulq_f16(values, sqrt_reciprocal), sqrt_reciprocal),
+        sqrt_reciprocal);
+
+    return sqrt_reciprocal;
+  }
+  c10::Half reduce_add() const {
+    return svaddv_f16(ptrue, svset_neonq(svundef_f16(), values));
+  }
+  c10::Half reduce_max() const {
+    return svmaxv_f16(ptrue, svset_neonq(svundef_f16(), values));
   }
   Vectorized<c10::Half> operator==(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vceqq_f16(values, other.values)));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator==);
-#endif
   }
 
   Vectorized<c10::Half> operator!=(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, other.values))));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator!=);
-#endif
   }
 
   Vectorized<c10::Half> operator<(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vcltq_f16(values, other.values)));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator<);
-#endif
   }
 
   Vectorized<c10::Half> operator<=(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vcleq_f16(values, other.values)));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator<=);
-#endif
   }
 
   Vectorized<c10::Half> operator>(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vcgtq_f16(values, other.values)));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator>);
-#endif
   }
 
   Vectorized<c10::Half> operator>=(const Vectorized<c10::Half>& other) const {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(
         vreinterpretq_f16_u16(vcgeq_f16(values, other.values)));
-#else
-    return map2_bitmask_with_vec_float_method(
-        other, &Vectorized<float>::operator>=);
-#endif
   }
 
   Vectorized<c10::Half> eq(const Vectorized<c10::Half>& other) const;
@@ -414,19 +365,13 @@ template <>
 Vectorized<c10::Half> inline operator+(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vaddq_f16(a, b));
-#else
-  return binary_operator_via_float(std::plus<Vectorized<float>>(), a, b);
-#endif
 }
 
 inline void load_fp32_from_fp16(const c10::Half* data, Vectorized<float>& out) {
-  __at_align__ float values[Vectorized<float>::size()];
-  for (const auto k : c10::irange(Vectorized<float>::size())) {
-    values[k] = data[k];
-  }
-  out = Vectorized<float>::loadu(values);
+  const __fp16* dataPtr = reinterpret_cast<const __fp16*>(data);
+  float16x4_t lowf16 = vld1_f16(dataPtr);
+  out = vcvt_f32_f16(lowf16);
 }
 
 inline void load_fp32_from_fp16(
@@ -443,33 +388,21 @@ template <>
 Vectorized<c10::Half> inline operator-(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vsubq_f16(a, b));
-#else
-  return binary_operator_via_float(std::minus<Vectorized<float>>(), a, b);
-#endif
 }
 
 template <>
 Vectorized<c10::Half> inline operator*(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vmulq_f16(a, b));
-#else
-  return binary_operator_via_float(std::multiplies<Vectorized<float>>(), a, b);
-#endif
 }
 
 template <>
 Vectorized<c10::Half> inline operator/(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vdivq_f16(a, b));
-#else
-  return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
-#endif
 }
 
 // frac. Implement this here so we can use subtraction
@@ -483,15 +416,7 @@ template <>
 Vectorized<c10::Half> inline maximum(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vmaxq_f16(a, b));
-#else
-  return binary_operator_via_float(
-      static_cast<Vectorized<float> (*)(
-          const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
-      a,
-      b);
-#endif
 }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
@@ -500,15 +425,7 @@ template <>
 Vectorized<c10::Half> inline minimum(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vminq_f16(a, b));
-#else
-  return binary_operator_via_float(
-      static_cast<Vectorized<float> (*)(
-          const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
-      a,
-      b);
-#endif
 }
 
 template <>
@@ -559,84 +476,110 @@ Vectorized<c10::Half> inline operator^(
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::eq(
     const Vectorized<c10::Half>& other) const {
-  return (*this == other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this == other), 1));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::ne(
     const Vectorized<c10::Half>& other) const {
-  return (*this != other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this != other), 1));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::gt(
     const Vectorized<c10::Half>& other) const {
-  return (*this > other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this > other), 1));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::ge(
     const Vectorized<c10::Half>& other) const {
-  return (*this >= other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this >= other), 1));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::lt(
     const Vectorized<c10::Half>& other) const {
-  return (*this < other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this < other), 1));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::le(
     const Vectorized<c10::Half>& other) const {
-  return (*this <= other) & Vectorized<c10::Half>(1);
+  return svreinterpret_f16_u16(
+      svand_n_u16_x(ptrue, svreinterpret_u16_f16(*this <= other), 1));
 }
 
-// These are global functions, so the defaults in vec_base.h should
-// work fine if __ARM_FEATURE_FP16_VECTOR_ARITHMETIC is not available.
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 template <>
 inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_s16(dst + i, vcvtq_s16_f16(vld1q_f16(src + i)));
+  constexpr uint64_t oneRegElemCount = Vectorized<c10::Half>::size();
+  constexpr uint64_t twoRegsElemCount = oneRegElemCount * 2;
+  constexpr uint64_t fourRegsElemCount = twoRegsElemCount * 2;
+  const uint64_t count = static_cast<uint64_t>(n);
+  for (uint64_t iters = count / fourRegsElemCount; iters > 0; --iters) {
+    auto vec1 = vld1q_f16(src);
+    auto vec2 = vld1q_f16(src + oneRegElemCount);
+    auto vec3 = vld1q_f16(src + twoRegsElemCount);
+    auto vec4 = vld1q_f16(src + (twoRegsElemCount + oneRegElemCount));
+    auto convertedVec1 = vcvtq_s16_f16(vec1);
+    auto convertedVec2 = vcvtq_s16_f16(vec2);
+    auto convertedVec3 = vcvtq_s16_f16(vec3);
+    auto convertedVec4 = vcvtq_s16_f16(vec4);
+    vst1q_s16(dst, convertedVec1);
+    vst1q_s16(dst + oneRegElemCount, convertedVec2);
+    vst1q_s16(dst + twoRegsElemCount, convertedVec3);
+    vst1q_s16(dst + (twoRegsElemCount + oneRegElemCount), convertedVec4);
+    src += fourRegsElemCount;
+    dst += fourRegsElemCount;
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int16_t>(src[i]);
+#pragma clang loop vectorize(disable)
+#pragma clang loop unroll(disable)
+  for (uint64_t remainder = count % fourRegsElemCount; remainder > 0;
+       --remainder) {
+    *dst = *src;
+    src += 1;
+    dst += 1;
   }
 }
 
 template <>
 inline void convert(const int16_t* src, float16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_f16(dst + i, vcvtq_f16_s16(vld1q_s16(src + i)));
+  constexpr uint64_t oneRegElemCount = Vectorized<c10::Half>::size();
+  constexpr uint64_t twoRegsElemCount = oneRegElemCount * 2;
+  constexpr uint64_t fourRegsElemCount = twoRegsElemCount * 2;
+  const uint64_t count = static_cast<uint64_t>(n);
+  for (uint64_t iters = count / fourRegsElemCount; iters > 0; --iters) {
+    auto vec1 = vld1q_s16(src);
+    auto vec2 = vld1q_s16(src + oneRegElemCount);
+    auto vec3 = vld1q_s16(src + twoRegsElemCount);
+    auto vec4 = vld1q_s16(src + (twoRegsElemCount + oneRegElemCount));
+    auto convertedVec1 = vcvtq_f16_s16(vec1);
+    auto convertedVec2 = vcvtq_f16_s16(vec2);
+    auto convertedVec3 = vcvtq_f16_s16(vec3);
+    auto convertedVec4 = vcvtq_f16_s16(vec4);
+    vst1q_f16(dst, convertedVec1);
+    vst1q_f16(dst + oneRegElemCount, convertedVec2);
+    vst1q_f16(dst + twoRegsElemCount, convertedVec3);
+    vst1q_f16(dst + (twoRegsElemCount + oneRegElemCount), convertedVec4);
+    src += fourRegsElemCount;
+    dst += fourRegsElemCount;
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float16_t>(src[i]);
+#pragma clang loop vectorize(disable)
+#pragma clang loop unroll(disable)
+  for (uint64_t remainder = count % fourRegsElemCount; remainder > 0;
+       --remainder) {
+    *dst = *src;
+    src += 1;
+    dst += 1;
   }
 }
-#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 
 template <>
 Vectorized<c10::Half> inline fmadd(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
-#else
-  return a * b + c;
-#endif
 }
 
 template <>
@@ -644,11 +587,7 @@ Vectorized<c10::Half> inline fnmadd(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
-#else
-  return -a * b + c;
-#endif
 }
 
 template <>
@@ -656,11 +595,7 @@ Vectorized<c10::Half> inline fmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-  return Vectorized<c10::Half>(vnegq_f16(vfmsq_f16(c, a, b)));
-#else
-  return a * b - c;
-#endif
+  return Vectorized<c10::Half>(svnmsb_f16_x(ptrue, a, b, c));
 }
 
 template <>
@@ -668,11 +603,7 @@ Vectorized<c10::Half> inline fnmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-  return Vectorized<c10::Half>(vnegq_f16(vfmaq_f16(c, a, b)));
-#else
-  return -a * b - c;
-#endif
+  return Vectorized<c10::Half>(svnmad_f16_x(ptrue, a, b, c));
 }
 
 #else
@@ -722,7 +653,6 @@ CONVERT_NON_VECTORIZED_INIT(Half, half)
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
-#endif
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
