@@ -359,13 +359,6 @@ class OpSchema:
                 args_schema.append(str(arg))
         return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
 
-    def __post_init__(self) -> None:
-        self.is_hashable = True
-        try:
-            hash(self)
-        except TypeError:
-            self.is_hashable = False
-
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
