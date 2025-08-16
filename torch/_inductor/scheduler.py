@@ -52,7 +52,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .simple_fsdp import bucket, estimator
+from .simple_fsdp import bucket, estimator, reorder
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -1915,7 +1915,8 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
         for snode in self.snodes:
             self.scheduler.name_to_fused_node[snode.get_name()] = snode
-        del self.scheduler.name_to_fused_node[self.get_name()]
+        if self.get_name() in self.scheduler.name_to_fused_node:
+            del self.scheduler.name_to_fused_node[self.get_name()]
         return self.scheduler.fuse_nodes(self.snodes)
 
     def add_fake_dep(self, fake_dep: Dep) -> None:
@@ -2190,9 +2191,25 @@ class Scheduler:
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
-            self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
-                self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
+            self.nodes, has_reduce_scatter = (
+                bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
+                    self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
+                )
             )
+            if config.simplefsdp.enable_reorder_ir:
+                node_length = len(self.nodes)
+                self.nodes = reorder.reorder_all_gather(
+                    self.nodes,
+                    all_gather_before_last_wait=True if has_reduce_scatter else False,
+                )
+                assert node_length == len(self.nodes), (
+                    "missed nodes in reordering all gather"
+                )
+                if has_reduce_scatter:
+                    self.nodes = reorder.reorder_reduce_scatter(self.nodes)
+                    assert node_length == len(self.nodes), (
+                        "missed nodes in reordering reduce scatter"
+                    )
 
         self.process_grouped_nodes()
 
