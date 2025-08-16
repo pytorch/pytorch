@@ -895,7 +895,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         # export succeeds, but running ORT through run_test would fail because the exported model
         # has the inputs flattened into 3 inputs.
         torch.onnx.export(
-            model, (x, {"y": (y0, y1)}), io.BytesIO(), opset_version=self.opset_version
+            model,
+            (x, {"y": (y0, y1)}),
+            io.BytesIO(),
+            opset_version=self.opset_version,
+            dynamo=False,
         )
 
     def test_primitive_input_integer(self):
