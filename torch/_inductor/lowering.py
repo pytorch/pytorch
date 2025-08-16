@@ -3369,6 +3369,26 @@ def empty_strided(
     return pointwise
 
 
+@register_lowering(torch.ops.aten._assert_async.msg, type_promotion_kind=None)
+def lower_assert_async_msg(cond, msg):
+    dev = getattr(V.graph, "device", None) or torch.device("cpu")
+    msg = msg or ""
+    device_assert = ir.DeviceAssert(cond, msg, dev)
+    V.graph.register_buffer(device_assert, set_name=True)
+    V.graph.register_operation(device_assert)
+
+
+@register_lowering(
+    torch.ops.aten._functional_assert_async.msg, type_promotion_kind=None
+)
+def lower_functional_assert_async_msg(cond, msg):
+    dev = getattr(V.graph, "device", None) or torch.device("cpu")
+    msg = msg or ""
+    device_assert = ir.DeviceAssert(cond, msg, dev)
+    V.graph.register_buffer(device_assert, set_name=True)
+    V.graph.register_operation(device_assert)
+
+
 @register_lowering(aten.new_empty_strided)
 def new_empty_strided(
     x, size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
