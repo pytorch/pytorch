@@ -39,6 +39,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import typing
 import weakref
 from dataclasses import dataclass
@@ -746,53 +747,44 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-def _compile(
-    code: CodeType,
+class TransformError(Exception):
+    def __init__(
+        self, inner: Exception, tracer_output_partial: DynamoTracerOutput
+    ) -> None:
+        self.inner = inner
+        self.tracer_ouptut_partial = tracer_output_partial
+
+
+@preserve_global_state
+def transform_frame(
+    code: types.CodeType,
     globals: dict[str, object],
     locals: dict[str, object],
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
-    export: bool,
-    export_constraints: Optional[typing.Never],
-    hooks: Hooks,
-    cache_entry: Optional[CacheEntry],
-    cache_size: CacheSizeRelevantForFrame,
-    frame: Optional[DynamoFrameType] = None,
-    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    speculation_log: SpeculationLog,
+    instructions: list[Instruction],
+    code_options: dict[str, object],
     *,
-    compile_id: CompileId,
-    skip: int = 0,
+    export: bool = False,
+    export_constraints: Optional[typing.Never] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
-    # Can be used to record things for the caller, both
-    # in the case of normal and exception code paths
-    convert_frame_box: Optional[ConvertFrameBox] = None,
-) -> ConvertFrameReturn:
-    from torch._inductor.async_compile import async_compile_pool_manager
-    from torch.fx.experimental.validator import (
-        bisect,
-        BisectValidationException,
-        translation_validation_enabled,
-        ValidationException,
-    )
+):
+    try:
+        from torch.fx.experimental.validator import (
+            bisect,
+            translation_validation_enabled,
+        )
 
-    # Only nonlocal defs here please!
-    # Time spent compiling this frame before restarting or failing analysis
-    dynamo_time_before_restart: float = 0.0
-    tracer_output: Optional[DynamoTracerOutput] = None
-
-    tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-        torch.overrides._get_current_function_mode_stack()
-    )
-
-    @preserve_global_state
-    def transform(
-        instructions: list[Instruction], code_options: dict[str, object]
-    ) -> None:
-        nonlocal tracer_output
         speculation_log.restart()  # type: ignore[has-type]
         exn_vt_stack = ExceptionStack()
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+            torch.overrides._get_current_function_mode_stack()
+        )
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -847,6 +839,72 @@ def _compile(
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+    except Exception as e:
+        raise TransformError(e, tracer_output) from e
+
+    return tracer_output
+
+
+def _compile(
+    code: CodeType,
+    globals: dict[str, object],
+    locals: dict[str, object],
+    builtins: dict[str, object],
+    closure: tuple[CellType],
+    compiler_fn: CompilerFn,
+    one_graph: bool,
+    export: bool,
+    export_constraints: Optional[typing.Never],
+    hooks: Hooks,
+    cache_entry: Optional[CacheEntry],
+    cache_size: CacheSizeRelevantForFrame,
+    frame: Optional[DynamoFrameType] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    *,
+    compile_id: CompileId,
+    skip: int = 0,
+    package: Optional[CompilePackage] = None,
+    # Can be used to record things for the caller, both
+    # in the case of normal and exception code paths
+    convert_frame_box: Optional[ConvertFrameBox] = None,
+) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
+    from torch.fx.experimental.validator import (
+        BisectValidationException,
+        ValidationException,
+    )
+
+    # Only nonlocal defs here please!
+    # Time spent compiling this frame before restarting or failing analysis
+    dynamo_time_before_restart: float = 0.0
+    tracer_output: Optional[DynamoTracerOutput] = None
+
+    @preserve_global_state
+    def transform(
+        instructions: list[Instruction], code_options: dict[str, object]
+    ) -> None:
+        nonlocal tracer_output
+        try:
+            tracer_output = transform_frame(
+                code,
+                globals,
+                locals,
+                builtins,
+                closure,
+                compiler_fn,
+                one_graph,
+                speculation_log,
+                instructions,
+                code_options,
+                export=export,
+                export_constraints=export_constraints,
+                frame_state=frame_state,
+                distributed_state=distributed_state,
+                package=package,
+            )
+        except TransformError as e:
+            tracer_output = e.tracer_ouptut_partial
+            raise e.inner from None
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
