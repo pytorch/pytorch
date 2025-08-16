@@ -53,6 +53,8 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
+    ObservedTypeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
 )
@@ -1097,6 +1099,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k in range(len(self.value))
             ]
         return super().unpack_var_sequence(tx)
+
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        try:
+            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            return True
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return False
+
+    def force_unpack_var_sequence(self, tx):
+        result = []
+        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+
+        while True:
+            try:
+                r = iter_.next_variable(tx)
+                result.append(r)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
 
     def next_variable(self, tx):
         return self.call_method(tx, "__next__", [], {})
