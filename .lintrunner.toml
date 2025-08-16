@@ -80,6 +80,7 @@ include_patterns = [
     'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'aten/src/ATen/native/Tensor*.h',
     'aten/src/ATen/native/Tensor*.cpp',
+    'aten/src/ATen/native/zendnn/*.*',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -137,6 +138,9 @@ include_patterns = [
     'test/test_type_hints.py',
     'test/test_type_info.py',
     'test/test_utils.py',
+    'test/test_zendnn_linear.py',
+    'test/test_zendnn_linear_fusions.py',
+
 ]
 exclude_patterns = [
     '**/fb/**',
