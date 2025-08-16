@@ -68,7 +68,7 @@ Windows llvm will not have this definition.
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
 #elif defined(__aarch64__) && \
-    !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+    !defined(CPU_CAPABILITY_SVE) && !defined(CPU_CAPABILITY_SVE256) // CPU_CAPABILITY_AVX512
 // SVE code expects 256-vectors; leave that set for SVE?
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
@@ -79,6 +79,17 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 16
 #else // CPU_CAPABILITY_AVX512
+#if defined(CPU_CAPABILITY_SVE)
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
+#define int_vector __m256i
+#else // CPU_CAPABILITY_SVE
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
@@ -88,6 +99,7 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 32
 #define int_vector __m256i
+#endif // CPU_CAPABILITY_SVE
 #endif // CPU_CAPABILITY_AVX512
 
 namespace at::vec {
@@ -210,8 +222,7 @@ struct Vectorized {
   auto as_bytes() const -> const char* {
     return reinterpret_cast<const char*>(values);
   }
-  template <int64_t mask_>
-  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
+  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b, const int64_t mask_) {
     int64_t mask = mask_;
     Vectorized vector;
     for (const auto i : c10::irange(size())) {
@@ -1312,7 +1323,7 @@ std::
         T const* base_addr,
         const Vectorized<int_same_size_t<T>>& vindex,
         Vectorized<T>& mask) {
-  static constexpr int size = Vectorized<T>::size();
+  static const int size = Vectorized<T>::size();
   T src_arr[size];
   int_same_size_t<T> mask_arr[size]; // use int type so we can logical and
   int_same_size_t<T> index_arr[size];
@@ -1405,7 +1416,7 @@ inline Vectorized<T> convert_to_fp_of_same_size(
 // clang-format on
 template <typename T>
 inline std::enable_if_t<
-    Vectorized<T>::size() % 2 == 0,
+    true,
     std::pair<Vectorized<T>, Vectorized<T>>>
 deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
@@ -1444,7 +1455,7 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(deinterleave2)
 // clang-format on
 template <typename T>
 inline std::enable_if_t<
-    Vectorized<T>::size() % 2 == 0,
+    true,
     std::pair<Vectorized<T>, Vectorized<T>>>
 interleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
   static constexpr int size = Vectorized<T>::size();
@@ -1486,7 +1497,7 @@ inline void convert(const src_T* src, dst_T* dst, int64_t n) {
 
 template <typename T>
 inline Vectorized<T> flip(const Vectorized<T>& data) {
-  static constexpr int size = Vectorized<T>::size();
+  static const int size = Vectorized<T>::size();
   T output[size];
   T buffer[size];
   data.store(static_cast<void*>(buffer));
