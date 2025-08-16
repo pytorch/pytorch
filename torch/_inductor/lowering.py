@@ -7159,7 +7159,7 @@ def prepare_softmax_online(x, dim):
         reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
         reduction_numel=rnumel,
     )
-
+    
     if (
         num_split == 1
         and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
