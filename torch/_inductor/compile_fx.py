@@ -1070,6 +1070,16 @@ def _compile_fx_inner(
                 torch._inductor.debug.dump_inductor_provenance_info()
             ),
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(
+                torch._inductor.debug._inductor_kernel_stack_trace
+            ),
+        )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
