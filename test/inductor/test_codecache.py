@@ -21,7 +21,6 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     BypassFxGraphCache,
-    cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
@@ -29,6 +28,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
