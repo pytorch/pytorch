@@ -594,6 +594,57 @@ class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
 /// module storage semantics.
 TORCH_MODULE(SiLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SwiGLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the SwiGLU activation function over a given input.
+/// The SwiGLU function splits the input into two parts along a specified
+/// dimension, applies the Swish (SiLU) activation to the second part, and
+/// multiplies it element-wise with the first part. It is defined as:
+/// SwiGLU(x) = (x1) * Swish(x2), where [x1, x2] = split(x, 2, dim) and
+/// Swish(x) = x * sigmoid(x).
+/// This module is commonly used in feed-forward networks of transformer models.
+///
+/// See the documentation for `torch::nn::SwiGLUOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// SwiGLU model(SwiGLUOptions(-1));
+/// ```
+
+/// Options for the SwiGLU module.
+struct SwiGLUOptions {
+  SwiGLUOptions(int64_t dim = -1) : dim_(dim) {}
+  /// The dimension along which to split the input tensor into two parts.
+  /// Default is -1 (last dimension).
+  TORCH_ARG(int64_t, dim) = -1;
+};
+
+class TORCH_API SwiGLUImpl : public torch::nn::Cloneable<SwiGLUImpl> {
+ public:
+  /// Constructs the SwiGLU module with the given options.
+  explicit SwiGLUImpl(const SwiGLUOptions& options_ = {});
+
+  /// Applies the SwiGLU activation to the input tensor.
+  Tensor forward(const Tensor& input);
+
+  /// Resets the module parameters (none in this case).
+  void reset() override;
+
+  /// Pretty prints the `SwiGLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SwiGLUOptions options;
+};
+
+/// A `ModuleHolder` subclass for `SwiGLUImpl`.
+/// See the documentation for `SwiGLUImpl` class to learn what methods it
+/// provides, and examples of how to use `SwiGLU` with
+/// `torch::nn::SwiGLUOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(SwiGLU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Mish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies mish over a given input.
