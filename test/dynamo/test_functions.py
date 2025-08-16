@@ -562,6 +562,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [a, b]
         return sub(*args)
 
+    @make_test
+    def test_tuple_map(a, b):
+        t = tuple(map(torch.sin, [a, b]))
+        return t[0] + t[1]
+
     def test_size_tuple_add(self):
         def fn():
             size = torch.Size([])
@@ -2015,6 +2020,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         )
         tmp = mytuple(a, xy=b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
+
+    @make_test
+    def test_namedtuple_replace(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        t = mytuple(a, b)
+        t._replace(x=b)
+        return t.x + t.y
+
+    @make_test
+    def test_namedtuple_fields(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y"])
+        if mytuple._fields == ("x", "y"):
+            return a + b
+        else:
+            return a - b
 
     class MyNamedTuple(NamedTuple):
         first: torch.Tensor
