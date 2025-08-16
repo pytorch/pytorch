@@ -382,6 +382,22 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
+
+        # Turning off kv cache for torchbench models. This is not the right
+        # thing to do, but the torchbench models are way outdated, and since we
+        # are using torchbench pt2 dashboard to track regressions (rather than
+        # improving performance), we are just setting the kv cache to false.
+        # Real transformers benchmarks will be added soon using a different
+        # infra.
+        if (
+            model_name.startswith("hf")
+            and hasattr(model, "config")
+            and hasattr(model.config, "use_cache")
+        ):
+            model.config.use_cache = False
+        if model_name == "hf_T5_generate":
+            model.model.config.use_cache = False
+
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 

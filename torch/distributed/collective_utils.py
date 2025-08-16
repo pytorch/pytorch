@@ -9,6 +9,7 @@ Each should also handle single rank scenario.
 
 from __future__ import annotations
 
+import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -233,45 +234,24 @@ def all_gather_object_enforce_type(
             )
 
 
-def _summarize_ranks(ranks: Iterable[int]) -> str:
-    ranks = sorted(ranks)
-    assert min(ranks) >= 0, "ranks should all be positive"
-    assert len(set(ranks)) == len(ranks), "ranks should not contain duplicates"
-    curr: Optional[Union[int, range]] = None
-    ranges = []
-    while ranks:
-        x = ranks.pop(0)
-        if curr is None:
-            curr = x
-        elif isinstance(curr, int):
-            if x == curr + 1:
-                curr = range(curr, x + 1, 1)
-            else:
-                step = x - curr
-                curr = range(curr, x + step, step)
-        else:
-            assert isinstance(curr, range)
-            if x == curr.stop:
-                curr = range(curr.start, curr.stop + curr.step, curr.step)
-            else:
-                ranges.append(curr)
-                curr = x
-
-    if isinstance(curr, int):
-        ranges.append(range(curr, curr + 1, 1))
-    elif isinstance(curr, range):
-        ranges.append(curr)
-
+def _summarize_ranks(numbers: Iterable[int]) -> str:
+    numbers = sorted(numbers)
     result = []
-    for r in ranges:
-        if r.step > 1:
-            if len(r) > 3:
-                result.append(f"({r.start}, {r.start + r.step}, ..., {r.stop})")
-            else:
-                result.append(f"{tuple(r)}")
+    current_range_start = numbers[0]
+    for i in range(1, len(numbers)):
+        if numbers[i] == numbers[i - 1] + 1:
+            pass
         else:
-            result.append(f"{r.start}:{r.stop}")
-    return ",".join(result)
+            if current_range_start == numbers[i - 1]:
+                result.append(str(current_range_start))
+            else:
+                result.append(f"{current_range_start}-{numbers[i - 1]}")
+            current_range_start = numbers[i]
+    if current_range_start == numbers[-1]:
+        result.append(str(current_range_start))
+    else:
+        result.append(f"{current_range_start}-{numbers[-1]}")
+    return ", ".join(result)
 
 
 def _check_philox_rng_sync(
@@ -299,10 +279,10 @@ def _check_cpu_rng_sync(
     torch.distributed.all_gather(all_state_tensors, state_tensor)
     state_ranks = defaultdict(set)
     for rank, state_tensor in enumerate(all_state_tensors):
-        # Hacky way to summarize the state vector of the CPU rng. Is there a better way to do this?
+        # Summarize the state vector of the CPU rng.
         # The properties that matter most are (1) its different if there is a state difference, (2) its printable
         # (see desync table- not viable to print whole state vector of size 5k)
-        state_ranks[hash(tuple(state_tensor.tolist()))].add(rank)
+        state_ranks[torch.hash_tensor(state_tensor).item()].add(rank)
     return state_ranks, "Generator state hash"
 
 
@@ -324,16 +304,20 @@ def _desync_table_str(tag: str, value_ranks: dict[Any, set[int]]) -> str:
     rank_values = [
         [_summarize_ranks(ranks), str(value)] for value, ranks in value_ranks.items()
     ]
-    from tabulate import tabulate
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
 
-    # todo do the try import tabulate thing
-    return tabulate(rank_values, headers=headers)
+        return tabulate(rank_values, headers=headers)
+    row_str = "\n".join([str(row) for row in rank_values])
+    return str(f"{headers}\n{row_str}")
 
 
-def _check_rng_sync(generator: torch.Generator, group: dist.ProcessGroup) -> None:
+def _check_rng_sync(
+    generator: torch.Generator, group: dist.ProcessGroup
+) -> Optional[str]:
     value_ranks, value_header = _check_rng_sync_internal(generator, group)
+    log_str = None
     if len(value_ranks) > 1:
-        logger.error(
-            "Generator desync detected:\n%s",
-            _desync_table_str(value_header, value_ranks),
-        )
+        log_str = f"Generator desync detected:\n{_desync_table_str(value_header, value_ranks)}"
+        logger.error(log_str)
+    return log_str
