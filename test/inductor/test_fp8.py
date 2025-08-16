@@ -8,6 +8,7 @@ import torch
 from torch import Tensor
 from torch._inductor import config, utils
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -24,6 +25,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
 )
+from torch.testing._internal.jit_utils import FileCheck
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -450,13 +452,18 @@ class TestFP8Lowering(TestCase):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-            y_compiled = linear_compiled(
+            y_compiled, code = run_and_get_code(
+                linear_compiled,
                 x_fp8,
                 x_inverse_scale,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
             )
+
+            src = code[0]
+            if "triton_tem_fused__scaled_mm" in src:
+                FileCheck().check("SCALING_ROWWISE : tl.constexpr = False").run(src)
             self.assertEqual(y_eager.dtype, dtype)
             self.assertEqual(y_compiled.dtype, dtype)
             # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
@@ -520,13 +527,18 @@ class TestFP8Lowering(TestCase):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-        y_compiled = linear_compiled(
+        y_compiled, code = run_and_get_code(
+            linear_compiled,
             x_fp8,
             x_inverse_scale,
             w_t_fp8,
             w_inverse_scale,
             bias,
         )
+
+        src = code[0]
+        if "triton_tem_fused__scaled_mm" in src:
+            FileCheck().check("SCALING_ROWWISE : tl.constexpr = True").run(src)
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
@@ -578,13 +590,18 @@ class TestFP8Lowering(TestCase):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-            y_compiled = linear_compiled(
+            y_compiled, code = run_and_get_code(
+                linear_compiled,
                 x_fp8,
                 x_inverse_scale,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
             )
+
+        src = code[0]
+        if "triton_tem_fused__scaled_mm" in src:
+            FileCheck().check("SCALING_ROWWISE : tl.constexpr = False").run(src)
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
@@ -637,13 +654,18 @@ class TestFP8Lowering(TestCase):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-            y_compiled = linear_compiled(
+            y_compiled, code = run_and_get_code(
+                linear_compiled,
                 x_fp8,
                 x_inverse_scale,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
             )
+
+        src = code[0]
+        if "triton_tem_fused__scaled_mm" in src:
+            FileCheck().check("SCALING_ROWWISE : tl.constexpr = True").run(src)
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
