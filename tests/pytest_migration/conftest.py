@@ -3,13 +3,6 @@ PyTest configuration for the new pytest-based test infrastructure.
 This configuration is designed to work alongside PyTorch's existing test infrastructure.
 """
 import pytest
-import os
-import sys
-
-# Add PyTorch root to Python path
-PYTORCH_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if PYTORCH_ROOT not in sys.path:
-    sys.path.insert(0, PYTORCH_ROOT)
 
 def pytest_configure(config):
     """Register markers and configure pytest."""
