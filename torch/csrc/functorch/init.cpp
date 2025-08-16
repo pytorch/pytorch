@@ -363,6 +363,13 @@ static int64_t maybe_get_level(const Tensor& tensor) {
   return -1;
 }
 
+static void unsafe_set_level(const Tensor& tensor, int64_t level) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    return batched->_unsafe_set_level(level);
+  }
+}
+
 static int64_t maybe_get_bdim(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
@@ -519,6 +526,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functionaltensor", &is_functionaltensor);
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
+  m.def("_unsafe_set_level", &unsafe_set_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
   m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
