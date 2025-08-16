@@ -77,53 +77,84 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     wheelname = os.path.basename(wheel_path)
     os.mkdir(f"{folder}/tmp")
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
-    libs_to_copy = [
-        "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
-        "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
-        "/usr/local/cuda/lib64/libcudnn.so.9",
-        "/usr/local/cuda/lib64/libcublas.so.12",
-        "/usr/local/cuda/lib64/libcublasLt.so.12",
-        "/usr/local/cuda/lib64/libcudart.so.12",
-        "/usr/local/cuda/lib64/libcufft.so.11",
-        "/usr/local/cuda/lib64/libcusparse.so.12",
-        "/usr/local/cuda/lib64/libcusparseLt.so.0",
-        "/usr/local/cuda/lib64/libcusolver.so.11",
-        "/usr/local/cuda/lib64/libcurand.so.10",
-        "/usr/local/cuda/lib64/libnccl.so.2",
-        "/usr/local/cuda/lib64/libnvJitLink.so.12",
-        "/usr/local/cuda/lib64/libnvrtc.so.12",
-        "/usr/local/cuda/lib64/libcudnn_adv.so.9",
-        "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
-        "/usr/local/cuda/lib64/libcudnn_graph.so.9",
-        "/usr/local/cuda/lib64/libcudnn_ops.so.9",
-        "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
-        "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
-        "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
-        "/lib64/libgomp.so.1",
-        "/usr/lib64/libgfortran.so.5",
-        "/acl/build/libarm_compute.so",
-        "/acl/build/libarm_compute_graph.so",
-        "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
-        "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
-        "/usr/local/lib/libnvpl_lapack_core.so.0",
-        "/usr/local/lib/libnvpl_blas_core.so.0",
-    ]
-
-    if "129" in desired_cuda:
-        libs_to_copy += [
-            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
-            "/usr/local/cuda/lib64/libcufile.so.0",
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+    
+    # Check if we should use PyPI NVIDIA libraries or bundle system libraries
+    use_nvidia_pypi_libs = os.getenv("USE_NVIDIA_PYPI_LIBS", "0") == "1"
+    
+    if use_nvidia_pypi_libs:
+        print("Using nvidia libs from pypi - skipping CUDA library bundling")
+        # For PyPI approach, we don't bundle CUDA libraries - they come from PyPI packages
+        # We only need to bundle non-NVIDIA libraries
+        minimal_libs_to_copy = [
+            "/lib64/libgomp.so.1",
+            "/usr/lib64/libgfortran.so.5",
+            "/acl/build/libarm_compute.so",
+            "/acl/build/libarm_compute_graph.so",
+            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
+            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
+            "/usr/local/lib/libnvpl_lapack_core.so.0",
+            "/usr/local/lib/libnvpl_blas_core.so.0",
+        ]
+        
+        # Copy minimal libraries to unzipped_folder/torch/lib
+        for lib_path in minimal_libs_to_copy:
+            if os.path.exists(lib_path):  # Check if file exists before copying
+                lib_name = os.path.basename(lib_path)
+                shutil.copy2(lib_path, f"{folder}/tmp/torch/lib/{lib_name}")
+                os.system(
+                    f"cd {folder}/tmp/torch/lib/; "
+                    f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
+                )
+    else:
+        print("Bundling CUDA libraries with wheel")
+        # Original logic for bundling system CUDA libraries
+        libs_to_copy = [
+            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
+            "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
+            "/usr/local/cuda/lib64/libcudnn.so.9",
+            "/usr/local/cuda/lib64/libcublas.so.12",
+            "/usr/local/cuda/lib64/libcublasLt.so.12",
+            "/usr/local/cuda/lib64/libcudart.so.12",
+            "/usr/local/cuda/lib64/libcufft.so.11",
+            "/usr/local/cuda/lib64/libcusparse.so.12",
+            "/usr/local/cuda/lib64/libcusparseLt.so.0",
+            "/usr/local/cuda/lib64/libcusolver.so.11",
+            "/usr/local/cuda/lib64/libcurand.so.10",
+            "/usr/local/cuda/lib64/libnccl.so.2",
+            "/usr/local/cuda/lib64/libnvJitLink.so.12",
+            "/usr/local/cuda/lib64/libnvrtc.so.12",
+            "/usr/local/cuda/lib64/libcudnn_adv.so.9",
+            "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
+            "/usr/local/cuda/lib64/libcudnn_graph.so.9",
+            "/usr/local/cuda/lib64/libcudnn_ops.so.9",
+            "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
+            "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
+            "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
+            "/lib64/libgomp.so.1",
+            "/usr/lib64/libgfortran.so.5",
+            "/acl/build/libarm_compute.so",
+            "/acl/build/libarm_compute_graph.so",
+            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
+            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
+            "/usr/local/lib/libnvpl_lapack_core.so.0",
+            "/usr/local/lib/libnvpl_blas_core.so.0",
         ]
 
-    # Copy libraries to unzipped_folder/a/lib
-    for lib_path in libs_to_copy:
-        lib_name = os.path.basename(lib_path)
-        shutil.copy2(lib_path, f"{folder}/tmp/torch/lib/{lib_name}")
-        os.system(
-            f"cd {folder}/tmp/torch/lib/; "
-            f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
-        )
+        if "129" in desired_cuda:
+            libs_to_copy += [
+                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+            ]
+
+        # Copy libraries to unzipped_folder/torch/lib
+        for lib_path in libs_to_copy:
+            lib_name = os.path.basename(lib_path)
+            shutil.copy2(lib_path, f"{folder}/tmp/torch/lib/{lib_name}")
+            os.system(
+                f"cd {folder}/tmp/torch/lib/; "
+                f"patchelf --set-rpath '$ORIGIN' --force-rpath {folder}/tmp/torch/lib/{lib_name}"
+            )
 
     # Make sure the wheel is tagged with manylinux_2_28
     for f in os.scandir(f"{folder}/tmp/"):
@@ -211,6 +242,28 @@ if __name__ == "__main__":
         build_vars += "MAX_JOBS=5 "
         # nvshmem is broken for aarch64 see https://github.com/pytorch/pytorch/issues/160425
         build_vars += "USE_NVSHMEM=OFF "
+        
+        # Handle PyPI NVIDIA libraries vs bundled libraries
+        use_nvidia_pypi_libs = os.getenv("USE_NVIDIA_PYPI_LIBS", "0") == "1"
+        if use_nvidia_pypi_libs:
+            print("Configuring build for PyPI NVIDIA libraries")
+            # Pass RPATH configuration to build
+            c_so_rpath = os.getenv("C_SO_RPATH", "")
+            lib_so_rpath = os.getenv("LIB_SO_RPATH", "") 
+            force_rpath = os.getenv("FORCE_RPATH", "")
+            
+            if c_so_rpath:
+                build_vars += f"C_SO_RPATH='{c_so_rpath}' "
+            if lib_so_rpath:
+                build_vars += f"LIB_SO_RPATH='{lib_so_rpath}' "
+            if force_rpath:
+                build_vars += f"FORCE_RPATH='{force_rpath}' "
+                
+            # Configure for dynamic linking (matching x86 logic)
+            build_vars += "USE_STATIC_NCCL=0 ATEN_STATIC_CUDA=0 USE_CUDA_STATIC_LINK=0 USE_CUPTI_SO=1 "
+        else:
+            print("Configuring build for bundled NVIDIA libraries")
+            # Keep existing static linking approach - already configured above
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")
