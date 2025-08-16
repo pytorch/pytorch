@@ -77,6 +77,13 @@ void KernelFactory::registerHandler(
   });
 }
 
+/* static */ bool KernelFactory::isHandlerRegistered(
+    const std::string& handler) {
+  return getKernelFactoryRegistry().withLock([&](auto&& reg) {
+    return reg.handlers.find(handler) != reg.handlers.end();
+  });
+}
+
 ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
     const std::shared_ptr<Weights>& weights,
