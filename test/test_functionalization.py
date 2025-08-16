@@ -16,7 +16,6 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -28,6 +27,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensor
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map_only
+from torch.utils.weak import StorageWeakRef
 
 
 def are_aliased(x, y):

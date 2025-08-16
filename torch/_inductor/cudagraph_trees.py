@@ -78,11 +78,10 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
     WrappedFunction,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
-from torch.utils.weak import TensorWeakRef
+from torch.utils.weak import StorageWeakRef, TensorWeakRef
 
 
 if TYPE_CHECKING:

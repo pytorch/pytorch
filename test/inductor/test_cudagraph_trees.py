@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.weak import StorageWeakRef
 
 
 if IS_WINDOWS and IS_CI:
@@ -1715,9 +1716,7 @@ if HAS_CUDA_AND_TRITON:
             inp = torch.rand([20, 20], device="cuda")
             mod = AliasMod()
 
-            storage_ref = torch.multiprocessing.reductions.StorageWeakRef(
-                mod.param.untyped_storage()
-            )
+            storage_ref = StorageWeakRef(mod.param.untyped_storage())
 
             for _ in range(3):
                 outs = foo(mod, inp)
