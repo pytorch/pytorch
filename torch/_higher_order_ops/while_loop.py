@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import functools
 from typing import Callable, Union
 
 import torch
@@ -180,7 +181,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop_dense(
+    cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+):
     carried_vals = carried_inputs
 
     def _validate_cond_output(pred):
@@ -205,13 +208,25 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     _validate_cond_output(should_loop)
 
     if not should_loop:
-        return tuple(
-            val.clone() if isinstance(val, torch.Tensor) else val
-            for val in carried_vals + additional_inputs
-        )
+        if with_checkpoint:
+            return tuple(
+                val.unsqueeze(0) if isinstance(val, torch.Tensor) else val
+                for val in carried_vals + additional_inputs
+            )
+        else:
+            return tuple(
+                val.clone() if isinstance(val, torch.Tensor) else val
+                for val in carried_vals + additional_inputs
+            )
+
+    checkpoints: list[list[torch.Tensor]] = [[] for _ in carried_vals]
 
     while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
+        if with_checkpoint:
+            for i, o in enumerate(out):
+                checkpoints[i].append(o)
+
         assert isinstance(out, tuple), (
             f"body_fn should return a tuple but got {type(out)}"
         )
@@ -221,6 +236,12 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
         carried_vals = out
 
         should_loop = cond_fn(*carried_vals, *additional_inputs)
+
+    if with_checkpoint:
+        outs: list[torch.Tensor] = []
+        for i, checkpoint in enumerate(checkpoints):
+            outs.append(torch.stack(checkpoint, dim=0))
+        return tuple(outs)
 
     return carried_vals
 
@@ -256,9 +277,18 @@ def _create_unbacked_symint(
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
-def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop_tracing(
+    mode,
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    with_checkpoint=False,
+):
+    op = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
+
     def _trace_while_loop(
-        proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+        proxy_mode, op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):
         # NOTE [unspecialize int carry with unbacked symints]
         # When we support int carry, we'll also need to support int output of body_fn because.
@@ -357,10 +387,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
         out_proxy = proxy_mode.tracer.create_proxy(
-            "call_function", while_loop_op, proxy_args, {}, name="while_loop"
+            "call_function", op, proxy_args, {}, name=op._name
         )
 
-        out = while_loop_op(
+        out = op(
             cond_graph, body_graph, unspecialized_carried_inputs, additional_inputs
         )
         return track_tensor_tree(
@@ -368,13 +398,18 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
     return _trace_while_loop(
-        mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+        mode,
+        op,
+        cond_fn,
+        body_fn,
+        carried_inputs,
+        additional_inputs,
     )
 
 
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
-    mode, cond_fn, body_fn, carried_inputs, additional_inputs
+    mode, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
 ):
     with mode:
         # NOTE: [Handling unback symints in subgraph of while_loop]
@@ -419,6 +454,26 @@ def while_loop_fake_tensor_mode(
                 "body_output",
                 include_contiguity=False,
             )
+
+        if with_checkpoint:
+            n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
+            assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
+            fake_checkpoints = tuple(
+                out.clone()
+                .unsqueeze(0)
+                .repeat((n_iter,) + tuple(1 for _ in range(out.dim())))
+                for out in body_outs
+            )
+            return pytree.tree_map_only(
+                (int, torch.SymInt),
+                # For while_loop's unbacked symint output, we want them to be bound
+                # to the proxy of while_loop's output.
+                lambda _: _create_unbacked_symint(
+                    mode, ignore_fresh_unbacked_symbols=False
+                ),
+                fake_checkpoints,
+            )
+
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),
@@ -432,8 +487,12 @@ def while_loop_fake_tensor_mode(
 
 
 @while_loop_op.py_functionalize_impl
-def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop_func(
+    ctx, cond_fn, body_fn, carried_inputs, additional_inputs, with_checkpoint=False
+):
     from torch._higher_order_ops.utils import _check_alias_and_mutation
+
+    op = while_loop_with_checkpoint_op if with_checkpoint else while_loop_op
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -447,10 +506,59 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             (body_fn, "body_fn"),
         ]:
             _check_alias_and_mutation(fn, unwrapped_inputs, fn_name, pre_dispatch)
-        ret = while_loop_op(
+        ret = op(
             functional_cond_fn,
             functional_body_fn,
             unwrapped_carried_inputs,
             unwrapped_additional_inputs,
         )
         return ctx.wrap_tensors(ret)
+
+
+class WhileLoopWithCheckpointOp(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("while_loop_with_checkpoint")
+
+    def __call__(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        /,
+    ):
+        if not isinstance(carried_inputs, (tuple, list)):
+            raise RuntimeError(
+                f"carried_inputs must be a tuple or list, got {type(carried_inputs)}"
+            )
+        if not isinstance(additional_inputs, (tuple, list)):
+            raise RuntimeError(
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+            )
+
+        validate_subgraph_args_types(carried_inputs)
+        validate_subgraph_args_types(additional_inputs)
+        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+
+while_loop_with_checkpoint_op = WhileLoopWithCheckpointOp()
+
+while_loop_with_checkpoint_op.py_impl(DispatchKey.CompositeExplicitAutograd)(
+    functools.partial(while_loop_dense, with_checkpoint=True)
+)
+
+while_loop_with_checkpoint_op.py_impl(ProxyTorchDispatchMode)(
+    functools.partial(while_loop_tracing, with_checkpoint=True)
+)
+
+while_loop_with_checkpoint_op.py_impl(FakeTensorMode)(
+    functools.partial(while_loop_fake_tensor_mode, with_checkpoint=True)
+)
+
+while_loop_with_checkpoint_op.py_functionalize_impl(
+    functools.partial(while_loop_func, with_checkpoint=True)
+)
+
+while_loop_with_checkpoint_op.py_autograd_impl(
+    autograd_not_implemented(while_loop_with_checkpoint_op, deferred_error=True)
+)
