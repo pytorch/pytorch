@@ -29,6 +29,13 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "12.9": "9",
 }
 
+# default torch CUDA arch list
+CUDA_ARCHES_LIST = {
+    "12.6": "5.0;6.0;6.1;7.0;7.5;8.0;8.6;9.0",
+    "12.8": "7.0;7.5;8.0;8.6;9.0;10.0;12.0",
+    "12.9": "7.0;7.5;8.0;8.6;9.0;10.0;12.0",
+}
+
 # NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
 ROCM_ARCHES = ["6.3", "6.4"]
 
