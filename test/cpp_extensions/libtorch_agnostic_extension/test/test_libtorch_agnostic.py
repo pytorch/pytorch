@@ -190,7 +190,7 @@ if not IS_WINDOWS:
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
-                # set use_deterministic_algorithms to fill unintialized memory
+                # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
 
                 t = torch.rand(2, 7, device=device)

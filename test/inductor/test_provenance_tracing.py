@@ -445,7 +445,7 @@ class TestProvenanceTracingNodeMeta(TestCase):
     @requires_cuda_and_triton  # test only works for cuda pattern matcher
     def test_pattern_matcher_transfer_meta(self):
         """
-        Test that stack trace is transfered when node is decomposed in post_grad_passes
+        Test that stack trace is transferred when node is decomposed in post_grad_passes
         """
 
         class Model(torch.nn.Module):
