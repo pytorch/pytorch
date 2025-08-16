@@ -139,6 +139,13 @@ class Tensor {
     return device_type == aoti_torch_device_type_cuda();
   }
 
+  bool is_cpu() const {
+    int32_t device_type;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_device_type(ath_.get(), &device_type));
+    return device_type == aoti_torch_device_type_cpu();
+  }
+
   int64_t size(int64_t dim) const {
     int64_t size;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(ath_.get(), dim, &size));
