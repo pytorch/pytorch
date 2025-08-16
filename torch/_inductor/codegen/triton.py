@@ -5573,9 +5573,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
                     )
                 else:
-                    line = f"if {arg}.dtype in (torch.float8_e4m3fn, torch.float8_e5m2): " \
-                            f"{arg} = {arg}.to(torch.float16)"
-                    wrapper.writeline(line)
+                    if arg_signature.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                        line = f"{arg} = {arg}.to(torch.float16)"
+                        wrapper.writeline(line)
                     line = f"assert not {arg}.isnan().any().item()"
                     wrapper.writeline(line)
                     line = f"assert not {arg}.isinf().any().item()"
