@@ -390,6 +390,11 @@ def channels_last_order(rank):
     return order
 
 
+def _get_float32_precision():
+    result = "tf32" if torch.backends.cuda.matmul.allow_tf32 else "ieee"
+    return f'"{result}"'
+
+
 def convert_1x1_conv_to_mm(x, weight, bias):
     # special case for 1x1 convolution, which is actually just a matmul
     rank = len(weight.get_size())
@@ -611,7 +616,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    FLOAT32_PRECISION=_get_float32_precision(),
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -634,7 +639,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    FLOAT32_PRECISION=_get_float32_precision(),
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,

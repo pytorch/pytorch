@@ -168,6 +168,65 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_strided(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def mm(a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        def next_multiple_16(a: int) -> int:
+            return ((a + 15) // 16) * 16
+
+        M, N, K = 21, 31, 11
+        a_shape = (K, M) if a_transposed else (M, K)
+        a_stride = (
+            (next_multiple_16(M), 1) if a_transposed else (next_multiple_16(K), 1)
+        )
+        a = torch.empty_strided(a_shape, a_stride, dtype=torch.float16).to(GPU_TYPE)
+        a[:] = torch.randn(a_shape, dtype=torch.float16)
+        a = a.to(GPU_TYPE)
+        b_shape = (N, K) if b_transposed else (K, N)
+        b_stride = (
+            (next_multiple_16(K), 1) if a_transposed else (next_multiple_16(N), 1)
+        )
+        b = torch.empty_strided(b_shape, b_stride, dtype=torch.float16)
+        b[:] = torch.randn(b_shape, dtype=torch.float16)
+        b = b.to(GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_mm").check(
+            "triton.language.make_tensor_descriptor"
+        ).run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
         def mm(a, b):

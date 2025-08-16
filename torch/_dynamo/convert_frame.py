@@ -1080,7 +1080,31 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        metrics_context.update_outer({"recompile_reason": recompile_reason})
+        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
+        inline_inbuilt_nn_modules_candidate = False
+        if not config.inline_inbuilt_nn_modules and frame:
+            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, skip_logging=True
+            )
+            inbuilt_nn_recompile_reason = (
+                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
+            )
+
+            if (
+                inbuilt_nn_recompile_reason is not None
+                and "[inline-inbuilt-nn-modules-candidate]"
+                in inbuilt_nn_recompile_reason
+            ):
+                inline_inbuilt_nn_modules_candidate = True
+
+        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
+        # regardless of whether inline_inbuilt_nn_modules is set or not
+        metrics_context.update_outer(
+            {
+                "recompile_reason": recompile_reason,
+                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+            }
+        )
 
         recompile_user_contexts = get_hook_for_recompile_user_context()
         if recompile_user_contexts:
@@ -1536,7 +1560,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
@@ -1572,8 +1595,13 @@ class CatchErrorsWrapper:
                 )
             return ConvertFrameReturn()
 
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
+        if (
+            frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
+        ) or (
+            frame.f_code.co_filename.endswith("collections/__init__.py")
+            and frame.f_code.co_name == "_make"
+        ):
+            # nametuple constructor/_make
             return ConvertFrameReturn()
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
