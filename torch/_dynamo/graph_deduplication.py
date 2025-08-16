@@ -338,9 +338,7 @@ def _stable_topological_sort(
             pending.extend(reversed(waiting.pop(node, ())))
 
     ready.update(outputs)
-    if not (not waiting and len(ready) == len(graph.nodes)):
-        breakpoint()
-        assert not waiting and len(ready) == len(graph.nodes)
+    assert not waiting and len(ready) == len(graph.nodes)
 
 
 def _populate_additional_deps(
@@ -493,9 +491,10 @@ def _create_getitem_nodes(
     while queue:
         cur_elem, path, parent = queue.popleft()
 
-        new_getitem_node = subgraph.create_node(
-            "call_function", operator.getitem, (parent, path[-1]), {}
-        )
+        with subgraph.inserting_after(parent):
+            new_getitem_node = subgraph.create_node(
+                "call_function", operator.getitem, (parent, path[-1]), {}
+            )
         new_getitem_node.meta["example_value"] = cur_elem
 
         path_to_output_index[path] = len(getitem_nodes)
@@ -526,12 +525,13 @@ def _replace_tuple_outputs(
         for c in _get_children_getitems(cur_node):
             queue.append((c, path + (c.args[1],)))  # type: ignore[return-value, arg-type]
 
-        subgraph_output = graph.create_node(
-            "call_function",
-            operator.getitem,
-            (invoke_subgraph_node, output_index + tuple_spec[path]),  # type: ignore[index]
-            {},
-        )
+        with graph.inserting_after(invoke_subgraph_node):
+            subgraph_output = graph.create_node(
+                "call_function",
+                operator.getitem,
+                (invoke_subgraph_node, output_index + tuple_spec[path]),  # type: ignore[index]
+                {},
+            )
         cur_node.replace_all_uses_with(subgraph_output, propagate_meta=True)
         graph.erase_node(cur_node)
         erased_nodes.add(cur_node)
