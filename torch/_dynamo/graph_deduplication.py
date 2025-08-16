@@ -80,6 +80,7 @@ when they are created in output_graph.
         (
             subgraph,
             external_node_usages,
+            node_usage_to_tuple_elems,
             ind_to_tuple_spec,
         ) = _create_subgraph(region, inds_with_external_users)
 
@@ -101,6 +102,7 @@ when they are created in output_graph.
                 region,
                 get_subgraph_node,
                 external_node_usages,
+                node_usage_to_tuple_elems,
                 ind_to_tuple_spec,
                 inds_with_external_users,
                 subgraph_name,
@@ -124,6 +126,7 @@ def _replace_region_with_subgraph(
     region: Region,
     get_subgraph_node: Node,
     external_node_usages: Iterable[OrderedSet[UsageIndex]],
+    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]],
     ind_to_tuple_spec: dict[int, dict[tuple[int, ...], int]],
     inds_with_external_users: list[int],
     subgraph_name: str,
@@ -131,6 +134,7 @@ def _replace_region_with_subgraph(
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
     sub_args = []
+    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
     for usages in external_node_usages:
         usage = next(iter(usages))
         node_ind, usage_ind = usage
@@ -144,13 +148,19 @@ def _replace_region_with_subgraph(
                         "NYI: Failed to substitute region %s due to mutation", region
                     )
                     return
-
-        sub_args.append(flattened_args_kwargs[usage_ind])
+        if usage in node_usage_to_tuple_elems:
+            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
+            flattened_getitem_nodes.update(tuple_elems)
+            sub_args.extend(tuple_elems)
+        else:
+            sub_args.append(flattened_args_kwargs[usage_ind])
 
     # Input/Output aliasing not supported in HOPs today
     # Note: we should use the nodes in the original graph (the region here)
     # because we use the original traced example values for this check
-    if _has_aliasing(region, sub_args, inds_with_external_users):
+    if _has_aliasing(
+        region, sub_args, inds_with_external_users, flattened_getitem_nodes
+    ):
         return
 
     invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
@@ -183,6 +193,10 @@ def _replace_region_with_subgraph(
 
     # Erase in reverse topological order
     for node in reversed(region):
+        if node in flattened_getitem_nodes:
+            # Don't erase these, since they will still be used
+            continue
+
         if node not in flattened_output_nodes:
             graph.erase_node(node)
 
@@ -244,17 +258,39 @@ def _create_subgraph(
     region: Region,
     inds_with_external_users: list[int],
 ) -> tuple[
-    torch.fx.Graph, list[OrderedSet[UsageIndex]], dict[int, dict[tuple[int, ...], int]]
+    torch.fx.Graph,
+    list[OrderedSet[UsageIndex]],
+    dict[UsageIndex, OrderedSet[int]],
+    dict[int, dict[tuple[int, ...], int]],
 ]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
     external_input_to_usages = _get_external_inputs(region)
     external_node_usages = list[OrderedSet[UsageIndex]]()
     region_to_subgraph_node = {}
     flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
+    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]] = {}
 
     for node, usage_indices in external_input_to_usages.items():
-        placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
-        region_to_subgraph_node[node] = placeholder
+        # We don't handle tuples as inputs today
+        if _is_tuple_node(node):
+            # If a node is a tuple we will possibly create multiple placeholders for them
+            # and track which nodes we won't copy into the subgraph because they are flattened away
+            # Later, when replacing each region with this subgraph, we will create a getitem node
+            # externally which will perform the flattening on the outer nodes.
+            flattened_node_indices = _get_flattened_node_indices(node, region)
+            for ind in flattened_node_indices:
+                placeholder = subgraph.placeholder(
+                    f"supgraph_input_{node.name}_flattened_{ind}"
+                )
+                region_to_subgraph_node[region[ind]] = placeholder
+                flattened_getitem_nodes.add(region[ind])
+            node_usage_to_tuple_elems[next(iter(usage_indices))] = (
+                flattened_node_indices
+            )
+        else:
+            placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
+            region_to_subgraph_node[node] = placeholder
+
         external_node_usages.append(usage_indices)
 
     def map_arg(node: Node) -> Node:
@@ -285,7 +321,7 @@ def _create_subgraph(
 
     subgraph.output(tuple(output_list))
 
-    return subgraph, external_node_usages, ind_to_tuple_spec
+    return subgraph, external_node_usages, node_usage_to_tuple_elems, ind_to_tuple_spec
 
 
 def _stable_topological_sort(
@@ -413,10 +449,12 @@ def _has_aliasing(
     region: Region,
     inputs: list[Node],
     inds_with_external_users: list[int],
+    flattened_getitem_nodes: OrderedSet[Node],
 ) -> bool:
     input_storages: dict[StorageWeakRef, Node] = dict()
-
     for node in inputs:
+        if node in flattened_getitem_nodes:
+            continue
         example_value = node.meta["example_value"]
         if isinstance(example_value, torch.Tensor):
             storage = StorageWeakRef(example_value._typed_storage())
@@ -430,11 +468,11 @@ def _has_aliasing(
                 )
                 return True
             input_storages[storage] = node
-
     output_storages: dict[StorageWeakRef, Node] = dict()
     for i in inds_with_external_users:
         out_node = region[i]
-
+        if out_node in flattened_getitem_nodes:
+            continue
         if out_node:
             example_value = out_node.meta["example_value"]
             assert not isinstance(example_value, list)
@@ -450,7 +488,6 @@ def _has_aliasing(
                     )
                     return True
                 output_storages[storage] = out_node
-
     intersected_storages = input_storages.keys() & output_storages.keys()
     if len(intersected_storages) > 0:
         # input-output aliasing
@@ -464,7 +501,6 @@ def _has_aliasing(
             aliased,
         )
         return True
-
     return False
 
 
@@ -476,6 +512,20 @@ def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
     for user in node.users:
         if user.target == operator.getitem and isinstance(user.args[1], int):
             yield user
+
+
+def _get_flattened_node_indices(node: Node, region: Region) -> OrderedSet[int]:
+    """Returns an ordered set of indices, each representing a node in the region which will be flattened"""
+    flattened_node_to_ind = {n: i for i, n in enumerate(region)}
+    node_indices: OrderedSet[int] = OrderedSet()
+    queue = deque(_get_children_getitems(node))
+    while queue:
+        cur_node = queue.popleft()
+        if any(user in region for user in cur_node.users):
+            node_indices.add(flattened_node_to_ind[cur_node])
+        for child in _get_children_getitems(cur_node):
+            queue.append(child)
+    return node_indices
 
 
 def _create_getitem_nodes(
