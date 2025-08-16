@@ -135,7 +135,7 @@ RENAME_WHEEL=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         CONDA_ENV_CREATE_FLAGS="python-freethreading"
@@ -145,7 +145,7 @@ case $desired_python in
         ;;
     3.14)
         echo "Using 3.14t deps"
-        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        SETUPTOOLS_PINNED_VERSION=">=77.0.0"
         PYYAML_PINNED_VERSION=">=6.0.1"
         NUMPY_PINNED_VERSION="==2.1.0"
         EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
