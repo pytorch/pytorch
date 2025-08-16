@@ -14,7 +14,7 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -254,6 +254,18 @@ def deserialize_device(d: Device) -> torch.device:
     if d.index is None:
         return torch.device(type=d.type)  # type: ignore[call-overload]
     return torch.device(type=d.type, index=d.index)
+
+
+def deserialize_size(sizes: Sequence[SymInt]) -> tuple[int, ...]:
+    return tuple(sym_int_size.as_int for sym_int_size in sizes)
+
+
+def deserialize_stride(strides: Sequence[SymInt]) -> tuple[int, ...]:
+    return tuple(sym_int_size.as_int for sym_int_size in strides)
+
+
+def deserialize_scalar_type(st: ScalarType) -> torch.dtype:
+    return _SERIALIZE_TO_TORCH_DTYPE[st]
 
 
 def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
@@ -3015,6 +3027,13 @@ def _dict_to_dataclass(cls, data):
     return data
 
 
+def _bytes_to_dataclass(cls: Any, artifact_bytes: bytes) -> Any:
+    artifact_str = artifact_bytes.decode("utf-8")
+    artifact_dict = json.loads(artifact_str)
+    artifact_dataclass = _dict_to_dataclass(cls, artifact_dict)
+    return artifact_dataclass
+
+
 def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: Optional[dict[str, int]] = None,
@@ -3022,10 +3041,8 @@ def deserialize(
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
     assert isinstance(artifact.exported_program, bytes)
-    exported_program_str = artifact.exported_program.decode("utf-8")
-    exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
+    serialized_exported_program = _bytes_to_dataclass(
+        ExportedProgram, artifact.exported_program
     )
     return ExportedProgramDeserializer(expected_opset_version).deserialize(
         serialized_exported_program,
