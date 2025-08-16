@@ -4,6 +4,7 @@ import logging
 import operator
 import textwrap
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
 
 import sympy
@@ -17,15 +18,17 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import sympy_product, sympy_subs
+from torch._inductor.utils import convert_shape_to_symint, sympy_product
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import CeilDiv
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
+from torch.utils._sympy.reference import OptimizedPythonReferenceAnalysis
 
 from .. import config, ir
-from ..utils import convert_shape_to_symint, convert_to_symint, LineContext
+from ..utils import LineContext
 from .common import (
     CodegenSymbol,
     FileBackedGraphModule,
@@ -155,10 +158,9 @@ class FxConverter:
             Optional[str], torch.fx.Node
         ] = {}  # Symbol table for codegen.
         self.kernels: dict[str, TritonKernel] = {}  # Table to store Triton kernels.
-        self.symbolic_arg_defs: dict[
-            sympy.Symbol, sympy.Expr
-        ] = {}  # Call arg definitions.
         self._unique_symbol_ids: Counter[str] = Counter()
+        self.tracer = torch.fx.proxy.GraphAppendingTracer(graph)
+        self.expr_to_proxy: dict[sympy.Expr, torch.fx.Proxy] = {}
 
     def _import_kernel(self, code: str, kernel_name: str) -> CachingAutotuner:
         """
@@ -199,9 +201,6 @@ class FxConverter:
     def _create_meta_from_buffer(
         self, node: torch.fx.Node, buffer: CodegenBuffer
     ) -> None:
-        name = buffer.get_name()
-        assert name
-        node.name = name
         node.meta["val"] = buffer.get_example()
 
     def _create_as_strided(
@@ -215,9 +214,9 @@ class FxConverter:
             torch.as_strided,
             args=(
                 input_node,
-                convert_shape_to_symint(size),
-                convert_shape_to_symint(stride),
-                convert_to_symint(offset),
+                self._generate_sym_nodes(size),
+                self._generate_sym_nodes(stride),
+                self._generate_sym_node(offset),
             ),
         )
 
@@ -267,6 +266,31 @@ class FxConverter:
         Converts graph inputs to FX placeholders.
         """
 
+        def _codegen_symbol(
+            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
+            base_node: torch.fx.Node,
+            target: torch._ops.OpOverload,
+            dim: int,
+        ) -> None:
+            if isinstance(sym_or_exp, sympy.Symbol):
+                buffer = SymbolBuffer(sym_or_exp)
+
+                if buffer.get_name() in self.buffer_to_node:
+                    return
+
+                size_node = self.gm.graph.call_function(target, (base_node, dim))
+                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
+
+                self._create_meta_from_buffer(size_node, buffer)
+                self._record_allocation(buffer, size_node)
+                self.expr_to_proxy[sym_or_exp] = size_proxy
+
+            elif isinstance(sym_or_exp, sympy.Integer):
+                return
+
+            elif isinstance(sym_or_exp, sympy.Expr):
+                self._sympy_interp(sym_or_exp)
+
         for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             name = node.name
             if name in V.graph.graph_inputs:
@@ -281,6 +305,24 @@ class FxConverter:
                 placeholder_node = self.gm.graph.placeholder(buffer.get_name())
                 self._create_meta_from_buffer(placeholder_node, buffer)
                 self._record_allocation(buffer, placeholder_node)
+
+                # not sure if this is needed...
+                if isinstance(ir_node, (sympy.Symbol)):
+                    placeholder_proxy = torch.fx.Proxy(
+                        placeholder_node, tracer=self.tracer
+                    )
+                    self.expr_to_proxy[ir_node] = placeholder_proxy
+
+                # Generate nodes for dynamic input sizes/strides.
+                if isinstance(ir_node, ir.TensorBox):
+                    for dim, size in enumerate(ir_node.get_size()):
+                        _codegen_symbol(
+                            size, placeholder_node, torch.ops.aten.sym_size.int, dim
+                        )
+                    for dim, stride in enumerate(ir_node.get_stride()):
+                        _codegen_symbol(
+                            stride, placeholder_node, torch.ops.aten.sym_stride.int, dim
+                        )
 
             elif V.aot_compilation:
                 # Create dummy input nodes to match the input signature
@@ -378,6 +420,80 @@ class FxConverter:
         self.gm.recompile()
         return self.gm
 
+    def _sympy_interp(self, expr: sympy.Expr) -> torch.fx.Proxy:
+        # hash cons
+        if expr in self.expr_to_proxy:
+            return self.expr_to_proxy[expr]
+        # base cases, don't cache
+        if isinstance(
+            expr,
+            (
+                sympy.Integer,
+                sympy.Number,
+                sympy.Symbol,
+                sympy.logic.boolalg.BooleanAtom,
+            ),
+        ):
+            return sympy_interp(
+                OptimizedPythonReferenceAnalysis, self.expr_to_proxy, expr
+            )
+
+        # hash cons on arguments, run expr handler
+        self.expr_to_proxy[expr] = _run_sympy_handler(
+            OptimizedPythonReferenceAnalysis,
+            [self._sympy_interp(arg) for arg in expr.args],
+            expr,
+        )
+        return self.expr_to_proxy[expr]
+
+    def _generate_sym_node(
+        self, s: Union[int, sympy.Expr]
+    ) -> Union[int, torch.fx.Node]:
+        if isinstance(s, (int, sympy.Integer)):
+            return int(s)
+        elif isinstance(s, sympy.Symbol):
+            assert s in self.expr_to_proxy, (
+                f"Could not find a node corresponding to the symbol {s}"
+            )
+            return self.expr_to_proxy[s].node
+        elif isinstance(s, sympy.Expr):
+
+            def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
+                """
+                Converts floor(x / c) to x // c.
+                """
+                if isinstance(expr, sympy.core.mul.Mul) and isinstance(
+                    expr.args[0], sympy.Rational
+                ):
+                    # Only the first argument of a Mul can be a Rational.
+                    frac = expr.args[0]
+                    numerator = sympy_product(expr.args[1:]) * frac.numerator
+                    denominator = frac.denominator
+
+                    # Sanity check the results.
+                    new_expr = numerator / denominator
+                    assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
+                        f"Unsound replacement: '{new_expr}' != '{expr}'"
+                    )
+                    # Undo the python division trick and replace with explicit CeilDiv
+                    return -CeilDiv(-numerator, denominator)
+                else:
+                    return sympy.floor(expr)
+
+            s = s.replace(sympy.floor, replace_floor_div)
+            return self._sympy_interp(s).node
+
+        elif isinstance(s, torch.fx.Node):
+            return s
+
+        else:
+            raise ValueError(f"{s} of type {type(s)} is not a valid input")
+
+    def _generate_sym_nodes(
+        self, shape: Sequence[sympy.Expr]
+    ) -> list[Union[int, torch.fx.Node]]:
+        return [self._generate_sym_node(s) for s in shape]
+
     def _generate_allocate(self, line: WrapperLine) -> None:
         assert isinstance(line, AllocateLine)
         buffer = line.node
@@ -386,8 +502,8 @@ class FxConverter:
 
         device = buffer.get_device()
         dtype = buffer.get_dtype()
-        shape = convert_shape_to_symint(buffer.get_size())
-        stride = convert_shape_to_symint(buffer.get_stride())
+        shape = self._generate_sym_nodes(buffer.get_size())
+        stride = self._generate_sym_nodes(buffer.get_stride())
 
         node = self.gm.graph.call_function(
             torch.empty_strided,
@@ -584,42 +700,10 @@ class FxConverter:
         call_kwargs = dict(zip(tuner.triton_meta["signature"], call_args))
         call_kwargs.update(kernel_config.kwargs)
 
-        def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
-            """
-            Converts floor(x / c) to x // c.
-            """
-            if isinstance(expr, sympy.core.mul.Mul) and isinstance(
-                expr.args[0], sympy.Rational
-            ):
-                # Only the first argument of a Mul can be a Rational.
-                frac = expr.args[0]
-                numerator = sympy_product(expr.args[1:]) * frac.numerator
-                denominator = frac.denominator
-
-                # Sanity check the results.
-                new_expr = numerator / denominator
-                assert V.graph.sizevars.statically_known_equals(new_expr, expr), (
-                    f"Unsound replacement: '{new_expr}' != '{expr}'"
-                )
-                # Undo the python division trick and replace with explicit CeilDiv
-                return -CeilDiv(-numerator, denominator)
-            else:
-                return sympy.floor(expr)
-
-        def expr_to_symint(
-            expr: Union[int, torch.fx.Node, sympy.Expr],
-        ) -> Union[int, torch.fx.Node, sympy.Expr]:
-            if not isinstance(expr, sympy.Expr):
-                return expr
-
-            expr = expr.replace(sympy.floor, replace_floor_div)
-            expr = sympy_subs(expr, self.symbolic_arg_defs)
-            return convert_to_symint(expr)
-
-        # Convert sympy expressions to symints.
-        # Use FloorDiv over sympy.floor, so we can get nicer Python code from FX.
-        wrapper_grid = [tuple(expr_to_symint(dim) for dim in grid)]
-        call_kwargs = {name: expr_to_symint(val) for name, val in call_kwargs.items()}
+        wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
+        call_kwargs = {
+            name: self._generate_sym_node(val) for name, val in call_kwargs.items()
+        }
 
         # Store non-graphable kwargs in the side table.
         (
@@ -726,4 +810,6 @@ class FxConverter:
         assert isinstance(line, SymbolicCallArgLine)
         # Store the arg: expr mapping for later use.
         arg = line.arg
-        self.symbolic_arg_defs[arg.inner] = arg.inner_expr
+
+        inner_expr_proxy = self._sympy_interp(arg.inner_expr)
+        self.expr_to_proxy[arg.inner] = inner_expr_proxy
