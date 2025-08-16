@@ -20,6 +20,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/TensorConversions.h>
+#include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -196,42 +197,32 @@ static at::Tensor& mul_out(
   const auto& t_output = output.scalar_type();
   TORCH_CHECK(at::native::result_type(self, other) == t_output);
 
-  auto self_sizes = self.sizes();
-  at::native::resize_(output, self_sizes, std::nullopt);
+  at::native::resize_(output, self.sizes(), std::nullopt);
+
+  auto iter = TensorIterator::unary_op(output, self);
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
         using output_t = scalar_t;
-        output_t* output_ptr = output.mutable_data_ptr<output_t>();
-
-        const int64_t num_elements = self.numel();
-        const void* self_ptr = self.data_ptr();
-
-        at::parallel_for(0, num_elements, 1, [&](int64_t start, int64_t end) {
-          for (int64_t i = start; i < end; ++i) {
-            AT_DISPATCH_ALL_TYPES_AND2(
-                kHalf, kBFloat16, other.type(), "mul_Scalar_other", [&]() {
-                  using other_t = scalar_t;
-
-                  output_t other_casted = static_cast<output_t>(
-                      reinterpret_cast<const other_t*>(other.data_ptr())[0]);
-
-                  AT_DISPATCH_ALL_TYPES_AND2(
-                      kHalf,
-                      kBFloat16,
-                      self.scalar_type(),
-                      "mul_Scalar_self",
-                      [&]() {
-                        using self_t = scalar_t;
-
-                        output_ptr[i] =
-                            other_casted *
-                            static_cast<output_t>(
-                                reinterpret_cast<const self_t*>(self_ptr)[i]);
-                      });
-                });
-          }
-        });
+        AT_DISPATCH_ALL_TYPES_AND2(
+            kHalf, kBFloat16, other.type(), "mul_Scalar_other", [&]() {
+              using other_t = scalar_t;
+              output_t other_casted = output_t(
+                  reinterpret_cast<const other_t*>(other.data_ptr())[0]);
+              AT_DISPATCH_ALL_TYPES_AND2(
+                  kHalf,
+                  kBFloat16,
+                  self.scalar_type(),
+                  "mul_Scalar_self",
+                  [&]() {
+                    using self_t = scalar_t;
+                    cpu_kernel(
+                        iter,
+                        [=](self_t a) __ubsan_ignore_undefined__ -> output_t {
+                          return output_t(a) * other_casted;
+                        });
+                  });
+            });
       });
 
   return output;
