@@ -21,7 +21,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
-from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
@@ -706,6 +705,9 @@ def _get_dtype_from_loopbodies(loop_bodies):
                     continue
                 dtypes.add(node.meta[OptimizationContext.key].dtype)
     return dtypes
+
+
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
 def template_fusion_with_epilogues_supported(
