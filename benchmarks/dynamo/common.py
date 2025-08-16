@@ -3710,6 +3710,7 @@ def run(runner, args, original_dir=None):
             "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
             "crossvit_9_240",
+            "vision_maskrcnn",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
