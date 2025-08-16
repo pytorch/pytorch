@@ -18,6 +18,8 @@ python -mpip install -r requirements.txt
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+python -mpip install --no-input -r requirements.txt
+
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to

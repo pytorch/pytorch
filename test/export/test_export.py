@@ -63,9 +63,7 @@ from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
