@@ -94,6 +94,9 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
             "uda_host_register") {
       i = parsePinnedUseCudaHostRegister(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "reclaim_memory_in_graph_capture") {
+      i = parseReclaimMemoryInGraphCapture(tokenizer, i);
+      used_native_specific_option = true;
     } else if (key == "pinned_num_register_threads") {
       i = parsePinnedNumRegisterThreads(tokenizer, i);
       used_native_specific_option = true;
@@ -125,6 +128,15 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   m_pinned_use_cuda_host_register = tokenizer.toBool(++i);
+
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseReclaimMemoryInGraphCapture(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  m_reclaim_memory_in_graph_capture = tokenizer.toBool(++i);
 
   return i;
 }
