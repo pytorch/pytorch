@@ -8,10 +8,16 @@ std::array<
     static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
     device_guard_impl_registry;
 
-DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
+void registerDeviceGuard(
     DeviceType type,
     const DeviceGuardImplInterface* impl) {
   device_guard_impl_registry[static_cast<size_t>(type)].store(impl);
+}
+
+DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
+    DeviceType type,
+    const DeviceGuardImplInterface* impl) {
+  registerDeviceGuard(type, impl);
 }
 
 } // namespace c10::impl
