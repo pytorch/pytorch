@@ -20,6 +20,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     LBFGS,
+    Muon,
     NAdam,
     Optimizer,
     RAdam,
@@ -245,8 +246,9 @@ class optims(_TestParametrizer):
 # Helper function for generating error inputs for all optimizers, used below.
 def get_error_inputs_for_all_optims(device, dtype):
     if _get_device_type(device) == "cpu":
-        sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
-        sample_param2 = Parameter(torch.randn(1, device=device, dtype=dtype))
+        # Creating 2D parameters for compatibility with Muon.
+        sample_param = Parameter(torch.randn(1, 1, device=device, dtype=dtype))
+        sample_param2 = Parameter(torch.randn(1, 1, device=device, dtype=dtype))
         return [
             ErrorOptimizerInput(
                 OptimizerInput(
@@ -830,6 +832,69 @@ def optim_inputs_func_lbfgs(device, dtype=None):
 
 def optim_error_inputs_func_lbfgs(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    return error_inputs
+
+
+def optim_inputs_func_muon(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.2},
+            desc="non-default weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"momentum": 0.8},
+            desc="non-default momentum",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"ns_steps": 6},
+            desc="passing alternative ns_steps",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "ns_coefficients": (3.4, -4.7, 2.0),
+            },
+            desc="passing alternative ns_coefficients",
+        ),
+    ]
+
+
+def optim_error_inputs_func_muon(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    complex_param = torch.rand(2, 3, device=device, dtype=torch.complex64)
+    complex_param.grad = torch.rand_like(complex_param)
+    non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
+    non_2d_param.grad = torch.rand_like(non_2d_param)
+    error_inputs += [
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[non_2d_param],
+                kwargs=dict(),
+                desc="only support 2D parameters",
+            ),
+            error_type=ValueError,
+            error_regex="Muon only supports 2D parameters",
+            error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[complex_param],
+                kwargs=dict(),
+                desc="does not support complex parameters",
+            ),
+            error_type=RuntimeError,
+            error_regex="Muon does not support complex parameters",
+            error_on=OptimizerErrorEnum.STEP_ERROR,
+        ),
+    ]
     return error_inputs
 
 
@@ -1868,6 +1933,15 @@ optim_db: list[OptimizerInfo] = [
                 and kwargs["use_closure"],
             ),
         ),
+    ),
+    OptimizerInfo(
+        Muon,
+        optim_inputs_func=optim_inputs_func_muon,
+        optim_error_inputs_func=optim_error_inputs_func_muon,
+        supported_impls=(),
+        not_og_supported_flags=(),
+        supports_complex=False,
+        skips=(),
     ),
     OptimizerInfo(
         NAdam,
