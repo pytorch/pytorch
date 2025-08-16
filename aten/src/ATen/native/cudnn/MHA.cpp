@@ -765,7 +765,7 @@ auto build_graph_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1194,7 +1194,7 @@ auto build_graph_backward_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_uid(BIAS)
@@ -1815,7 +1815,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   TORCH_CHECK(
       !attn_bias.has_value(),
-      "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+      "attn_bias not yet supported with cuDNN Attention and NestedTensor");
 
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
