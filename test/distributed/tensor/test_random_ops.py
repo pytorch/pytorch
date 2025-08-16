@@ -122,13 +122,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
-        # test suite sets each rank's seed to the same value but in actual
-        # execution the default random seed will be different (a random value).
-        # The DTensor random ops will use the same random seed even though the
-        # torch random generator keeps different seeds on ranks. This ensures
-        # that Replicate DTensor will have the same initialized results
-        # across ranks.
-        torch.cuda.manual_seed(self.rank)
+        # test suite sets each rank's seed to the same value.
+        # The DTensor random ops will use the same generator as the default one on the device.
+
+        # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
+        torch.cuda.manual_seed(0)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -147,7 +145,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        gathered_local_tensors = funcol.all_gather_tensor(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -158,7 +156,8 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 # other rank should have an identical local tensor
                 other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
                 self.assertEqual(
-                    local_tensor[self_slice, :], local_tensor[other_slice, :]
+                    gathered_local_tensors[self_slice, :],
+                    gathered_local_tensors[other_slice, :],
                 )
 
         # Test 2: disable the distribute region for RNG
@@ -177,11 +176,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
         # compare with local tensors from other ranks
         for other_rank in range(self.world_size):
-            # the RNG result on each rank differs even they're supposed
-            # to be replicated
+            # the RNG result on each rank are the same even without the help of DTensor's RNG infra,
+            # since the default RNG is the same across ranks.
             if self.rank != other_rank:
                 other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
-                self.assertNotEqual(
+                self.assertEqual(
                     local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
 
