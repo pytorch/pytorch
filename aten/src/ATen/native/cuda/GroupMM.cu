@@ -7,7 +7,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-
 // Three warninngs in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
@@ -174,26 +173,9 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   using StrideA = typename Gemm::GemmKernel::InternalStrideA;
   using StrideB = typename Gemm::GemmKernel::InternalStrideB;
   using StrideOutput = typename Gemm::GemmKernel::InternalStrideD;
-  int32_t M, N, K, group_count;
 
-  M = mat_a.size(-2);
-  K = mat_a.size(-1);
-  N = mat_b.size(-1);
-
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
-    // if both inputs are ragged, K is dynamic, M and N come from inputs
-    group_count = offs->size(0);
-    K = -1;
-  } else if (mat_a.dim() == 2) {
-    group_count = mat_b.size(0);
-    M = -1;
-  } else if (mat_b.dim() == 2) {
-    group_count = mat_a.size(0);
-    N = -1;
-  } else {
-    // regular bmm
-    group_count = mat_a.size(0);
-  }
+  auto group_count_info = at::cuda::detail::get_group_info(mat_a, mat_b, offs);
+  int32_t group_count = group_count_info.group_count;
 
   TORCH_CHECK(group_count < 1024, "Can't process more than 1024 groups");
   const int64_t problem_shape_size =
@@ -244,6 +226,8 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   Strides tensor_ShapeA = make_strides(mat_a.sizes());
   Strides tensor_ShapeB = make_strides(mat_b.sizes());
 
+  at::cuda::detail::Sm90ScalingFormat scaling_format{0, 0};
+
   at::cuda::detail::prepare_grouped_gemm_data<<<1, group_count, 0, stream>>>(
       reinterpret_cast<DtypeA*>(mat_a.data_ptr()),
       reinterpret_cast<DtypeB*>(mat_b.data_ptr()),
@@ -260,16 +244,13 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
       stride_B,
       stride_output,
       offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
-      M,
-      N,
-      K,
+      group_count_info,
       tensor_StrideA,
       tensor_StrideB,
       tensor_StrideOutput,
       tensor_ShapeA,
       tensor_ShapeB,
-      0,
-      0,
+      scaling_format,
       a_row_major,
       b_row_major);
 
@@ -322,24 +303,8 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
     std::optional<at::Tensor> offs,
     std::optional<at::Tensor> bias, // BF16
     at::Tensor& out) {
-  int32_t M, N, K, group_count;
 
-  M = mat_a.size(-2);
-  K = mat_a.size(-1);
-  N = mat_b.size(-1);
-
-  // below we assume that gemms are approx same size
-  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
-    // if both inputs are ragged, K is dynamic, M and N come from inputs
-    group_count = offs->size(0);
-    K = K / group_count;
-  } else if (mat_a.dim() == 2) {
-    group_count = mat_b.size(0);
-    M = M / group_count;
-  } else if (mat_b.dim() == 2) {
-    group_count = mat_a.size(0);
-    N = N / group_count;
-  }
+  auto [M, N, K, group_count, type] = at::cuda::detail::get_group_info(mat_a, mat_b, offs);
   //   bool large =
   //       ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
   //        (K >= 2048 && N >= 2048));
