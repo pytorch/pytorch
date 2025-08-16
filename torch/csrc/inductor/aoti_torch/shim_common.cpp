@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
+#include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
@@ -1088,6 +1089,45 @@ AOTITorchError aoti_torch_check_inf_and_nan(
     at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
 
     assert_inf_and_nan(tensor_name, *check_tensor);
+  });
+}
+
+AOTITorchError aoti_record_function_start(
+    const char* name,
+    IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
+    AtenRecordFunctionHandle* guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* newGuard =
+        new at::RecordFunction(at::RecordScope::FUNCTION);
+    std::unordered_map<std::string, c10::IValue> recordKwargs;
+
+    if (kwargs != nullptr) {
+      auto wrappedKwargs =
+          reinterpret_cast<std::unordered_map<std::string, C10IValueHandle>*>(
+              kwargs);
+      for (const auto& pair : *wrappedKwargs) {
+        recordKwargs.emplace(
+            pair.first, *(reinterpret_cast<c10::IValue*>(pair.second)));
+      }
+    }
+
+    std::vector<c10::IValue> recordInputs(n_inputs);
+    for (size_t i = 0; i < n_inputs; i++) {
+      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+    }
+
+    newGuard->before(name, &recordInputs, &recordKwargs);
+    *guard = reinterpret_cast<AtenRecordFunctionHandle>(newGuard);
+  });
+}
+
+AOTITorchError aoti_record_function_end(AtenRecordFunctionHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* t = reinterpret_cast<at::RecordFunction*>(guard);
+
+    delete t;
   });
 }
 
