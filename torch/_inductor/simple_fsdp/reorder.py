@@ -72,7 +72,7 @@ def _check_ir_node_fsdp(ir_node: "ir.Operation") -> bool:
 
     for n in ir_node_origins:
         meta_data = n.meta.get("stack_trace", {})
-        # TODO(ruisizhang123): hack to get FSDP node (the FSDP AG/RS are created from torch_spmd)
+        # TODO(ruisizhang123): hack to get FSDP node (the SimpleFSDP AG/RS are created with parametrization)
         if "parametrization" in meta_data:
             is_fsdp = True
     return is_fsdp
@@ -111,25 +111,40 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
         python_kernel_name = ir_node.python_kernel_name
         if (
             python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
-            and ir_node.inputs[0].inputs[0].python_kernel_name
-            == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            and _check_ir_node_fsdp(ir_node)
         ):
-            return NodeType.RS_WAIT
-        elif (
-            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
-            and ir_node.inputs[0].inputs[0].python_kernel_name
-            == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-        ):
-            return NodeType.AG_WAIT
+            inputs_rs_kernel_name1 = (
+                getattr(ir_node.inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            )
+            inputs_rs_kernel_name2 = (
+                hasattr(ir_node.inputs[0], "inputs")
+                and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            )
+            if inputs_rs_kernel_name1 or inputs_rs_kernel_name2:
+                return NodeType.RS_WAIT
+
+            inputs_ag_kernel_name1 = (
+                getattr(ir_node.inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            )
+            inputs_ag_kernel_name2 = (
+                hasattr(ir_node.inputs[0], "inputs")
+                and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            )
+            if inputs_ag_kernel_name1 or inputs_ag_kernel_name2:
+                return NodeType.AG_WAIT
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-        ):
+        ) and _check_ir_node_fsdp(ir_node):
             return NodeType.REDUCE_SCATTER
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-        ):
+        ) and _check_ir_node_fsdp(ir_node):
             return NodeType.ALL_GATHER
     return NodeType.COMPUTE
 
@@ -144,13 +159,15 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
 
     if isinstance(node, scheduler.GroupedSchedulerNode):
         # [Only for bucketing]: newly created AG and RS are grouped as GroupedSchedulerNode
-        child_nodes_type = [
-            _get_ir_node_type(n) for n in [node.snodes[0].node, node.snodes[-2].node]
-        ]
-        if child_nodes_type[0] in [NodeType.AG_WAIT, NodeType.RS_WAIT]:
-            return child_nodes_type[0]
-        elif child_nodes_type[1] in [NodeType.ALL_GATHER, NodeType.REDUCE_SCATTER]:
-            return child_nodes_type[1]
+        child_nodes_type = [_get_ir_node_type(n.node) for n in node.snodes]
+        if NodeType.AG_WAIT in child_nodes_type:
+            return NodeType.AG_WAIT
+        elif NodeType.RS_WAIT in child_nodes_type:
+            return NodeType.RS_WAIT
+        elif NodeType.ALL_GATHER in child_nodes_type:
+            return NodeType.ALL_GATHER
+        elif NodeType.REDUCE_SCATTER in child_nodes_type:
+            return NodeType.REDUCE_SCATTER
         else:
             return NodeType.COMPUTE
 
@@ -226,12 +243,14 @@ def reorder_reduce_scatter(
     for node in snodes:
         node_to_type[node] = get_node_type(node)
         types.append(get_node_type(node))
+
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]
         if node_type in [NodeType.ALL_GATHER, NodeType.COMPUTE, NodeType.AG_WAIT]:
             if node not in result_list and node not in wait_list:
                 result_list.append(node)
         elif node_type == NodeType.RS_WAIT:
+            # there will sometimes be a memory checker node between rs and rs wait
             assert node_to_type[snodes[idx - 1]] == NodeType.REDUCE_SCATTER
             # gather wait node after reduce scatter
             wait_list.append(node)
@@ -248,5 +267,4 @@ def reorder_reduce_scatter(
 
     if len(wait_list) > 0:
         result_list.extend(wait_list)
-
     return result_list
