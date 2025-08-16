@@ -16,17 +16,31 @@ popd
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+__TEST_PYTHON_HAS_SETUP=''
+
 setup_test_python() {
+  if [[ -n "${__TEST_PYTHON_HAS_SETUP}" ]]; then
+    return
+  fi
+
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
-  echo "Ninja version: $(ninja --version)"
   echo "Python version: $(which python) ($(python --version))"
+  python -m pip install -qr requirements-build.txt
+
+  echo "CMake version: $(cmake --version)"
+  echo "Ninja version: $(ninja --version)"
+
+  echo "Python packages:"
+  python -m pip freeze
 
   # Set the limit on open file handles to 16384
   # might help with intermittent compiler test failures
   ulimit -n 16384
+
+  __TEST_PYTHON_HAS_SETUP=1
 }
 
 test_python_all() {
