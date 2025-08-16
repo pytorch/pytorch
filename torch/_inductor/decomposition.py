@@ -472,6 +472,15 @@ def add(
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
+
+    if x.ndim == 0 and y.ndim == 0:
+        return NotImplemented
+
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+
     z = y
     if alpha is not None:
         z = alpha * y
