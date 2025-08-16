@@ -3,8 +3,14 @@ name: PyTest Migration
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'tests/pytest_migration/**'
+      - '.github/workflows/pytest-migration.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'tests/pytest_migration/**'
+      - '.github/workflows/pytest-migration.yml'
 
 jobs:
   test:
@@ -26,15 +32,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch pytest pytest-sugar pytest-xdist pytest-html
+          pip install -r tests/pytest_migration/requirements-test.txt
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
 
       - name: Run tests
         run: |
-          pytest test/test_*_pytest.py \
+          pytest -c tests/pytest_migration/pytest.ini tests/pytest_migration \
             -v \
             --html=test-results/report.html \
             --self-contained-html \
-            --junitxml=test-results/junit.xml
+            --junitxml=test-results/junit.xml \
+            -k 'not cuda'
             
       - name: Upload test results
         if: always()

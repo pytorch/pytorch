@@ -3,7 +3,6 @@ PyTest configuration for the new pytest-based test infrastructure.
 This configuration is designed to work alongside PyTorch's existing test infrastructure.
 """
 import pytest
-import torch
 import os
 import sys
 
@@ -20,7 +19,12 @@ def pytest_configure(config):
 @pytest.fixture(scope="session")
 def cuda_available():
     """Check if CUDA is available."""
-    return torch.cuda.is_available()
+    try:
+        import torch  # noqa: F401
+        return torch.cuda.is_available()
+    except Exception:
+        # If torch is not importable or CUDA check fails, treat as not available
+        return False
 
 @pytest.fixture(autouse=True)
 def skip_cuda(request, cuda_available):
@@ -33,14 +37,20 @@ def cuda_device(cuda_available):
     """Provide CUDA device if available."""
     if not cuda_available:
         pytest.skip('CUDA not available')
+    import torch
     return torch.device('cuda')
 
 @pytest.fixture(autouse=True)
 def cuda_memory_cleanup():
     """Clean up CUDA memory before and after each test."""
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        yield
-        torch.cuda.empty_cache()
-    else:
-        yield
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            yield
+            torch.cuda.empty_cache()
+            return
+    except Exception:
+        pass
+    # Default when torch is not available
+    yield
