@@ -358,6 +358,7 @@ static inline int C10_WARP_SIZE_INTERNAL() {
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -394,6 +395,25 @@ __host__ __device__
                _CRT_WIDE(__FILE__),              \
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                 \
+  if (C10_UNLIKELY(!(cond))) {                                    \
+    (void)(printf(                                                \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(       \
+            __LINE__) ", block: [%d,%d,%d], thread: [%d,%d,%d]: " \
+                      "Assertion failed: `" #cond "`: " msg "\n", \
+        blockIdx.x,                                               \
+        blockIdx.y,                                               \
+        blockIdx.z,                                               \
+        threadIdx.x,                                              \
+        threadIdx.y,                                              \
+        threadIdx.z,                                              \
+        ##__VA_ARGS__));                                          \
+    (void)(_wassert(                                              \
+               _CRT_WIDE(#cond),                                  \
+               _CRT_WIDE(__FILE__),                               \
+               static_cast<unsigned>(__LINE__)),                  \
+           0);                                                    \
   }
 #define SYCL_KERNEL_ASSERT(cond)                 \
   if (C10_UNLIKELY(!(cond))) {                   \
@@ -454,6 +474,10 @@ __host__ __device__
   if C10_UNLIKELY (!(cond)) {             \
     abort();                              \
   }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  if C10_UNLIKELY (!(cond)) {                     \
+    abort();                                      \
+  }
 #define SYCL_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
@@ -468,6 +492,22 @@ __host__ __device__
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
         msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                          \
+  if (C10_UNLIKELY(!(cond))) {                                             \
+    printf(                                                              \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(              \
+            __LINE__) ", block: [%d,%d,%d], thread: [%d,%d,%d]: "        \
+            "Assertion failed: `" #cond "`: " msg "\n",                  \
+        blockIdx.x,                                                      \
+        blockIdx.y,                                                      \
+        blockIdx.z,                                                      \
+        threadIdx.x,                                                     \
+        threadIdx.y,                                                     \
+        threadIdx.z,                                                     \
+        ##__VA_ARGS__); \
+    __assert_fail(                                                         \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__);   \
   }
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
