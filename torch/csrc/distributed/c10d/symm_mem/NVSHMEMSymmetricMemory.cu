@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -381,12 +383,23 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
     }
-    // Today this would still find the ptr in the map because one allocation
-    // matches one tensor. But will break once we enable MemPool.
-    // TODO: implement a customized `find` that searches for the allocation that
-    // contains ptr.
-    auto it = allocations_.find(ptr);
-    TORCH_CHECK(it != allocations_.end());
+    // This is the first time the tenosr gets rendezvous'ed. We need to first
+    // search for an allocations that backs it (below).
+
+    // [Note] In case of MemPool or when the tensor is a slice of another, the
+    // tensor's data_ptr() may not match exactly with an allocation's base
+    // address. Thus we perform the search by testing if the tensor's data_ptr
+    // is within an allocation's range.
+    auto it = std::find_if(allocations_.begin(), allocations_.end(),
+                               [&](const auto& pair){
+                                  auto& allocation = pair.second;
+                                  auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                  auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                  return ptr_int >= base_ptr && ptr_int < base_ptr + allocation->buffer_size; });
+    TORCH_CHECK(it != allocations_.end(),
+        "Pointer not within any SymmetricMemory allocation, "
+        "is the tensor allocated from SymmetricMemory?");
+
     auto symm_mem =
         c10::make_intrusive<NVSHMEMSymmetricMemory>(ptr, it->second, *group_name);
 
