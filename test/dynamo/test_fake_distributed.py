@@ -120,7 +120,7 @@ class GraphModule(torch.nn.Module):
 
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
-            device_type="cuda",
+            device_type="cpu",
             mesh_shape=(self.world_size,),
             mesh_dim_names=("dp",),  # data parallel dimension
         )
