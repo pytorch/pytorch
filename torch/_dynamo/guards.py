@@ -139,6 +139,7 @@ from .source import (
     GradSource,
     ListGetItemSource,
     LocalSource,
+    NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
@@ -727,6 +728,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___dataclass_fields": dataclass_fields,
+            "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -1652,6 +1654,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: dataclass_fields(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, NamedTupleFieldsSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x._fields,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

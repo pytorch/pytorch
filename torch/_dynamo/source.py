@@ -831,6 +831,19 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class NamedTupleFieldsSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen(self.base)
+        codegen.extend_output(codegen.create_load_attrs("_fields"))
+
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source()
+
+    def name(self) -> str:
+        return f"___namedtuple_fields({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class DataclassFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
