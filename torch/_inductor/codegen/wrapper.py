@@ -50,6 +50,7 @@ from ..utils import (
     get_benchmark_name,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_using_cudagraph_partition,
     LineContext,
     sympy_product,
     sympy_str,
@@ -479,7 +480,7 @@ class ExternKernelOutLine(WrapperLine):
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
         # set provenance tracing kernel mapping for ExternKernel types
-        if config.trace.provenance_tracking:
+        if config.trace.provenance_tracking_level != 0:
             set_kernel_post_grad_provenance_tracing(node, kernel_name, is_extern=True)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
@@ -1197,7 +1198,14 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
-            self.codegen_input_size_and_nan_asserts()
+
+            # avoid duplicating asserts for both partition functions and
+            # the call function when using cudagraph partition
+            if not (
+                is_using_cudagraph_partition()
+                and (not is_codegen_graph_partition_subgraph(self))
+            ):
+                self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
