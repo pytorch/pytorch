@@ -4,7 +4,9 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -93,7 +95,7 @@ nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
 #endif
 }
 
-#if defined CUDA_VERSION && CUDA_VERSION >= 12040
+#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
 bool isFabricSupported() {
   // 1. try allocating memory
   CUmemGenericAllocationHandle handle = 0;
@@ -145,7 +147,7 @@ bool isFabricSupported() {
 } // namespace
 
 bool get_fabric_access(c10::DeviceIndex dev) {
-#if defined CUDA_VERSION && CUDA_VERSION >= 12040
+#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   TORCH_CHECK(dev >= 0 || dev < num_devices_, dev, " is not a device");
