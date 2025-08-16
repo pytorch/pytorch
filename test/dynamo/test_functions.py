@@ -4136,6 +4136,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
     def test_meth_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg

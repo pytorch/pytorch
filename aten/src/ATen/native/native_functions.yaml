@@ -2931,6 +2931,7 @@
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
+    MPS: grid_sampler_3d_mps
   autogen: grid_sampler_3d.out
 
 # `grid_sampler_3d_backward` takes in `output_mask` to optimize performance for
@@ -3447,7 +3448,11 @@
 
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor? bias) -> Tensor
 
+- func: fbgemm_linear_fp16_weight_fp32_activation.out(Tensor input, Tensor packed_weight, Tensor? bias, Tensor(a!) output) -> Tensor
+
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_fp16_weight.out(Tensor input, Tensor packed_weight, Tensor bias, Tensor(a!) output) -> Tensor
 
 - func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
 
@@ -5504,6 +5509,13 @@
   tags: core
   manual_cpp_binding: True
 
+- func: sym_is_contiguous(Tensor self, MemoryFormat memory_format=contiguous_format) -> SymBool
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
 - func: sym_numel(Tensor self) -> SymInt
   variants: function
   device_check: NoCheck
@@ -7462,7 +7474,7 @@
 - func: indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: indices_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: indices_sparse
     CompositeExplicitAutograd: indices_default
   device_check: NoCheck
   device_guard: False
@@ -7470,7 +7482,7 @@
 - func: values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: values_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: values_sparse_csr
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: values_nested
     CompositeExplicitAutograd: values_default

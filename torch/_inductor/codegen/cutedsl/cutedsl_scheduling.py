@@ -124,14 +124,13 @@ class CuteDSLScheduling(BaseScheduling):
         ctb: CuteDSLTemplateBuffer = cast(CuteDSLTemplateBuffer, template_node.node)
 
         kernel, render = ctb.make_kernel_render(ctb)  # type: ignore[misc]
-        with kernel:
-            template_node.mark_run()
-            src_code = render()
-            # Finalize PartialRender if needed
-            if isinstance(src_code, PartialRender):
-                src_code_str = src_code.finalize_all()
-            else:
-                src_code_str = src_code
+        template_node.mark_run()
+        src_code = render()
+        # Finalize PartialRender if needed
+        if isinstance(src_code, PartialRender):
+            src_code_str = src_code.finalize_all()
+        else:
+            src_code_str = src_code
 
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]

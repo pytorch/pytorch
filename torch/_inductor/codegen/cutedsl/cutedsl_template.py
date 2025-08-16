@@ -1,69 +1,19 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
-import torch
-from torch._inductor.codecache import PyCodeCache
 from torch._inductor.ir import ShapeAsConstantBuffer
-from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.utils import Placeholder
 from torch._logging import getArtifactLogger
 
-from ...autotune_process import BenchmarkRequest, GPUDeviceBenchmarkMixin, TensorMeta
+from ...autotune_process import CuteDSLBenchmarkRequest, TensorMeta
 from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, Layout, TensorBox
 from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
 
 
 log = getArtifactLogger(__name__, "output_code")
-
-
-class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
-    """Benchmark request for CuteDSL (CUTLASS Python DSL) kernels."""
-
-    def __init__(
-        self,
-        kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        extra_args: tuple[Any, ...],
-        source_code: PartialRender,
-    ) -> None:
-        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
-
-        finalized_code = source_code.finalize_all()
-        self.module_cache_key, self.module_path = PyCodeCache.write(finalized_code)
-
-    def make_run_fn(
-        self, *input_tensors: torch.Tensor, out: torch.Tensor
-    ) -> Callable[[], None]:
-        """
-        Create a function to run the CuteDSL kernel with the given input and output tensors.
-        Similar to TritonBenchmarkRequest.make_run_fn but for CuteDSL kernels.
-        """
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-
-        # Logic replicated async_compile
-        from .cutedsl_kernel import MAIN_SUFFIX
-
-        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
-
-        if not hasattr(mod, main_func_name):
-            available = [name for name in dir(mod) if callable(getattr(mod, name))]
-            raise RuntimeError(
-                f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
-            )
-
-        kernel_func = getattr(mod, main_func_name)
-
-        def run_kernel():
-            return kernel_func(*input_tensors, out)
-
-        return run_kernel
-
-    def cleanup_run_fn(self) -> None:
-        """Clean up any resources used by the kernel."""
 
 
 class CuteDSLTemplate(KernelTemplate):

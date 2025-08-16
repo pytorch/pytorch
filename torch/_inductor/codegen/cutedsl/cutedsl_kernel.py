@@ -140,13 +140,6 @@ class CuteDSLTemplateKernel(Kernel):
 
         return PartialRender(full_code, self.render_hooks)
 
-    def __enter__(self):
-        """TODO: Context manager entry - doesn't set anything yet"""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """TODO: Context manager exit - doesn't set anything yet"""
-
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         """Set the active subgraph body for template processing."""
@@ -159,7 +152,6 @@ class CuteDSLTemplateKernel(Kernel):
             for key in dataclasses.fields(CuteDSLSubgraphInfo)
         }
 
-        # Auto-create subgraph if it doesn't exist (for kernels without epilogue fusion)
         if body_name not in self.subgraph_bodies:
             self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
                 body=IndentedBuffer(),

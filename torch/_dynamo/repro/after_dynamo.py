@@ -319,7 +319,7 @@ def dynamo_minifier_backend(
 ) -> fx.GraphModule:
     from functorch.compile import minifier
 
-    compiler_fn = lookup_backend(compiler_name)
+    compiler_fn = lookup_backend(compiler_name)  # type: ignore[arg-type]
 
     # TODO: It's inconsistent to pass SymInt inputs but REAL tensors.
     # We should pass ints and look at the GraphModule placeholders
@@ -330,7 +330,7 @@ def dynamo_minifier_backend(
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, example_inputs)
+        run_fwd_maybe_bwd(compiled_gm, example_inputs)  # type: ignore[arg-type]
         raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
@@ -361,20 +361,20 @@ def dynamo_accuracy_minifier_backend(
 ) -> fx.GraphModule:
     from functorch.compile import minifier
 
-    compiler_fn = lookup_backend(compiler_name)
+    compiler_fn = lookup_backend(compiler_name)  # type: ignore[arg-type]
 
     # Set the eval mode to remove randomness.
     gm.eval()
 
     # Check Accuracy
-    if _accuracy_fails(gm, example_inputs, compiler_fn):
+    if _accuracy_fails(gm, example_inputs, compiler_fn):  # type: ignore[arg-type]
         log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
         fails_fn = functools.partial(
             _accuracy_fails,
-            compiler_fn=compiler_fn,
+            compiler_fn=compiler_fn,  # type: ignore[arg-type]
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
@@ -469,7 +469,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
 
     dynamo_minifier_backend = functools.partial(
         compiler_fn,
-        compiler_name=options.backend,
+        compiler_name=options.backend,  # type: ignore[call-arg]
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
