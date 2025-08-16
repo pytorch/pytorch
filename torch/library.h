@@ -926,7 +926,7 @@ class TorchLibraryInit final {
             }
 
       void initialize() {
-        lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
+        lib = std::make_unique<Library>(kind, ns, key, file, line);
         init_function(*lib);
       }
 };
