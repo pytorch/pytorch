@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import logging
 import os
 import unittest
@@ -13,7 +12,11 @@ except ImportError:
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FP8,
+    tf32_off,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -32,20 +35,8 @@ if HAS_CUDA_AND_TRITON:
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _get_path_without_sccache() -> str:
-    """
-    Get the PATH environment variable without sccache.
-    """
-    path_envs = os.environ.get("PATH", "").split(":")
-    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
-    return ":".join(path_envs)
-
-
-_test_env = {
-    "PATH": _get_path_without_sccache(),
-    "DISABLE_SCCACHE": "1",
-}
+# patch env for tests if needed
+_test_env = {}
 
 
 @instantiate_parametrized_tests
@@ -289,6 +280,8 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y_eager)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "Scaled mm requires bf16 support")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Scaled mm requires fp8 support")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
