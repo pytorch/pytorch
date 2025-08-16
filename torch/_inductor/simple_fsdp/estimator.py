@@ -499,6 +499,13 @@ def benchmark_extern_node(
                     out._coalesced_(e.is_coalesced())
                 return out
 
+            def delete_tensor_in_list(l: list[Any]) -> None:
+                for i in range(len(l)):
+                    if isinstance(l[i], torch.Tensor):
+                        l[i].cpu()
+                        del l[i]
+                        break
+
             flat_args = [to_real_tensor(a) for a in flat_args]
             args, kwargs = pytree.tree_unflatten(flat_args, args_property)
             func(*args, **kwargs)
@@ -515,7 +522,11 @@ def benchmark_extern_node(
             cpu_time = cpu_end - cpu_start
             total_op_time = start_event.elapsed_time(end_event) - cpu_time
             mean_op_time = total_op_time / num_iters
+            delete_tensor_in_list(flat_args)
+            delete_tensor_in_list(args)
             del flat_args
+            del args
+            del kwargs
 
     mean_op_time = mean_op_time * 1e3
     if comp_cache is not None:
