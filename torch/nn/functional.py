@@ -3645,10 +3645,6 @@ def linear_cross_entropy(
     if chunking_strategy is None:
         chunking_strategy = choose_chunking().value
 
-    assert isinstance(chunking_strategy, str), (
-        chunking_strategy,
-        type(chunking_strategy),
-    )
     torch._check_with(
         AssertionError,
         hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
