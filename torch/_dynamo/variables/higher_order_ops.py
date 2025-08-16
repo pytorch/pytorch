@@ -285,6 +285,7 @@ def _call_while_loop(
     from torch._higher_order_ops.while_loop import _create_unbacked_symint
 
     from . import TensorVariable
+    from .builder import wrap_fx_proxy
 
     args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
     cond_fn, body_fn, operands, additional_inputs = args
@@ -503,14 +504,88 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
-    return _call_function_and_unflatten_output(
-        tx,
-        self.value,
-        p_args,
-        {},
-        None,
-        body_treespec,
-    )
+    if with_checkpoint:
+        # No need to call _call_function_and_unflatten_output because
+        # the outputs of while_loop_with_checkpoint is guaranteed to be a flat tuple
+        flat_variable = wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch.ops.higher_order.while_loop_with_checkpoint,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=None,
+        )
+        assert isinstance(flat_variable, TupleVariable), flat_variable
+        return flat_variable
+    else:
+        example_args = [
+            proxy.node.meta["example_value"]
+            for proxy in operands_proxy + additional_inputs_proxy
+            if isinstance(proxy, torch.fx.Proxy)
+        ]
+        need_grad = (
+            any(t.requires_grad for t in example_args if isinstance(t, (torch.Tensor,)))
+            and torch.is_grad_enabled()
+        )
+        # For while_loop, if any input requires_grad, we want to call while_loop_with_checkpoint directly
+        # instead of calling while_loop and letting it forward call to while_loop_with_checkpoint
+        # in autograd key.
+
+        # If we call while_loop, the autograd implementation of while_loop will save the checkpoints, whose
+        # first dimension is unbacked symint and just return the forward outputs.
+        # From dynamo's point view, the forward outputs doesn't contain any unbacked symbols, and the
+        # unbacked symint leaked out so it raises an PendingUnbackedSymbolNotFound error.
+        #
+        # In contrast, if we call while_loop_with_checkpoint, dynamo will track both the fw output and the
+        # checkpoints, and the newly allocated unbacked symints are correctly tracked.
+        # We just need to slice the output
+        if need_grad:
+            if not all(isinstance(carry, TensorVariable) for carry in operands_seq):
+                unimplemented(
+                    "while_loop doesn't support int carry training"
+                    "Consider change the int carry to a scalar int tensor."
+                )
+
+            # Store the invocation as a call
+            flat_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.higher_order.while_loop_with_checkpoint,
+                    args=p_args,
+                    kwargs={},
+                ),
+                example_value=None,
+            )
+
+            # Create a new list variable where each element accesses the -1 element of the tensor in flat_variable
+            flat_variable_seq = flat_variable.unpack_var_sequence(tx)
+            new_list_elements = []
+            for tensor_var in flat_variable_seq:
+                # Access the -1 element of each tensor variable
+                last_element = tensor_var.call_method(
+                    tx, "__getitem__", args=[ConstantVariable.create(-1)], kwargs={}
+                )
+                new_list_elements.append(last_element)
+
+            # Create the new list variable
+            new_list_variable = ListVariable(new_list_elements)
+
+            # Unflatten the list variable using body_treespec
+            return _make_inlined(tx, pytree.tree_unflatten)(
+                new_list_variable, body_treespec
+            )
+
+        return _call_function_and_unflatten_output(
+            tx,
+            self.value,
+            p_args,
+            {},
+            None,
+            body_treespec,
+        )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
