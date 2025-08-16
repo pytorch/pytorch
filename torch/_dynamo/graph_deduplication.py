@@ -515,7 +515,7 @@ def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
 
 
 def _get_flattened_node_indices(node: Node, region: Region) -> OrderedSet[int]:
-    """Returns an ordered set of indices, each reprenting a node in the region which will be flattened"""
+    """Returns an ordered set of indices, each representing a node in the region which will be flattened"""
     flattened_node_to_ind = {n: i for i, n in enumerate(region)}
     node_indices: OrderedSet[int] = OrderedSet()
     queue = deque(_get_children_getitems(node))
