@@ -59,7 +59,7 @@ from ..utils import proxy_args_kwargs, set_example_value
 from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
-from .lists import ListVariable, SliceVariable, TupleVariable
+from .lists import ListVariable, TupleVariable
 
 
 if TYPE_CHECKING:
@@ -559,25 +559,24 @@ def _call_while_loop(
                 ),
                 example_value=None,
             )
-            # Transform variable back into a list (previously made into a tuple by
-            # speculate_subgraph function) so as to respect the pytree API typing.
-            flat_list_variable = BuiltinVariable(list).call_function(
-                tx, [flat_variable], {}
+
+            # Create a new list variable where each element accesses the -1 element of the tensor in flat_variable
+            flat_variable_seq = flat_variable.unpack_var_sequence(tx)
+            new_list_elements = []
+            for tensor_var in flat_variable_seq:
+                # Access the -1 element of each tensor variable
+                last_element = tensor_var.call_method(
+                    tx, "__getitem__", args=[ConstantVariable.create(-1)], kwargs={}
+                )
+                new_list_elements.append(last_element)
+
+            # Create the new list variable
+            new_list_variable = ListVariable(new_list_elements)
+
+            # Unflatten the list variable using body_treespec
+            return _make_inlined(tx, pytree.tree_unflatten)(
+                new_list_variable, body_treespec
             )
-            slice_obj = SliceVariable(
-                [
-                    ConstantVariable.create(None),
-                    ConstantVariable.create(len(operands_seq)),
-                    ConstantVariable.create(None),
-                ]
-            )
-            flat_list_variable = flat_list_variable.call_method(
-                tx, "__getitem__", [slice_obj], {}
-            )
-            out_var = _make_inlined(tx, pytree.tree_unflatten)(
-                flat_list_variable, body_treespec
-            )
-            return out_var
 
         return _call_function_and_unflatten_output(
             tx,

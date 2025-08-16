@@ -8244,21 +8244,20 @@ class GraphModule(torch.nn.Module):
                 def body_fn(c, x):
                     return c + 1, self.linear(x)
 
-                final_c, final_x, checkpoint_c, checkpoint_x = (
+                checkpoint_c, checkpoint_x = (
                     torch.ops.higher_order.while_loop_with_checkpoint(
                         cond_fn, body_fn, (c, x), tuple()
                     )
                 )
-                return final_c, final_x, checkpoint_c, checkpoint_x
+                return checkpoint_c, checkpoint_x
 
         x = torch.randn(3, 3)
         mod = Mod()
         compiled_out = torch.compile(mod, backend=backend, dynamic=dynamic)(x)
-        # 2 outputs and 2 checkpoints
-        self.assertEqual(len(compiled_out), 4)
-        # 3 checkpoints since we have 3 iterations
-        self.assertEqual(compiled_out[-1].size(0), 3)
-        self.assertEqual(compiled_out[-2].size(0), 3)
+        # 2 checkpoints
+        self.assertEqual(len(compiled_out), 2)
+        self.assertEqual(compiled_out[0].size(0), 3)
+        self.assertEqual(compiled_out[1].size(0), 3)
         self.assertEqual(compiled_out, mod(x))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)

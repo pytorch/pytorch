@@ -747,7 +747,7 @@ class WhileLoopModels:
     class Simple(torch.nn.Module):
         def forward(self, ci, a, b):
             def cond_fn(i, x, y):
-                return i >= 0
+                return i > 0
 
             def body_fn(i, x, y):
                 return i - 1, x + y, y - x
@@ -757,16 +757,16 @@ class WhileLoopModels:
     class Nested(torch.nn.Module):
         def forward(self, ci, cj, a, b):
             def cond_fn(i1, j1, x1, y1):
-                return i1 >= 0
+                return i1 > 0
 
             def body_fn(i1, j1, x1, y1):
                 def cond_fn_nested(i2, j2, x2, y2):
-                    return j2 >= 0
+                    return j2 > 0
 
                 def body_fn_nested(i2, j2, x2, y2):
                     return i2.clone(), j2 - 1, x2 + 3.14, y2 - 2.71
 
-                i1, _, x1, y1 = torch._higher_order_ops.while_loop(
+                i1, j1, x1, y1 = torch._higher_order_ops.while_loop(
                     cond_fn_nested, body_fn_nested, [i1, j1, x1, y1]
                 )
 
@@ -787,8 +787,7 @@ class WhileLoopModels:
         def __init__(self, device):
             super().__init__()
             self.body_fn = self.InnerModel(device)
-            # make sure the body_fn is run at least once
-            self.cond_fn = lambda c, x: c >= 0
+            self.cond_fn = lambda c, x: c > 0
 
         def forward(self, c, a):
             return torch._higher_order_ops.while_loop(
@@ -801,7 +800,7 @@ class WhileLoopModels:
             e = a / b - 2.71
 
             def cond_fn(c, x, y):
-                return c >= 0
+                return c > 0
 
             def body_fn(c, x, y):
                 return c - 1, y - x, x + y
@@ -820,7 +819,7 @@ class WhileLoopModels:
             e = b / 2
 
             def cond_fn(c, x, y):
-                return c >= 0
+                return c > 0
 
             def body_fn(c, x, y):
                 return c - 1, x + d, y - e
@@ -830,7 +829,7 @@ class WhileLoopModels:
     class PytreeCarry(torch.nn.Module):
         def forward(self, it, pytree_input):
             def cond_fn(it, pytree_input):
-                return it >= 0
+                return it > 0
 
             def body_fn(it, pytree_input):
                 x = pytree_input[0][0]
@@ -848,7 +847,7 @@ class WhileLoopModels:
     class DataDependentOpInSubgraph(torch.nn.Module):
         def forward(self, c, a, b):
             def cond_fn(c, reduced_carry):
-                return c >= 0
+                return c > 0
 
             def body_fn(c, reduced_carry):
                 k = torch.masked_select(a, b)
@@ -868,7 +867,7 @@ class WhileLoopModels:
             )
 
             def cond_fn(c, inp):
-                return c >= 0
+                return c > 0
 
             def body_fn(c, inp):
                 return c - 1, (inp.sin() + 1).to(torch.int64)
@@ -882,7 +881,7 @@ class WhileLoopModels:
     class DataDependentInOutMismatch(torch.nn.Module):
         def forward(self, c, a, b):
             def cond_fn(c, a, b):
-                return c >= 0
+                return c > 0
 
             def body_fn(c, a, b):
                 return c - 1, a.nonzero(), b.nonzero()
@@ -960,16 +959,30 @@ class WhileLoopModels:
             )
             return out1 + 1, out2 + 2
 
+    class ZeroLoop4(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return torch.clip(a_view.sum(), 0, 1) < 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out2.sin_(), a_view.cos_()
+
     class UnbackedSymIntClosure(torch.nn.Module):
         def forward(self, c, a, b):
             d = a.sum().to(torch.int64).item()
             e = torch.nonzero(b).size(0)
 
             def cond_fn(c, a, b):
-                return (
-                    c + d + e + a.shape[0] - b.shape[0]
-                    >= d + e + a.shape[0] - b.shape[0]
-                )
+                return c > d + e + a.shape[0] - b.shape[0]
 
             def body_fn(c, a, b):
                 return c - 1, a + e, b + d
@@ -986,7 +999,7 @@ class WhileLoopModels:
             e = torch.nonzero(b).size(0)
 
             def cond_fn(c, a, b):
-                return c + d + e + a.shape[0] - b.shape[0] < e + 10
+                return d + e + a.shape[0] - b.shape[0] < 10
 
             def body_fn(c, a, b):
                 return c + 1, a + e, b + d
@@ -1038,9 +1051,7 @@ class WhileLoopModels:
 
         def forward(self, c, x):
             def cond_fn(loop_idx, x):
-                # counter can starts with 5 setting upper bound
-                # to 6 in order to run the body_fn at least once.
-                return loop_idx < 6
+                return loop_idx < x.size(0)
 
             def body_fn(loop_idx, x):
                 return loop_idx + 1, self.conv2d(x) + 1
@@ -1065,12 +1076,12 @@ class WhileLoopModels:
             def body_fn(c, x):
                 return c + 1, self.linear(x)
 
-            final_c, final_x, checkpoint_c, checkpoint_x = (
+            checkpoint_c, checkpoint_x = (
                 torch.ops.higher_order.while_loop_with_checkpoint(
                     cond_fn, body_fn, (c, x), tuple()
                 )
             )
-            return final_c, final_x, checkpoint_c, checkpoint_x
+            return checkpoint_c, checkpoint_x
 
 
 class WhileLoopTests(TestCase):
@@ -1141,8 +1152,13 @@ class WhileLoopTests(TestCase):
                 ):
                     result_loss = loss_fn(pytree.tree_flatten(result)[0])
                     compiled_loss = loss_fn(pytree.tree_flatten(result_compiled)[0])
-                    self.assertTrue(not torch.isnan(result_loss) and not torch.isinf(compiled_loss))
-                    self.assertTrue(not torch.isnan(compiled_loss) and not torch.isinf(compiled_loss))
+                    self.assertTrue(
+                        not torch.isnan(result_loss) and not torch.isinf(compiled_loss)
+                    )
+                    self.assertTrue(
+                        not torch.isnan(compiled_loss)
+                        and not torch.isinf(compiled_loss)
+                    )
 
                     self.assertEqual(result_loss, compiled_loss)
 
@@ -1375,6 +1391,7 @@ class WhileLoopTests(TestCase):
             WhileLoopModels.ZeroLoop(),
             WhileLoopModels.ZeroLoop2(),
             WhileLoopModels.ZeroLoop3(),
+            WhileLoopModels.ZeroLoop4(),
         ]:
             self._run_test(
                 model=model,
