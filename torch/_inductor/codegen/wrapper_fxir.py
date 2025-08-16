@@ -14,7 +14,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     tracing_triton_hopifier_singleton,
     triton_kernel_wrapper_mutation,
 )
-from torch._inductor.codecache import PyCodeCache
+from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.utils import sympy_product, sympy_subs
@@ -168,6 +168,9 @@ class FxConverter:
         mod = PyCodeCache.load(module_code)
         kernel = getattr(mod, kernel_name)
 
+        if isinstance(kernel, LambdaFuture):
+            kernel = kernel.result()
+
         if not isinstance(kernel, CachingAutotuner):
             raise NotImplementedError(
                 textwrap.dedent(f"""
@@ -263,16 +266,32 @@ class FxConverter:
         """
         Converts graph inputs to FX placeholders.
         """
-        for name, ir_node in V.graph.graph_inputs.items():
-            # Introduce a new symbol for constant inputs.
-            buffer = (
-                SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
-                else self._get_buffer(ir_node)
-            )
-            node = self.gm.graph.placeholder(buffer.get_name())
-            self._create_meta_from_buffer(node, buffer)
-            self._record_allocation(buffer, node)
+
+        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
+            name = node.name
+            if name in V.graph.graph_inputs:
+                ir_node = V.graph.graph_inputs[name]
+
+                # Introduce a new symbol for constant inputs.
+                buffer = (
+                    SymbolBuffer(sympy.Symbol(name, is_integer=True))
+                    if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                    else self._get_buffer(ir_node)
+                )
+                placeholder_node = self.gm.graph.placeholder(buffer.get_name())
+                self._create_meta_from_buffer(placeholder_node, buffer)
+                self._record_allocation(buffer, placeholder_node)
+
+            elif V.aot_compilation:
+                # Create dummy input nodes to match the input signature
+                self.gm.graph.placeholder(name)
+
+    def _generate_graph_constants(self) -> None:
+        for name, value in V.graph.constants.items():
+            node = self.gm.graph.get_attr(name)
+            node.meta["val"] = value
+            setattr(self.gm, name, value)
+            self.buffer_to_node[name] = node
 
     def _generate_buffer(self, node: ir.IRNode) -> Optional[torch.fx.Node]:
         """
@@ -334,6 +353,7 @@ class FxConverter:
         Main entrypoint for FX codegen.
         """
         self._generate_graph_inputs()
+        self._generate_graph_constants()
 
         # Generate FX IR from Wrapper IR lines.
         for line in self.lines:
