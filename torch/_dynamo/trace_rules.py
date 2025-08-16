@@ -652,6 +652,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_constant_bool_symnode",
         "torch._C._get_cpp_backtrace",
         "torch._C._get_cpu_capability",
+        "torch._C._get_sve_len",
         "torch._C._get_cublas_allow_bf16_reduced_precision_reduction",
         "torch._C._get_cublas_allow_fp16_reduced_precision_reduction",
         "torch._C._get_cublas_allow_tf32",

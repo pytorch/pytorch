@@ -46,7 +46,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with SVE. This may not be an issue, because
@@ -205,7 +205,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float float_vals[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -216,7 +216,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::qint32, /*precision=*/32>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::qint32*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
@@ -359,7 +359,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float float_vals[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -370,7 +370,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::qint8>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::qint8*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
@@ -511,7 +511,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       int32_t zero_point,
       float inverse_scale) {
     std::array<value_type, size()> qvals;
-    std::array<float, float_num_vecs() * Vectorized<float>::size()> float_vals;
+    float float_vals[float_num_vecs() * Vectorized<float>::size()];
 
     for (int i = 0; i < float_num_vecs(); ++i) {
       rhs[i].store(
@@ -522,7 +522,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     at::native::quantize_vec<c10::quint8>(
         scale,
         zero_point,
-        float_vals.data(),
+        float_vals,
         (c10::quint8*)qvals.data(),
         Vectorized<float>::size() * float_num_vecs());
 
@@ -600,7 +600,7 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
