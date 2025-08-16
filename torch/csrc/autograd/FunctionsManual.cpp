@@ -7464,4 +7464,36 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
   return grad_self;
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> attention_backward(
+    const at::Tensor & grad_o,
+    const at::Tensor & grad_a,
+    const at::Tensor & result_a,
+    const at::Tensor & query,
+    const at::Tensor & key,
+    const at::Tensor & value
+    ) {
+  Tensor grad_query, grad_key, grad_value;
+  // Return undefined tensors if grad_o and grad_a are not defined, since we cannot compute gradients.
+  if (!(grad_o.defined() || grad_a.defined())) {
+    return std::make_tuple(grad_query, grad_key, grad_value);
+  }
+
+  Tensor grad_a_local;
+
+  if (grad_a.defined()) {
+    grad_a_local = grad_a.clone();
+  }
+
+  if (grad_o.defined()) {
+    auto term = grad_o.mm(value.t());
+    grad_a_local = grad_a_local.defined() ? grad_a_local + term : term;
+    grad_value = result_a.t().mm(grad_o);
+  }
+  // Assume grad_a_local is now defined, since one of grad_o or grad_a was defined
+  auto grad_x = grad_a_local * (1 - result_a.pow(2));
+
+  grad_query = grad_x.mm(key);
+  grad_key = grad_x.t().mm(query);
+  return std::make_tuple(grad_query, grad_key, grad_value);
+}
 } // namespace torch::autograd::generated::details
