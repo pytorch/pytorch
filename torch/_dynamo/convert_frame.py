@@ -747,7 +747,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-class TransformError(Exception):
+class TracerError(Exception):
     def __init__(
         self, inner: Exception, tracer_output_partial: DynamoTracerOutput
     ) -> None:
@@ -756,7 +756,7 @@ class TransformError(Exception):
 
 
 @preserve_global_state
-def transform_frame(
+def trace_frame(
     code: types.CodeType,
     globals: dict[str, object],
     locals: dict[str, object],
@@ -840,7 +840,7 @@ def transform_frame(
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
     except Exception as e:
-        raise TransformError(e, tracer_output) from e
+        raise TracerError(e, tracer_output) from e
 
     return tracer_output
 
@@ -885,7 +885,7 @@ def _compile(
     ) -> None:
         nonlocal tracer_output
         try:
-            tracer_output = transform_frame(
+            tracer_output = trace_frame(
                 code,
                 globals,
                 locals,
@@ -902,7 +902,7 @@ def _compile(
                 distributed_state=distributed_state,
                 package=package,
             )
-        except TransformError as e:
+        except TracerError as e:
             tracer_output = e.tracer_ouptut_partial
             raise e.inner from None
 
