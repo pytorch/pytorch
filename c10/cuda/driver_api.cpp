@@ -38,6 +38,13 @@ DriverAPI create_driver_api() {
     C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
 #undef LOOKUP_NVML_ENTRY
   }
+
+  if (handle_1) {
+#define LOOKUP_NVML_ENTRY_OPTIONAL(name) \
+  r.name##_ = ((decltype(&name))dlsym(handle_1, #name));
+    C10_NVML_DRIVER_API_OPTIONAL(LOOKUP_NVML_ENTRY_OPTIONAL)
+#undef LOOKUP_NVML_ENTRY_OPTIONAL
+  }
   return r;
 }
 
