@@ -85,7 +85,10 @@ EOF
     # CI no longer builds for ROCm 6.3, but
     # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
     if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
-        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
+        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.3) ]]; then
+            HIP_TAG=rocm-6.4.3
+            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # no change from 6.4.2
+        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
             HIP_TAG=rocm-6.4.2
             CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
         elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
