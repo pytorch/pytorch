@@ -277,6 +277,31 @@ test_torchbench_smoketest() {
 
   done
 
+  echo "Launching torchbench inference performance run for AOT Inductor and dtype ${dtype}"
+  local dtype_arg="--${dtype}"
+  if [ "$dtype" == notset ]; then
+      dtype_arg="--float32"
+  fi
+  touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
+  for model in "${models[@]}"; do
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --performance --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv" || true
+    if [ "$backend" == "inductor" ]; then
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+        --accuracy --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+    fi
+  done
+  if [ "$backend" == "inductor" ]; then
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+      --performance --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_performance.csv" || true
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+      --accuracy --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
+  fi
+
   echo "Pytorch benchmark on mps device completed"
 }
 
