@@ -603,12 +603,10 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
-    def get_stack_traces(self) -> dict[str, str]:
+    def get_stack_traces(self) -> OrderedSet[str]:
         # Return stack traces to user model code
         # A single IRNode could correspond to multiple lines of code
-
-        # Group nodes by their stack traces to deduplicate
-        nodes_to_stack_trace = {}
+        stack_traces: OrderedSet[str] = OrderedSet()
         origins = self.origins
         if isinstance(self, ExternKernel):
             origin_node = self.get_origin_node()
@@ -617,7 +615,7 @@ class IRNode:
         for node in origins:
             if hasattr(node, "stack_trace") and node.stack_trace:
                 # nodes in the backward graph don't have mapping to pre_grad_graph
-                nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+                stack_traces.add(node.stack_trace)
             else:
                 pre_grad_nodes = (
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes.get(
@@ -633,9 +631,8 @@ class IRNode:
                         )
                     )
                     if stack_trace:
-                        nodes_to_stack_trace["pre_grad+" + node_name] = stack_trace
-
-        return nodes_to_stack_trace
+                        stack_traces.add(stack_trace)
+        return stack_traces
 
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
@@ -646,8 +643,8 @@ class IRNode:
             return [origins]
 
         stack_trace_str = []
-        for stack_trace in self.get_stack_traces().values():
-            stack_trace_str.append("stack_traces = {{")
+        for stack_trace in self.get_stack_traces():
+            stack_trace_str.append("stack_traces = {")
             stack_trace_str += stack_trace.split("\n")
             stack_trace_str.append("}")
         return [origins] + stack_trace_str
@@ -1601,9 +1598,10 @@ class Reduction(Loops):
             reduction_hint = hint
         if split == -1:
             assert input_node is not None
-            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node
-            )
+            with patch.object(FlexibleLayout, "allow_indexing", True):
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
             return cls.create_multilayer_existing_ranges(
@@ -3557,12 +3555,21 @@ class IndexingConstant(BaseConstant):
 def is_contiguous_strides_for_shape(
     stride: Sequence[_IntLike], shape: Sequence[_IntLike]
 ) -> bool:
-    return all(
-        size == 1 or left == right
-        for left, right, size in zip(
-            stride, FlexibleLayout.contiguous_strides(shape), shape
-        )
-    )
+    expected_stride = 1
+    expected_stride_max = 1
+    for x, y in reversed(tuple(zip(shape, stride))):
+        if x == 1:
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            y, expected_stride
+        ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
+            return False
+
+        expected_stride_max *= sympy.Max(1, x)
+        expected_stride *= x
+
+    return True
 
 
 def get_align_for_dtype(dtype: torch.dtype) -> int:
@@ -6678,6 +6685,9 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            if name in constexpr_names and triton_version_uses_attrs_dict():
+                # see #160000 - we don't pass in constexpr args to speed up runtime.
+                continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
@@ -8646,38 +8656,38 @@ class WhileLoop(ExternKernel):
         )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
-        real_outputs = {
-            idx: out
-            for idx, out in enumerate(body_outputs)
-            if idx not in mutated_idx_set
-        }
-        real_outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                while_loop,
-                [(list, idx)],
-            )
-            for idx, output in real_outputs.items()
-        ]
-        while_loop.outputs = real_outputs
-        while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[attr-defined, union-attr]
-            for inp in mutated_inputs
-        ]
 
-        outputs_iter = iter(real_outputs)
+        # Create all outputs first
         mutated_inputs_iter = iter(mutated_inputs)
-        all_outputs = [
-            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
-            for idx in range(len(body_outputs))
-        ]
+        all_outputs = []
+        while_loop.outputs = []
+        while_loop.mutation_outputs = []
+
+        for idx, output in enumerate(body_outputs):
+            if idx in mutated_idx_set:
+                assert idx < len(carried_inputs), "only carries can be mutated."
+                # Create MutationOutput for mutated inputs
+                mutated_input = next(mutated_inputs_iter)
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
+                all_outputs.append(mutated_input)
+            else:
+                # Create MultiOutput for regular outputs
+                multi_out = MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    while_loop,
+                    [(list, idx)],
+                )
+                while_loop.outputs.append(multi_out)
+                all_outputs.append(multi_out)
+
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
