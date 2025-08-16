@@ -7136,10 +7136,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
