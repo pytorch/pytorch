@@ -8703,57 +8703,56 @@ class WhileLoop(ExternKernel):
         all_outputs = []
         while_loop.outputs = []
         while_loop.mutation_outputs = []
-
-        for idx, output in enumerate(body_outputs):
-            if idx in mutated_idx_set:
-                assert idx < len(carried_inputs), "only carries can be mutated."
-                # Create MutationOutput for mutated inputs
-                mutated_input = next(mutated_inputs_iter)
-                while_loop.mutation_outputs.append(
-                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
-                )
-                all_outputs.append(mutated_input)
-            else:
-                # Create MultiOutput for regular outputs
-                multi_out = MultiOutput(
-                    FixedLayout(
-                        device=output.get_device(),  # type: ignore[arg-type]
-                        dtype=output.get_dtype(),
-                        size=output.get_size(),
-                        stride=output.get_stride(),
-                        offset=output.get_layout().offset,
-                    ),
-                    while_loop,
-                    [(list, idx)],
-                )
-                while_loop.outputs.append(multi_out)
-                all_outputs.append(multi_out)
-
         if with_checkpoint:
-            # Create additional outputs for checkpointing
-            # The latter half of cur_node.meta["val"] contains the checkpoint outputs
-            cur_node = V.graph.current_node
-            checkpoint_meta_vals = cur_node.meta["val"][len(body_outputs) :]
-
-            for idx, checkpoint_meta in enumerate(checkpoint_meta_vals):
-                multi_out = MultiOutput(
-                    FixedLayout(
-                        size=tuple(
-                            Conditional._maybe_expr(sz) for sz in checkpoint_meta.size()
+            for idx, output in enumerate(V.graph.current_node.meta["val"]):
+                if idx in mutated_idx_set:
+                    assert idx < len(carried_inputs), "only carries can be mutated."
+                    # Create MutationOutput for mutated inputs
+                    mutated_input = next(mutated_inputs_iter)
+                    while_loop.mutation_outputs.append(
+                        MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                    )
+                    all_outputs.append(mutated_input)
+                else:
+                    # Create MultiOutput for regular outputs
+                    multi_out = MultiOutput(
+                        FixedLayout(
+                            device=output.device,  # type: ignore[arg-type]
+                            dtype=output.dtype,
+                            size=[Conditional._maybe_expr(sz) for sz in output.size()],
+                            stride=[
+                                Conditional._maybe_expr(st) for st in output.stride()
+                            ],
                         ),
-                        stride=tuple(
-                            Conditional._maybe_expr(sz)
-                            for sz in checkpoint_meta.stride()
+                        while_loop,
+                        [(list, idx)],
+                    )
+                    while_loop.outputs.append(multi_out)
+                    all_outputs.append(multi_out)
+        else:
+            for idx, output in enumerate(body_outputs):
+                if idx in mutated_idx_set:
+                    assert idx < len(carried_inputs), "only carries can be mutated."
+                    # Create MutationOutput for mutated inputs
+                    mutated_input = next(mutated_inputs_iter)
+                    while_loop.mutation_outputs.append(
+                        MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                    )
+                    all_outputs.append(mutated_input)
+                else:
+                    multi_out = MultiOutput(
+                        FixedLayout(
+                            device=output.get_device(),  # type: ignore[arg-type]
+                            dtype=output.get_dtype(),
+                            size=output.get_size(),
+                            stride=output.get_stride(),
+                            offset=output.get_layout().offset,
                         ),
-                        device=checkpoint_meta.device,
-                        dtype=checkpoint_meta.dtype,
-                        offset=0,
-                    ),
-                    while_loop,
-                    [(list, len(body_outputs) + idx)],
-                )
-                while_loop.outputs.append(multi_out)
-                all_outputs.append(multi_out)
+                        while_loop,
+                        [(list, idx)],
+                    )
+                    while_loop.outputs.append(multi_out)
+                    all_outputs.append(multi_out)
 
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:

@@ -503,36 +503,14 @@ def _call_while_loop(
         operands_proxy,
         additional_inputs_proxy,
     )
-    if with_checkpoint:
-        # The outputs of while_loop_with_checkpoint is guaranteed to be flattened.
-        with tx.output.fake_mode:
-            example_outputs = self.value(
-                cond_gm,
-                body_gm,
-                tuple(get_fake_value(proxy.node, tx) for proxy in operands_proxy),
-                tuple(
-                    get_fake_value(proxy.node, tx) for proxy in additional_inputs_proxy
-                ),
-            )
-        _, body_treespec_with_checkpoint = pytree.tree_flatten(example_outputs)
-        return _call_function_and_unflatten_output(
-            tx,
-            self.value,
-            p_args,
-            {},
-            example_outputs,
-            body_treespec_with_checkpoint,
-        )
-
-    else:
-        return _call_function_and_unflatten_output(
-            tx,
-            self.value,
-            p_args,
-            {},
-            None,
-            body_treespec,
-        )
+    return _call_function_and_unflatten_output(
+        tx,
+        self.value,
+        p_args,
+        {},
+        None,
+        body_treespec,
+    )
 
 
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):

@@ -203,17 +203,30 @@ def while_loop_dense(
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
-    # Initialize checkpoints
-    checkpoints: list[list[torch.Tensor]] = [[] for _ in range(len(carried_inputs))]
+    # Check condition and set up flag
+    should_loop = cond_fn(*carried_vals, *additional_inputs)
+    _validate_cond_output(should_loop)
 
-    while pred := cond_fn(*carried_vals, *additional_inputs):
-        _validate_cond_output(pred)
-
+    if not should_loop:
         if with_checkpoint:
-            for i, carry in enumerate(carried_vals):
-                checkpoints[i].append(carry)
+            return tuple(
+                val.unsqueeze(0) if isinstance(val, torch.Tensor) else val
+                for val in carried_vals + additional_inputs
+            )
+        else:
+            return tuple(
+                val.clone() if isinstance(val, torch.Tensor) else val
+                for val in carried_vals + additional_inputs
+            )
 
+    checkpoints: list[list[torch.Tensor]] = [[] for _ in carried_vals]
+
+    while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
+        if with_checkpoint:
+            for i, o in enumerate(out):
+                checkpoints[i].append(o)
+
         assert isinstance(out, tuple), (
             f"body_fn should return a tuple but got {type(out)}"
         )
@@ -222,14 +235,15 @@ def while_loop_dense(
         )
         carried_vals = out
 
+        should_loop = cond_fn(*carried_vals, *additional_inputs)
+
     if with_checkpoint:
-        assert all(len(ckp_list) != 0 for ckp_list in checkpoints), (
-            "body_fn is not executed at all."
-        )
-        checkpoint_tensors = tuple(torch.stack(ckp_list) for ckp_list in checkpoints)
-        return tuple(carried_vals) + checkpoint_tensors
-    else:
-        return tuple(carried_vals)
+        outs: list[torch.Tensor] = []
+        for i, checkpoint in enumerate(checkpoints):
+            outs.append(torch.stack(checkpoint, dim=0))
+        return tuple(outs)
+
+    return carried_vals
 
 
 while_loop_op.py_autograd_impl(
@@ -441,7 +455,6 @@ def while_loop_fake_tensor_mode(
                 include_contiguity=False,
             )
 
-        fake_checkpoints: tuple[torch.Tensor, ...] = tuple()
         if with_checkpoint:
             n_iter = _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
             assert all(isinstance(x, torch.Tensor) for x in carried_inputs)
@@ -450,6 +463,15 @@ def while_loop_fake_tensor_mode(
                 .unsqueeze(0)
                 .repeat((n_iter,) + tuple(1 for _ in range(out.dim())))
                 for out in body_outs
+            )
+            return pytree.tree_map_only(
+                (int, torch.SymInt),
+                # For while_loop's unbacked symint output, we want them to be bound
+                # to the proxy of while_loop's output.
+                lambda _: _create_unbacked_symint(
+                    mode, ignore_fresh_unbacked_symbols=False
+                ),
+                fake_checkpoints,
             )
 
         # See NOTE [unspecialize int carry with unbacked symints]
@@ -460,7 +482,7 @@ def while_loop_fake_tensor_mode(
             lambda _: _create_unbacked_symint(
                 mode, ignore_fresh_unbacked_symbols=False
             ),
-            body_outs + fake_checkpoints,
+            body_outs,
         )
 
 
