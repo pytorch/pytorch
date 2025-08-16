@@ -55,12 +55,6 @@ fake_export_failures = {
     # cannot xfail as it is passing for cpu-only build
     skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
 
 fake_decomposition_failures = {
@@ -82,9 +76,7 @@ def _test_export_helper(self, dtype, op):
     target_device = "cuda:1"
 
     def to_fake_device(x):
-        x = converter.from_real_tensor(mode, x)
-        x.fake_device = torch.device(target_device)
-        return x
+        return x.to(target_device)
 
     # Limit to first 100 inputs so tests don't take too long
     for sample_input in itertools.islice(sample_inputs_itr, 100):
