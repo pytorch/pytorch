@@ -37,6 +37,7 @@ jobs:
 
       - name: Run tests
         run: |
+          mkdir -p test-results
           pytest -c tests/pytest_migration/pytest.ini tests/pytest_migration \
             -v \
             --html=test-results/report.html \
