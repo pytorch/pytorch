@@ -1,0 +1,20 @@
+if(WIN32)
+  set(TORCH_PYTHON_IMPORTED_LOCATION "${PYTORCH_INSTALL_DIR}/lib/torch_python.lib")
+else()
+  set(TORCH_PYTHON_IMPORTED_LOCATION "${PYTORCH_INSTALL_DIR}/lib/libtorch_python.so")
+endif()
+
+add_library(torch_python SHARED IMPORTED)
+
+set_target_properties(torch_python PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "${PYTORCH_INSTALL_DIR}/include"
+  INTERFACE_LINK_LIBRARIES "c10;torch_cpu"
+  IMPORTED_LOCATION "${TORCH_PYTHON_IMPORTED_LOCATION}"
+)
+
+add_library(torch_python_library INTERFACE IMPORTED)
+
+set_target_properties(torch_python_library PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "\$<TARGET_PROPERTY:torch_python,INTERFACE_INCLUDE_DIRECTORIES>"
+  INTERFACE_LINK_LIBRARIES "\$<TARGET_FILE:torch_python>;\$<TARGET_PROPERTY:torch_python,INTERFACE_LINK_LIBRARIES>"
+)

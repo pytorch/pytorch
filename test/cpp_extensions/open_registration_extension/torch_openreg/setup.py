@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -9,11 +10,28 @@ from distutils.command.clean import clean
 from setuptools import Extension, find_packages, setup
 
 
+# Env Variables
+IS_DARWIN = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 RUN_BUILD_DEPS = any(arg in {"clean", "dist_info"} for arg in sys.argv)
 
 
+def make_relative_rpath_args(path):
+    if IS_DARWIN:
+        return ["-Wl,-rpath,@loader_path/" + path]
+    elif IS_WINDOWS:
+        return []
+    else:
+        return ["-Wl,-rpath,$ORIGIN/" + path]
+
+
 def get_pytorch_dir():
+    # Disable autoload of device backends.
+    # This is necessary to avoid issues with the backend being loaded
+    # before the extension is built.
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     import torch
 
     return os.path.dirname(os.path.realpath(torch.__file__))
@@ -39,9 +57,15 @@ def build_deps():
         ".",
         "--target",
         "install",
+        "--config",
+        "Release",
         "--",
     ]
-    build_args += ["-j", str(multiprocessing.cpu_count())]
+
+    if IS_WINDOWS:
+        build_args += ["/m:" + str(multiprocessing.cpu_count())]
+    else:
+        build_args += ["-j", str(multiprocessing.cpu_count())]
 
     command = ["cmake"] + build_args
     subprocess.check_call(command, cwd=build_dir, env=os.environ)
@@ -64,20 +88,53 @@ def main():
     if not RUN_BUILD_DEPS:
         build_deps()
 
+    if IS_WINDOWS:
+        # /NODEFAULTLIB makes sure we only link to DLL runtime
+        # and matches the flags set for protobuf and ONNX
+        extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"] + [
+            *make_relative_rpath_args("lib")
+        ]
+        # /MD links against DLL runtime
+        # and matches the flags set for protobuf and ONNX
+        # /EHsc is about standard C++ exception handling
+        extra_compile_args: list[str] = ["/MD", "/FS", "/EHsc"]
+    else:
+        extra_link_args = [*make_relative_rpath_args("lib")]
+        extra_compile_args = [
+            "-Wall",
+            "-Wextra",
+            "-Wno-strict-overflow",
+            "-Wno-unused-parameter",
+            "-Wno-missing-field-initializers",
+            "-Wno-unknown-pragmas",
+            # Python 2.6 requires -fno-strict-aliasing, see
+            # http://legacy.python.org/dev/peps/pep-3123/
+            # We also depend on it in our code (even Python 3).
+            "-fno-strict-aliasing",
+        ]
+
     ext_modules = [
         Extension(
             name="torch_openreg._C",
             sources=["torch_openreg/csrc/stub.c"],
             language="c",
-            extra_compile_args=["-g", "-Wall", "-Werror"],
+            extra_compile_args=extra_compile_args,
             libraries=["torch_bindings"],
             library_dirs=[os.path.join(BASE_DIR, "torch_openreg/lib")],
-            extra_link_args=["-Wl,-rpath,$ORIGIN/lib"],
+            extra_link_args=extra_link_args,
         )
     ]
 
-    package_data = {"torch_openreg": ["lib/*.so*"]}
+    package_data = {
+        "torch_openreg": [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+            "lib/*.lib",
+        ]
+    }
 
+    # LITERALINCLUDE START: SETUP
     setup(
         packages=find_packages(),
         package_data=package_data,
@@ -86,7 +143,13 @@ def main():
             "clean": BuildClean,  # type: ignore[misc]
         },
         include_package_data=False,
+        entry_points={
+            "torch.backends": [
+                "torch_openreg = torch_openreg:_autoload",
+            ],
+        },
     )
+    # LITERALINCLUDE START: SETUP
 
 
 if __name__ == "__main__":
