@@ -446,6 +446,22 @@ def leaky_relu(
 
 __all__ += ["leaky_relu"]
 
+def linear_cross_entropy(
+    input: Tensor,
+    target: Tensor,
+    linear_weight: Tensor,
+    chunking_strategy: str = ...,
+    bias: Tensor | None = ...,
+    cross_entropy_weight: Tensor | None = ...,
+    ignore_index: int = ...,
+    label_smoothing: float = ...,
+    reduce: Tensor | None = ...,
+    reduction: str = ...,
+    size_average: bool | None = ...,
+) -> Tensor: ...
+
+__all__ += ["linear_cross_entropy"]
+
 def local_response_norm(
     input: Tensor,
     size: int,
