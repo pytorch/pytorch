@@ -3265,6 +3265,17 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop, with_checkpoint):
+        """while_loop is codegened as a host side while_loop"""
+
+        def codegen_subgraph(subgraph, outer_inputs, outer_outputs):
+            """Helper method to deduplicate subgraph codegen logic"""
+            if V.graph.aot_mode:
+                self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
+            else:
+                self.codegen_subgraph_with_flattened_outputs(
+                    subgraph, outer_inputs, outer_outputs
+                )
+
         name = while_loop.get_name()
         outer_carried_inputs = [
             buf.codegen_reference() for buf in while_loop.carried_inputs
@@ -3296,43 +3307,65 @@ class PythonWrapperCodegen(CodeGen):
         # the carried_inputs part of the inputs, the additional ones
         # are passed in as they're before.
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
-
-        self.writeline("while True:")
-        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
-
-        if V.graph.aot_mode:
-            self.codegen_subgraph_by_inlining(
-                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-            )
-        else:
-            self.codegen_subgraph_with_flattened_outputs(
-                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-            )
-        self.writeline(
-            f"if not {cond_outer_outputs[0]}: break"
-        )  # condition doesn't hold
-
+        # Check condition at the beginning and set up flag
+        codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(f"should_loop = {cond_outer_outputs[0]}")
+        self.writeline("if not should_loop:")
         if with_checkpoint:
-            for i, out in enumerate(body_outer_outputs):
-                self.writeline(f"{name}[{i + ckp_offset}].append({out})")
+            # Handle the case when loop never executes with checkpointing
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
+                self.writeline(ExitSubgraphLine(self))
+        else:
+            for i, (carried_input, carried_buf) in enumerate(
+                zip(outer_carried_inputs, while_loop.carried_inputs)
+            ):
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                self.writeline(ExitSubgraphLine(self))
 
-        self.writeline(ExitSubgraphLine(self))
+        self.writeline("while should_loop:")
+        # Body execution
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-        if V.graph.aot_mode:
-            self.codegen_subgraph_by_inlining(
-                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-            )
-        else:
-            self.codegen_subgraph_with_flattened_outputs(
-                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-            )
+        codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
         self.writeline(ExitSubgraphLine(self))
-        # stack the inp checkpoint when body finishes execution
+
+        # Collect checkpoints if enabled
         if with_checkpoint:
-            for i, out in enumerate(outer_carried_inputs):
+            self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
+            self.writeline(ExitSubgraphLine(self))
+
+        # Condition check at end of loop
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
+
+        # Stack checkpoints after loop completion
+        if with_checkpoint:
+            self.writeline("# Stack checkpoints after loop completion")
+            for i in range(len(outer_carried_inputs)):
+                self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
                 self.writeline(
-                    f"{name}[{i + ckp_offset}] = torch.stack({name}[{i + len(outer_carried_inputs)}])"
+                    f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
                 )
+                self.writeline(ExitSubgraphLine(self))
+                self.writeline("else:")
+                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+                self.writeline(f"{name}[{i}] = {name}[{i}].unsqueeze(0)")
+                self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
     def statically_known_int_or_none(x):
