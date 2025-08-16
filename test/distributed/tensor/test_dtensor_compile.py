@@ -20,7 +20,15 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard, distribute_module, distribute_tensor
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_module,
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -70,6 +78,7 @@ def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g.code
     return fx_g
 
+
 # Shards on the given dimension if possible, else replicate
 def _apply_sharding(mod, shard_dim, device_mesh):
     def shard_module_params(name, module, device_mesh):
@@ -83,9 +92,7 @@ def _apply_sharding(mod, shard_dim, device_mesh):
             name = name.split(".")[-1]
             module.register_parameter(name, dist_param)
 
-    sharded_mod = distribute_module(
-        mod, device_mesh, shard_module_params
-    )
+    sharded_mod = distribute_module(mod, device_mesh, shard_module_params)
     return sharded_mod
 
 
@@ -353,7 +360,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x, y)
         self.assertEqual(res, ref)
-    
+
     @skipIfHpu
     def test_dtensor_compile_embedding_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -362,17 +369,13 @@ def forward(self, b_parametrizations_buffer_original0, x):
             def __init__(self, embedding, mesh):
                 super().__init__()
                 self.mesh = mesh
-                self.embedding = _apply_sharding(
-                    embedding,
-                    0,
-                    self.mesh
-                )
+                self.embedding = _apply_sharding(embedding, 0, self.mesh)
 
             def forward(self, x):
                 x = self.embedding(x)
                 x = x.redistribute(self.mesh, [Shard(1)])
                 return x
-        
+
         embedding = torch.nn.Embedding(10, 20, device=self.device_type)
         inp = torch.randint(0, 10, (8,), device=self.device_type)
         ref_out = embedding(inp)
@@ -398,7 +401,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
-    
+
     def test_dtensor_constructor_w_graph_break(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         x = torch.randn(64, 32, requires_grad=True)
