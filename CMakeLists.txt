@@ -1196,7 +1196,7 @@ if(APPLE)
     string(
       APPEND
       CMAKE_SHARED_LINKER_FLAGS
-      " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal"
+      " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal -weak_framework IOKit"
     )
     # To suppress MPSGraph availability warnings
     append_cxx_flag_if_supported("-Wno-unguarded-availability-new"
