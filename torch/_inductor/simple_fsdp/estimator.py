@@ -21,6 +21,7 @@ kernel_name_to_comm_op: dict[str, Callable[..., Any]] = {
     "torch.ops._c10d_functional.reduce_scatter_tensor.default": c10d.reduce_scatter_tensor,
     "torch.ops._c10d_functional.all_gather_into_tensor_out.default": c10d.all_gather_into_tensor,
     "torch.ops._c10d_functional.all_reduce_.default": c10d.all_reduce,
+    "torch.ops._c10d_functional.all_to_all_single.default": c10d.all_to_all_single,
 }
 
 
@@ -94,6 +95,7 @@ class CommPerfCache:
         self.ag_max_inp_size = -1
         self.rs_max_out_size = -1
         self.all_reduce_max_input_size = -1
+        self.all_to_all_max_input_size = -1
 
     def _calculate_distance(self, size1, size2):
         word_size1 = get_data_size(size1)
@@ -114,8 +116,12 @@ class CommPerfCache:
                 self.all_reduce_max_input_size = max(
                     self.all_reduce_max_input_size, get_data_size(list(k[0]))
                 )
+            if k[2] == "torch.ops._c10d_functional.all_to_all_single.default":
+                self.all_to_all_max_input_size = max(
+                    self.all_to_all_max_input_size, get_data_size(list(k[0]))
+                )
 
-    def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, process_group, value):
+    def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, value):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
         self.cache[key] = value
         if comm_func == "torch.ops._c10d_functional.all_gather_into_tensor.default":
@@ -130,9 +136,13 @@ class CommPerfCache:
             self.all_reduce_max_input_size = max(
                 self.all_reduce_max_input_size, get_data_size(tensor_input_size)
             )
+        if comm_func == "torch.ops._c10d_functional.all_to_all_single.default":
+            self.all_to_all_max_input_size = max(
+                self.all_to_all_max_input_size, get_data_size(tensor_input_size)
+            )
 
     def get_comm_time(
-        self, tensor_input_size, tensor_output_size, comm_func, process_group, calibrated=False
+        self, tensor_input_size, tensor_output_size, comm_func, calibrated=False
     ):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
         if key in self.cache:
@@ -321,13 +331,8 @@ def benchmark_comm_func(
         input_args = {"input": tensor_input, "output": tensor_output}
     elif comm_func_name == "torch.ops._c10d_functional.all_reduce_.default":
         input_args = {"tensor": tensor_input}
-
-    if comm_cache is not None:
-        comm_time = comm_cache.get_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name, process_group
-        )
-        if comm_time is not None:
-            return comm_time
+    elif comm_func_name == "torch.ops._c10d_functional.all_to_all_single.default":
+        input_args = {"input": tensor_input, "output": tensor_output}
 
     comm_func = kernel_name_to_comm_op.get(comm_func_name, None)
     assert comm_func is not None, f"Unsupported comm op {comm_func}"
@@ -365,7 +370,7 @@ def benchmark_comm_func(
         )
     if comm_cache is not None:
         comm_cache.add_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name, process_group, comm_time
+            tensor_input.size(), tensor_output.size(), comm_func_name, comm_time
         )
     tensor_input.cpu()
     tensor_output.cpu()

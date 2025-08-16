@@ -500,14 +500,14 @@ def all_to_all_single_autograd(
     """
     Same as all_to_all_single but supports autograd.
     """
-    # if output_split_sizes is not None:
-    #     assert all(
-    #         isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-    #     ), output_split_sizes
-    # if input_split_sizes is not None:
-    #     assert all(
-    #         isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
-    #     ), input_split_sizes
+    if output_split_sizes is not None:
+        assert all(
+            isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
+        ), output_split_sizes
+    if input_split_sizes is not None:
+        assert all(
+            isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
+        ), input_split_sizes
 
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
@@ -520,8 +520,8 @@ def all_to_all_single_autograd(
         input_split_sizes = output_split_sizes
     tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
         self,
-        output_split_sizes.tolist(),
-        input_split_sizes.tolist(),
+        output_split_sizes,
+        input_split_sizes,
         group_name,
     )
     return _FromTorchTensor.apply(tensor)

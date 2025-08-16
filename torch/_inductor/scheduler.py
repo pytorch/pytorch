@@ -2219,7 +2219,7 @@ class Scheduler:
                     "fwd_nn_module_stack",
                 )
             elif config.simplefsdp.bucketing_type == "auto":
-                #self.insert_memory_check_nodes()
+                # self.insert_memory_check_nodes()
                 all_gather_plan, reduce_scatter_plan = (
                     auto_bucket_plan.get_bucketing_plan(
                         self,
@@ -2260,7 +2260,9 @@ class Scheduler:
                 node_length = len(self.nodes)
                 self.nodes = reorder.reorder_all_gather(
                     self.nodes,
-                    all_gather_before_last_wait=True if has_reduce_scatter and config.simplefsdp.bucketing_type != "auto" else False,
+                    all_gather_before_last_wait=True
+                    if has_reduce_scatter and config.simplefsdp.bucketing_type != "auto"
+                    else False,
                 )
                 assert node_length == len(self.nodes), (
                     "missed nodes in reordering all gather"
@@ -2270,7 +2272,9 @@ class Scheduler:
                     assert node_length == len(self.nodes), (
                         "missed nodes in reordering reduce scatter"
                     )
+            print("end reordering")
             import gc
+
             gc.collect()
             torch.cuda.empty_cache()
 

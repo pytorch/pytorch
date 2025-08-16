@@ -2,9 +2,13 @@ import re
 from collections import defaultdict
 from typing import Any, Callable
 
+import torch
+
 from .. import scheduler
 from ..utils import is_collective
+from .auto_bucket_utils import get_ag_node_pg_info, get_rs_node_pg_info
 from .bucket_utils import get_fx_node
+from .reorder import _check_ir_node_fsdp
 
 
 def get_module_name(nn_module_stack: Any) -> str:
@@ -55,7 +59,7 @@ def get_manual_plan(
     bucketing_plan = get_full_plan(bucketing_plan)
     plan_name_to_nodes = defaultdict(list)
     for snode in snodes:
-        if is_collective(snode.node, op=comm_func):
+        if is_collective(snode.node, op=comm_func) and _check_ir_node_fsdp(snode.node):
             fx_node = get_fx_node(
                 snode.node,
                 expected_op=comm_func,
@@ -82,5 +86,9 @@ def get_manual_plan(
             plan_name_to_nodes[bucket_name].append(snode)
 
     for _, nodes in plan_name_to_nodes.items():
-        manual_plan.append(nodes)
+        if comm_func == torch.ops._c10d_functional.all_gather_into_tensor.default:
+            tensor_info = get_ag_node_pg_info(nodes[0])
+        elif comm_func == torch.ops._c10d_functional.reduce_scatter_tensor.default:
+            tensor_info = get_rs_node_pg_info(nodes[0])
+        manual_plan.append({tensor_info: nodes})
     return manual_plan

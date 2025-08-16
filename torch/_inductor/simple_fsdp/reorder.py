@@ -109,14 +109,31 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
 
     if isinstance(ir_node, ir.FallbackKernel):
         python_kernel_name = ir_node.python_kernel_name
-        if python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default" and _check_ir_node_fsdp(ir_node):
-            inputs_rs_kernel_name1 = getattr(ir_node.inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-            inputs_rs_kernel_name2 = hasattr(ir_node.inputs[0], "inputs") and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+        if (
+            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
+            and _check_ir_node_fsdp(ir_node)
+        ):
+            inputs_rs_kernel_name1 = (
+                getattr(ir_node.inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            )
+            inputs_rs_kernel_name2 = (
+                hasattr(ir_node.inputs[0], "inputs")
+                and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+            )
             if inputs_rs_kernel_name1 or inputs_rs_kernel_name2:
                 return NodeType.RS_WAIT
 
-            inputs_ag_kernel_name1 = getattr(ir_node.inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-            inputs_ag_kernel_name2 = hasattr(ir_node.inputs[0], "inputs") and  getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "") == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            inputs_ag_kernel_name1 = (
+                getattr(ir_node.inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            )
+            inputs_ag_kernel_name2 = (
+                hasattr(ir_node.inputs[0], "inputs")
+                and getattr(ir_node.inputs[0].inputs[0], "python_kernel_name", "")
+                == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+            )
             if inputs_ag_kernel_name1 or inputs_ag_kernel_name2:
                 return NodeType.AG_WAIT
         elif (
@@ -142,9 +159,7 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
 
     if isinstance(node, scheduler.GroupedSchedulerNode):
         # [Only for bucketing]: newly created AG and RS are grouped as GroupedSchedulerNode
-        child_nodes_type = [
-            _get_ir_node_type(n.node) for n in node.snodes
-        ]
+        child_nodes_type = [_get_ir_node_type(n.node) for n in node.snodes]
         if NodeType.AG_WAIT in child_nodes_type:
             return NodeType.AG_WAIT
         elif NodeType.RS_WAIT in child_nodes_type:

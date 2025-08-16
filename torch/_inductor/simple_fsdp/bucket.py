@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import functools
 from typing import Dict
-from collections import defaultdict
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -120,8 +119,12 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
 
     for all_gather_bucket in all_gather_bucket_plan:
         for all_gather_info, all_gather_list in all_gather_bucket.items():
-            ag_snode_to_bucket_id.update(dict.fromkeys(all_gather_list, all_gather_info + (cur_bucket_id,)))
-            ag_snode_to_bucket_id_coarsen.update(dict.fromkeys(all_gather_list, cur_bucket_id))
+            ag_snode_to_bucket_id.update(
+                dict.fromkeys(all_gather_list, all_gather_info + (cur_bucket_id,))
+            )
+            ag_snode_to_bucket_id_coarsen.update(
+                dict.fromkeys(all_gather_list, cur_bucket_id)
+            )
         cur_bucket_id += 1
     assert len(ag_snode_to_bucket_id) == len(ag_snode_to_wait_snode)
 
@@ -138,7 +141,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             if len(ag_snodes) == 0:
                 continue
             example_ag_fx_node = get_fx_node(
-                ag_snodes[0], expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
+                ag_snodes[0],
+                expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
             _, group_size, group_name = example_ag_fx_node.args
             ag_input_ir_nodes: list[ir.IRNode] = []
@@ -149,7 +153,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
                 )
                 assert (
-                    ag_fx_node.args[1] == group_size and ag_fx_node.args[2] == group_name
+                    ag_fx_node.args[1] == group_size
+                    and ag_fx_node.args[2] == group_name
                 ), (
                     f"Expected group_size {group_size} and group_name {group_name}, but got {ag_fx_node.args[1:]}"
                 )
@@ -189,7 +194,9 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     ag_and_wait_snodes |= OrderedSet(ag_snode_to_wait_snode.values())  # wait_tensor
 
     for snode in snodes:
-        if snode not in ag_and_wait_snodes: #and snode not in list(ag_snode_to_cast_snode.values()):
+        if (
+            snode not in ag_and_wait_snodes
+        ):  # and snode not in list(ag_snode_to_cast_snode.values()):
             # not all_gather or its wait_tensor - schedule it normally
             schedule_snode(snode)
         elif snode in ag_snodes:
@@ -212,11 +219,19 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
 
                 AG_Group_node_list = []
                 Wait_Group_node_list = []
-                for idx, (ag_input_ir_nodes, orig_ag_snodes, orig_wait_snodes) in enumerate(zip(all_ag_input_ir_nodes, all_orig_ag_snodes, all_orig_wait_snodes)):
+                for idx, (
+                    ag_input_ir_nodes,
+                    orig_ag_snodes,
+                    orig_wait_snodes,
+                ) in enumerate(
+                    zip(all_ag_input_ir_nodes, all_orig_ag_snodes, all_orig_wait_snodes)
+                ):
                     if len(orig_ag_snodes) == 1:
                         # If there is only one all_gather in the bucket, schedule it normally.
                         if orig_ag_snodes[0] in ag_snode_to_cast_snode:
-                            AG_Group_node_list.append(ag_snode_to_cast_snode[orig_ag_snodes[0]])
+                            AG_Group_node_list.append(
+                                ag_snode_to_cast_snode[orig_ag_snodes[0]]
+                            )
                         AG_Group_node_list.append(orig_ag_snodes[0])
                         Wait_Group_node_list.append(orig_wait_snodes[0])
                     else:
@@ -250,14 +265,18 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                             # wait_tensor node output is modeled as a mutation on the all_gather node output.
                             # We need to preserve this property even after swapping.
                             assert (
-                                isinstance(orig_wait_snode_output.node, ir.MutationOutput)
+                                isinstance(
+                                    orig_wait_snode_output.node, ir.MutationOutput
+                                )
                                 and len(orig_wait_snode_output.get_mutations()) == 1
                                 and orig_wait_snode_output.get_mutations()[0]
                                 == orig_ag_snode_output.get_name()
                             )
                             out_snode.outputs.append(orig_wait_snode_output)
                             out_snode.read_writes.writes.add(
-                                StarDep(name=orig_wait_snode_output.get_name(), mode=None)
+                                StarDep(
+                                    name=orig_wait_snode_output.get_name(), mode=None
+                                )
                             )
                             # Remove original all_gather and wait_tensor operations
                             remove_operation(orig_ag_snode.node)
@@ -285,8 +304,12 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                         current_Wait_Group_node.reverse()
                         AG_Group_node_list.extend(current_AG_Group_node)
                         Wait_Group_node_list.extend(current_Wait_Group_node)
-                AG_Group_node = scheduler.GroupedSchedulerNode.create(AG_Group_node_list)
-                Wait_Group_node = scheduler.GroupedSchedulerNode.create(Wait_Group_node_list)
+                AG_Group_node = scheduler.GroupedSchedulerNode.create(
+                    AG_Group_node_list
+                )
+                Wait_Group_node = scheduler.GroupedSchedulerNode.create(
+                    Wait_Group_node_list
+                )
                 AG_Group_node.temp_grouping = True
                 Wait_Group_node.temp_grouping = True
                 new_order.append(AG_Group_node)
@@ -368,7 +391,9 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     for reduce_scatter_bucket in reduce_scatter_bucket_plan:
         for reduce_scatter_info, reduce_scatter_list in reduce_scatter_bucket.items():
             rs_snode_to_bucket_id.update(
-                dict.fromkeys(reduce_scatter_list, reduce_scatter_info + (cur_bucket_id, ))
+                dict.fromkeys(
+                    reduce_scatter_list, reduce_scatter_info + (cur_bucket_id,)
+                )
             )
             rs_snode_to_bucket_id_coarsen.update(
                 dict.fromkeys(reduce_scatter_list, cur_bucket_id)
@@ -466,7 +491,8 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
 
             if (
                 coarsen_bucket_id not in bucket_id_is_scheduled
-                and snode == bucket_id_to_bucketed_op_info[coarsen_bucket_id][-3][-1][-1]
+                and snode
+                == bucket_id_to_bucketed_op_info[coarsen_bucket_id][-3][-1][-1]
             ):
                 # If we are at the last node in the bucket, we can start to schedule the bucketed reduce_scatter node
                 (
@@ -481,7 +507,19 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
 
                 RS_Group_node_list = []
                 Wait_Group_node_list = []
-                for idx, (rs_input_ir_nodes, orig_rs_snodes, orig_wait_snodes, orig_wait_snode_recursive_users) in enumerate(zip(all_rs_input_ir_nodes, all_orig_rs_snodes, all_orig_wait_snodes, all_orig_wait_snode_recursive_users)):
+                for idx, (
+                    rs_input_ir_nodes,
+                    orig_rs_snodes,
+                    orig_wait_snodes,
+                    orig_wait_snode_recursive_users,
+                ) in enumerate(
+                    zip(
+                        all_rs_input_ir_nodes,
+                        all_orig_rs_snodes,
+                        all_orig_wait_snodes,
+                        all_orig_wait_snode_recursive_users,
+                    )
+                ):
                     if len(rs_input_ir_nodes) == 1:
                         # If there is only one input, we can directly use the input as the output
                         RS_Group_node_list.append(orig_rs_snodes[0])
@@ -515,14 +553,18 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                             # wait_tensor node output is modeled as a mutation on the reduce_scatter node output.
                             # We need to preserve this property even after swapping.
                             assert (
-                                isinstance(orig_wait_snode_output.node, ir.MutationOutput)
+                                isinstance(
+                                    orig_wait_snode_output.node, ir.MutationOutput
+                                )
                                 and len(orig_wait_snode_output.get_mutations()) == 1
                                 and orig_wait_snode_output.get_mutations()[0]
                                 == orig_rs_snode_output.get_name()
                             )
                             out_snode.outputs.append(orig_wait_snode_output)
                             out_snode.read_writes.writes.add(
-                                StarDep(name=orig_wait_snode_output.get_name(), mode=None)
+                                StarDep(
+                                    name=orig_wait_snode_output.get_name(), mode=None
+                                )
                             )
                             # Remove original reduce_scatter and wait_tensor operations
                             remove_operation(orig_rs_snode.node)
@@ -552,11 +594,17 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                         RS_Group_node_list.extend(current_RS_Group_node)
                         Wait_Group_node_list.extend(current_Wait_Group_node)
 
-                RS_Group_node = scheduler.GroupedSchedulerNode.create(RS_Group_node_list)
-                Wait_Group_node = scheduler.GroupedSchedulerNode.create(Wait_Group_node_list)
+                RS_Group_node = scheduler.GroupedSchedulerNode.create(
+                    RS_Group_node_list
+                )
+                Wait_Group_node = scheduler.GroupedSchedulerNode.create(
+                    Wait_Group_node_list
+                )
                 RS_Group_node.temp_grouping = True
                 Wait_Group_node.temp_grouping = True
-                for orig_wait_snode_recursive_users in all_orig_wait_snode_recursive_users:
+                for (
+                    orig_wait_snode_recursive_users
+                ) in all_orig_wait_snode_recursive_users:
                     for user in sorted(
                         orig_wait_snode_recursive_users, key=lambda x: order[x]
                     ):
