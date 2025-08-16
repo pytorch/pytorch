@@ -32,6 +32,7 @@
 #include <c10/util/Enumerate.h>
 #include <c10/util/irange.h>
 
+#include "caffe2/torch/fb/sparsenn/preproc_operators.h"
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace at::native {
@@ -1043,6 +1044,21 @@ REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   auto& out = KernelOutput(0).toTensor();
   fastResizeToZero(out);
   at::native::where_self_out(cond, self, other, out);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.preproc.event_feature_padding.default", preproc_event_feature_padding, {
+  const auto& in_0 = KernelInput(0).toTensor();
+  const auto& in_1 = KernelInput(1).toTensor();
+  const auto& in_2 = KernelInput(2).toTensor();
+  const auto& in_3 = KernelInput(3).toTensor();
+  const auto& in_4 = KernelInput(4).toTensor();
+  const auto& in_5 = KernelInput(5).toTensor();
+  const auto& in_6 = KernelInput(6).toTensor();
+
+  auto result = facebook::preproc::event_feature_padding(in_0, in_1, in_2, in_3, in_4, in_5, in_6);
+  KernelOutput(0) = std::get<0>(result);
+  KernelOutput(1) = std::get<1>(result);
+  KernelOutput(2) = std::get<2>(result);
 })
 
 REGISTER_CPU_KERNEL("torch.ops.fb.scale_gradient.default", fb_scale_gradient, {
