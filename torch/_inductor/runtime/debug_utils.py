@@ -94,7 +94,7 @@ class BufferMemoryTracker:
 
 
 def get_mem_tracker() -> BufferMemoryTracker:
-    if local.memory_tracker is None:
+    if not hasattr(local, "memory_tracker") or local.memory_tracker is None:
         local.memory_tracker = BufferMemoryTracker()
     return local.memory_tracker
 
