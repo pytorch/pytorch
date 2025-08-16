@@ -27,7 +27,7 @@ inline namespace CPU_CAPABILITY {
 //    https://github.com/android/ndk/issues/1248
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE128)
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
