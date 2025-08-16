@@ -256,3 +256,30 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
+
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    needs: get-default-label-prefix
+    with:
+      build-environment: win-vs2022-cpu-py3
+      cuda-version: cpu
+      runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral"
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral" },
+        ]}
+    secrets: inherit
+
+  win-vs2022-cpu-py3-inductor-test:
+    name: win-vs2022-cpu-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs:
+      - win-vs2022-cpu-py3-build
+    with:
+      build-environment: win-vs2022-cpu-py3
+      cuda-version: cpu
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      disable-monitor: false
+    secrets: inherit
