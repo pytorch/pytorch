@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.codecache import PyCodeCache
 from torch.utils._mode_utils import no_dispatch
 
-from .. import ir
+from .. import config, ir
 from ..utils import contains_collective, contains_wait
 
 
@@ -41,7 +41,7 @@ OpType = Union[
 def get_sample_list(input_size_list, cali_num_samples):
     input_size_min, input_size_max = (
         min(input_size_list),
-        int(0.3 * sum(input_size_list)),
+        int(config.simplefsdp.benchmark_ratio * sum(input_size_list)),
     )
     # ensure the min transmitted data volume is not 0
     input_size_min = max(100, input_size_min)
