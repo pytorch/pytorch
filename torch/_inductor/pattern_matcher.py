@@ -67,6 +67,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
@@ -2100,15 +2101,17 @@ def fwd_only(
     args: Sequence[Any],
     *,
     run_functional_passes: bool = True,
+    should_preserve_node_meta: bool = False,
     get_decomp_fn: Optional[Callable[..., Any]] = None,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        decompositions = (
-            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
-        )
-        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
+        with preserve_node_meta() if should_preserve_node_meta else contextlib.nullcontext():
+            decompositions = (
+                get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
+            )
+            gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 
