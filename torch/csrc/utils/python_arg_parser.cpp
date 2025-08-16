@@ -304,7 +304,9 @@ static py::object maybe_get_registered_torch_dispatch_rule(
 }
 
 // NB: Invariant: if you run this function, you MUST test if the returned
-// py::object is nullptr, as this will occur WITHOUT error condition being set
+// py::object is nullptr, as this will occur WITHOUT error condition being set.
+// And if an error happens, this function is responsible for throwing a C++
+// error.
 static py::object dispatch_on_subclass(
     PyObject* args,
     PyObject* kwargs,
@@ -590,7 +592,7 @@ auto handle_torch_function_no_python_arg_parser(
     TORCH_INTERNAL_ASSERT(
         0,
         "dispatch_on_subclass called with NO overloaded args that actually triggered dispatch, "
-        "perhaps there is a divergence in how you detect torch function and how overloaded args is "
+        "perhaps there is a divergence in how you detect torch function/dispatch and how overloaded args is "
         "computed?  overloaded_args = ",
         overloaded_args,
         ", is_mode_active = ",
@@ -685,10 +687,9 @@ auto handle_torch_function_indexing(
         continue;
       }
       for (auto j : c10::irange(inner_size)) {
-        auto* inner_obj = PySequence_GetItem(obj, j);
-        if (inner_obj) {
-          is_tensor_and_append_overloaded(inner_obj, &overridable_args);
-          Py_DECREF(inner_obj);
+        THPObjectPtr inner_obj(PySequence_GetItem(obj, j));
+        if (inner_obj.get()) {
+          is_tensor_and_append_overloaded(inner_obj.get(), &overridable_args);
         }
       }
     }
