@@ -1,9 +1,12 @@
 """Functional interface."""
 
+import functools
 import importlib
+import itertools
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -36,6 +39,10 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 conv1d = _add_docstr(
@@ -426,6 +433,36 @@ Args:
 )
 
 
+def handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    names = list(func.__annotations__)
+    it = func.__annotations__.items()
+    tensor_args = [k for k, v in it if Tensor in (v, *getattr(v, "__args__", ()))]
+    assert tensor_args, f"{func} does not have any tensor arguments"
+
+    @functools.wraps(func)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        it = itertools.chain(zip(names, args), kwargs.items())
+        tensors = [v for k, v in it if k in tensor_args]
+        if has_torch_function_variadic(*tensors):
+            return handle_torch_function(func, tensors, *args, **kwargs)
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
+def handle_torch_function_unary(
+    func: Callable[Concatenate[Tensor, _P], _T],
+) -> Callable[Concatenate[Tensor, _P], _T]:
+    @functools.wraps(func)
+    def wrapped(input: Tensor, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if has_torch_function_unary(input):
+            return handle_torch_function(func, (input,), input, *args, **kwargs)
+        return func(input, *args, **kwargs)
+
+    return wrapped
+
+
+@handle_torch_function_variadic
 def fractional_max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -466,17 +503,6 @@ def fractional_max_pool2d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_variadic(input, _random_samples):
-        return handle_torch_function(
-            fractional_max_pool2d_with_indices,
-            (input, _random_samples),
-            input,
-            kernel_size,
-            output_size=output_size,
-            output_ratio=output_ratio,
-            return_indices=return_indices,
-            _random_samples=_random_samples,
-        )
     if output_size is None and output_ratio is None:
         raise ValueError(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
@@ -538,6 +564,7 @@ fractional_max_pool2d = boolean_dispatch(
 )
 
 
+@handle_torch_function_variadic
 def fractional_max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -585,17 +612,6 @@ def fractional_max_pool3d_with_indices(
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
-    if has_torch_function_variadic(input, _random_samples):
-        return handle_torch_function(
-            fractional_max_pool3d_with_indices,
-            (input, _random_samples),
-            input,
-            kernel_size,
-            output_size=output_size,
-            output_ratio=output_ratio,
-            return_indices=return_indices,
-            _random_samples=_random_samples,
-        )
     if output_size is None and output_ratio is None:
         raise ValueError(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"
@@ -654,6 +670,7 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
+@handle_torch_function_variadic
 def max_pool1d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList1[int],
@@ -688,18 +705,6 @@ def max_pool1d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_pool1d_with_indices,
-            (input,),
-            input,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            ceil_mode=ceil_mode,
-            return_indices=return_indices,
-        )
     if stride is None:
         stride = torch.jit.annotate(list[int], [])
     return torch.max_pool1d_with_indices(
@@ -744,6 +749,7 @@ max_pool1d = boolean_dispatch(
 )
 
 
+@handle_torch_function_variadic
 def max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -778,18 +784,6 @@ def max_pool2d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_pool2d_with_indices,
-            (input,),
-            input,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            ceil_mode=ceil_mode,
-            return_indices=return_indices,
-        )
     if stride is None:
         stride = torch.jit.annotate(list[int], [])
     return torch._C._nn.max_pool2d_with_indices(
@@ -834,6 +828,7 @@ max_pool2d = boolean_dispatch(
 )
 
 
+@handle_torch_function_variadic
 def max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -868,18 +863,6 @@ def max_pool3d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_pool3d_with_indices,
-            (input,),
-            input,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            ceil_mode=ceil_mode,
-            return_indices=return_indices,
-        )
     if stride is None:
         stride = torch.jit.annotate(list[int], [])
     return torch._C._nn.max_pool3d_with_indices(
@@ -961,6 +944,7 @@ def _unpool_output_size(
     return ret
 
 
+@handle_torch_function_unary
 def max_unpool1d(
     input: Tensor,
     indices: Tensor,
@@ -973,17 +957,6 @@ def max_unpool1d(
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool1d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _single(kernel_size)
     if stride is not None:
         _stride = _single(stride)
@@ -1000,6 +973,7 @@ def max_unpool1d(
     ).squeeze(-1)
 
 
+@handle_torch_function_unary
 def max_unpool2d(
     input: Tensor,
     indices: Tensor,
@@ -1012,17 +986,6 @@ def max_unpool2d(
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool2d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _pair(kernel_size)
     if stride is not None:
         _stride = _pair(stride)
@@ -1033,6 +996,7 @@ def max_unpool2d(
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
+@handle_torch_function_unary
 def max_unpool3d(
     input: Tensor,
     indices: Tensor,
@@ -1045,17 +1009,6 @@ def max_unpool3d(
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            max_unpool3d,
-            (input,),
-            input,
-            indices,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            output_size=output_size,
-        )
     kernel_size = _triple(kernel_size)
     if stride is not None:
         _stride = _triple(stride)
@@ -1066,6 +1019,7 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
+@handle_torch_function_unary
 def lp_pool3d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1081,16 +1035,6 @@ def lp_pool3d(
 
     See :class:`~torch.nn.LPPool3d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool3d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     kd, kw, kh = _triple(kernel_size)
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -1104,6 +1048,7 @@ def lp_pool3d(
     )
 
 
+@handle_torch_function_unary
 def lp_pool2d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1119,16 +1064,6 @@ def lp_pool2d(
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool2d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     kw, kh = _pair(kernel_size)
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -1140,6 +1075,7 @@ def lp_pool2d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
+@handle_torch_function_unary
 def lp_pool1d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1154,16 +1090,6 @@ def lp_pool1d(
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            lp_pool1d,
-            (input,),
-            input,
-            norm_type,
-            kernel_size,
-            stride=stride,
-            ceil_mode=ceil_mode,
-        )
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1176,6 +1102,7 @@ def lp_pool1d(
     )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
@@ -1193,14 +1120,6 @@ def adaptive_max_pool1d_with_indices(
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool1d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     return torch.adaptive_max_pool1d(input, output_size)
 
 
@@ -1231,6 +1150,7 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
@@ -1248,14 +1168,6 @@ def adaptive_max_pool2d_with_indices(
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool2d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
@@ -1287,6 +1199,7 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
+@handle_torch_function_unary
 def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
@@ -1305,14 +1218,6 @@ def adaptive_max_pool3d_with_indices(
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            adaptive_max_pool3d_with_indices,
-            (input,),
-            input,
-            output_size,
-            return_indices=return_indices,
-        )
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
@@ -1360,6 +1265,7 @@ Args:
 )
 
 
+@handle_torch_function_unary
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1369,12 +1275,11 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
+@handle_torch_function_unary
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
     r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1384,13 +1289,12 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
 
 # Activation functions
+@handle_torch_function_unary
 def dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1408,10 +1312,6 @@ def dropout(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1419,6 +1319,7 @@ def dropout(
     )
 
 
+@handle_torch_function_unary
 def alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1429,10 +1330,6 @@ def alpha_dropout(
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1442,6 +1339,7 @@ def alpha_dropout(
     )
 
 
+@handle_torch_function_unary
 def dropout1d(
     input: Tensor,
     p: float = 0.5,
@@ -1462,10 +1360,6 @@ def dropout1d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout1d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1493,6 +1387,7 @@ def dropout1d(
     return result
 
 
+@handle_torch_function_unary
 def dropout2d(
     input: Tensor,
     p: float = 0.5,
@@ -1513,10 +1408,6 @@ def dropout2d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout2d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1552,6 +1443,7 @@ def dropout2d(
     return result
 
 
+@handle_torch_function_unary
 def dropout3d(
     input: Tensor,
     p: float = 0.5,
@@ -1572,10 +1464,6 @@ def dropout3d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            dropout3d, (input,), input, p=p, training=training, inplace=inplace
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1604,6 +1492,7 @@ def dropout3d(
     return result
 
 
+@handle_torch_function_unary
 def feature_alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1629,15 +1518,6 @@ def feature_alpha_dropout(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            feature_alpha_dropout,
-            (input,),
-            input,
-            p=p,
-            training=training,
-            inplace=inplace,
-        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1683,14 +1563,13 @@ In-place version of :func:`~threshold`.
 )
 
 
+@handle_torch_function_unary
 def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.relu_(input)
     else:
@@ -1708,6 +1587,7 @@ In-place version of :func:`~relu`.
 )
 
 
+@handle_torch_function_unary
 def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     r"""
     glu(input, dim=-1) -> Tensor
@@ -1726,8 +1606,6 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
         input (Tensor): input tensor
         dim (int): dimension on which to split the input. Default: -1
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(glu, (input,), input, dim=dim)
     if input.dim() == 0:
         raise RuntimeError(
             "glu does not support scalars because halving size must be even"
@@ -1770,6 +1648,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
+@handle_torch_function_unary
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu6(input, inplace=False) -> Tensor
 
@@ -1777,8 +1656,6 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu6, (input,), input, inplace=inplace)
     if inplace:
         result = torch._C._nn.relu6_(input)
     else:
@@ -1786,13 +1663,12 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     return result
 
 
+@handle_torch_function_unary
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     r"""Apply the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
@@ -1810,6 +1686,7 @@ In-place version of :func:`~elu`.
 )
 
 
+@handle_torch_function_unary
 def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""selu(input, inplace=False) -> Tensor
 
@@ -1820,8 +1697,6 @@ def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
 
     See :class:`~torch.nn.SELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(selu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.selu_(input)
     else:
@@ -1839,6 +1714,7 @@ In-place version of :func:`~selu`.
 )
 
 
+@handle_torch_function_unary
 def celu(
     input: Tensor,
     alpha: float = 1.0,
@@ -1851,10 +1727,6 @@ def celu(
 
     See :class:`~torch.nn.CELU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            celu, (input,), input, alpha=alpha, inplace=inplace
-        )
     if inplace:
         result = torch.celu_(input, alpha)
     else:
@@ -1872,6 +1744,7 @@ In-place version of :func:`~celu`.
 )
 
 
+@handle_torch_function_unary
 def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
@@ -1885,10 +1758,6 @@ def leaky_relu(
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace
-        )
     if inplace:
         result = torch._C._nn.leaky_relu_(input, negative_slope)
     else:
@@ -1927,6 +1796,7 @@ See :class:`~torch.nn.PReLU` for more details.
 )
 
 
+@handle_torch_function_unary
 def rrelu(
     input: Tensor,
     lower: float = 1.0 / 8,
@@ -1940,16 +1810,6 @@ def rrelu(
 
     See :class:`~torch.nn.RReLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            rrelu,
-            (input,),
-            input,
-            lower=lower,
-            upper=upper,
-            training=training,
-            inplace=inplace,
-        )
     if inplace:
         result = torch.rrelu_(input, lower, upper, training)
     else:
@@ -2008,6 +1868,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 )
 
 
+@handle_torch_function_unary
 def tanhshrink(input):  # noqa: D400,D402
     r"""tanhshrink(input) -> Tensor
 
@@ -2015,11 +1876,10 @@ def tanhshrink(input):  # noqa: D400,D402
 
     See :class:`~torch.nn.Tanhshrink` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(tanhshrink, (input,), input)
     return input - input.tanh()
 
 
+@handle_torch_function_unary
 def softsign(input):  # noqa: D400,D402
     r"""softsign(input) -> Tensor
 
@@ -2027,8 +1887,6 @@ def softsign(input):  # noqa: D400,D402
 
     See :class:`~torch.nn.Softsign` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(softsign, (input,), input)
     return input / (input.abs() + 1)
 
 
@@ -2060,6 +1918,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     return ret
 
 
+@handle_torch_function_unary
 def softmin(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2080,10 +1939,6 @@ def softmin(
           If specified, the input tensor is casted to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
     if dtype is None:
@@ -2093,6 +1948,7 @@ def softmin(
     return ret
 
 
+@handle_torch_function_unary
 def softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2123,10 +1979,6 @@ def softmax(
         Use log_softmax instead (it's faster and has better numerical properties).
 
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
     if dtype is None:
@@ -2136,6 +1988,7 @@ def softmax(
     return ret
 
 
+@handle_torch_function_unary
 def gumbel_softmax(
     logits: Tensor,
     tau: float = 1,
@@ -2182,10 +2035,6 @@ def gumbel_softmax(
     .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
-    if has_torch_function_unary(logits):
-        return handle_torch_function(
-            gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim
-        )
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
@@ -2210,6 +2059,7 @@ def gumbel_softmax(
     return ret
 
 
+@handle_torch_function_unary
 def log_softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2231,10 +2081,6 @@ def log_softmax(
           If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
     if dim is None:
         dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
     if dtype is None:
@@ -2277,6 +2123,7 @@ def sigmoid(input):  # noqa: D400,D402
     return input.sigmoid()
 
 
+@handle_torch_function_unary
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Hardsigmoid function element-wise.
 
@@ -2292,8 +2139,6 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.Hardsigmoid` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.hardsigmoid_(input)
     return torch._C._nn.hardsigmoid(input)
@@ -2346,6 +2191,7 @@ Shape:
 )
 
 
+@handle_torch_function_unary
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
 
@@ -2364,13 +2210,12 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.SiLU` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(silu, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.silu_(input)
     return torch._C._nn.silu(input)
 
 
+@handle_torch_function_unary
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Mish function, element-wise.
 
@@ -2384,13 +2229,12 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
 
     See :class:`~torch.nn.Mish` for more details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(mish, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.mish_(input)
     return torch._C._nn.mish(input)
 
 
+@handle_torch_function_unary
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply hardswish function, element-wise.
 
@@ -2409,8 +2253,6 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.hardswish_(input)
     return torch._C._nn.hardswish(input)
@@ -2425,6 +2267,7 @@ def _no_grad_embedding_renorm_(
     torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
 
+@handle_torch_function_variadic
 def embedding(
     input: Tensor,
     weight: Tensor,
@@ -2503,18 +2346,6 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-    if has_torch_function_variadic(input, weight):
-        return handle_torch_function(
-            embedding,
-            (input, weight),
-            input,
-            weight,
-            padding_idx=padding_idx,
-            max_norm=max_norm,
-            norm_type=norm_type,
-            scale_grad_by_freq=scale_grad_by_freq,
-            sparse=sparse,
-        )
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), (
@@ -2542,6 +2373,7 @@ def embedding(
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
+@handle_torch_function_variadic
 def embedding_bag(
     input: Tensor,
     weight: Tensor,
@@ -2634,22 +2466,6 @@ def embedding_bag(
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
     """
-    if has_torch_function_variadic(input, weight, offsets, per_sample_weights):
-        return handle_torch_function(
-            embedding_bag,
-            (input, weight, offsets, per_sample_weights),
-            input,
-            weight,
-            offsets=offsets,
-            max_norm=max_norm,
-            norm_type=norm_type,
-            scale_grad_by_freq=scale_grad_by_freq,
-            mode=mode,
-            sparse=sparse,
-            per_sample_weights=per_sample_weights,
-            include_last_offset=include_last_offset,
-            padding_idx=padding_idx,
-        )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
     # Now is     embedding_bag(input, weight, ...)
@@ -2779,6 +2595,7 @@ def _verify_batch_size(size: list[int]) -> None:
         )
 
 
+@handle_torch_function_variadic
 def batch_norm(
     input: Tensor,
     running_mean: Optional[Tensor],
@@ -2794,19 +2611,6 @@ def batch_norm(
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
-    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
-        return handle_torch_function(
-            batch_norm,
-            (input, running_mean, running_var, weight, bias),
-            input,
-            running_mean,
-            running_var,
-            weight=weight,
-            bias=bias,
-            training=training,
-            momentum=momentum,
-            eps=eps,
-        )
     if training:
         _verify_batch_size(input.size())
 
@@ -2834,6 +2638,7 @@ def _verify_spatial_size(size: list[int]) -> None:
         )
 
 
+@handle_torch_function_variadic
 def instance_norm(
     input: Tensor,
     running_mean: Optional[Tensor] = None,
@@ -2849,19 +2654,6 @@ def instance_norm(
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
-        return handle_torch_function(
-            instance_norm,
-            (input, running_mean, running_var, weight, bias),
-            input,
-            running_mean=running_mean,
-            running_var=running_var,
-            weight=weight,
-            bias=bias,
-            use_input_stats=use_input_stats,
-            momentum=momentum,
-            eps=eps,
-        )
     if use_input_stats:
         _verify_spatial_size(input.size())
     return torch.instance_norm(
@@ -2877,6 +2669,7 @@ def instance_norm(
     )
 
 
+@handle_torch_function_variadic
 def layer_norm(
     input: Tensor,
     normalized_shape: list[int],
@@ -2888,38 +2681,22 @@ def layer_norm(
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if has_torch_function_variadic(input, weight, bias):
-        return handle_torch_function(
-            layer_norm,
-            (input, weight, bias),
-            input,
-            normalized_shape,
-            weight=weight,
-            bias=bias,
-            eps=eps,
-        )
     return torch.layer_norm(
         input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
     )
 
 
+@handle_torch_function_variadic
 def rms_norm(
     input: Tensor,
     normalized_shape: list[int],
     weight: Optional[Tensor] = None,
     eps: Optional[float] = None,
 ) -> Tensor:
-    r"""Apply Root Mean Square Layer Normalization.
-
-    See :class:`~torch.nn.RMSNorm` for details.
-    """
-    if has_torch_function_variadic(input, weight):
-        return handle_torch_function(
-            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
-        )
     return torch.rms_norm(input, normalized_shape, weight, eps)
 
 
+@handle_torch_function_variadic
 def group_norm(
     input: Tensor,
     num_groups: int,
@@ -2931,20 +2708,6 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    if has_torch_function_variadic(input, weight, bias):
-        return handle_torch_function(
-            group_norm,
-            (
-                input,
-                weight,
-                bias,
-            ),
-            input,
-            num_groups,
-            weight=weight,
-            bias=bias,
-            eps=eps,
-        )
     if input.dim() < 2:
         raise RuntimeError(
             f"Expected at least 2 dimensions for input tensor but received {input.dim()}"
@@ -2958,6 +2721,7 @@ def group_norm(
     )
 
 
+@handle_torch_function_variadic
 def local_response_norm(
     input: Tensor,
     size: int,
@@ -2972,10 +2736,6 @@ def local_response_norm(
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            local_response_norm, (input,), input, size, alpha=alpha, beta=beta, k=k
-        )
     dim = input.dim()
     if dim < 3:
         raise ValueError(
@@ -3083,6 +2843,7 @@ if ctc_loss.__doc__:
     ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
 
 
+@handle_torch_function_variadic
 def nll_loss(
     input: Tensor,
     target: Tensor,
@@ -3126,18 +2887,6 @@ def nll_loss(
         >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            nll_loss,
-            (input, target, weight),
-            input,
-            target,
-            weight=weight,
-            size_average=size_average,
-            ignore_index=ignore_index,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return torch._C._nn.nll_loss_nd(
@@ -3145,6 +2894,7 @@ def nll_loss(
     )
 
 
+@handle_torch_function_variadic
 def poisson_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -3180,19 +2930,6 @@ def poisson_nll_loss(
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            poisson_nll_loss,
-            (input, target),
-            input,
-            target,
-            log_input=log_input,
-            full=full,
-            size_average=size_average,
-            eps=eps,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
@@ -3205,6 +2942,7 @@ def poisson_nll_loss(
     return ret
 
 
+@handle_torch_function_variadic
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -3231,18 +2969,6 @@ def gaussian_nll_loss(
             ``'sum'``: the output is the sum of all batch member losses.
             Default: ``'mean'``.
     """
-    if has_torch_function_variadic(input, target, var):
-        return handle_torch_function(
-            gaussian_nll_loss,
-            (input, target, var),
-            input,
-            target,
-            var,
-            full=full,
-            eps=eps,
-            reduction=reduction,
-        )
-
     # Entries of var must be non-negative
     if isinstance(var, float):
         if var < 0:
@@ -3296,6 +3022,7 @@ def gaussian_nll_loss(
         return loss
 
 
+@handle_torch_function_variadic
 def kl_div(
     input: Tensor,
     target: Tensor,
@@ -3337,17 +3064,6 @@ def kl_div(
         :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            kl_div,
-            (input, target),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-            log_target=log_target,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3372,6 +3088,7 @@ def kl_div(
     return reduced
 
 
+@handle_torch_function_variadic
 def cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3440,19 +3157,6 @@ def cross_entropy(
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            cross_entropy,
-            (input, target, weight),
-            input,
-            target,
-            weight=weight,
-            size_average=size_average,
-            ignore_index=ignore_index,
-            reduce=reduce,
-            reduction=reduction,
-            label_smoothing=label_smoothing,
-        )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return torch._C._nn.cross_entropy_loss(
@@ -3465,6 +3169,7 @@ def cross_entropy(
     )
 
 
+@handle_torch_function_variadic
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3498,17 +3203,6 @@ def binary_cross_entropy(
         >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
         >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            binary_cross_entropy,
-            (input, target, weight),
-            input,
-            target,
-            weight=weight,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3526,6 +3220,7 @@ def binary_cross_entropy(
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
+@handle_torch_function_variadic
 def binary_cross_entropy_with_logits(
     input: Tensor,
     target: Tensor,
@@ -3568,18 +3263,6 @@ def binary_cross_entropy_with_logits(
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
-    if has_torch_function_variadic(input, target, weight, pos_weight):
-        return handle_torch_function(
-            binary_cross_entropy_with_logits,
-            (input, target, weight, pos_weight),
-            input,
-            target,
-            weight=weight,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-            pos_weight=pos_weight,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3595,6 +3278,7 @@ def binary_cross_entropy_with_logits(
     )
 
 
+@handle_torch_function_variadic
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
@@ -3626,17 +3310,6 @@ def smooth_l1_loss(
     Returns:
         Tensor: L1 loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            smooth_l1_loss,
-            (input, target),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-            beta=beta,
-        )
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3659,6 +3332,7 @@ def smooth_l1_loss(
         )
 
 
+@handle_torch_function_variadic
 def huber_loss(
     input: Tensor,
     target: Tensor,
@@ -3689,17 +3363,6 @@ def huber_loss(
     Returns:
         Tensor: Huber loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            huber_loss,
-            (input, target, weight),
-            input,
-            target,
-            reduction=reduction,
-            delta=delta,
-            weight=weight,
-        )
-
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3739,6 +3402,7 @@ def huber_loss(
             )
 
 
+@handle_torch_function_variadic
 def l1_loss(
     input: Tensor,
     target: Tensor,
@@ -3767,16 +3431,6 @@ def l1_loss(
     Returns:
         Tensor: L1 loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            l1_loss,
-            (input, target, weight),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3812,6 +3466,7 @@ def l1_loss(
         )
 
 
+@handle_torch_function_variadic
 def mse_loss(
     input: Tensor,
     target: Tensor,
@@ -3838,18 +3493,6 @@ def mse_loss(
     Returns:
         Tensor: Mean Squared Error loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            mse_loss,
-            (input, target, weight),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-            weight=weight,
-        )
-
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
@@ -3887,6 +3530,7 @@ def mse_loss(
         )
 
 
+@handle_torch_function_variadic
 def margin_ranking_loss(
     input1: Tensor,
     input2: Tensor,
@@ -3914,18 +3558,6 @@ def margin_ranking_loss(
     Returns:
         Tensor: Margin ranking loss.
     """
-    if has_torch_function_variadic(input1, input2, target):
-        return handle_torch_function(
-            margin_ranking_loss,
-            (input1, input2, target),
-            input1,
-            input2,
-            target,
-            margin=margin,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3938,6 +3570,7 @@ def margin_ranking_loss(
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
+@handle_torch_function_variadic
 def hinge_embedding_loss(
     input: Tensor,
     target: Tensor,
@@ -3964,17 +3597,6 @@ def hinge_embedding_loss(
     Returns:
        Tensor: Hinge embedding loss.
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            hinge_embedding_loss,
-            (input, target),
-            input,
-            target,
-            margin=margin,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3982,6 +3604,7 @@ def hinge_embedding_loss(
     return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
+@handle_torch_function_variadic
 def multilabel_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -4006,16 +3629,6 @@ def multilabel_margin_loss(
     Returns:
        Tensor: Mutilabel margin loss.
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            multilabel_margin_loss,
-            (input, target),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -4023,6 +3636,7 @@ def multilabel_margin_loss(
     return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
+@handle_torch_function_variadic
 def soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -4047,16 +3661,6 @@ def soft_margin_loss(
     Returns:
        Tensor: Soft margin loss.
     """
-    if has_torch_function_variadic(input, target):
-        return handle_torch_function(
-            soft_margin_loss,
-            (input, target),
-            input,
-            target,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -4064,6 +3668,7 @@ def soft_margin_loss(
     return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
+@handle_torch_function_variadic
 def multilabel_soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -4089,17 +3694,6 @@ def multilabel_soft_margin_loss(
     Returns:
        Tensor: Mutilabel soft margin loss.
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            multilabel_soft_margin_loss,
-            (input, target, weight),
-            input,
-            target,
-            weight=weight,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
@@ -4124,6 +3718,7 @@ def multilabel_soft_margin_loss(
     return ret
 
 
+@handle_torch_function_variadic
 def cosine_embedding_loss(
     input1: Tensor,
     input2: Tensor,
@@ -4152,18 +3747,6 @@ def cosine_embedding_loss(
     Returns:
        Tensor: Cosine embedding loss.
     """
-    if has_torch_function_variadic(input1, input2, target):
-        return handle_torch_function(
-            cosine_embedding_loss,
-            (input1, input2, target),
-            input1,
-            input2,
-            target,
-            margin=margin,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -4171,6 +3754,7 @@ def cosine_embedding_loss(
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
+@handle_torch_function_variadic
 def multi_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -4201,19 +3785,6 @@ def multi_margin_loss(
     Returns:
         Tensor: Multi margin loss (optionally weighted).
     """
-    if has_torch_function_variadic(input, target, weight):
-        return handle_torch_function(
-            multi_margin_loss,
-            (input, target, weight),
-            input,
-            target,
-            p=p,
-            margin=margin,
-            weight=weight,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -4527,6 +4098,7 @@ def interpolate(  # noqa: F811
     pass
 
 
+@handle_torch_function_unary
 def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
@@ -4604,18 +4176,6 @@ def interpolate(  # noqa: F811
     Note:
         {backward_reproducibility_note}
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            interpolate,
-            (input,),
-            input,
-            size=size,
-            scale_factor=scale_factor,
-            mode=mode,
-            align_corners=align_corners,
-            recompute_scale_factor=recompute_scale_factor,
-            antialias=antialias,
-        )
 
     if mode in ("nearest", "area", "nearest-exact"):
         if align_corners is not None:
@@ -4949,6 +4509,7 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
+@handle_torch_function_variadic
 def grid_sample(
     input: Tensor,
     grid: Tensor,
@@ -5057,16 +4618,6 @@ def grid_sample(
     .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
     .. _`OpenCV`: https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908
     """
-    if has_torch_function_variadic(input, grid):
-        return handle_torch_function(
-            grid_sample,
-            (input, grid),
-            input,
-            grid,
-            mode=mode,
-            padding_mode=padding_mode,
-            align_corners=align_corners,
-        )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
             f"nn.functional.grid_sample(): expected mode to be 'bilinear', 'nearest' or 'bicubic', but got: '{mode}'"
@@ -5108,6 +4659,7 @@ def grid_sample(
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
 
 
+@handle_torch_function_unary
 def affine_grid(
     theta: Tensor,
     size: list[int],
@@ -5159,10 +4711,6 @@ def affine_grid(
         along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
-    if has_torch_function_unary(theta):
-        return handle_torch_function(
-            affine_grid, (theta,), theta, size, align_corners=align_corners
-        )
     if align_corners is None:
         warnings.warn(
             "Default grid_sample and affine_grid behavior has changed "
@@ -5210,6 +4758,7 @@ def affine_grid(
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
+@handle_torch_function_unary
 def pad(
     input: Tensor,
     pad: list[int],
@@ -5276,10 +4825,6 @@ def pad(
         >>> print(out.size())
         torch.Size([3, 9, 7, 3])
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
-        )
     if not torch.jit.is_scripting():
         if torch.are_deterministic_algorithms_enabled() and (
             input.is_cuda or input.is_xpu
@@ -5419,6 +4964,7 @@ Examples:
 )
 
 
+@handle_torch_function_variadic
 def triplet_margin_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -5435,21 +4981,6 @@ def triplet_margin_loss(
 
     See :class:`~torch.nn.TripletMarginLoss` for details.
     """
-    if has_torch_function_variadic(anchor, positive, negative):
-        return handle_torch_function(
-            triplet_margin_loss,
-            (anchor, positive, negative),
-            anchor,
-            positive,
-            negative,
-            margin=margin,
-            p=p,
-            eps=eps,
-            swap=swap,
-            size_average=size_average,
-            reduce=reduce,
-            reduction=reduction,
-        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -5461,6 +4992,7 @@ def triplet_margin_loss(
     )
 
 
+@handle_torch_function_variadic
 def triplet_margin_with_distance_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -5479,19 +5011,6 @@ def triplet_margin_with_distance_loss(
         raise NotImplementedError(
             "F.triplet_margin_with_distance_loss does not support JIT scripting: "
             "functions requiring Callables cannot be scripted."
-        )
-
-    if has_torch_function_variadic(anchor, positive, negative):
-        return handle_torch_function(
-            triplet_margin_with_distance_loss,
-            (anchor, positive, negative),
-            anchor,
-            positive,
-            negative,
-            distance_function=distance_function,
-            margin=margin,
-            swap=swap,
-            reduction=reduction,
         )
 
     # Check validity of reduction mode
@@ -5538,6 +5057,7 @@ def triplet_margin_with_distance_loss(
         return loss
 
 
+@handle_torch_function_variadic
 def normalize(
     input: Tensor,
     p: float = 2.0,
@@ -5563,10 +5083,6 @@ def normalize(
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
-    if has_torch_function_variadic(input, out):
-        return handle_torch_function(
-            normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
-        )
     if out is None:
         denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
@@ -5579,6 +5095,7 @@ def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
+@handle_torch_function_unary
 def unfold(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -5602,21 +5119,12 @@ def unfold(
 
     See :class:`torch.nn.Unfold` for details
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            unfold,
-            (input,),
-            input,
-            kernel_size,
-            dilation=dilation,
-            padding=padding,
-            stride=stride,
-        )
     return torch._C._nn.im2col(
         input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
     )
 
 
+@handle_torch_function_unary
 def fold(
     input: Tensor,
     output_size: BroadcastingList2[int],
@@ -5632,17 +5140,6 @@ def fold(
 
     See :class:`torch.nn.Fold` for details
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            fold,
-            (input,),
-            input,
-            output_size,
-            kernel_size,
-            dilation=dilation,
-            padding=padding,
-            stride=stride,
-        )
     return torch._C._nn.col2im(
         input,
         _pair(output_size),
