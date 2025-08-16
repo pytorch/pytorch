@@ -853,7 +853,7 @@ void all2all_single_equal_split(
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
-  NCCL_CHECK(ncclGroupStart());
+  AutoNcclGroup nccl_group_guard(_comm);
   for (const auto r : c10::irange(numranks)) {
     if (_nccl_should_send_recv(count)) {
       NCCL_CHECK(
@@ -862,11 +862,6 @@ void all2all_single_equal_split(
           ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
-  NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 #else
   TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
@@ -911,7 +906,7 @@ void all2all_single_unequal_split(
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
-  NCCL_CHECK(ncclGroupStart());
+  AutoNcclGroup nccl_group_guard(_comm);
   for (const auto r : c10::irange(numranks)) {
     if (_nccl_should_send_recv(sendcounts[r])) {
       NCCL_CHECK(ncclSend(
@@ -932,11 +927,6 @@ void all2all_single_unequal_split(
           stream));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
-  NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 #else
   TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
@@ -957,7 +947,7 @@ void all2all(
   using namespace torch::cuda::nccl::detail;
   auto comm = to_nccl_comm(_comm);
 
-  NCCL_CHECK(ncclGroupStart());
+  AutoNcclGroup nccl_group_guard(_comm);
   for (const int r : c10::irange(static_cast<int>(outputTensors.size()))) {
     at::Tensor& input = inputTensors[r];
     at::Tensor& output = outputTensors[r];
@@ -981,11 +971,6 @@ void all2all(
           stream.stream()));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
-  NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #else
   TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -1086,7 +1071,7 @@ void gather(
   auto type = to_nccl_data_type(inputs);
   const auto* sendbuff = reinterpret_cast<const char*>(inputs.const_data_ptr());
 
-  NCCL_CHECK(ncclGroupStart());
+  AutoNcclGroup nccl_group_guard(_comm);
 
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
@@ -1101,12 +1086,6 @@ void gather(
   } else {
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
-  NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
-
 #else
   TORCH_CHECK(false, "gather is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -1135,7 +1114,7 @@ void scatter(
   NCCL_CHECK_TIMEOUT(ncclCommCount(comm, &numranks), _comm);
   NCCL_CHECK_TIMEOUT(ncclCommUserRank(comm, &cur_rank), _comm);
 #endif
-  NCCL_CHECK(ncclGroupStart());
+  AutoNcclGroup nccl_group_guard(_comm);
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
@@ -1155,11 +1134,6 @@ void scatter(
     auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
-  NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #else
   TORCH_CHECK(false, "scatter is only supported for NCCL lib version >= 2.7.0");
 #endif
