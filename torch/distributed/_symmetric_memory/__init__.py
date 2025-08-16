@@ -13,7 +13,12 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
+from torch.distributed._distributed_c10d import (
+    _register_work,
+    _SymmetricMemory,
+    ProcessGroup,
+    Work as _Work,
+)
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -1486,7 +1491,7 @@ def _low_contention_all_gather(
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
         symm_mem.barrier()
-        torch._C._distributed_c10d._register_work(output, Work())
+        _register_work(output, Work())
         return output
 
 
@@ -1534,7 +1539,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        torch._C._distributed_c10d._register_work(ret, Work())
+        _register_work(ret, Work())
         return ret
 
 
@@ -1569,7 +1574,7 @@ def _low_contention_reduce_scatter_with_workspace(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        torch._C._distributed_c10d._register_work(ret, Work())
+        _register_work(ret, Work())
         return ret
 
 
@@ -1648,10 +1653,6 @@ from typing import Any, overload, TYPE_CHECKING, Union
 from torch.types import _device, _dtype, _int
 
 
-if TYPE_CHECKING:
-    from torch._C._distributed_c10d import ProcessGroup
-
-
 @overload
 def empty(
     *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
@@ -1726,8 +1727,6 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
-    from torch._C._distributed_c10d import ProcessGroup
-
     if isinstance(group, str):
         group_name = group
     elif isinstance(group, ProcessGroup):
@@ -1745,11 +1744,7 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM is available in current build and on current system.
     """
-    try:
-        from torch._C._distributed_c10d import _is_nvshmem_available
-    except ImportError:
-        # Not all builds have NVSHMEM support.
-        return False
+    from torch.distributed._distributed_c10d import _is_nvshmem_available
 
     # Check if NVSHMEM is available on current system.
     return _is_nvshmem_available()
