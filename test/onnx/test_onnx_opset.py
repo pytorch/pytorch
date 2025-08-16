@@ -67,6 +67,7 @@ def check_onnx_opsets_operator(
             training=training,
             input_names=input_names,
             dynamic_axes=dynamic_axes,
+            dynamo=False,
         )
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
