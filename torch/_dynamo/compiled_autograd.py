@@ -1508,7 +1508,7 @@ def _enable(
             # we need to import this, because user might not have imported it if they directly use this context manager
             # we need to lazily import it, because of circular dependencies
             if torch.cuda.is_available():
-                from torch._inductor import cudagraph_trees
+                from torch._inductor import cudagraph_trees  # noqa: F401
 
             (
                 prior_compiler,
