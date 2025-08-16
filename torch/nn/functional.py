@@ -1625,8 +1625,6 @@ def hardtanh(
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
     """
-    # This op causes errors when @handle_torch_function_unary is used, it's
-    # not clear why
     if has_torch_function_unary(input):
         return handle_torch_function(
             hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace
@@ -2765,7 +2763,6 @@ def local_response_norm(
 # loss
 
 
-@handle_torch_function_variadic
 def ctc_loss(
     log_probs: Tensor,
     targets: Tensor,
@@ -2819,6 +2816,18 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        return handle_torch_function(
+            ctc_loss,
+            (log_probs, targets, input_lengths, target_lengths),
+            log_probs,
+            targets,
+            input_lengths,
+            target_lengths,
+            blank=blank,
+            reduction=reduction,
+            zero_infinity=zero_infinity,
+        )
     return torch.ctc_loss(
         log_probs,
         targets,
