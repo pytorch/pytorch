@@ -942,6 +942,7 @@ exclusions = {
     "aot_graphs",
     "aot_graphs_effects",
     "pre_grad_graphs",
+    "joint_graph_passes",
     "post_grad_graphs",
     "inductor_metrics",
     "ir_pre_fusion",
