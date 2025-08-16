@@ -61,6 +61,32 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
+// We only go one deep, because that's all torchdim needs (it supports
+// a tuple/list of FCDs which triggers a split behavior, but you can
+// only do it at the top level).
+static bool sequence_has_torch_function(PyObject* seq) {
+  auto length = PySequence_Length(seq);
+  if (length < 0) {
+    PyErr_Clear();
+    return false;
+  }
+
+  for (Py_ssize_t i = 0; i < length; i++) {
+    THPObjectPtr item(PySequence_GetItem(seq, i));
+    if (!item.get()) {
+      PyErr_Clear();
+      continue;
+    }
+
+    // Only check direct torch function on item (no recursion)
+    if (check_has_torch_function(item.get(), /*ignore_mode*/ true)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
@@ -68,8 +94,10 @@ static int64_t count_specified_dimensions(PyObject* index) {
   auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
-    if (check_has_torch_function(obj))
+    if (check_has_torch_function(obj)) {
       return -1;
+    }
+
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
@@ -78,10 +106,17 @@ static int64_t count_specified_dimensions(PyObject* index) {
       } else {
         count++;
       }
-    } else if (
-        obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
-        obj != Py_False) {
-      count++;
+    } else {
+      // Check sequences for __torch_function__ (top-level only)
+      if (PySequence_Check(obj)) {
+        if (sequence_has_torch_function(obj)) {
+          return -1; // Signal torch function handling needed
+        }
+      }
+      if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
+          obj != Py_False) {
+        count++;
+      }
     }
   }
   return count;
@@ -398,7 +433,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, holder.get());
+    return handle_torch_function_indexing(self, index);
   }
   Variable sliced = applySlicing(
       self_,
