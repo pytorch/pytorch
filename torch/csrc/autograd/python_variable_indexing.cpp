@@ -79,7 +79,7 @@ static bool sequence_has_torch_function(PyObject* seq) {
     }
 
     // Only check direct torch function on item (no recursion)
-    if (check_has_torch_function(item.get())) {
+    if (check_has_torch_function(item.get(), /*ignore_mode*/ true)) {
       return true;
     }
   }
