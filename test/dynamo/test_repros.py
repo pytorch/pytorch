@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
 )
@@ -7405,6 +7406,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
     @requires_cuda
     def test_partitioner_saves_weights_for_bw(self):
