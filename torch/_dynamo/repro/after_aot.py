@@ -34,13 +34,11 @@ from tempfile import TemporaryFile
 from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
-from torch.utils._triton import has_triton
 
-
-if has_triton():
+try:
     from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
-else:
+except ImportError:
 
     class Autotuner:  # type: ignore[no-redef]
         pass
