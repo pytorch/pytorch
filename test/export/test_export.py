@@ -5216,9 +5216,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         register_pytree_node(
             Box,
-            lambda box: ([box.content], None),  # flatten_fn
-            lambda contents, _context: Box(*contents),  # unflatten_fn
-            flatten_with_keys_fn=None,  # unflatten_fn
+            lambda box: ([box.content], None),  # flatten_func
+            lambda contents, _: Box(*contents),  # unflatten_func
+            flatten_with_keys_func=None,  # flatten_with_keys_func
             serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
         )
 
