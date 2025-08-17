@@ -16,7 +16,7 @@ if "%DESIRED_PYTHON%" == "3.11" set NUMPY_PINNED_VERSION="==2.0.2"
 if "%DESIRED_PYTHON%" == "3.10" set NUMPY_PINNED_VERSION="==2.0.2"
 if "%DESIRED_PYTHON%" == "3.9" set NUMPY_PINNED_VERSION="==2.0.2"
 
-%PYTHON_EXEC% -m pip install "numpy%NUMPY_PINNED_VERSION%" -r "..\..\..\requirements-build.txt"
+%PYTHON_EXEC% -m pip install "numpy%NUMPY_PINNED_VERSION%" -r "%PYTORCH_ROOT%\requirements-build.txt"
 %PYTHON_EXEC% -m pip install mkl-include mkl-static
 %PYTHON_EXEC% -m pip install boto3
 
