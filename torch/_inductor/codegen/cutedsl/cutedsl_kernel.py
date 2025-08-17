@@ -35,13 +35,13 @@ class CuteDSLKernelWrapper:
 
         Args:
             *args: Arguments to pass to the kernel function
-            stream: TODO: CUDA stream (handled internally by CuteDSL, so ignored)
+            stream: CUDA stream to pass to the kernel function
             **kwargs: Additional keyword arguments for the kernel
 
         Returns:
             Result of the kernel execution
         """
-        return self.kernel_fn(*args, **kwargs)
+        return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
 @dataclasses.dataclass
@@ -203,8 +203,9 @@ class CuteDSLTemplateKernel(Kernel):
         def hook():
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
+            params = list(argnames) + ["stream"]
             code.writeline(
-                f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(argnames)}):"
+                f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(params)}):"
             )
             return code.getvalue()
 
