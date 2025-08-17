@@ -764,6 +764,7 @@ def trace_frame(
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
+    tf_mode_stack: list[torch.overrides.TorchFunctionMode],
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
     code_options: dict[str, object],
@@ -782,9 +783,8 @@ def trace_frame(
 
         speculation_log.restart()  # type: ignore[has-type]
         exn_vt_stack = ExceptionStack()
-        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-            torch.overrides._get_current_function_mode_stack()
-        )
+
+        tracer_output = None
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -883,6 +883,9 @@ def _compile(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
         nonlocal tracer_output
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+            torch.overrides._get_current_function_mode_stack()
+        )
         try:
             tracer_output = trace_frame(
                 code,
@@ -892,6 +895,7 @@ def _compile(
                 closure,
                 compiler_fn,
                 one_graph,
+                tf_mode_stack,
                 speculation_log,
                 instructions,
                 code_options,
@@ -1625,7 +1629,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
