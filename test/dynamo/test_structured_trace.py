@@ -22,10 +22,9 @@ from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-requires_cuda_and_triton = unittest.skipUnless(HAS_CUDA, "requires cuda")
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
