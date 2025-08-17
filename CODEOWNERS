@@ -164,6 +164,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 # torch.export
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 
 # Dynamic Shapes
 /torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
