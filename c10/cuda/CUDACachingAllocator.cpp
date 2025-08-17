@@ -1167,8 +1167,11 @@ class DeviceCachingAllocator {
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
-  // See free() for this thing's purpose
-  // This is a list of empty nodes that are inserted during capture.
+  // Map of blocks whose freeing is deferred until after CUDA graph capture.
+  //   - Key: Block* to be freed.
+  //   - Value: List of "empty nodes" inserted as free markers during capture.
+  //     If the vector is empty, the block must always be deferred until capture
+  //     ends.
   ska::flat_hash_map<Block*, std::vector<cudaGraphNode_t>> deferred_blocks;
 
   // outstanding cuda events
@@ -1663,17 +1666,20 @@ class DeviceCachingAllocator {
     return new_node;
   }
 
-  // Find the current set of "terminals" (T) in the CUDA graph.
-  // A terminal is a node with out-degree 0 at the time of allocate();
-  // intuitively, these are the current tails/frontiers of each active stream,
-  // and possibly more if the graph branches. Any new captured work will be
-  // attached after some terminal.
+  // Returns the current set of "terminal" nodes in the CUDA graph.
+  // A terminal node is defined as a node with out-degree 0 at the time of
+  // allocation; these represent the current endpoints (tails/frontiers) of all
+  // active streams, and may include additional nodes if the graph branches. Any
+  // new work captured will be attached after one or more of these terminals.
   //
-  // Note: We do NOT rely on dependent nodes returned by
-  // cudaStreamGetCaptureInfo; instead, we query the graph for roots and
-  // traverse from there.
+  // Note: We do NOT use the dependent nodes returned by
+  // cudaStreamGetCaptureInfo, as it only provides dependencies for the current
+  // stream, not all terminals in the graph.
+  //
+  // Instead, this function queries the graph for root nodes and performs a
+  // traversal to identify all terminal nodes.
   std::vector<cudaGraphNode_t> get_terminals(cudaGraph_t graph) {
-    // Helper to get all children of a node.
+    // Helper lambda to retrieve all children (dependent nodes) of a given node.
     auto get_children = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
       size_t count = 0;
       C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(
@@ -1686,19 +1692,20 @@ class DeviceCachingAllocator {
       return out;
     };
 
-    // Fetch root nodes of the graph.
+    // Retrieve all root nodes of the graph.
     size_t num_root_nodes = 0;
     C10_CUDA_CHECK(
         cudaGraphGetRootNodes(graph, /*pRootNodes=*/nullptr, &num_root_nodes));
     if (num_root_nodes == 0) {
-      // A valid capture should have roots; if not, nothing to do.
+      // If there are no roots, the capture is invalid or empty; return empty.
       return {};
     }
     std::vector<cudaGraphNode_t> roots(num_root_nodes);
     C10_CUDA_CHECK(cudaGraphGetRootNodes(graph, roots.data(), &num_root_nodes));
     roots.resize(num_root_nodes);
 
-    // Forward DFS to find all terminal nodes (nodes with no children).
+    // Perform a forward DFS from each root to find all terminal nodes (nodes
+    // with no children).
     ska::flat_hash_set<cudaGraphNode_t> visited;
     ska::flat_hash_set<cudaGraphNode_t> terminals_set;
 
@@ -1730,20 +1737,19 @@ class DeviceCachingAllocator {
     return terminals;
   }
 
-  // Determine which free marker nodes (empty nodes) are "freeable" in the
-  // current CUDA graph capture. A free marker is freeable if it is a
-  // predecessor of every current terminal node, i.e., every terminal is a
-  // successor of the free marker. This means all future captured work will be
-  // after the free, so it is safe to reclaim the block.
-  //
-  // Returns the set of empty nodes that can reach every terminal node in the
-  // capture graph.
+  // Returns the set of "freeable" empty nodes (free markers) in the current
+  // CUDA graph capture. An empty node is considered freeable if it is a
+  // predecessor of every terminal node in the capture graph, i.e., all terminal
+  // nodes are reachable from it. This ensures that all future captured work
+  // will occur after the free marker, making it safe to reclaim the associated
+  // memory block.
   ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes(
       cudaStream_t stream) {
     cudaStreamCaptureStatus status{};
     cudaGraph_t graph{};
 
-    // Only need capture status + graph handle.
+    // Query the capture status and obtain the graph handle for the given
+    // stream.
     C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
         stream,
         &status,
@@ -1756,16 +1762,17 @@ class DeviceCachingAllocator {
         status != cudaStreamCaptureStatusInvalidated,
         "Invalid stream capture status");
     if (status == cudaStreamCaptureStatusNone) {
-      // Stream is not capturing → no graph to traverse.
+      // No active capture on this stream; nothing to analyze.
       return {};
     }
 
     auto terminals = get_terminals(graph);
     if (terminals.empty()) {
+      // No terminal nodes found; nothing to free.
       return {};
     }
 
-    // Helper to get all parents of a node.
+    // Helper to retrieve all parent nodes (dependencies) of a given node.
     auto get_parents = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
       size_t count = 0;
       C10_CUDA_CHECK(
@@ -1778,16 +1785,17 @@ class DeviceCachingAllocator {
       return out;
     };
 
-    // Helper to check if a node is an empty node (free marker).
+    // Helper to determine if a node is an empty node (used as a free marker).
     auto is_empty_node = [](cudaGraphNode_t n) -> bool {
       cudaGraphNodeType type{};
       C10_CUDA_CHECK(cudaGraphNodeGetType(n, &type));
       return type == cudaGraphNodeTypeEmpty;
     };
 
-    // For each terminal, do a reverse DFS to count, for each empty node,
-    // how many terminals it can reach (i.e., is a predecessor of).
-    // If an empty node can reach all terminals, it is freeable.
+    // For each terminal node, perform a reverse DFS to count, for each empty
+    // node, how many terminals it can reach (i.e., for how many terminals it is
+    // a predecessor). An empty node is freeable if it is a predecessor of all
+    // terminal nodes.
     ska::flat_hash_map<cudaGraphNode_t, size_t> num_terminals_reachable;
 
     for (auto terminal : terminals) {
@@ -1815,13 +1823,6 @@ class DeviceCachingAllocator {
       if (count == terminals.size()) {
         freeable_empty_nodes.insert(node);
       }
-    }
-
-    // Debug output: show which empty nodes can reach how many terminals.
-    std::cerr << "get_joined_empty_nodes results:\n";
-    for (auto [node, count] : num_terminals_reachable) {
-      std::cerr << "empty node: " << node << " can reach " << count
-                << " terminals, total terminals: " << terminals.size() << "\n";
     }
 
     return freeable_empty_nodes;
@@ -1862,32 +1863,45 @@ class DeviceCachingAllocator {
     if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_allocations.decrease(1);
 
+    // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
-        // It's forbidden to cudaEventQuery an event recorded during CUDA graph
-        // capture. We conservatively defer recording end-of-life events until
-        // the next call to process_events() (which won't happen until no
-        // captures are underway)
-        std::vector<cudaGraphNode_t> empty_nodes;
         if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
+          std::vector<cudaGraphNode_t> empty_nodes;
+          bool has_non_capture_stream = false;
+
+          // Inserts an empty node as a free marker for the given stream.
           auto add_empty_node = [&](cudaStream_t stream) {
             auto empty_node = insert_empty_node_as_free_marker(stream);
-            if (empty_node != nullptr) {
-              empty_nodes.push_back(empty_node);
+            if (empty_node == nullptr) {
+              has_non_capture_stream = true;
             }
+            empty_nodes.push_back(empty_node);
           };
 
+          // Insert an empty node for the allocation stream.
+          add_empty_node(block->stream);
+          // Insert empty nodes for all streams that have used this block.
           for (auto& stream : block->stream_uses) {
             add_empty_node(stream.stream());
           }
-          // we should also add empty node for the allocation stream
-          add_empty_node(block->stream);
+
+          if (has_non_capture_stream) {
+            // If any stream is not part of the current capture, defer the free
+            // until capture is finished.
+            deferred_blocks.emplace(block, std::vector<cudaGraphNode_t>{});
+          } else {
+            // All streams are part of the capture; associate the block with the
+            // inserted empty nodes.
+            deferred_blocks.emplace(block, std::move(empty_nodes));
+          }
+        } else {
+          // If reclaim_memory_in_graph_capture is not enabled, always defer the
+          // free until capture is finished.
+          deferred_blocks.emplace(block, std::vector<cudaGraphNode_t>{});
         }
-        std::cerr << "deferred_blocks ptr: " << block->ptr
-                  << " size: " << block->size << " stream: " << block->stream
-                  << " size: " << block->size << std::endl;
-        deferred_blocks.emplace(block, std::move(empty_nodes));
       } else {
+        // If not in a capture, insert events for the block.
         insert_events(block);
       }
     } else {
@@ -3523,9 +3537,6 @@ class DeviceCachingAllocator {
         remove_cudagraph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {
-          std::cerr << "post-graph free_blocks ptr: " << block->ptr
-                    << " size: " << block->size << " stream: " << block->stream
-                    << " size: " << block->size << std::endl;
           free_block(block, context);
         }
       }
@@ -3533,24 +3544,24 @@ class DeviceCachingAllocator {
     }
   }
 
-  // Determines if deferred blocks are safe to free during CUDA graph capture.
-  // A block is considered safe to free if all of its inserted empty nodes can
-  // reach every terminal node in the capture graph. In this case, the free
-  // operation is guaranteed to occur before the terminal node executes,
-  // ensuring the safety of the free operation.
+  // Check if deferred blocks are safe to free during CUDA graph capture.
+  // A deferred block is safe to free if all of its associated "empty nodes"
+  // (free markers) are predecessors of every terminal node in the current
+  // capture graph. This ensures that the free operation will always occur
+  // before any terminal node executes, making it safe.
   //
-  // If an empty node cannot reach every terminal node, we cannot guarantee the
-  // block is safe to free at this point.
+  // If any empty node for a block is not a predecessor of all terminal nodes,
+  // the block cannot be safely freed yet and must remain deferred.
   //
-  // This function checks each deferred block's empty nodes to see if they can
-  // reach every terminal node, and frees the block if so.
+  // This function iterates over all deferred blocks, checks if their empty
+  // nodes are freeable, and frees the block if so.
   void capture_safe_free_blocks(
       const std::shared_ptr<GatheredContext>& context,
       cudaStream_t stream) {
     auto freeable_empty_nodes = get_freeable_empty_nodes(stream);
 
-    // If the stream is not currently capturing, there are no joined empty
-    // nodes, so nothing to do.
+    // If there are no freeable empty nodes (e.g., not currently capturing),
+    // nothing to do.
     if (freeable_empty_nodes.empty()) {
       return;
     }
@@ -3558,8 +3569,15 @@ class DeviceCachingAllocator {
     std::vector<Block*> blocks_to_erase;
 
     for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
+      // If no empty nodes were inserted for this block, always defer free until
+      // after capture.
+      if (inserted_empty_nodes.empty()) {
+        continue;
+      }
+
       bool is_freeable = true;
 
+      // All inserted empty nodes must be in the set of freeable nodes.
       for (const auto& free_node : inserted_empty_nodes) {
         if (freeable_empty_nodes.find(free_node) ==
             freeable_empty_nodes.end()) {
@@ -3570,20 +3588,17 @@ class DeviceCachingAllocator {
 
       // If all empty nodes are freeable, the block is safe to free.
       if (is_freeable) {
-        // Clear stream uses, as the graph guarantees synchronization.
-        // No need to insert events, since event queries are not allowed during
+        // Clear stream uses since the graph ensures proper synchronization.
+        // No need to insert events, as event queries are not allowed during
         // capture.
         block->stream_uses.clear();
 
-        std::cerr << "capture-safe free_blocks ptr: " << block->ptr
-                  << " size: " << block->size << " stream: " << block->stream
-                  << " size: " << block->size << std::endl;
         free_block(block, context);
         blocks_to_erase.push_back(block);
       }
     }
 
-    // Remove freed blocks from the deferred_blocks map.
+    // Remove blocks that were freed from the deferred_blocks map.
     for (auto* block : blocks_to_erase) {
       deferred_blocks.erase(block);
     }

@@ -5613,6 +5613,131 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_2_streams(self):
+        torch.cuda.memory._set_allocator_settings(
+            "reclaim_memory_in_graph_capture:True"
+        )
+        torch.cuda.empty_cache()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            data1 = torch.ones(8, device="cuda")
+            data1_ptr = data1.data_ptr()
+
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                data1.fill_(2.0)
+                data1.record_stream(s2)
+
+            data1.fill_(1.0)
+
+            # data1 is deleted
+            del data1
+            gc.collect()
+
+            s1.wait_stream(s2)
+
+            # The first allocation of data2 occurs before the graph is joined.
+            # The graph will be joined after this allocation.
+            data2 = torch.ones(8, device="cuda")
+            # The second allocation of data2 happens after the graph is joined.
+            # If capture-reclaim is enabled, data2 should reuse the memory from data1.
+            data2 = torch.ones(8, device="cuda")
+            data2_ptr = data2.data_ptr()
+
+            g.capture_end()
+
+        torch.cuda.synchronize()
+        self.assertTrue(data1_ptr == data2_ptr)
+        torch.cuda.memory._set_allocator_settings(
+            "reclaim_memory_in_graph_capture:False"
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_4_streams(self):
+        torch.cuda.memory._set_allocator_settings(
+            "reclaim_memory_in_graph_capture:True"
+        )
+        torch.cuda.empty_cache()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        s3 = torch.cuda.Stream()
+        s4 = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            data1 = torch.ones(8, device="cuda")
+            data2 = torch.ones(8, device="cuda")
+            data1_ptr = data1.data_ptr()
+
+            s2.wait_stream(s1)
+            with torch.cuda.stream(s2):
+                data1.fill_(2.0)
+                data1.record_stream(s2)
+
+            s3.wait_stream(s1)
+            with torch.cuda.stream(s3):
+                data1.fill_(3.0)
+                data1.record_stream(s3)
+
+            s4.wait_stream(s1)
+            with torch.cuda.stream(s4):
+                data1.fill_(4.0)
+                data1.record_stream(s4)
+
+            data1.fill_(1.0)
+
+            # data1 is deleted
+            del data1
+            gc.collect()
+
+            s1.wait_stream(s2)
+            data2.fill_(1.0)
+
+            s3.wait_stream(s4)
+            with torch.cuda.stream(s3):
+                data2.fill_(3.0)
+                data2.record_stream(s3)
+
+            # First allocation of data3 before the graph is joined.
+            data3 = torch.ones(8, device="cuda")
+            # Second allocation of data3 after the graph is joined.
+            data3 = torch.ones(8, device="cuda")
+            # data3 should not reuse memory from data1, as the freed nodes from data1 are not yet available.
+            # At this point, the graph has two terminal nodes.
+            data3_ptr = data3.data_ptr()
+
+            s1.wait_stream(s3)
+
+            # First allocation of data4 before the graph is joined.
+            data4 = torch.ones(8, device="cuda")
+            # Second allocation of data4 after the graph is joined.
+            data4 = torch.ones(8, device="cuda")
+            # data4 should reuse memory from data1.
+            data4_ptr = data4.data_ptr()
+
+            g.capture_end()
+
+        torch.cuda.synchronize()
+        self.assertTrue(data1_ptr != data3_ptr)
+        self.assertTrue(data1_ptr == data4_ptr)
+        torch.cuda.memory._set_allocator_settings(
+            "reclaim_memory_in_graph_capture:False"
+        )
+
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
