@@ -1625,9 +1625,12 @@ class DeviceCachingAllocator {
     return block;
   }
 
-  // An "empty node" in a CUDA graph is a no-op node, used here to represent a
-  // free event within the graph.
-  cudaGraphNode_t insert_empty_node(CUDAStream stream) {
+  // Insert a "free marker" (an empty node) into the CUDA graph during capture.
+  // A free marker is a no-op node (cudaGraphAddEmptyNode) placed after the last
+  // captured use of a block on a given stream. This marks the "last use" of the
+  // block in the capture DAG for that stream. Later, we use these markers to
+  // determine when it is safe to reclaim the block.
+  cudaGraphNode_t insert_empty_node_as_free_marker(cudaStream_t stream) {
     cudaStreamCaptureStatus status{};
     cudaGraph_t currently_capturing_graph{};
     const cudaGraphNode_t* dependencies{};
@@ -1640,8 +1643,12 @@ class DeviceCachingAllocator {
         &dependencies,
         &num_dependencies));
 
-    // If the stream is not related to a capturing graph, return nullptr.
-    if (status != cudaStreamCaptureStatusActive) {
+    TORCH_INTERNAL_ASSERT(
+        status != cudaStreamCaptureStatusInvalidated,
+        "Invalid stream capture status");
+
+    // If the stream is not currently capturing, there is no graph to insert into.
+    if (status == cudaStreamCaptureStatusNone) {
       return nullptr;
     }
 
@@ -1655,42 +1662,104 @@ class DeviceCachingAllocator {
     return new_node;
   }
 
-  // CUDA graphs are modeled as directed acyclic graphs
+  // Find the current set of "terminals" (T) in the CUDA graph.
+  // A terminal is a node with out-degree 0 at the time of allocate(); intuitively,
+  // these are the current tails/frontiers of each active stream, and possibly more
+  // if the graph branches. Any new captured work will be attached after some terminal.
   //
-  // Definitions:
-  // - A "joined node" is any node with in-degree >= 2 (i.e., it has multiple
-  // parents).
-  // - A "joined path" is a path that leads to a joined node; equivalently, any
-  // ancestor of a joined node is on a joined path.
-  // - A "joined empty node" is an empty node that lies on at least one joined
-  // path, i.e., it can reach a joined node downstream.
-  //
-  // Note: The provided stream may not be capturing; if it is not, this function
-  // returns an empty set.
-  ska::flat_hash_set<cudaGraphNode_t> get_joined_empty_nodes(
-      cudaStream_t stream) {
-    cudaStreamCaptureStatus status{};
-    cudaGraph_t capturing_graph{};
-    const cudaGraphNode_t* dependencies = nullptr;
-    size_t num_dependencies = 0;
+  // Note: We do NOT rely on numDependencies from cudaStreamGetCaptureInfo;
+  // instead, we query the graph for roots and traverse from there.
+  std::vector<cudaGraphNode_t> get_terminals(cudaGraph_t graph) {
+    // Helper to get all children of a node.
+    auto get_children = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
+      size_t count = 0;
+      C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(n, /*pDependentNodes=*/nullptr, &count));
+      std::vector<cudaGraphNode_t> out(count);
+      if (count) {
+        C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(n, out.data(), &count));
+        out.resize(count);
+      }
+      return out;
+    };
 
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-        stream,
-        &status,
-        /*pId*/ nullptr,
-        &capturing_graph,
-        &dependencies,
-        &num_dependencies));
+    // Fetch root nodes of the graph.
+    size_t num_root_nodes = 0;
+    C10_CUDA_CHECK(cudaGraphGetRootNodes(graph, /*pRootNodes=*/nullptr, &num_root_nodes));
+    if (num_root_nodes == 0) {
+      // A valid capture should have roots; if not, nothing to do.
+      return {};
+    }
+    std::vector<cudaGraphNode_t> roots(num_root_nodes);
+    C10_CUDA_CHECK(cudaGraphGetRootNodes(graph, roots.data(), &num_root_nodes));
+    roots.resize(num_root_nodes);
 
-    if (status != cudaStreamCaptureStatusActive || num_dependencies == 0) {
+    // Forward DFS to find all terminal nodes (nodes with no children).
+    ska::flat_hash_set<cudaGraphNode_t> visited;
+    ska::flat_hash_set<cudaGraphNode_t> terminals_set;
+
+    std::function<void(cudaGraphNode_t)> forward_dfs = [&](cudaGraphNode_t node) {
+      if (!visited.insert(node).second) return;
+
+      auto children = get_children(node);
+      if (children.empty()) {
+        terminals_set.insert(node);
+        return;
+      }
+      for (auto c : children) {
+        forward_dfs(c);
+      }
+    };
+
+    for (auto r : roots) {
+      forward_dfs(r);
+    }
+
+    if (terminals_set.empty()) {
       return {};
     }
 
-    // Helper to get the parent nodes (dependencies) of a given node.
-    auto get_parents = [](cudaGraphNode_t n) {
+    std::vector<cudaGraphNode_t> terminals(terminals_set.begin(), terminals_set.end());
+    return terminals;
+  }
+
+  // Determine which free marker nodes (empty nodes) are "freeable" in the current CUDA graph capture.
+  // A free marker is freeable if it is a predecessor of every current terminal node,
+  // i.e., every terminal is a successor of the free marker. This means all future
+  // captured work will be after the free, so it is safe to reclaim the block.
+  //
+  // Returns the set of empty nodes that can reach every terminal node in the capture graph.
+  ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes(
+      cudaStream_t stream) {
+    cudaStreamCaptureStatus status{};
+    cudaGraph_t graph{};
+
+    // Only need capture status + graph handle.
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &status,
+        /*id=*/nullptr,
+        &graph,
+        /*dependencies=*/nullptr,
+        /*numDependencies=*/nullptr));
+
+    TORCH_INTERNAL_ASSERT(
+        status != cudaStreamCaptureStatusInvalidated,
+        "Invalid stream capture status");
+    if (status == cudaStreamCaptureStatusNone) {
+      // Stream is not capturing → no graph to traverse.
+      return {};
+    }
+
+    auto terminals = get_terminals(graph);
+    if (terminals.empty()) {
+      return {};
+    }
+
+    // Helper to get all parents of a node.
+    auto get_parents = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
       size_t count = 0;
-      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(
-          n, nullptr, &count)); // parents = dependencies
+      C10_CUDA_CHECK(
+          cudaGraphNodeGetDependencies(n, /*pDependencies=*/nullptr, &count));
       std::vector<cudaGraphNode_t> out(count);
       if (count) {
         C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, out.data(), &count));
@@ -1699,40 +1768,53 @@ class DeviceCachingAllocator {
       return out;
     };
 
-    // Helper to check if a node is an empty node.
-    auto is_empty_node = [](cudaGraphNode_t n) {
+    // Helper to check if a node is an empty node (free marker).
+    auto is_empty_node = [](cudaGraphNode_t n) -> bool {
       cudaGraphNodeType type{};
       C10_CUDA_CHECK(cudaGraphNodeGetType(n, &type));
       return type == cudaGraphNodeTypeEmpty;
     };
 
-    ska::flat_hash_set<cudaGraphNode_t> visited;
-    ska::flat_hash_set<cudaGraphNode_t> empty_nodes_on_joined_path;
+    // For each terminal, do a reverse DFS to count, for each empty node,
+    // how many terminals it can reach (i.e., is a predecessor of).
+    // If an empty node can reach all terminals, it is freeable.
+    ska::flat_hash_map<cudaGraphNode_t, size_t> num_terminals_reachable;
 
-    // The dependencies array contains the frontier nodes of the graph.
-    // We perform a reverse traversal from these frontiers.
-    // If we encounter a joined node (in-degree >= 2), all its ancestors are on
-    // a joined path. If we encounter an empty node on a joined path, it is a
-    // joined empty node.
-    std::function<void(cudaGraphNode_t, bool)> dfs =
-        [&](cudaGraphNode_t node, bool on_the_joined_path) {
-          if (!visited.insert(node).second)
-            return;
-          if (on_the_joined_path && is_empty_node(node)) {
-            empty_nodes_on_joined_path.insert(node);
-          }
-          auto parents = get_parents(node);
-          bool is_joined_node = parents.size() >= 2;
-          for (auto p : parents) {
-            dfs(p, on_the_joined_path || is_joined_node);
-          }
-        };
+    for (auto terminal : terminals) {
+      ska::flat_hash_set<cudaGraphNode_t> visited;
 
-    for (size_t i = 0; i < num_dependencies; ++i) {
-      dfs(dependencies[i], false);
+      std::function<void(cudaGraphNode_t)> reverse_dfs =
+          [&](cudaGraphNode_t node) {
+            if (!visited.insert(node).second)
+              return;
+
+            if (is_empty_node(node)) {
+              num_terminals_reachable[node]++;
+            }
+            auto parents = get_parents(node);
+            for (auto p : parents) {
+              reverse_dfs(p);
+            }
+          };
+
+      reverse_dfs(terminal);
     }
 
-    return empty_nodes_on_joined_path;
+    ska::flat_hash_set<cudaGraphNode_t> freeable_empty_nodes;
+    for (auto [node, count] : num_terminals_reachable) {
+      if (count == terminals.size()) {
+        freeable_empty_nodes.insert(node);
+      }
+    }
+
+    // Debug output: show which empty nodes can reach how many terminals.
+    std::cerr << "get_joined_empty_nodes results:\n";
+    for (auto [node, count] : num_terminals_reachable) {
+      std::cerr << "empty node: " << node << " can reach " << count
+                << " terminals, total terminals: " << terminals.size() << "\n";
+    }
+
+    return freeable_empty_nodes;
   }
 
   void free(Block* block) {
@@ -1778,13 +1860,22 @@ class DeviceCachingAllocator {
         // captures are underway)
         std::vector<cudaGraphNode_t> empty_nodes;
         if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
-          for (auto& stream : block->stream_uses) {
-            auto empty_node = insert_empty_node(stream);
+
+          auto add_empty_node = [&](cudaStream_t stream) {
+            auto empty_node = insert_empty_node_as_free_marker(stream);
             if (empty_node != nullptr) {
               empty_nodes.push_back(empty_node);
             }
+          };
+
+          for (auto& stream : block->stream_uses) {
+            add_empty_node(stream.stream());
           }
+          // we should also add empty node for the allocation stream
+          add_empty_node(block->stream);
+
         }
+        std::cerr << "deferred_blocks ptr: " << block->ptr << " size: " << block->size << " stream: " << block->stream << " size: " << block->size << std::endl;
         deferred_blocks.emplace(block, std::move(empty_nodes));
       } else {
         insert_events(block);
@@ -3422,6 +3513,7 @@ class DeviceCachingAllocator {
         remove_cudagraph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {
+          std::cerr << "post-graph free_blocks ptr: " << block->ptr << " size: " << block->size << " stream: " << block->stream << " size: " << block->size << std::endl;
           free_block(block, context);
         }
       }
@@ -3429,42 +3521,51 @@ class DeviceCachingAllocator {
     }
   }
 
-  // A block is safe to free if all its inserted empty nodes are
-  // on a "joined path" in the graph, meaning they are guaranteed to be
-  // synchronized with all relevant graph execution. This function checks for
-  // such blocks and frees them if possible.
+  // Determines if deferred blocks are safe to free during CUDA graph capture.
+  // A block is considered safe to free if all of its inserted empty nodes can
+  // reach every terminal node in the capture graph. In this case, the free
+  // operation is guaranteed to occur before the terminal node executes,
+  // ensuring the safety of the free operation.
+  //
+  // If an empty node cannot reach every terminal node, we cannot guarantee the
+  // block is safe to free at this point.
+  //
+  // This function checks each deferred block's empty nodes to see if they can
+  // reach every terminal node, and frees the block if so.
   void capture_safe_free_blocks(
       const std::shared_ptr<GatheredContext>& context,
       cudaStream_t stream) {
-    auto joined_empty_nodes = get_joined_empty_nodes(stream);
+    auto freeable_empty_nodes = get_freeable_empty_nodes(stream);
 
     // If the stream is not currently capturing, there are no joined empty
     // nodes, so nothing to do.
-    if (joined_empty_nodes.empty()) {
+    if (freeable_empty_nodes.empty()) {
       return;
     }
 
     std::vector<Block*> blocks_to_erase;
 
     for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
-      bool all_nodes_joined = true;
+      bool is_freeable = true;
 
-      // Check if all empty nodes associated with this block are on a joined
-      // path.
-      for (const auto& node : inserted_empty_nodes) {
-        if (joined_empty_nodes.find(node) == joined_empty_nodes.end()) {
-          all_nodes_joined = false;
+      for (const auto& free_node : inserted_empty_nodes) {
+        if (freeable_empty_nodes.find(free_node) ==
+            freeable_empty_nodes.end()) {
+          is_freeable = false;
           break;
         }
       }
 
-      // If all empty nodes are joined, the block is safe to free.
-      if (all_nodes_joined) {
+      // If all empty nodes are freeable, the block is safe to free.
+      if (is_freeable) {
         // Clear stream uses, as the graph guarantees synchronization.
         // No need to insert events, since event queries are not allowed during
         // capture.
         block->stream_uses.clear();
 
+        std::cerr << "capture-safe free_blocks ptr: " << block->ptr
+                  << " size: " << block->size << " stream: " << block->stream
+                  << " size: " << block->size << std::endl;
         free_block(block, context);
         blocks_to_erase.push_back(block);
       }
