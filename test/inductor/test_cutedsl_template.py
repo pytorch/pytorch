@@ -49,7 +49,7 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
     kernel.launch(
         grid=[num_blocks, 1, 1],
         block=[THREADS_PER_BLOCK, 1, 1],
-        stream=stream
+        stream=cuda.CUstream(stream)
     )
 
 {{def_kernel("input_a", "input_b", "output_c")}}

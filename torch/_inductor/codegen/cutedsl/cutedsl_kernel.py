@@ -106,6 +106,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cutlass
             import cutlass.cute as cute
             from cutlass.cute.runtime import from_dlpack
+            import cuda.bindings.driver as cuda
             """
         )
         return imports.getvalue()
