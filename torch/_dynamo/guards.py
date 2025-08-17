@@ -3429,6 +3429,7 @@ class CheckFunctionManager:
         self.guards_state: Optional[bytes] = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraph
+
             assert isinstance(self.output_graph, OutputGraph)
             self.guards_state = self.serialize_guards(sorted_guards, self.output_graph)
 
