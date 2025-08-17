@@ -3127,10 +3127,14 @@ class NcclRegistrationTest(MultiProcessTestCase):
     @requires_multicast_support()
     def test_nccl_user_buffer_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
         device = torch.device(f"cuda:{self.rank}")
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            device_id=device,
+        )
         torch.cuda.set_device(self.rank)
         pg = c10d.distributed_c10d._get_default_group()
         backend = pg._get_backend(torch.device(device))
@@ -3172,35 +3176,42 @@ class NcclRegistrationTest(MultiProcessTestCase):
     @requires_multicast_support()
     def test_nccl_window_registration(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
         device = torch.device(f"cuda:{self.rank}")
-        torch.cuda.set_device(self.rank)
-        pg = c10d.distributed_c10d._get_default_group()
-        backend = pg._get_backend(torch.device(device))
+        with torch.cuda.device(device):
+            # Eager init the nccl comm so that we don't implicitly create one during register_mem_pool
+            c10d.init_process_group(
+                backend="nccl",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+                device_id=device,
+            )
+            pg = c10d.distributed_c10d._get_default_group()
+            backend = pg._get_backend(torch.device(device))
 
-        # Use NCCL memory allocator
-        # enable symmetric memory usage in NCCL
-        pool = torch.cuda.MemPool(backend.mem_allocator, symmetric=True)
+            # Use NCCL memory allocator
+            # enable symmetric memory usage in NCCL
+            pool = torch.cuda.MemPool(backend.mem_allocator, symmetric=True)
 
-        # allocate memory with ncclMemAlloc
-        # note: symmetric kernels are not available for dtypes like torch.int64
-        with torch.cuda.use_mem_pool(pool):
-            tensor = torch.arange(1024 * 1024 * 2, device=device, dtype=torch.float32)
+            # allocate memory with ncclMemAlloc
+            # note: symmetric kernels are not available for dtypes like torch.int64
+            with torch.cuda.use_mem_pool(pool):
+                tensor = torch.arange(
+                    1024 * 1024 * 2, device=device, dtype=torch.float32
+                )
 
-        # register buffers to NCCL
-        backend.register_mem_pool(pool)
+            # register buffers to NCCL
+            backend.register_mem_pool(pool)
 
-        # allreduce now should use NVIDIA Switches
-        pg.allreduce(tensor).wait()
-        torch.cuda.synchronize(device=device)
+            # allreduce now should use NVIDIA Switches
+            pg.allreduce(tensor).wait()
+            torch.cuda.synchronize(device=device)
 
-        # de-register buffers from NCCL
-        backend.deregister_mem_pool(pool)
+            # de-register buffers from NCCL
+            backend.deregister_mem_pool(pool)
 
-        # clean up memory
-        del tensor, pool
+            # clean up memory
+            del tensor, pool
 
         with open(os.environ["NCCL_DEBUG_FILE"]) as f:
             nccl_debug_file_content = f.read()
