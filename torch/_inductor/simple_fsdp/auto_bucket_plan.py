@@ -289,7 +289,6 @@ def get_bucketing_plan(
                 ) * (1+config.simplefsdp.relax_ratio) < (
                     estimated_comm
                     + heuristic_info["last_step_rs_comm"]
-                    * (1 + config.simplefsdp.relax_ratio)
                 )
             if (
                 break_overlap_criteria
