@@ -17,8 +17,11 @@ namespace at::native {
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
 
-    // using meta bit test to catch Fake Tensor as well until __torch_function__
+    // Route Meta and Fake tensors (dynamic shape tracing) to functional path.
+    // The MetaBit check was intended to catch Fake Tensor as well; explicitly
+    // include Fake dispatch key to be robust under dynamo/functorch tracing.
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
+            self.key_set().has_all(DispatchKeySet(DispatchKey::Fake)) ||
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
         // functional version that torch.compiles better and works with dynamic shapes
         if (num_classes == -1) {
@@ -28,16 +31,16 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         return at::eq(self.unsqueeze(-1), index).to(kLong);
     }
 
-    auto shape = self.sizes().vec();
+    auto shape = self.sym_sizes().vec();
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
-    if (self.numel() == 0) {
+    if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
             TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
-            shape.push_back(num_classes);
-            return at::empty(shape, self.options());
+            shape.emplace_back(num_classes);
+            return at::empty_symint(shape, self.options());
         }
     }
 
@@ -60,8 +63,8 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
-    shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, self.options());
+    shape.emplace_back(num_classes);
+    Tensor ret = at::zeros_symint(shape, self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }
