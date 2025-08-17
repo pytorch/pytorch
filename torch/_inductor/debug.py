@@ -319,6 +319,7 @@ _inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
+_inductor_kernel_stack_trace: dict[str, list[str]] = {}
 
 
 @contextlib.contextmanager
@@ -328,6 +329,8 @@ def reset_provenance_globals() -> Iterator[None]:
     global _pre_grad_graph_id
     global _inductor_post_to_pre_grad_nodes
     global _inductor_triton_kernel_to_post_grad_node_info
+    global _inductor_pre_grad_node_stack_trace
+    global _inductor_kernel_stack_trace
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -335,11 +338,17 @@ def reset_provenance_globals() -> Iterator[None]:
     original_triton_kernel_to_post_grad_node_info = (
         _inductor_triton_kernel_to_post_grad_node_info.copy()
     )
+    original_inductor_pre_grad_node_stack_trace = (
+        _inductor_pre_grad_node_stack_trace.copy()
+    )
+    original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
 
     # Reset to default values
     _pre_grad_graph_id = -1
     _inductor_post_to_pre_grad_nodes = {}
     _inductor_triton_kernel_to_post_grad_node_info = {}
+    _inductor_pre_grad_node_stack_trace = {}
+    _inductor_kernel_stack_trace = {}
 
     try:
         yield
@@ -349,6 +358,10 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_post_to_pre_grad_nodes = original_post_to_pre_grad_nodes
         _inductor_triton_kernel_to_post_grad_node_info = (
             original_triton_kernel_to_post_grad_node_info
+        )
+        _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
+        _inductor_pre_grad_node_stack_trace = (
+            original_inductor_pre_grad_node_stack_trace
         )
 
 
@@ -942,6 +955,7 @@ def set_kernel_post_grad_provenance_tracing(
         from .codegen.simd_kernel_features import DisableReduction, EnableReduction
 
         global _inductor_triton_kernel_to_post_grad_node_info
+        global _inductor_kernel_stack_trace
         if is_extern:
             assert isinstance(node_schedule, ExternKernelOut)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
@@ -960,8 +974,12 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
+            _inductor_kernel_stack_trace[kernel_name] = list(
+                node_schedule.get_stack_traces()
+            )
         else:
             assert isinstance(node_schedule, list)
+            stack_traces: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
                 if snode not in (EnableReduction, DisableReduction):
                     if snode.node is not None:
@@ -970,11 +988,13 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
+                        stack_traces.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
+            _inductor_kernel_stack_trace[kernel_name] = list(stack_traces)
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
