@@ -3544,14 +3544,15 @@ class DeviceCachingAllocator {
     }
   }
 
-  // Check if deferred blocks are safe to free during CUDA graph capture.
-  // A deferred block is safe to free if all of its associated "empty nodes"
-  // (free markers) are predecessors of every terminal node in the current
-  // capture graph. This ensures that the free operation will always occur
-  // before any terminal node executes, making it safe.
+  // A block is reclaimable during capture iff EVERY free-marker we inserted for
+  // that block is a predecessor of EVERY current terminal (out-degree-0 node)
+  // in the capture DAG.
   //
-  // If any empty node for a block is not a predecessor of all terminal nodes,
-  // the block cannot be safely freed yet and must remain deferred.
+  // Any newly captured op will attach after some terminal. If all terminals are
+  // after all free-markers, then all future work is ordered after the block's
+  // last use on every stream, so the old lifetime ends before any new lifetime
+  // begins. We make this decision purely from DAG topology (no event queries)
+  // to remain legal during capture.
   //
   // This function iterates over all deferred blocks, checks if their empty
   // nodes are freeable, and frees the block if so.
