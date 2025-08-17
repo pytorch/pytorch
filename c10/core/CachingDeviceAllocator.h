@@ -853,7 +853,6 @@ struct AllocParams {
 };
 
 template <
-    c10::DeviceType StaticDeviceType,
     typename StreamT,
     typename EventT,
     typename BlockT = DeviceBlock<StreamT>,
@@ -862,8 +861,6 @@ struct CachingDeviceAllocatorImpl {
   using BlockPoolT = BlockPool<BlockT>;
   using PrivatePoolT = PrivatePool<BlockT>;
   using AllocParamsT = AllocParams<StreamT, BlockT>;
-
-  static constexpr c10::DeviceType static_device_type = StaticDeviceType;
 
   virtual ~CachingDeviceAllocatorImpl() = default;
 
@@ -1148,10 +1145,8 @@ struct CachingDeviceAllocatorImpl {
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
-    static const std::string key = "pytorch." +
-        c10::DeviceTypeName(static_device_type) +
-        "CachingAllocator.reserved_bytes";
-    auto reserved_bytes_gauge = STATIC_GAUGE_STR(key);
+    auto reserved_bytes_gauge =
+        STATIC_GAUGE(pytorch.CachingAllocator.reserved_bytes);
     reserved_bytes_gauge.record(
         stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
             .current);
