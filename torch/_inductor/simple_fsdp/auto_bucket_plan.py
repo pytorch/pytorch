@@ -244,10 +244,9 @@ def get_bucketing_plan(
                     comm_cache,
                 )
             )
-            break_overlap_criteria = heuristic_info["this_step_comp"] < (
+            break_overlap_criteria = heuristic_info["this_step_comp"] * (1 + config.simplefsdp.relax_ratio) < (
                 estimated_comm
                 + heuristic_info["last_step_rs_comm"]
-                * (1 + config.simplefsdp.relax_ratio)
             )
             if not has_reduce_scatter:
                 break_comm_size_criteria = comm_cache.ag_max_inp_size < comm_size_inp
