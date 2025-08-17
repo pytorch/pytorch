@@ -3460,10 +3460,9 @@ class CheckFunctionManager:
                 (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES),
                 None
             ):
-                assert len(failed) > 0
                 # Just raise the first failed guard name
                 raise torch._dynamo.exc.PackageError(
-                    f"{failed[0]} guard cannot be serialized."
+                    f"{failed} guard cannot be serialized."
                 )
 
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
