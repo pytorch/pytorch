@@ -1647,7 +1647,8 @@ class DeviceCachingAllocator {
         status != cudaStreamCaptureStatusInvalidated,
         "Invalid stream capture status");
 
-    // If the stream is not currently capturing, there is no graph to insert into.
+    // If the stream is not currently capturing, there is no graph to insert
+    // into.
     if (status == cudaStreamCaptureStatusNone) {
       return nullptr;
     }
@@ -1663,17 +1664,20 @@ class DeviceCachingAllocator {
   }
 
   // Find the current set of "terminals" (T) in the CUDA graph.
-  // A terminal is a node with out-degree 0 at the time of allocate(); intuitively,
-  // these are the current tails/frontiers of each active stream, and possibly more
-  // if the graph branches. Any new captured work will be attached after some terminal.
+  // A terminal is a node with out-degree 0 at the time of allocate();
+  // intuitively, these are the current tails/frontiers of each active stream,
+  // and possibly more if the graph branches. Any new captured work will be
+  // attached after some terminal.
   //
-  // Note: We do NOT rely on numDependencies from cudaStreamGetCaptureInfo;
-  // instead, we query the graph for roots and traverse from there.
+  // Note: We do NOT rely on dependent nodes returned by
+  // cudaStreamGetCaptureInfo; instead, we query the graph for roots and
+  // traverse from there.
   std::vector<cudaGraphNode_t> get_terminals(cudaGraph_t graph) {
     // Helper to get all children of a node.
     auto get_children = [](cudaGraphNode_t n) -> std::vector<cudaGraphNode_t> {
       size_t count = 0;
-      C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(n, /*pDependentNodes=*/nullptr, &count));
+      C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(
+          n, /*pDependentNodes=*/nullptr, &count));
       std::vector<cudaGraphNode_t> out(count);
       if (count) {
         C10_CUDA_CHECK(cudaGraphNodeGetDependentNodes(n, out.data(), &count));
@@ -1684,7 +1688,8 @@ class DeviceCachingAllocator {
 
     // Fetch root nodes of the graph.
     size_t num_root_nodes = 0;
-    C10_CUDA_CHECK(cudaGraphGetRootNodes(graph, /*pRootNodes=*/nullptr, &num_root_nodes));
+    C10_CUDA_CHECK(
+        cudaGraphGetRootNodes(graph, /*pRootNodes=*/nullptr, &num_root_nodes));
     if (num_root_nodes == 0) {
       // A valid capture should have roots; if not, nothing to do.
       return {};
@@ -1697,18 +1702,20 @@ class DeviceCachingAllocator {
     ska::flat_hash_set<cudaGraphNode_t> visited;
     ska::flat_hash_set<cudaGraphNode_t> terminals_set;
 
-    std::function<void(cudaGraphNode_t)> forward_dfs = [&](cudaGraphNode_t node) {
-      if (!visited.insert(node).second) return;
+    std::function<void(cudaGraphNode_t)> forward_dfs =
+        [&](cudaGraphNode_t node) {
+          if (!visited.insert(node).second)
+            return;
 
-      auto children = get_children(node);
-      if (children.empty()) {
-        terminals_set.insert(node);
-        return;
-      }
-      for (auto c : children) {
-        forward_dfs(c);
-      }
-    };
+          auto children = get_children(node);
+          if (children.empty()) {
+            terminals_set.insert(node);
+            return;
+          }
+          for (auto c : children) {
+            forward_dfs(c);
+          }
+        };
 
     for (auto r : roots) {
       forward_dfs(r);
@@ -1718,16 +1725,19 @@ class DeviceCachingAllocator {
       return {};
     }
 
-    std::vector<cudaGraphNode_t> terminals(terminals_set.begin(), terminals_set.end());
+    std::vector<cudaGraphNode_t> terminals(
+        terminals_set.begin(), terminals_set.end());
     return terminals;
   }
 
-  // Determine which free marker nodes (empty nodes) are "freeable" in the current CUDA graph capture.
-  // A free marker is freeable if it is a predecessor of every current terminal node,
-  // i.e., every terminal is a successor of the free marker. This means all future
-  // captured work will be after the free, so it is safe to reclaim the block.
+  // Determine which free marker nodes (empty nodes) are "freeable" in the
+  // current CUDA graph capture. A free marker is freeable if it is a
+  // predecessor of every current terminal node, i.e., every terminal is a
+  // successor of the free marker. This means all future captured work will be
+  // after the free, so it is safe to reclaim the block.
   //
-  // Returns the set of empty nodes that can reach every terminal node in the capture graph.
+  // Returns the set of empty nodes that can reach every terminal node in the
+  // capture graph.
   ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes(
       cudaStream_t stream) {
     cudaStreamCaptureStatus status{};
@@ -1860,7 +1870,6 @@ class DeviceCachingAllocator {
         // captures are underway)
         std::vector<cudaGraphNode_t> empty_nodes;
         if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
-
           auto add_empty_node = [&](cudaStream_t stream) {
             auto empty_node = insert_empty_node_as_free_marker(stream);
             if (empty_node != nullptr) {
@@ -1873,9 +1882,10 @@ class DeviceCachingAllocator {
           }
           // we should also add empty node for the allocation stream
           add_empty_node(block->stream);
-
         }
-        std::cerr << "deferred_blocks ptr: " << block->ptr << " size: " << block->size << " stream: " << block->stream << " size: " << block->size << std::endl;
+        std::cerr << "deferred_blocks ptr: " << block->ptr
+                  << " size: " << block->size << " stream: " << block->stream
+                  << " size: " << block->size << std::endl;
         deferred_blocks.emplace(block, std::move(empty_nodes));
       } else {
         insert_events(block);
@@ -3513,7 +3523,9 @@ class DeviceCachingAllocator {
         remove_cudagraph_stream_uses(block);
         insert_events(block);
         if (block->event_count == 0) {
-          std::cerr << "post-graph free_blocks ptr: " << block->ptr << " size: " << block->size << " stream: " << block->stream << " size: " << block->size << std::endl;
+          std::cerr << "post-graph free_blocks ptr: " << block->ptr
+                    << " size: " << block->size << " stream: " << block->stream
+                    << " size: " << block->size << std::endl;
           free_block(block, context);
         }
       }
