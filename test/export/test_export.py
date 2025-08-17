@@ -7240,7 +7240,7 @@ graph():
     %to : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%to,), kwargs = {})
     %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
-    %tree_unflatten : [num_users=1] = call_function[target=torch.utils.pytree.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
+    %tree_unflatten : [num_users=1] = call_function[target=torch.utils.pytree.python.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
     return tree_unflatten""",
         )
 
