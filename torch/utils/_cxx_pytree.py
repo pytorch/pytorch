@@ -1007,7 +1007,7 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
-class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
+class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):  # type: ignore[misc,final]
     def __new__(cls) -> "LeafSpec":
         return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
 

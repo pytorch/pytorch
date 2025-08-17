@@ -25,6 +25,7 @@ if torch.backends.mps.is_available():
             "__rsub__",
             "__getitem__",
             "_unsafe_masked_index",
+            "_unsafe_masked_index_put_accumulate",
             "abs",
             "add",
             "alias_copy",
@@ -75,6 +76,7 @@ if torch.backends.mps.is_available():
             "imag",
             "index_copy",
             "index_select",
+            "index_put",
             "isfinite",
             "isinf",
             "isreal",
@@ -284,85 +286,6 @@ if torch.backends.mps.is_available():
             "where",
             "byte",
         }
-        # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
-        MACOS_BEFORE_13_3_XFAILLIST = {
-            # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-            "cdist": [torch.float32],
-            # CPU Error: cpu not giving nan for x/0.0
-            "atan2": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
-            # test blow pass on macOS 12 as it falls back to cpu
-            # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
-            #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
-            # Elements from index 30 and 5133 are both equal.
-            # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
-            "argsort": [torch.float16, torch.int8, torch.uint8, torch.bool],
-            # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
-            # The values of the sorted tensor match the CPU,
-            # but in case of the returned indices this results in undefined behaviour.
-            "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
-            # Unsupported dtypes
-            "cumsum": [torch.int64],
-            "cumprod": [torch.int64],
-            "cumulative_trapezoid": [torch.int64],
-            "masked.cumsum": [torch.int64],
-            "masked.cumprod": [torch.int64],
-            "linalg.vander": [torch.int64],
-            # Fail with `Expected 1.0 but got nan.` for empty tensors
-            # Caused by sample input at index 23: SampleInput(
-            #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
-            #     args=(0),
-            #     kwargs={'mask': 'Tensor[size=(), device="mps:0", dtype=torch.bool]'},
-            #     broadcasts_input=False, name='')
-            "masked.softmin": [torch.float32, torch.float16],
-            "masked.softmax": [torch.float32, torch.float16],
-            "masked.log_softmax": [torch.float32, torch.float16],
-        }
-
-        MACOS_AFTER_13_1_XFAILLIST = {
-            # before macOS 13.2 it falls back to cpu and pass the forward pass
-            "grid_sampler_2d": [
-                torch.float32,
-                torch.float16,
-                torch.bfloat16,
-            ],  # Unsupported Border padding mode
-        }
-
-        MACOS_13_3_XFAILLIST = {
-            # Failure due to precision issue for fp16
-            # on both cpu and mps there are test cases that might produce inf result
-            # 'nn.functional.pairwise_distance': [torch.float16],
-            # test blow pass on macOS 12 as it falls back to cpu
-            # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
-            #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
-            # Elements from index 30 and 5133 are both equal.
-            # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
-            "argsort": [
-                torch.float16,
-                torch.int8,
-                torch.uint8,
-                torch.bool,
-                torch.bfloat16,
-            ],
-            # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
-            # The values of the sorted tensor match the CPU,
-            # but in case of the returned indices this results in undefined behaviour.
-            "sort": [
-                torch.int8,
-                torch.uint8,
-                torch.bool,
-                torch.float16,
-                torch.bfloat16,
-            ],
-        }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
             # These ops work fine in 14.4 but fail in 14.2 or 13.x
@@ -495,7 +418,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
             ],
             # Unsupported dtypes
-            "dot": [torch.int64] if MACOS_VERSION < 14.0 else [],
             "histc": [torch.float16, torch.bfloat16],
             "index_add": [torch.int64],
             # GEMM on MPS is not supported for integral types
@@ -506,19 +428,9 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            "addmmdecomposed": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             "addbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-            "addmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "baddbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-            "matmul": [torch.int64] if MACOS_VERSION < 14.0 else [],
-            "__rmatmul__": [torch.int64] if MACOS_VERSION < 14.0 else [],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -623,6 +535,38 @@ if torch.backends.mps.is_available():
             "linalg.matrix_rank": None,
             # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
             "arange": [torch.uint8],
+            # before macOS 13.2 it falls back to cpu and pass the forward pass
+            "grid_sampler_2d": [
+                torch.float32,
+                torch.float16,
+                torch.bfloat16,
+            ],  # Unsupported Border padding mode
+            # Failure due to precision issue for fp16
+            # on both cpu and mps there are test cases that might produce inf result
+            # 'nn.functional.pairwise_distance': [torch.float16],
+            # test blow pass on macOS 12 as it falls back to cpu
+            # Argsort case using duplicate indices (undefined behaviour):
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
+            #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+            # Elements from index 30 and 5133 are both equal.
+            # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+            "argsort": [
+                torch.float16,
+                torch.int8,
+                torch.uint8,
+                torch.bool,
+                torch.bfloat16,
+            ],
+            # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+            # The values of the sorted tensor match the CPU,
+            # but in case of the returned indices this results in undefined behaviour.
+            "sort": [
+                torch.int8,
+                torch.uint8,
+                torch.bool,
+                torch.float16,
+                torch.bfloat16,
+            ],
         }
 
         EMPTY_OPS_SKIPLIST = {
@@ -644,6 +588,10 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
+            # The CPU impl of grid_sampler_3d does not use opmath_t, so it has a
+            # large amount of error compared with the MPS impl for half
+            # precision types. So we have to skip these for now.
+            "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -690,43 +638,6 @@ if torch.backends.mps.is_available():
                     ),
                 )
 
-            if (
-                key in MACOS_BEFORE_13_3_XFAILLIST
-                and key not in xfail_exclusion
-                and (torch.backends.mps.is_macos13_or_newer() and MACOS_VERSION < 13.3)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_13_3_XFAILLIST[key],
-                    ),
-                )
-
-            if (
-                key in MACOS_AFTER_13_1_XFAILLIST
-                and key not in xfail_exclusion
-                and torch.backends.mps.is_macos13_or_newer(2)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_AFTER_13_1_XFAILLIST[key]
-                    ),
-                )
-
-            if (
-                key in MACOS_13_3_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION >= 13.3)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST[key]
-                    ),
-                )
-
             # If ops is not supported for complex types, expect it to fail
             if key not in SUPPORTED_COMPLEX_OPS:
                 addDecorator(
@@ -751,6 +662,7 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": [torch.float32],
             "masked.scatter": [torch.float16, torch.float32],
+            "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
@@ -874,8 +786,6 @@ if torch.backends.mps.is_available():
             "clamp_min",
             "masked_scatter",
             # unsupported float64 dtype
-            "cat",
-            "complex",
             "multinomial",
             "nn.functional.conv1d",
             "nn.functional.conv2d",
