@@ -449,7 +449,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            # "conj_physical": None,
             "deg2rad": None,
             "erf": None,
             "expm1": None,
@@ -474,13 +473,11 @@ if torch.backends.mps.is_available():
             "asin": None,
             "isnan": None,
             "isinf": None,
-            # "conj": None,
             "atan": None,
             "atanh": None,
             "ceil": None,
             "relu": None,
             "nn.functional.relu": None,
-            # "positive": None,
         }
 
         if MACOS_VERSION < 15.0:
@@ -632,6 +629,13 @@ if torch.backends.mps.is_available():
             # precision types. So we have to skip these for now.
             "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
+        SKIPLIST_SPARSE = {
+            "abs": None,
+            "trunc": None,
+            "conj": None,
+            "conj_physical": None,
+            "positive": None,
+        }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
             if device_type is not None:
@@ -641,6 +645,24 @@ if torch.backends.mps.is_available():
 
         for op in ops:
             key = op.name + op.variant_test_name
+            if key in SKIPLIST_SPARSE:
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.skip(
+                            "MPS does not support float64 (double) or complex128 (cdouble)"
+                        ),
+                        # TODO index_add on mps doesn't support int64, is buggy on cfloat and chalf(issue #160845)
+                        # remove the dtype here once there is a metal shader for it
+                        dtypes=[
+                            torch.double,
+                            torch.cdouble,
+                            torch.int64,
+                            torch.cfloat,
+                            torch.chalf,
+                        ],
+                    ),
+                )
             if key in EMPTY_OPS_SKIPLIST:
                 addDecorator(
                     op,

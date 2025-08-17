@@ -6,7 +6,6 @@ import itertools
 import functools
 import operator
 import random
-import copy
 import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dtypes, \
@@ -16,7 +15,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
-from torch.testing._internal.common_dtype import get_all_dtypes
 from numbers import Number
 from typing import Any
 from packaging import version
@@ -45,9 +43,6 @@ def _op_supports_any_sparse(op):
             or op.supports_sparse_bsc)
 
 
-test_consistency_op_db = copy.deepcopy(op_db)
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 reduction_ops_with_sparse_support = [
     op for op in reduction_ops if 'masked.' not in op.name and
     _op_supports_any_sparse(op) and not isinstance(op, ReductionPythonRefInfo)]
@@ -4131,16 +4126,13 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs), dtypes=OpDTypes.supported, allowed_dtypes=MPS_DTYPES)
+_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs), dtypes=OpDTypes.supported)
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
 
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
-        if self.device_type == 'mps' and dtype in {torch.double, torch.cfloat, torch.cdouble, torch.int64}:
-            # TODO index_add on mps doesn't support int64, remove the above check once there is a metal kernel for it
-            self.skipTest(f"Skipping test_sparse_consistency for dtype {dtype} on MPS backend.")
         sample = first_sample(self, op.sample_inputs(device, dtype))
         assert isinstance(sample.input, torch.Tensor)
 
@@ -4152,8 +4144,6 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_out(self, device, dtype, op):
-        if self.device_type == 'mps' and dtype in {torch.double, torch.cfloat, torch.cdouble}:
-            self.skipTest(f"Skipping test_out for dtype {dtype} on MPS backend.")
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
 
@@ -4168,8 +4158,6 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_inplace(self, device, dtype, op):
-        if self.device_type == 'mps' and dtype in {torch.double, torch.cfloat, torch.cdouble}:
-            self.skipTest(f"Skipping test_out for dtype {dtype} on MPS backend.")
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
 
@@ -4210,8 +4198,6 @@ class TestSparseUnaryUfuncs(TestCase):
     @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
     def test_sparse_fn_grad(self, device, dtype, op):
-        if self.device_type == 'mps' and dtype in {torch.double, torch.cfloat, torch.cdouble}:
-            self.skipTest(f"Skipping test_out for dtype {dtype} on MPS backend.")
         if not op.supports_autograd:
             self.skipTest("Skipped! Op doesn't support autograd")
 
