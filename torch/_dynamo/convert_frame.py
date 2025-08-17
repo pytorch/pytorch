@@ -879,7 +879,6 @@ def _compile(
     dynamo_time_before_restart: float = 0.0
     tracer_output: Optional[DynamoTracerOutput] = None
 
-    @preserve_global_state
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
@@ -1412,8 +1411,8 @@ def _compile(
             # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
-                    tracer.error_on_graph_break
-                    if tracer
+                    tracer_output.error_on_graph_break
+                    if tracer_output
                     else _get_error_on_graph_break()
                 )
 
