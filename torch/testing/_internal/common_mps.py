@@ -531,6 +531,45 @@ if torch.backends.mps.is_available():
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
         }
+        UNIMPLEMENTED_XFAILLIST_SPARSE = {
+            "logspace": None,
+            "logspacetensor_overload": None,
+            "linalg.eig": None,
+            "linalg.eigvals": None,
+            "put": None,
+            # "conj_physical": None,
+            "deg2rad": None,
+            "erf": None,
+            "expm1": None,
+            "floor": None,
+            "frac": None,
+            "isneginf": None,
+            "isposinf": None,
+            "log1p": None,
+            "nan_to_num": None,
+            "neg": None,
+            "rad2deg": None,
+            "round": None,
+            "sgn": None,
+            "sign": None,
+            "signbit": None,
+            "sin": None,
+            "sinh": None,
+            "sqrt": None,
+            "tan": None,
+            "tanh": None,
+            "asinh": None,
+            "asin": None,
+            "isnan": None,
+            "isinf": None,
+            # "conj": None,
+            "atan": None,
+            "atanh": None,
+            "ceil": None,
+            "relu": None,
+            "nn.functional.relu": None,
+            # "positive": None,
+        }
 
         if MACOS_VERSION < 15.0:
             UNIMPLEMENTED_XFAILLIST.update(
@@ -668,6 +707,7 @@ if torch.backends.mps.is_available():
                 )
             for xfaillist in [
                 UNIMPLEMENTED_XFAILLIST,
+                UNIMPLEMENTED_XFAILLIST_SPARSE,
                 UNDEFINED_XFAILLIST,
                 ON_MPS_XFAILLIST,
             ]:
