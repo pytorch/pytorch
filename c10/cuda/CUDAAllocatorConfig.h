@@ -110,8 +110,22 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_use_async_allocator;
   }
 
+  // Use `Construct On First Use Idiom` to avoid `Static Initialization Order`
+  // issue.
   static const std::unordered_set<std::string>& getKeys() {
-    return keys_;
+    static std::unordered_set<std::string> keys{
+        "backend",
+        // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
+        // NOLINTBEGIN(bugprone-suspicious-missing-comma,-warnings-as-errors)
+        "release_lock_on_cud"
+        "amalloc",
+        "pinned_use_cud"
+        "a_host_register",
+        // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
+        "release_lock_on_hipmalloc",
+        "pinned_use_hip_host_register",
+        "pinned_num_register_threads"};
+    return keys;
   }
 
   static CUDAAllocatorConfig& instance() {
@@ -163,18 +177,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_use_async_allocator{false};
   std::atomic<bool> m_is_allocator_loaded{false};
-  inline static std::unordered_set<std::string> keys_{
-      "backend",
-      // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
-      // NOLINTBEGIN(bugprone-suspicious-missing-comma,-warnings-as-errors)
-      "release_lock_on_cud"
-      "amalloc",
-      "pinned_use_cud"
-      "a_host_register",
-      // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
-      "release_lock_on_hipmalloc",
-      "pinned_use_hip_host_register",
-      "pinned_num_register_threads"};
 };
 
 // Keep this for backwards compatibility
