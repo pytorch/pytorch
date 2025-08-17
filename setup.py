@@ -269,6 +269,7 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
+import contextlib
 import filecmp
 import glob
 import importlib
@@ -282,8 +283,9 @@ import textwrap
 import time
 import zipfile
 from collections import defaultdict
+from configparser import ConfigParser
 from pathlib import Path
-from typing import Any, ClassVar, IO
+from typing import Any, ClassVar, IO, TYPE_CHECKING
 
 import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
@@ -324,6 +326,10 @@ from tools.setup_helpers.env import (
     IS_WINDOWS,
 )
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 def str2bool(value: str | None) -> bool:
@@ -509,7 +515,97 @@ def get_submodule_folders() -> list[Path]:
         ]
 
 
-def check_submodules() -> None:
+def initialize_git_repository() -> None:
+    """Initialize the git repository if it does not already exist."""
+    if (CWD / ".git").exists():
+        # If the .git directory exists, we assume the repository is already
+        # initialized via a git clone.
+        return
+
+    report(" --- Initializing git repository")
+    start = time.perf_counter()
+
+    commands = (
+        ["git", "init", "--initial-branch=main"],
+        ["git", "config", "user.name", "PyTorch Team"],
+        ["git", "config", "user.email", "packages@pytorch.org"],
+        ["git", "config", "advice.detachedHead", "false"],
+        ["git", "remote", "add", "origin", "https://github.com/pytorch/pytorch.git"],
+        ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
+    )
+    try:
+        for cmd in commands:
+            subprocess.check_call(cmd, cwd=CWD)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
+        sys.exit(1)
+
+    # We just initialized the git repository rather than using a clone, we need
+    # to add the submodules manually. Because `git submodule update --init` will
+    # not clone submodules if the submodules are not staged/committed in the
+    # fresh git history.
+    report(" --- Git repository initialized, now registering submodules")
+
+    git_modules = ConfigParser()
+    git_modules.read([CWD / ".gitmodules"], encoding="utf-8")
+    try:
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            path: str = submodule["path"]
+            url: str = submodule["url"]
+            branch: str | None = submodule.get("branch")
+            report(f" --- Adding submodule {path} from {url}")
+            subprocess.check_call(["git", "submodule", "add", "--", url, path], cwd=CWD)
+            if branch:
+                # The branch name can be a branch or a tag.
+                # `git submodule add --branch <branch>` does not work with tags.
+                # So we need to checkout after adding the submodule to work with tags.
+                report(f" --- Checking out HEAD to {branch} for submodule {path}")
+                subprocess.check_call(
+                    ["git", "config", "advice.detachedHead", "false"], cwd=CWD / path
+                )
+                subprocess.check_call(["git", "checkout", branch, "--"], cwd=CWD / path)
+            subprocess.check_call(["git", "add", "--", path], cwd=CWD)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to add submodules: {e}")
+        sys.exit(1)
+
+    try:
+        subprocess.check_call(
+            ["git", "commit", "--message", "Initial commit for building with SDist"],
+            cwd=CWD,
+        )
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Git repository initialization took {end - start:.2f} sec")
+
+
+def initialize_git_submodules() -> None:
+    initialize_git_repository()
+
+    report(" --- Trying to initialize submodules")
+    start = time.perf_counter()
+    try:
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
+        )
+    except Exception:
+        report(" --- Submodule initialization failed")
+        report("Please run:\n\tgit submodule update --init --recursive")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Submodule initialization took {end - start:.2f} sec")
+
+
+def ensure_git_submodules() -> None:
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
+        return
+
     def check_for_files(folder: Path, files: list[str]) -> None:
         if not any((folder / f).exists() for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
@@ -521,23 +617,15 @@ def check_submodules() -> None:
             folder.is_dir() and next(folder.iterdir(), None) is None
         )
 
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
+        report(
+            " --- No submodule folders found. Initializing git submodules "
+            "to ensure all dependencies are present."
+        )
+        initialize_git_submodules()
+
     for folder in folders:
         check_for_files(
             folder,
@@ -967,7 +1055,7 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
+    ensure_git_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -1026,6 +1114,114 @@ def check_pydep(importname: str, module: str) -> None:
         raise RuntimeError(
             missing_pydep.format(importname=importname, module=module)
         ) from e
+
+
+@contextlib.contextmanager
+def concat_license_files(include_files: bool = False) -> Generator[None]:
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+    license_file = CWD / "LICENSE"
+    original_content = ""
+    try:
+        original_content = license_file.read_text(encoding="utf-8")
+
+        old_path = sys.path[:]
+        sys.path.append(str(THIRD_PARTY_DIR))
+        try:
+            from build_bundled import create_bundled  # type: ignore[import-not-found]
+        finally:
+            sys.path[:] = old_path
+
+        with license_file.open(mode="a", encoding="utf-8") as file:
+            file.write("\n\n")
+            create_bundled(
+                str(THIRD_PARTY_DIR.resolve()),
+                file,
+                include_files=include_files,
+            )
+
+        yield
+    finally:
+        if original_content:
+            license_file.write_text(original_content, encoding="utf-8")
+
+
+@contextlib.contextmanager
+def dump_git_submodule_hashes() -> Generator[None]:
+    """Dump git submodule hashes to .gitmodules file"""
+    file = CWD / ".gitmodules"
+    if not (CWD / ".git").exists() or not file.exists():
+        yield
+        return
+
+    original_content = ""
+    try:
+        # Read the original content of the .gitmodules file so we can restore it later.
+        original_content = file.read_text(encoding="utf-8")
+
+        # Read the .gitmodules file and update it with commit hashes
+        # for submodules that do not have a branch specified.
+        git_modules = ConfigParser()
+        git_modules.read([file], encoding="utf-8")
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            if "branch" in submodule:
+                # If the submodule has a branch, we don't need to dump the hash
+                continue
+            path = submodule["path"]
+            try:
+                # Get the current commit hash of the submodule
+                commit_hash = (
+                    subprocess.check_output(
+                        ["git", "submodule", "status", "--", path],
+                        cwd=CWD,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    .strip()
+                    .partition(" ")[0]
+                    .lstrip("+-U")
+                )
+                # Update the .gitmodules file with the commit hash
+                submodule["branch"] = commit_hash
+            except subprocess.CalledProcessError as e:
+                report(f"Failed to get commit hash for submodule {path}: {e}")
+                continue
+
+        # Write the updated .gitmodules file
+        with file.open(mode="w", encoding="utf-8") as f:
+            git_modules.write(f)
+
+        yield
+    finally:
+        if original_content:
+            # Restore the original content of the .gitmodules file
+            file.write_text(original_content, encoding="utf-8")
+
+
+@contextlib.contextmanager
+def freeze_version_file(version: str = TORCH_VERSION) -> Generator[None]:
+    """Freeze the version.txt file to the specified version"""
+    version_file = CWD / "version.txt"
+    original_content = ""
+    try:
+        # Read the original content of the version.txt file
+        original_content = version_file.read_text(encoding="utf-8")
+
+        # Write the specified version to the version.txt file
+        version_file.write_text(f"{version.strip()}\n", encoding="utf-8")
+
+        yield
+    finally:
+        if original_content:
+            # Restore the original content of the version.txt file
+            version_file.write_text(original_content, encoding="utf-8")
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -1271,46 +1467,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             compile_commands_json.write_text(new_contents, encoding="utf-8")
 
 
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
-
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
-
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
 # Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
     def run(self) -> None:
@@ -1366,7 +1522,7 @@ class clean(Command):
 # Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
-        with concat_license_files():
+        with dump_git_submodule_hashes(), freeze_version_file(), concat_license_files():
             super().run()
 
 
