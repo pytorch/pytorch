@@ -16,10 +16,11 @@ popd
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
-__TEST_PYTHON_HAS_SETUP=''
+__TEST_PYTHON_HAS_SETUP=''  # marker for `setup_test_python`
 
 setup_test_python() {
   if [[ -n "${__TEST_PYTHON_HAS_SETUP}" ]]; then
+    # Already set up, skip.
     return
   fi
 
@@ -40,7 +41,7 @@ setup_test_python() {
   # might help with intermittent compiler test failures
   ulimit -n 16384
 
-  __TEST_PYTHON_HAS_SETUP=1
+  __TEST_PYTHON_HAS_SETUP=1  # marker
 }
 
 test_python_all() {
@@ -188,20 +189,20 @@ checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+  popd
 
-  # soxr comes from https://github.com/huggingface/transformers/pull/39429
-  pip install transformers==4.54.0 soxr==0.5.0
-
+  pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
   # https://github.com/pytorch/pytorch/issues/160689 to remove torchao because
   # its current version 0.12.0 doesn't work with transformers 4.54.0
   pip uninstall -y torchao
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
-  popd
 }
 
 torchbench_setup_macos() {
+  setup_test_python
+
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
   brew install jpeg-turbo libpng
