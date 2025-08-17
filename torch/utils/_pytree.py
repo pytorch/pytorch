@@ -927,6 +927,39 @@ def _deque_unflatten(values: Iterable[T], context: Context) -> deque[T]:
     return deque(values, maxlen=context)
 
 
+def _structseq_flatten(d: structseq[T]) -> tuple[list[T], Context]:
+    return list(d), type(d)
+
+
+def _structseq_flatten_with_keys(
+    d: structseq[T],
+) -> tuple[list[tuple[KeyEntry, T]], Context]:
+    values, context = _structseq_flatten(d)
+    return [(SequenceKey(i), v) for i, v in enumerate(values)], context
+
+
+def _structseq_unflatten(values: Iterable[T], context: Context) -> structseq[T]:
+    return context(values)  # type: ignore[no-any-return]
+
+
+def _structseq_serialize(context: Context) -> DumpableContext:
+    json_structseq = {
+        "class_module": context.__module__,
+        "class_name": context.__qualname__,
+    }
+    return json_structseq
+
+
+def _structseq_deserialize(dumpable_context: DumpableContext) -> Context:
+    class_module = dumpable_context["class_module"]
+    class_name = dumpable_context["class_name"]
+    assert isinstance(class_module, str)
+    assert isinstance(class_name, str)
+    module = importlib.import_module(class_module)
+    context = getattr(module, class_name)
+    return context
+
+
 _private_register_pytree_node(
     tuple,
     _tuple_flatten,
@@ -980,6 +1013,15 @@ _private_register_pytree_node(
     serialized_type_name="collections.deque",
     flatten_with_keys_fn=_deque_flatten_with_keys,
 )
+_private_register_pytree_node(
+    structseq,
+    _structseq_flatten,
+    _structseq_unflatten,
+    serialized_type_name="structseq",
+    to_dumpable_context=_structseq_serialize,
+    from_dumpable_context=_structseq_deserialize,
+    flatten_with_keys_fn=_structseq_flatten_with_keys,
+)
 
 
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
@@ -992,6 +1034,7 @@ BUILTIN_TYPES: frozenset[type] = frozenset(
         OrderedDict,
         defaultdict,
         deque,
+        structseq,
     },
 )
 
@@ -1007,6 +1050,10 @@ def _is_namedtuple_instance(tree: Any) -> bool:
 
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
+    # Only structseq types that are not explicitly registered should return `structseq`.
+    # If a structseq type is explicitly registered, then the actual type will be returned.
+    if node_type not in SUPPORTED_NODES and is_structseq_class(node_type):
+        return structseq
     # All namedtuple types are implicitly registered as pytree nodes.
     # XXX: Other parts of the codebase expect namedtuple types always return
     #      `namedtuple` instead of the actual namedtuple type. Even if the type
