@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
+#include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
@@ -23,6 +24,10 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+
+#include <c10/core/Device.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Stream.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -402,6 +407,15 @@ AOTITorchError aoti_torch_is_contiguous(
   });
 }
 
+AOTITorchError aoti_torch_is_defined(
+    AtenTensorHandle tensor,
+    bool* ret_is_defined) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_defined = t->defined();
+  });
+}
+
 AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,
     AtenTensorHandle* new_handle) {
@@ -449,6 +463,28 @@ AOTITorchError aoti_torch_empty_strided(
       *ret_new_tensor =
           new_tensor_handle(at::empty_strided(sizes, strides, options));
     }
+  });
+}
+
+AOTITorchError aoti_torch_empty_strided_pinned(
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    TORCH_CHECK(
+        c10::DeviceType(device_type) == c10::DeviceType::CPU,
+        "only CPU tensors can be pinned");
+    *ret_new_tensor = new_tensor_handle(at::detail::empty_strided_cpu(
+        sizes,
+        strides,
+        static_cast<c10::ScalarType>(dtype),
+        /*is_pinned=*/true));
   });
 }
 
@@ -1056,6 +1092,45 @@ AOTITorchError aoti_torch_check_inf_and_nan(
   });
 }
 
+AOTITorchError aoti_record_function_start(
+    const char* name,
+    IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
+    AtenRecordFunctionHandle* guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* newGuard =
+        new at::RecordFunction(at::RecordScope::FUNCTION);
+    std::unordered_map<std::string, c10::IValue> recordKwargs;
+
+    if (kwargs != nullptr) {
+      auto wrappedKwargs =
+          reinterpret_cast<std::unordered_map<std::string, C10IValueHandle>*>(
+              kwargs);
+      for (const auto& pair : *wrappedKwargs) {
+        recordKwargs.emplace(
+            pair.first, *(reinterpret_cast<c10::IValue*>(pair.second)));
+      }
+    }
+
+    std::vector<c10::IValue> recordInputs(n_inputs);
+    for (size_t i = 0; i < n_inputs; i++) {
+      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+    }
+
+    newGuard->before(name, &recordInputs, &recordKwargs);
+    *guard = reinterpret_cast<AtenRecordFunctionHandle>(newGuard);
+  });
+}
+
+AOTITorchError aoti_record_function_end(AtenRecordFunctionHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::RecordFunction* t = reinterpret_cast<at::RecordFunction*>(guard);
+
+    delete t;
+  });
+}
+
 AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
@@ -1182,8 +1257,7 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   if (msg) {
     std::cout << "  " << msg;
   }
-  std::cout << "  "
-            << "]:" << '\n';
+  std::cout << "  " << "]:" << '\n';
 
   // Print exact tensor values for small size tensors
   const int64_t numel = t->numel();
@@ -1589,4 +1663,61 @@ AOTITorchError aoti_torch_call_dispatcher(
       stack[stack_idx] = from_ivalue(ret_type, torch::jit::pop(ivalue_stack));
     }
   });
+}
+
+AOTITorchError aoti_torch_create_device_guard(
+    int32_t device_index,
+    DeviceGuardHandle* ret_guard // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // checked=true will fail if no accelerator is available
+    const auto device_type =
+        at::accelerator::getAccelerator(/*checked=*/true).value();
+    c10::Device device(device_type, device_index);
+    c10::DeviceGuard* guard = new c10::DeviceGuard(device);
+    *ret_guard = reinterpret_cast<DeviceGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_device_guard(DeviceGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::DeviceGuard*>(guard); });
+}
+
+AOTITorchError aoti_torch_device_guard_set_index(
+    DeviceGuardHandle guard,
+    int32_t device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { reinterpret_cast<c10::DeviceGuard*>(guard)->set_index(device_index); });
+}
+
+AOTITorchError aoti_torch_delete_stream(StreamHandle stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::Stream*>(stream); });
+}
+
+AOTITorchError aoti_torch_stream_id(
+    StreamHandle stream,
+    int64_t* ret_stream_id) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream* stream_ptr = reinterpret_cast<c10::Stream*>(stream);
+    *ret_stream_id = stream_ptr->id();
+  });
+}
+
+// This function creates a new Stream object and makes StreamHandle point to it.
+// The caller is responsible for managing the object's lifecycle.
+AOTITorchError aoti_torch_get_current_stream(
+    int32_t device_index,
+    StreamHandle* ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::Stream stream = at::accelerator::getCurrentStream(device_index);
+    c10::Stream* stream_ptr = new c10::Stream(stream);
+    *ret_stream = reinterpret_cast<StreamHandle>(stream_ptr);
+  });
+}
+
+AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_device_index = at::accelerator::getDeviceIndex(); });
 }

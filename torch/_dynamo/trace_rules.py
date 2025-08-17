@@ -21,7 +21,6 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
-import collections
 import copy
 import dataclasses
 import functools
@@ -2963,6 +2962,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu.random.seed_all",
         "torch.xpu.random.seed",
         "torch.xpu.set_stream",
+        "torch.xpu.stream",
         "torch.xpu.synchronize",
     ],
     TorchInGraphFunctionVariable,
@@ -3291,7 +3291,6 @@ def is_numpy_type_info(obj: Any) -> bool:
 
 BUILTIN_SKIPLIST = (
     abc,
-    collections,
     copy,
     random,
     traceback,
