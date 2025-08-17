@@ -16,11 +16,13 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import tempfile
 import threading
 import traceback
+import types
 import typing
 import unittest
 import unittest.mock as mock
@@ -1958,6 +1960,31 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         act = opt_fn(a, b)
 
         self.assertEqual(exp, act)
+
+    def test_class_binop(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __add__(self, other):
+                return Foo(self.x + other.x)
+
+        def fn(a, b):
+            return a + b
+
+        x = torch.randn(2)
+        a, b = Foo(x), Foo(x + 1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(a, b).x, 2 * x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        def fn(a, b):
+            return a - b
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertRaises(torch._dynamo.exc.Unsupported, opt_fn, a, b)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -8519,6 +8546,50 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(len(seen_frames), 1)
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
+
+    def test_fullgraph_capture(self):
+        def foo(x):
+            return x + x.shape[0]
+
+        compiled_foo = torch._dynamo.eval_frame.fullgraph_capture(foo)
+        compiled_foo(torch.randn(3, 2))
+        compiled_foo(torch.randn(4))
+        artifacts = compiled_foo.get_artifacts()
+
+        guarded_codes = artifacts.dynamo_artifacts.guarded_codes
+        backend_ids = list(artifacts.backend_inputs.keys())
+        gms = [b.graph_module for b in artifacts.backend_inputs.values()]
+
+        def _convert_to_ep_demo(code, backend_id, gm, args):
+            # Inject compiled function as the original gm
+            new_globals = copy.copy(globals())
+            new_globals[backend_id] = gm
+            # Minimal boilerplate to setup a callable.
+            SerializedCode = type(code.dynamo_code)
+            dynamo_bytecode = SerializedCode.to_code_object(code.dynamo_code)
+            guards_state = pickle.loads(code.guards_state)
+            guard_manager = torch._dynamo.guards.CheckFunctionManager(
+                foo.__code__,
+                guards_state.output_graph,
+                guards_serialization_mode="load",
+                shape_code_parts=guards_state.shape_code_parts,
+                runtime_global_scope=new_globals,
+            ).guard_manager
+
+            class ModuleForExport(torch.nn.Module):
+                def forward(self, x):
+                    return types.FunctionType(dynamo_bytecode, new_globals)(x)
+
+            m = ModuleForExport()
+            return guard_manager, torch.export.export(m, args)
+
+        guards0, ep0 = _convert_to_ep_demo(
+            guarded_codes[0], backend_ids[0], gms[0], (torch.randn(3, 2),)
+        )
+        self.assertTrue(guards0.check({"x": torch.randn(3, 2)}))
+        self.assertFalse(guards0.check({"x": torch.randn(4)}))
+        input0 = torch.randn(3, 2)
+        self.assertEqual(ep0.module()(input0), foo(input0))
 
     def test_torch_guards_stack_frame_register_inlining_deep(self):
         x = torch.tensor([0.5, 0.5])
