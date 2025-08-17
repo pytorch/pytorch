@@ -225,29 +225,34 @@ def fx_forward_from_src_skip_result(
     return result
 
 
-def log_dynamo_start(code: CodeType, skip: int = 0) -> None:
+def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
+    # Extract and filter the stack
+    stack = list(
+        itertools.takewhile(
+            lambda f: f["filename"] != convert_frame_intern,
+            structured.from_traceback(
+                CapturedTraceback.extract(skip=4 + skip).summary()
+            ),
+        )
+    ) + [
+        {
+            "line": code.co_firstlineno,
+            "name": code.co_name,
+            "filename": structured.intern_string(code.co_filename),
+        }
+    ]
     # Initialize the ChromiumEventLogger on start
     torch._logging.trace_structured(
         "dynamo_start",
-        lambda: {
-            "stack": list(
-                itertools.takewhile(
-                    lambda f: f["filename"] != convert_frame_intern,
-                    structured.from_traceback(
-                        CapturedTraceback.extract(skip=4 + skip).summary()
-                    ),
-                )
-            )
-            + [
-                {
-                    "line": code.co_firstlineno,
-                    "name": code.co_name,
-                    "filename": structured.intern_string(code.co_filename),
-                }
-            ]
-        },
+        lambda: {"stack": stack},
     )
+
+    stack_strings = [
+        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
+        for frame in stack
+    ]
+    return stack_strings
 
 
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -1075,7 +1080,31 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        metrics_context.update_outer({"recompile_reason": recompile_reason})
+        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
+        inline_inbuilt_nn_modules_candidate = False
+        if not config.inline_inbuilt_nn_modules and frame:
+            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, skip_logging=True
+            )
+            inbuilt_nn_recompile_reason = (
+                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
+            )
+
+            if (
+                inbuilt_nn_recompile_reason is not None
+                and "[inline-inbuilt-nn-modules-candidate]"
+                in inbuilt_nn_recompile_reason
+            ):
+                inline_inbuilt_nn_modules_candidate = True
+
+        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
+        # regardless of whether inline_inbuilt_nn_modules is set or not
+        metrics_context.update_outer(
+            {
+                "recompile_reason": recompile_reason,
+                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+            }
+        )
 
         recompile_user_contexts = get_hook_for_recompile_user_context()
         if recompile_user_contexts:
@@ -1160,7 +1189,7 @@ def _compile(
         # # 2 extra here
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
-        log_dynamo_start(code, skip)
+        stack_trace = log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
@@ -1256,6 +1285,7 @@ def _compile(
                 shape_env_guard_count = len(output.shape_env.guards)
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
+                graph_node_shapes = output.get_graph_sizes_structured()
                 graph_input_count = len(output.placeholders)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
@@ -1267,6 +1297,7 @@ def _compile(
                 shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                graph_node_shapes = {}
                 graph_input_count = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
@@ -1300,6 +1331,8 @@ def _compile(
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
+                "stack_trace": stack_trace,
+                "graph_node_shapes": str(graph_node_shapes),
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
@@ -1527,7 +1560,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
@@ -1563,8 +1595,13 @@ class CatchErrorsWrapper:
                 )
             return ConvertFrameReturn()
 
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
+        if (
+            frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
+        ) or (
+            frame.f_code.co_filename.endswith("collections/__init__.py")
+            and frame.f_code.co_name == "_make"
+        ):
+            # nametuple constructor/_make
             return ConvertFrameReturn()
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()

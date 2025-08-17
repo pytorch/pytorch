@@ -48,10 +48,16 @@ from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
+    ClosureGuardAccessor,
+    CodeGuardAccessor,
     dict_version,
     DictGetItemGuardAccessor,
     DictGuardManager,
+    FuncDefaultsGuardAccessor,
+    FuncKwDefaultsGuardAccessor,
+    GetAttrGuardAccessor,
     GetGenericDictGuardAccessor,
+    GuardAccessor,
     GuardDebugInfo,
     GuardManager,
     install_no_tensor_aliasing_guard,
@@ -62,6 +68,10 @@ from torch._C._dynamo.guards import (
     profile_guard_manager,
     RelationalGuard,
     RootGuardManager,
+    TupleGetItemGuardAccessor,
+    TypeDictGuardAccessor,
+    TypeGuardAccessor,
+    TypeMROGuardAccessor,
 )
 from torch._dynamo.source import (
     get_global_source_name,
@@ -70,6 +80,7 @@ from torch._dynamo.source import (
     is_from_flatten_script_object_source,
     is_from_local_source,
     is_from_optimizer_source,
+    is_from_skip_guard_source,
     is_from_unspecialized_builtin_nn_module_source,
     TensorProperty,
     TensorPropertySource,
@@ -201,6 +212,17 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+
+
+dunder_attrs_assumed_constants = (
+    "__defaults__",
+    "__kwdefaults__",
+    "__code__",
+    "__closure__",
+    "__annotations__",
+    "__func__",
+    "__mro__",
+)
 
 
 class IndentedBufferWithPrefix(IndentedBuffer):
@@ -371,6 +393,16 @@ class GuardManagerWrapper:
         subset that are tag safe roots.
         """
 
+        def check_tag_safety(
+            node: GuardManager, accepted_accessors: tuple[type[GuardAccessor], ...]
+        ) -> bool:
+            accessors = node.get_accessors()
+            child_mgrs = node.get_child_managers()
+            return all(
+                isinstance(accessor, accepted_accessors) and mgr.is_tag_safe()
+                for accessor, mgr in zip(accessors, child_mgrs)
+            )
+
         def visit_dict_manager(node: DictGuardManager) -> list[GuardManager]:
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
@@ -428,12 +460,8 @@ class GuardManagerWrapper:
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
-                accessors = node.get_accessors()
-                child_mgrs = node.get_child_managers()
-                is_subtree_tag_safe = all(
-                    isinstance(accessor, GetGenericDictGuardAccessor)
-                    and mgr.is_tag_safe()
-                    for accessor, mgr in zip(accessors, child_mgrs)
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (GetGenericDictGuardAccessor, TypeGuardAccessor)
                 )
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
@@ -442,6 +470,77 @@ class GuardManagerWrapper:
                     return [
                         node,
                     ]
+            elif (
+                node.get_type_of_guarded_value()
+                in (
+                    types.FunctionType,
+                    types.MethodType,
+                    staticmethod,
+                    classmethod,
+                )
+                and config.assume_dunder_attributes_remain_unchanged
+            ):
+                # Assumption: callers will not reassignthe attributes
+                #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
+                # Mutating the objects those attributes point to is fine;
+                # rebinding the attribute itself is not.
+                # Example ─ allowed:   foo.__defaults__[0].bar = 99
+                #          forbidden: foo.__defaults__ = (3, 4)
+                is_subtree_tag_safe = check_tag_safety(
+                    node,
+                    (
+                        CodeGuardAccessor,
+                        ClosureGuardAccessor,
+                        FuncDefaultsGuardAccessor,
+                        FuncKwDefaultsGuardAccessor,
+                        GetAttrGuardAccessor,
+                    ),
+                )
+
+                for accessor in node.get_accessors():
+                    if isinstance(accessor, GetAttrGuardAccessor):
+                        is_subtree_tag_safe &= (
+                            accessor.get_attr_name() in dunder_attrs_assumed_constants
+                        )
+
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif issubclass(node.get_type_of_guarded_value(), types.CellType):
+                is_subtree_tag_safe = check_tag_safety(node, (GetAttrGuardAccessor,))
+
+                is_subtree_tag_safe &= all(
+                    isinstance(accessor, GetAttrGuardAccessor)
+                    and accessor.get_attr_name() == "cell_contents"
+                    for accessor in node.get_accessors()
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif (
+                issubclass(node.get_type_of_guarded_value(), tuple)
+                and node.get_source().endswith(dunder_attrs_assumed_constants)
+                and config.assume_dunder_attributes_remain_unchanged
+            ):
+                # We trust tuples obtained from a function’s __closure__ or
+                # __defaults__. Any *other* tuple-valued attribute can be
+                # silently replaced—for example:
+                #
+                #     foo.bar = (1, 2)      # original
+                #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won’t see
+                #
+                # Therefore only tuples from __closure__ / __defaults__ participate in the
+                # recursive-dict-tag optimization; all others are ignored.
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (TupleGetItemGuardAccessor,)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif issubclass(node.get_type_of_guarded_value(), type):
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+
             return tag_safe_roots
 
         def visit(node: GuardManager) -> list[GuardManager]:
@@ -668,11 +767,22 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: Union[str, list[str]], guard: Optional[Guard]
+    code_parts: Union[str, list[str]],
+    guard: Optional[Guard],
+    recompile_hint: Optional[str] = None,
 ) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
-    return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
+
+    verbose_code_parts = [
+        get_verbose_code_part(code_part, guard) for code_part in code_parts
+    ]
+    if recompile_hint:
+        verbose_code_parts = [
+            f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
+        ]
+
+    return verbose_code_parts
 
 
 def convert_int_to_concrete_values(dim: Any) -> Optional[int]:
@@ -1833,12 +1943,14 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
-    def ID_MATCH(self, guard: Guard) -> None:
+    def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         if self.serialization_mode == "save":
             raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
-        return self.id_match_unchecked(guard)
+        return self.id_match_unchecked(guard, recompile_hint)
 
-    def id_match_unchecked(self, guard: Guard) -> None:
+    def id_match_unchecked(
+        self, guard: Guard, recompile_hint: Optional[str] = None
+    ) -> None:
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1851,9 +1963,8 @@ class GuardBuilder(GuardBuilderBase):
         id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
-
         self.get_guard_manager(guard).add_id_match_guard(
-            id_val, get_verbose_code_parts(code, guard)
+            id_val, get_verbose_code_parts(code, guard, recompile_hint)
         )
 
         # Keep track of ID_MATCH'd objects. This will be used to modify the
@@ -2103,7 +2214,7 @@ class GuardBuilder(GuardBuilderBase):
             raise torch._dynamo.exc.PackageError(
                 "NN_MODULE guard cannot be serialized."
             )
-        self.ID_MATCH(guard)
+        self.ID_MATCH(guard, "[inline-inbuilt-nn-modules-candidate]")
         val = self.get(guard.name)
         if hasattr(val, "training"):
             assert istype(val.training, bool)
@@ -3932,10 +4043,13 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
+    skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+    if skip_logging:
+        return reason_str
     guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
@@ -3952,7 +4066,9 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reasons(
-    cache_entry: Optional[CacheEntry], frame: DynamoFrameType
+    cache_entry: Optional[CacheEntry],
+    frame: DynamoFrameType,
+    skip_logging: bool = False,
 ) -> list[str]:
     """
     Return the list of guard failure reasons using cache_entry.
@@ -3966,6 +4082,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.code,
             frame.f_locals,
             cache_entry.compile_id,
+            skip_logging,
         )
         if reason:
             reasons.append(reason)
@@ -3973,6 +4090,8 @@ def get_and_maybe_log_recompilation_reasons(
 
     code = frame.f_code
 
+    if skip_logging:
+        return reasons
     # at least one of "recompiles" or "recompiles_verbose" is enabled
     do_recompiles_log = is_recompiles_enabled() or is_recompiles_verbose_enabled()
 
@@ -4124,4 +4243,7 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
+
+        if is_from_skip_guard_source(guard.originating_source):
+            continue
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
