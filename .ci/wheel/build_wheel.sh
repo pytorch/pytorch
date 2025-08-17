@@ -133,6 +133,25 @@ EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=true
 case $desired_python in
+    3.14t)
+        echo "Using 3.14 deps"
+        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        PYYAML_PINNED_VERSION=">=6.0.1"
+        NUMPY_PINNED_VERSION="=2.1.0"
+        CONDA_ENV_CREATE_FLAGS="python-freethreading"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
+    3.14)
+        echo "Using 3.14t deps"
+        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        PYYAML_PINNED_VERSION=">=6.0.1"
+        NUMPY_PINNED_VERSION="=2.1.0"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
     3.13t)
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"
@@ -192,9 +211,6 @@ retry brew install libomp
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
-if [[ -n "$CROSS_COMPILE_ARM64" ]]; then
-    export CMAKE_OSX_ARCHITECTURES=arm64
-fi
 export USE_MKLDNN=OFF
 export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
@@ -202,16 +218,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling setup.py bdist_wheel at $(date)"
 
-if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-    echo "Calling setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_LIBTORCH_WHL)"
-    echo "Calling setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-    BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 CMAKE_FRESH=1 python setup.py bdist_wheel -d "$whl_tmp_dir"
-    echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
-else
-    python setup.py bdist_wheel -d "$whl_tmp_dir"
-fi
+python setup.py bdist_wheel -d "$whl_tmp_dir"
 
 echo "Finished setup.py bdist_wheel at $(date)"
 
