@@ -26,7 +26,7 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
@@ -1692,14 +1692,12 @@ class TMACompatibilityChecker:
     def can_use_tma(
         self,
     ) -> bool:
-        import triton
-
         if not (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
             and config.triton.use_tensor_descriptor
             and config.assume_aligned_inputs
-            and triton.__version__ >= "3.4.0"
+            and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
             log.debug(
@@ -2001,14 +1999,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         )
 
     def want_no_x_dim(self):
-        if (
+        return (
             self.persistent_reduction
             and len(self.numels) == self.num_reduction_dims + 1
-        ):
-            if self.fixed_config:
-                return self.fixed_config["XBLOCK"] == 1
-            return V.choices.want_no_x_dim(self.features)
-        return False
+            and self.fixed_config
+            and self.fixed_config["XBLOCK"] == 1
+        )
 
     @property
     def assert_function(self) -> str:
@@ -2671,6 +2667,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
 
+    def _combine_masks(self, *variables: Optional[CSEVariable]):
+        masks = None
+        for elem in variables:
+            if elem is None:
+                continue
+            if hasattr(elem, "mask_vars"):
+                if masks is None:
+                    masks = elem.mask_vars
+                else:
+                    masks = masks | elem.mask_vars
+        return masks
+
     def bucketize(
         self,
         values: CSEVariable,
@@ -2719,6 +2727,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
+
+        masks = self._combine_masks(values, boundary_indices, sorter_indices)
+        result.mask_vars = masks  # type: ignore[attr-defined]
 
         return result
 

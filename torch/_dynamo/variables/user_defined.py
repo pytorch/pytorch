@@ -52,6 +52,9 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
+    ObservedKeyError,
+    ObservedTypeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
 )
@@ -91,7 +94,12 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -253,6 +261,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__dict__":
             options = {"source": source}
             return variables.GetAttrVariable(self, name, **options)
+        elif name == "__mro__":
+            attr_source = self.source and TypeMROSource(self.source)
+            return VariableTracker.build(tx, self.value.__mro__, attr_source)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -295,10 +306,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             func = obj.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
         elif source:
-            # __mro__ is a member in < 3.12, an attribute in >= 3.12
-            if inspect.ismemberdescriptor(obj) or (
-                sys.version_info >= (3, 12) and name == "__mro__"
-            ):
+            if inspect.ismemberdescriptor(obj):
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
         if ConstantVariable.is_literal(obj):
@@ -470,7 +478,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import here to avoid circular dependency
             from .ctx_manager import NullContextVariable
 
-            return NullContextVariable()
+            return NullContextVariable(*args, **kwargs)
         elif self.value is collections.OrderedDict:
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.construct_dict),
@@ -1091,6 +1099,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k in range(len(self.value))
             ]
         return super().unpack_var_sequence(tx)
+
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        try:
+            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            return True
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return False
+
+    def force_unpack_var_sequence(self, tx):
+        result = []
+        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+
+        while True:
+            try:
+                r = iter_.next_variable(tx)
+                result.append(r)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
 
     def next_variable(self, tx):
         return self.call_method(tx, "__next__", [], {})
@@ -1885,7 +1914,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
-            return self._dict_vt.call_method(tx, name, args, kwargs)
+            # Dict subclasses can override __missing__ to provide fallback
+            # behavior instead of raising a KeyError. This is used, for example,
+            # by collections.Counter.
+            try:
+                return self._dict_vt.call_method(tx, name, args, kwargs)
+            except ObservedKeyError:
+                if (
+                    name == "__getitem__"
+                    and issubclass(self.python_type(), dict)
+                    and self._maybe_get_baseclass_method("__missing__")
+                ):
+                    return self.call_method(tx, "__missing__", args, kwargs)
+                else:
+                    raise
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
@@ -2084,7 +2126,9 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting()
+        self.mutation_type = (
+            AttributeMutationExisting() if self.source else AttributeMutationNew()
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
