@@ -2931,6 +2931,7 @@
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
+    MPS: grid_sampler_3d_mps
   autogen: grid_sampler_3d.out
 
 # `grid_sampler_3d_backward` takes in `output_mask` to optimize performance for
@@ -5502,6 +5503,13 @@
   device_guard: False
 
 - func: sym_size.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
+- func: sym_is_contiguous(Tensor self, MemoryFormat memory_format=contiguous_format) -> SymBool
   variants: function
   device_check: NoCheck
   device_guard: False
