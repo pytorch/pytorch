@@ -14,6 +14,7 @@ if torch.backends.mps.is_available():
         ops: Sequence[OpInfo],
         device_type: Optional[str] = None,
         xfail_exclusion: Optional[list[str]] = None,
+        sparse: bool = False,
     ) -> Sequence[OpInfo]:
         if xfail_exclusion is None:
             xfail_exclusion = []
@@ -487,6 +488,8 @@ if torch.backends.mps.is_available():
                     "nanquantile": None,
                 }
             )
+        if sparse:
+            UNIMPLEMENTED_XFAILLIST.update(UNIMPLEMENTED_XFAILLIST_SPARSE)
 
         UNDEFINED_XFAILLIST: dict[str, Optional[list]] = {
             # Top 60 operators
@@ -677,7 +680,6 @@ if torch.backends.mps.is_available():
                 )
             for xfaillist in [
                 UNIMPLEMENTED_XFAILLIST,
-                UNIMPLEMENTED_XFAILLIST_SPARSE,
                 UNDEFINED_XFAILLIST,
                 ON_MPS_XFAILLIST,
             ]:
@@ -878,5 +880,6 @@ else:
         ops: Sequence[OpInfo],
         device_type: Optional[str] = None,
         xfail_exclusion: Optional[list[str]] = None,
+        sparse: bool = False,
     ) -> Sequence[OpInfo]:
         return ops
