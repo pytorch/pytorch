@@ -293,7 +293,7 @@ if torch.backends.mps.is_available():
         }
 
         # Those ops are not expected to work
-        UNIMPLEMENTED_XFAILLIST = {
+        UNIMPLEMENTED_XFAILLIST: dict[str, Optional[list]] = {
             # Failures due to lack of op implementation on MPS backend
             "logspace": None,
             "logspacetensor_overload": None,
@@ -443,7 +443,7 @@ if torch.backends.mps.is_available():
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
         }
-        UNIMPLEMENTED_XFAILLIST_SPARSE = {
+        UNIMPLEMENTED_XFAILLIST_SPARSE: dict[str, Optional[list]] = {
             "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
@@ -491,7 +491,7 @@ if torch.backends.mps.is_available():
                 }
             )
 
-        UNDEFINED_XFAILLIST = {
+        UNDEFINED_XFAILLIST: dict[str, Optional[list]] = {
             # Top 60 operators
             # topk fails with duplicate indices
             "topk": [
@@ -568,7 +568,7 @@ if torch.backends.mps.is_available():
             ],
         }
 
-        ON_MPS_XFAILLIST = {
+        ON_MPS_XFAILLIST: dict[str, Optional[list]] = {
             # Failures due to lack of implementation of downstream functions on MPS backend
             # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
             "linalg.matrix_rank": None,
