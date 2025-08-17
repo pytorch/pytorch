@@ -4126,7 +4126,7 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs), dtypes=OpDTypes.supported)
+_sparse_unary_ops = ops(mps_ops_modifier(sparse_unary_ufuncs, sparse=True), dtypes=OpDTypes.supported)
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
