@@ -48,10 +48,8 @@ Tensor flatten_indices_mps(const Tensor& indices, IntArrayRef size) {
     row_muls[i] = row_muls[i + 1] * size[i + 1];
   }
 
-  // Output
   Tensor flat_indices = at::empty({nnz}, indices.options().dtype(kLong));
 
-  // Indices strides in elements (2D tensor)
   const int64_t idx_stride0 = indices.stride(0);
   const int64_t idx_stride1 = indices.stride(1);
 
