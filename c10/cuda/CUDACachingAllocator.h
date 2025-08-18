@@ -37,22 +37,11 @@ namespace c10::cuda::CUDACachingAllocator {
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingAllocator::kLargeBuffer;
+using c10::CachingDeviceAllocator::BlockInfo;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::OutOfMemoryObserver;
 using c10::CachingDeviceAllocator::RecordContext;
 using c10::CachingDeviceAllocator::trace_time_;
-
-// Struct containing info of an allocation block (i.e. a fractional part of a
-// cudaMalloc)..
-struct BlockInfo {
-  size_t size = 0;
-  size_t requested_size = 0;
-  int32_t gc_counter = 0;
-  bool allocated = false;
-  bool active = false;
-  std::shared_ptr<GatheredContext>
-      context_when_allocated; // per-watcher context
-};
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
