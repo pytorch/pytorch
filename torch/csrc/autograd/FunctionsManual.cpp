@@ -1078,7 +1078,7 @@ std::vector<Tensor> cat_tensors_backward(
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(shape[0].sym_eq(0))) {
         grad_inputs[i] = at::zeros({0}, grad_val.options());
         continue;
       }
