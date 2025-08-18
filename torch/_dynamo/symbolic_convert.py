@@ -1801,15 +1801,6 @@ class InstructionTranslatorBase(
         # 1) when user raises exception type
         val = self._create_exception_type(val)
 
-        # Handle https://peps.python.org/pep-0479/
-        # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
-        if (
-            is_generator(self.f_code)
-            and isinstance(val, variables.ExceptionVariable)
-            and val.exc_type is StopIteration
-        ):
-            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
-
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)
 
@@ -2726,8 +2717,9 @@ class InstructionTranslatorBase(
         op = inst.argval
         try:
             self.push(right.call_method(self, "__contains__", [left], {}))
-        except Unsupported:  # object doesn't support __contains__
+        except Unsupported as excp:  # object doesn't support __contains__
             # Use __iter__ as fallback
+            excp.remove_from_stats()
             self.push(
                 self.inline_user_function_return(
                     VariableTracker.build(self, impl_CONTAINS_OP_fallback),
@@ -3982,7 +3974,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                args = []
+                if not (
+                    isinstance(self.symbolic_result, ConstantVariable)
+                    and self.symbolic_result.value is None
+                ):
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
             else:
                 return self.symbolic_result
         else:
