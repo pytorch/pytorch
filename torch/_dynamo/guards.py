@@ -847,6 +847,16 @@ def raise_local_type_error(obj: Any) -> NoReturn:
     )
 
 
+def should_optimize_getattr_on_nn_module(value: Any) -> bool:
+    # If inline_inbuilt_nn_modules flag is True, Dynamo has already traced
+    # through the __getattr__, and therefore it is always safe to optimize
+    # getattr on nn modules.
+    return isinstance(value, torch.nn.Module) and (
+        config.inline_inbuilt_nn_modules
+        or get_custom_getattr(value) is unpatched_nn_module_getattr
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class NNModuleAttrAccessorInfo:
     # Represents where is the attr name is present in the nn module attribute
@@ -1432,11 +1442,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 assert base_source_name
                 out = self.getattr_on_nn_module(
                     source,
@@ -1810,11 +1816,7 @@ class GuardBuilder(GuardBuilderBase):
 
             # if the base value is nn.Module, check if we can speedup the
             # guard by going through __dict__ attrs.
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 self.getattr_on_nn_module(
                     source,
                     base_manager,
