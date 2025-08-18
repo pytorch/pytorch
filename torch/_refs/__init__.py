@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    contiguous_for_memory_format_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -29,6 +28,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
@@ -2991,7 +2991,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
+    if is_contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
