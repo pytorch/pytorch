@@ -6,8 +6,10 @@
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
-#include <ATen/native/cudnn/BatchNorm_v8.h>
+#include <ATen/native/cudnn/BatchNorm.h>
 #endif
+
+#include <ATen/native/ConvUtils.h> // for cudnnv8_enabled_check_debug()
 
 #if !AT_CUDNN_ENABLED()
 
@@ -239,7 +241,7 @@ thread_local BatchNormGraphCache<
     BatchNormCacheKeyWrapper>
     batchnorm_backward_graph_cache;
 
-void raw_cudnn_batchnorm_forward_out(
+void raw_cudnn_batchnorm_forward_out_v8(
     const Tensor& X,
     const Tensor& weight,
     const Tensor& bias,
@@ -463,7 +465,7 @@ void raw_cudnn_batchnorm_forward_out(
           .is_good());
 }
 
-void raw_cudnn_batchnorm_backward_out(
+void raw_cudnn_batchnorm_backward_out_v8(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& weight,
@@ -614,14 +616,24 @@ void raw_cudnn_batchnorm_backward_out(
 
 } // namespace
 
-size_t _get_cudnn_batch_norm_reserve_space_size(
+size_t _get_cudnn_batch_norm_reserve_space_size_v8(
     const Tensor& input_t,
     bool training) {
   // Frontend API doesn't use reserve space
   return 0;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
+    return _get_cudnn_batch_norm_reserve_space_size_v8(input_t, training);
+  } else {
+    return _get_cudnn_batch_norm_reserve_space_size_v7(input_t, training);
+  }
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out_v8(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_t_opt,
@@ -674,7 +686,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
   Tensor running_mean_new = running_mean_t.defined() ? at::empty_like(running_mean_t) : Tensor();
   Tensor running_var_new = running_var_t.defined() ? at::empty_like(running_var_t) : Tensor();
 
-  raw_cudnn_batchnorm_forward_out(
+  raw_cudnn_batchnorm_forward_out_v8(
       *input,
       *weight,
       *bias,
@@ -701,7 +713,33 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
       output_t, save_mean, save_var, reserve};
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon,
+    Tensor& output_t,
+    Tensor& save_mean,
+    Tensor& save_var,
+    Tensor& reserve) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
+    return cudnn_batch_norm_out_v8(
+        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
+        training, exponential_average_factor, epsilon,
+        output_t, save_mean, save_var, reserve);
+  } else {
+    return cudnn_batch_norm_out_v7(
+        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
+        training, exponential_average_factor, epsilon,
+        output_t, save_mean, save_var, reserve);
+  }
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm_v8(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_t_opt,
@@ -726,7 +764,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 
   reserve = at::empty({0}, input_t.options().dtype(kByte));
 
-  return cudnn_batch_norm_out(
+  return cudnn_batch_norm_out_v8(
       input_t,
       weight_t,
       bias_t_opt,
@@ -741,7 +779,27 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
       reserve);
 }
 
-std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
+    return cudnn_batch_norm_v8(
+        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
+        training, exponential_average_factor, epsilon);
+  } else {
+    return cudnn_batch_norm_v7(
+        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
+        training, exponential_average_factor, epsilon);
+  }
+}
+
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward_v8(
     const Tensor& input_t,
     const Tensor& grad_output_t,
     const Tensor& weight_t,
@@ -788,7 +846,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
   auto grad_bias_t = at::empty(weight->sizes(), weight->options());
 
-  raw_cudnn_batchnorm_backward_out(
+  raw_cudnn_batchnorm_backward_out_v8(
       *grad_output,
       *input,
       *weight,
@@ -803,6 +861,27 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   return std::tuple<Tensor, Tensor, Tensor>{
       grad_input_t, grad_weight_t, grad_bias_t};
+}
+
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
+    const Tensor& input_t,
+    const Tensor& grad_output_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_t_opt,
+    const std::optional<Tensor>& save_var_t_opt,
+    double epsilon,
+    const Tensor& reserveSpace) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
+    return cudnn_batch_norm_backward_v8(
+        input_t, grad_output_t, weight_t, running_mean_opt, running_var_opt,
+        save_mean_t_opt, save_var_t_opt, epsilon, reserveSpace);
+  } else {
+    return cudnn_batch_norm_backward_v7(
+        input_t, grad_output_t, weight_t, running_mean_opt, running_var_opt,
+        save_mean_t_opt, save_var_t_opt, epsilon, reserveSpace);
+  }
 }
 
 } // namespace native
