@@ -339,7 +339,7 @@ class Vectorized<float> {
   }
 
   inline Vectorized<float> fexp_u20() {
-    return exp();
+    return exp_u20();
   }
   inline Vectorized<float> fmod(const Vectorized<float>& q) const {
     return USE_SLEEF(Sleef_fmodfx_sve(*this, q), return map2(std::fmod, q));
