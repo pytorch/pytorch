@@ -128,6 +128,12 @@ struct C10_API DeviceAllocator : public c10::Allocator {
   DeviceAllocator();
   ~DeviceAllocator() override;
 
+  // Allocates memory of size nbytes on the device.
+  virtual void* raw_alloc(size_t nbytes) = 0;
+
+  // Deallocates memory previously allocated by raw_alloc.
+  virtual void raw_delete(void* ptr) = 0;
+
   // Returns true if the allocator has been properly initialized and is ready
   // for use
   virtual bool initialized() = 0;
