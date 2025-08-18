@@ -837,7 +837,7 @@ class DynamoOutput:
     last_attempt_start_time: Optional[float]
 
 
-def compile_frame(
+def compile_frame(  # type: ignore[return]
     code: types.CodeType,
     transform: Callable[[list[Instruction], dict[str, Any]], DynamoTracerOutput],
     restart_reasons: set[str],
@@ -1350,8 +1350,9 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
-            assert tracer_output is not None
-            output = tracer_output.output_graph
+            output = None
+            if tracer_output:
+                output = tracer_output.output_graph
             if output:
                 output.local_scope = {}
                 # tracer should already be None, keep an extra check here just in case.
