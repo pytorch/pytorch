@@ -2650,6 +2650,7 @@ class GuardManager {
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
             .cast<uint64_t>();
+    _recompile_limit = config_module.attr("recompile_limit").cast<int64_t>();
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -3205,7 +3206,10 @@ class GuardManager {
     // failed_on_first is just an optimization to avoid sorting if we are
     // failing on the first accessor itself. This is helpful when we have
     // already sorted the guards once, and dont need to sort again.
-    if (!result && !failed_on_first) {
+    // Another heuristic to prevent sorting in cases where we are round-robin
+    // going over a few cache entries is to prevent sorting if the _fail_count
+    // exceed maximum recompile limit.
+    if (!result && !failed_on_first && _fail_count < _recompile_limit) {
       // Inplace sort the child guards by fail count. This moves the guard
       // with higher fail count earlier in the queue, and enables fail fast
       // for the next check_verbose.
@@ -3395,6 +3399,8 @@ class GuardManager {
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
+
+  int64_t _recompile_limit;
 
  protected:
   // weakref to the type of guarded value
