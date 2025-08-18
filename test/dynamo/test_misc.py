@@ -1961,6 +1961,31 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertEqual(exp, act)
 
+    def test_class_binop(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __add__(self, other):
+                return Foo(self.x + other.x)
+
+        def fn(a, b):
+            return a + b
+
+        x = torch.randn(2)
+        a, b = Foo(x), Foo(x + 1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(a, b).x, 2 * x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        def fn(a, b):
+            return a - b
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertRaises(torch._dynamo.exc.Unsupported, opt_fn, a, b)
+
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
