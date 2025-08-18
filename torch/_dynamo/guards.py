@@ -1879,9 +1879,10 @@ class GuardBuilder(GuardBuilderBase):
         else:
             t = type(value)
 
-        if self.save_guards:
-            if t.__qualname__ != t.__name__:
-                raise_local_type_error(value)
+        if t.__qualname__ != t.__name__:
+            # Type match guards must be local scope, this is
+            # raised in self.serialize_guards
+            guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
@@ -1892,10 +1893,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError(
-                "DICT_VERSION guard cannot be serialized."
-            )
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1963,8 +1960,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
         return self.id_match_unchecked(guard, recompile_hint)
 
     def id_match_unchecked(
@@ -2229,10 +2224,6 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE(self, guard: Guard) -> None:
         # don't support this in serialization because it uses unsupported ID_MATCH
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError(
-                "NN_MODULE guard cannot be serialized."
-            )
         self.ID_MATCH(guard, "[inline-inbuilt-nn-modules-candidate]")
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -2254,19 +2245,11 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError(
-                "FUNCTION_MATCH guard cannot be serialized."
-            )
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError(
-                "CLOSURE_MATCH guard cannot be serialized."
-            )
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -2388,10 +2371,6 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
-        if self.save_guards:
-            raise torch._dynamo.exc.PackageError(
-                "WEAKREF_ALIVE guard cannot be serialized."
-            )
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -3367,14 +3346,11 @@ class CheckFunctionManager:
                         value = MISSING
                         has_value = False
                 is_global = get_global_source_name(guard.originating_source) is not None
-                guard_fn = guard.create_fn
-                if isinstance(guard_fn, functools.partial):
-                    guard_fn = guard.create_fn.func  # type: ignore[attr-defined]
                 return GuardFilterEntry(
                     name=name,
                     has_value=has_value,
                     value=value,
-                    guard_type=guard_fn.__name__,
+                    guard_type=guard.create_fn_name(),
                     derived_guard_types=(
                         tuple(guard.guard_types) if guard.guard_types else ()
                     ),
@@ -3462,7 +3438,9 @@ class CheckFunctionManager:
             from torch._dynamo.output_graph import OutputGraph
 
             assert isinstance(self.output_graph, OutputGraph)
-            self.guards_state = self.serialize_guards(sorted_guards, self.output_graph)
+            self.guards_state = self.serialize_guards(
+                builder, sorted_guards, self.output_graph
+            )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -3482,9 +3460,41 @@ class CheckFunctionManager:
 
     def serialize_guards(
         self,
+        builder: GuardBuilder,
         sorted_guards: list[Guard],
         output_graph: OutputGraph,
     ) -> bytes:
+        UNSUPPORTED_GUARD_TYPES = (
+            "DICT_VERSION",
+            "NN_MODULE",
+            "ID_MATCH",
+            "FUNCTION_MATCH",
+            "CLOSURE_MATCH",
+            "WEAKREF_ALIVE",
+        )
+        # We check whether our list of guards are serializable here
+        for guard in sorted_guards:
+            guard_type = guard.create_fn_name()
+            derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
+            # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
+            # a chance that the guard is unserializable
+            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
+                if guard._unserializable:
+                    # Only call builder.get again if we know we're going to throw
+                    obj = builder.get(guard.name)
+                    raise_local_type_error(obj)
+            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+                raise torch._dynamo.exc.PackageError(
+                    f"{guard_type} guard cannot be serialized."
+                )
+            elif failed := next(
+                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+            ):
+                # Just raise the first failed guard name
+                raise torch._dynamo.exc.PackageError(
+                    f"{failed} guard cannot be serialized."
+                )
+
         builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
         used_global_vars = set()
         used_local_vars = set()
