@@ -545,7 +545,6 @@ def _gen_transform_infos_non_cached(
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
 
-    assert src_spec.mesh == src_spec.device_mesh
     if src_device_order == tuple(
         range(src_spec.mesh.ndim)
     ) and dst_device_order == tuple(range(src_spec.mesh.ndim)):
@@ -553,7 +552,6 @@ def _gen_transform_infos_non_cached(
     else:
         use_greedy_transform = False
 
-    use_greedy_transform = False
     drp = _get_dtensor_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
