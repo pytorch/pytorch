@@ -966,9 +966,7 @@ def _compile(
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
-        code: CodeType,
-        one_graph: bool,
-        hooks: Hooks
+        code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, Optional[DynamoTracerOutput]]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -1296,9 +1294,7 @@ def _compile(
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
-            guarded_code, tracer_output = compile_inner(
-                code, one_graph, hooks
-            )
+            guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
 
             # NB: We only put_code_state in success case.  Success case here
             # does include graph breaks; specifically, if a graph break still
