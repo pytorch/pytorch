@@ -1440,7 +1440,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         if (fake_mode := torch._guards.detect_fake_mode()) and (
             shape_env := fake_mode.shape_env
         ):
-            ctx = shape_env.ignore_fresh_unbacked_symbols  # tyep: ignore[assignment]
+            ctx = shape_env.ignore_fresh_unbacked_symbols  # type: ignore[assignment]
         # In fake tensor prop, we end up calling slice() with these unbacked indices.
         # Because slice has flexible semantics, the unbacked handling generates new output sizes
         # for each slice, effectively clobbering over these index symbols.
