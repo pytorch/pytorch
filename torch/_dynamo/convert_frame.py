@@ -1560,7 +1560,6 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
-
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
@@ -1596,8 +1595,13 @@ class CatchErrorsWrapper:
                 )
             return ConvertFrameReturn()
 
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
+        if (
+            frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
+        ) or (
+            frame.f_code.co_filename.endswith("collections/__init__.py")
+            and frame.f_code.co_name == "_make"
+        ):
+            # nametuple constructor/_make
             return ConvertFrameReturn()
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
