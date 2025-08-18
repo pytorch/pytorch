@@ -1005,7 +1005,7 @@ def _compile(
                 log.debug(
                     "No graph captured with one_graph=True or error_on_graph_break=True"
                 )
-            return ConvertFrameReturn(), tracer_output
+            return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
@@ -1350,6 +1350,7 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
+            assert tracer_output is not None
             output = tracer_output.output_graph
             if output:
                 output.local_scope = {}
