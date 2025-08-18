@@ -3466,6 +3466,83 @@ def cross_entropy(
     )
 
 
+# TODO: works for now but inconsistent with existing code base.
+class CrossEntropyChunkingStrategy(_Enum):
+    # Naive, unfused computation
+    none = "none"
+
+    # Chunk by inputs on batch dimension
+    inputs_on_batch = "inputs_on_batch"
+
+    # Chunk by weights on vocabulary dimension
+    weights_on_vocabulary = "weights_on_vocabulary"
+
+
+def linear_cross_entropy(
+    input: Tensor,
+    target: Tensor,
+    linear_weight: Tensor,
+    bias: Optional[Tensor] = None,
+    cross_entropy_weight: Optional[Tensor] = None,
+    reduce: Optional[Tensor] = None,
+    size_average: Optional[bool] = None,
+    chunking_strategy: Optional[str] = None,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    reduction: str = "mean",
+) -> Tensor:
+    tensors = input, target, linear_weight, cross_entropy_weight, reduce
+    if has_torch_function_variadic(*tensors):
+        return handle_torch_function(
+            linear_cross_entropy,
+            tensors,
+            input,
+            target,
+            linear_weight,
+            bias=bias,
+            cross_entropy_weight=cross_entropy_weight,
+            reduce=reduce,
+            size_average=size_average,
+            chunking_strategy=chunking_strategy,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            reduction=reduction,
+        )
+
+    def choose_chunking() -> str:
+        return CrossEntropyChunkingStrategy.none
+
+    if chunking_strategy is None:
+        chunking_strategy = choose_chunking().value
+
+    if False:
+        torch._check_with(
+            AssertionError,
+            hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
+            lambda: (
+                "Expected one of"
+                f" {', '.join(i.value for i in CrossEntropyChunkingStrategy)}"
+                f" but got {chunking_strategy=}"
+            ),
+        )
+        torch._check_with(
+            NotImplementedError,
+            chunking_strategy == CrossEntropyChunkingStrategy.none.value,
+            lambda: f"{chunking_strategy=} is not yet implemented",
+        )
+
+    return cross_entropy(
+        target,
+        linear(input=input, weight=linear_weight, bias=bias),
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+        reduce=reduce,
+        reduction=reduction,
+        size_average=size_average,
+        weight=cross_entropy_weight,
+    )
+
+
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3593,86 +3670,6 @@ def binary_cross_entropy_with_logits(
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum
-    )
-
-
-# TODO: works for now but inconsistent with existing code base.
-class CrossEntropyChunkingStrategy(_Enum):
-    # Naive, unfused computation
-    none = "none"
-
-    # Chunk by inputs on batch dimension
-    inputs_on_batch = "inputs_on_batch"
-
-    # Chunk by weights on vocabulary dimension
-    weights_on_vocabulary = "weights_on_vocabulary"
-
-
-def linear_cross_entropy(
-    input: Tensor,
-    target: Tensor,
-    linear_weight: Tensor,
-    bias: Optional[Tensor] = None,
-    cross_entropy_weight: Optional[Tensor] = None,
-    reduce: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
-    chunking_strategy: Optional[str] = None,
-    ignore_index: int = -100,
-    label_smoothing: float = 0.0,
-    reduction: str = "mean",
-) -> Tensor:
-    tensors = input, target, linear_weight, cross_entropy_weight, reduce
-    if has_torch_function_variadic(*tensors):
-        return handle_torch_function(
-            linear_cross_entropy,
-            tensors,
-            input,
-            target,
-            linear_weight,
-            bias=bias,
-            cross_entropy_weight=cross_entropy_weight,
-            reduce=reduce,
-            size_average=size_average,
-            chunking_strategy=chunking_strategy,
-            ignore_index=ignore_index,
-            label_smoothing=label_smoothing,
-            reduction=reduction,
-        )
-
-    def choose_chunking() -> str:
-        return CrossEntropyChunkingStrategy.none
-
-    if chunking_strategy is None:
-        chunking_strategy = choose_chunking().value
-
-    torch._check_with(
-        AssertionError,
-        hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
-        lambda: (
-            "Expected one of"
-            f" {', '.join(i.value for i in CrossEntropyChunkingStrategy)}"
-            f" but got {chunking_strategy=}"
-        ),
-    )
-    torch._check_with(
-        NotImplementedError,
-        chunking_strategy == CrossEntropyChunkingStrategy.none.value,
-        lambda: f"{chunking_strategy=} is not yet implemented",
-    )
-
-    return cross_entropy(
-        linear(
-            input=input,
-            weight=linear_weight,
-            bias=bias,
-        ),
-        target,
-        ignore_index=ignore_index,
-        label_smoothing=label_smoothing,
-        reduce=reduce,
-        reduction=reduction,
-        size_average=size_average,
-        weight=cross_entropy_weight,
     )
 
 
