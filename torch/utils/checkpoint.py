@@ -23,6 +23,7 @@ __all__ = [
     "check_backward_validity",
     "detach_variable",
     "get_device_states",
+    "is_checkpoint_enabled",
     "set_device_states",
     "noop_context_fn",
     "set_checkpoint_early_stop",
@@ -337,6 +338,14 @@ def is_checkpoint_enabled():
     return _is_checkpoint_enabled
 
 
+def _set_checkpoint_enabled():
+    _is_checkpoint_enabled = True
+
+
+def _unset_checkpoint_enabled():
+    _is_checkpoint_enabled = False
+
+
 def checkpoint(
     function,
     *args,
@@ -463,11 +472,16 @@ def checkpoint(
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    from torch._dynamo.utils import (
+        _disable_side_effect_safety_checks_for_current_subtracer,
+    )
     try:
         global _is_checkpoint_enabled
-        _is_checkpoint_enabled = True
+        _disable_side_effect_safety_checks_for_current_subtracer(
+            _set_checkpoint_enabled
+        )
         kwargs["use_reentrant"] = use_reentrant
-        if kwargs.get("context_fn", noop_context_fn) is not noop_context_fn:
+        if context_fn is not noop_context_fn:
             kwargs["context_fn"] = context_fn
         kwargs["determinism_check"] = determinism_check
         kwargs["debug"] = debug
@@ -478,7 +492,9 @@ def checkpoint(
             **kwargs
         )
     finally:
-        _is_checkpoint_enabled = False
+        _disable_side_effect_safety_checks_for_current_subtracer(
+            _set_checkpoint_enabled
+        )
 
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow

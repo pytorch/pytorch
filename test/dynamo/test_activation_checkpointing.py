@@ -1440,7 +1440,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-
     @requires_cuda_and_triton
     def test_pattern_matcher(self, device):
         # Check that the sdpa op is recomputed in the backward graph
