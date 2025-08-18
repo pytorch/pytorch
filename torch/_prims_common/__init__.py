@@ -566,7 +566,6 @@ def compute_elementwise_output_logical_to_physical_perm(
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
-
         def ge(a, b):
             """
             Returns true if a is symbolically greater than or equal to b, assuming a >= 0, b >= 0.

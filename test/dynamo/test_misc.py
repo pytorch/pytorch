@@ -9621,7 +9621,8 @@ def ___make_guard_fn():
         def h0(xs, ambiguity_check=False):
             u0, u1, u2 = xs.tolist()
             torch._check(u2 >= u0)
-            torch._check(u1 >= u0)  # stride ordering still isn't unique here, should raise
+            torch._check(u1 >= u0)
+            # stride ordering still isn't unique here, should raise
             y = torch.empty_strided([4, 4, 4], [u0, u1, u2])
             return y.dim_order(ambiguity_check=ambiguity_check)
 
@@ -9657,9 +9658,15 @@ def ___make_guard_fn():
         # custom unbacked strides with no ordering: ambiguity check should raise
         xs = torch.tensor([2, 3, 4])
         h0(xs)
-        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, r"The tensor does not have unique dim order."):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
             h0(xs, ambiguity_check=True)
-        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, r"The tensor does not have unique dim order."):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"The tensor does not have unique dim order.",
+        ):
             h1(xs, ambiguity_check=True)
 
     def test_str_format_assert1(self):

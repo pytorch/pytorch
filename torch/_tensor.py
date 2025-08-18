@@ -1592,7 +1592,8 @@ class Tensor(torch._C.TensorBase):
 
             # Check if there are any duplicate strides
             has_duplicate_strides = any(
-                guard_or_false(earlier == later) for earlier, later in zip(strides, strides[1:])
+                guard_or_false(earlier == later)
+                for earlier, later in zip(strides, strides[1:])
             )
 
             # Check if there are any singleton dimensions
@@ -1616,7 +1617,11 @@ class Tensor(torch._C.TensorBase):
 
         import torch._prims_common as utils
 
-        out_perm, raise_ambiguity = utils.compute_elementwise_output_logical_to_physical_perm(self, ambiguity_check=ambiguity_check)
+        out_perm, raise_ambiguity = (
+            utils.compute_elementwise_output_logical_to_physical_perm(
+                self, ambiguity_check=ambiguity_check
+            )
+        )
         if raise_ambiguity:
             raise RuntimeError("The tensor does not have unique dim order.")
         return tuple(out_perm)
