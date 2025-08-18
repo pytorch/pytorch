@@ -2650,7 +2650,7 @@ class GuardManager {
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
             .cast<uint64_t>();
-    _recompile_limit = config_module.attr("recompile_limit").cast<uint64_t>();
+    _recompile_limit = config_module.attr("recompile_limit").cast<int64_t>();
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -3400,7 +3400,7 @@ class GuardManager {
   // 3.12+ related helper
   bool _dict_callback_installed = false;
 
-  uint64_t _recompile_limit;
+  int64_t _recompile_limit;
 
  protected:
   // weakref to the type of guarded value
