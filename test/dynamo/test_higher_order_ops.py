@@ -38,11 +38,8 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def count_ops(gm, args, freq, op):
@@ -1186,7 +1183,7 @@ class GraphModule(torch.nn.Module):
         pred = a.sum() > 0
         with self.assertRaisesRegex(
             NotImplementedError,
-            "no rule registered for HOP cond and mode .*MyMode",
+            "no rule registered for HigherOrderOperator cond and mode .*MyMode",
         ):
             with MyMode():
                 res = cond_op(pred, torch.sin, torch.cos, (a,))
@@ -4483,15 +4480,13 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
-        l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
-        l_buffers_buffer_ = L_buffers_buffer_
+    def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
         l_inputs_ = L_inputs_
-
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
-
-        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        l_model_modules_l1_parameters_weight_ = L_model_modules_l1_parameters_weight_
+        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
+        l_model_buffers_buffer_ = L_model_buffers_buffer_
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_model_modules_l1_parameters_weight_, l_model_modules_l1_parameters_bias_);  l_inputs_ = l_model_modules_l1_parameters_weight_ = l_model_modules_l1_parameters_bias_ = None
+        add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
         return (add,)
 """
             # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
@@ -6847,7 +6842,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             for arg, cloned_arg in zip(args, cloned_args):
                 self.assertEqual(arg.grad, cloned_arg.grad)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
         def gn(x, y):
@@ -6866,7 +6861,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
         def gn(x, y):
@@ -6889,7 +6884,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout(self):
         def gn(x, y):
@@ -6915,7 +6910,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_dropout_inductor(self):
         def gn(x, y):
@@ -6934,7 +6929,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
         def gn(x, y):
@@ -6965,7 +6960,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
@@ -7108,6 +7103,103 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
+    def test_flop_counter_for_cond(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.cond(
+                    torch.tensor(True),
+                    lambda x: self.linear(x),
+                    lambda x: self.linear(self.linear(x)),
+                    (x,),
+                )
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 256},
+                "Mod": {torch.ops.aten.addmm: 256},
+                "Mod.linear": {torch.ops.aten.addmm: 256},
+            },
+        )
+
+    def test_flop_counter_for_nested_cond(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_branch(x):
+                    # Nested cond inside true branch
+                    return torch.cond(
+                        torch.tensor(True),
+                        lambda x: self.linear1(x),
+                        lambda x: self.linear2(x),
+                        (x,),
+                    )
+
+                def false_branch(x):
+                    return self.linear1(self.linear2(x))
+
+                return torch.cond(torch.tensor(True), true_branch, false_branch, (x,))
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 256},
+                "Mod": {torch.ops.aten.addmm: 256},
+                "Mod.linear1": {torch.ops.aten.addmm: 128},
+                "Mod.linear2": {torch.ops.aten.addmm: 128},
+            },
+        )
+
+    def test_flop_counter_for_cond_unbalanced_branches(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_branch(x):
+                    return self.linear(x)
+
+                def false_branch(x):
+                    return x.clone()
+
+                return torch.cond(torch.tensor(True), true_branch, false_branch, (x,))
+
+        mod = Mod()
+        with FlopCounterMode(mod, display=False) as mode:
+            mod(torch.randn(4, 4))
+
+        self.assertEqual(
+            mode.get_flop_counts(),
+            {
+                "Global": {torch.ops.aten.addmm: 128},
+                "Mod": {torch.ops.aten.addmm: 128},
+                "Mod.linear": {torch.ops.aten.addmm: 128},
+            },
+        )
+
 
 xfail_hops_compile = {
     # aot_eager
@@ -7121,7 +7213,7 @@ xfail_hops_compile = {
 
 
 class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
-    @requires_cuda
+    @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
         list(filter(lambda op: op.name not in xfail_hops_compile, hop_db)),

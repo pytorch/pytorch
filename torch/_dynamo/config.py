@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Configuration module for TorchDynamo compiler and optimization settings.
 
@@ -328,6 +326,10 @@ dont_skip_tracing = False
 # No longer used
 optimize_ddp_lazy_compile = False
 
+# lambda guarding on object aliasing to improve opportunity for dict tag
+# optimization
+use_lamba_guard_for_object_aliasing = True
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 # Whether to apply torch._dynamo.disable() to FSDP2 hooks.
@@ -348,6 +350,36 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # Considers a tensor immutable if it is one of the values of a dictionary, and
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
+
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
+
+
+# The recursive-dict-tag guard relies on the class/function identity staying
+# stable.  We therefore assume that the following function dunder attributes
+# are **never rebound** to a different object:
+#
+#     • __code__        • __closure__
+#     • __defaults__    • __kwdefaults__
+#     • __annotations__ • __mro__
+#
+# It is fine to mutate the objects they already point to (e.g. tweak an element
+# inside __defaults__), but assignments like
+#
+#     foo.__defaults__ = (3, 4)          # REBIND  - NOT SUPPORTED
+#
+# would invalidate the optimization.  This type of rebinding is rare, so we
+# assume that the rebinding never happens for guard purposes.  Set the flag
+# below to False only in environments where such rebinding is known to occur.
+assume_dunder_attributes_remain_unchanged = True
+
+# Speedup guard execution of nested nn modules by recursively checking for dict
+# tags to avoid full guard execution.
+use_recursive_dict_tags_for_guards = True
+
+# Maximum number of objects for which we check dict pointers tags. This is
+# useful for regional compilation.
+max_saved_pointers_for_recursive_dict_tags_check = 256
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
@@ -450,7 +482,7 @@ allow_empty_graphs = False
 record_compile_time_instruction_count = False
 
 
-def default_debug_dir_root():
+def default_debug_dir_root() -> str:
     # [@compile_ignored: debug]
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
     if DEBUG_DIR_VAR_NAME in os.environ:
@@ -542,6 +574,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
+# Experimental feature for running automatic caching precompile.
+# Enables automatic DynamoCache save/load
+caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
+
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
 # compiled region. But AOTAutograd traces without knowledge of backward hooks which are
@@ -552,6 +588,13 @@ fake_tensor_disable_inference_mode = True
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
+
+
+# Checks if we should graph break when seeing nn parameter constructors
+# in dynamo; this is so that we clearly fail and ask users to move outside
+# the function as opposed to trying to support the ctor with unclear semantics
+# See https://github.com/pytorch/pytorch/issues/157452 for more context
+graph_break_on_nn_param_ctor = True
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
@@ -604,6 +647,9 @@ _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
+# Common prefix to append to the id of each compile run to filter out data
+pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
+
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
     default=True,
@@ -625,7 +671,7 @@ _custom_ops_profile: Optional[Any] = None
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes: Any) -> Any: ...
 
 
 install_config_module(sys.modules[__name__])

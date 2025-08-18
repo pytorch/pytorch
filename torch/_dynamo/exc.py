@@ -26,12 +26,15 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import json
 import logging
 import os
 import re
 import textwrap
 import typing
 from enum import auto, Enum
+from functools import lru_cache
+from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -261,7 +264,14 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class IncorrectUsage(Exception):
@@ -498,7 +508,6 @@ def format_graph_break_message(
     return msg
 
 
-'''
 @lru_cache(maxsize=1)
 def _load_graph_break_registry() -> dict[str, Any]:
     """
@@ -513,9 +522,7 @@ def _load_graph_break_registry() -> dict[str, Any]:
         log.error("Error accessing the registry file: %s", e)
         return {}
 
-'''
 
-'''
 def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     """
     Retrieves the GBID documentation link for a given graph break type.
@@ -526,16 +533,17 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     Returns:
         A string containing the documentation URL if found, otherwise None.
     """
-    GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
+    GRAPH_BREAK_SITE_URL = (
+        "https://meta-pytorch.github.io/compile-graph-break-site/gb/"  # @lint-ignore
+    )
 
     registry = _load_graph_break_registry()
 
     for k, v in registry.items():
         if v and v[0].get("Gb_type") == gb_type:
-            return f"{GRAPH_BREAK_SITE_URL}{k}"
+            return f"{GRAPH_BREAK_SITE_URL}gb{k.lstrip('GB')}.html"
 
-    return "None"
-'''
+    return None
 
 
 # TODO replace old unimplemented later
@@ -560,21 +568,16 @@ def unimplemented_v2(
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
-    # Temporarily disabling the generation of the weblinks in error message
+    documentation_link = get_gbid_documentation_link(gb_type)
 
-    # documentation_link = get_gbid_documentation_link(gb_type)
-    # msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+    if documentation_link:
+        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
         raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
-
-
-def warning(msg: str) -> None:
-    counters["warnings"][msg] += 1
-    assert msg != os.environ.get("BREAK", False)
 
 
 # KeyError has special handling for its args

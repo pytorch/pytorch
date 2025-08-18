@@ -1,12 +1,18 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 from sympy import Symbol, sympify
 
 import torch
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
-from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import sympy_str, sympy_subs
+from torch._inductor.utils import get_device_tflops, sympy_str, sympy_subs
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestUtils(TestCase):
@@ -188,6 +194,14 @@ class TestUtils(TestCase):
                     countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
                 )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    def test_get_device_tflops(self, dtype):
+        ret = get_device_tflops(dtype)
+        self.assertTrue(type(ret) == float)
+
+
+instantiate_device_type_tests(TestUtils, globals())
 
 if __name__ == "__main__":
     run_tests()

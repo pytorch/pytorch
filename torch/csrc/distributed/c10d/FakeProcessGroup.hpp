@@ -20,7 +20,25 @@ class FakeWork : public Work {
 
 class FakeProcessGroup : public Backend {
  public:
-  FakeProcessGroup(int rank, int size) : Backend(rank, size) {}
+  struct Options : Backend::Options {
+    explicit Options() : Backend::Options("fake") {}
+
+    int fake_option = 0;
+  };
+
+  FakeProcessGroup(
+      int rank,
+      int size,
+      c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>())
+      : Backend(rank, size), options_(std::move(options)) {}
+
+  const std::string getBackendName() const override {
+    return "fake";
+  }
+
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
@@ -194,6 +212,9 @@ class FakeProcessGroup : public Backend {
       const BarrierOptions& /* opts */ = BarrierOptions()) override {
     return c10::make_intrusive<FakeWork>();
   }
+
+ private:
+  c10::intrusive_ptr<Options> options_;
 };
 
 } // namespace c10d

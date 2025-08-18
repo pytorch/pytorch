@@ -807,10 +807,8 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        (
-            tx.output.create_node(
-                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-            ),
+        tx.output.create_node(
+            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
         )
         torch._C._set_deterministic_algorithms(value)
 
@@ -942,7 +940,8 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        none = variables.ConstantVariable.create(None)
+        return self.target_values if self.target_values else none
 
     def exit(self, tx: "InstructionTranslator", *args):
         return variables.ConstantVariable.create(None)

@@ -54,12 +54,13 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
 case ${CUDA_VERSION} in
-    #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
+    #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
+    #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
     12.8)
-        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0"
+        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
         ;;
     12.9)
-        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
         # WAR to resolve the ld error in libtorch build with CUDA 12.9
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
             TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
@@ -133,6 +134,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
             "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            "/usr/local/cuda/lib64/libnvshmem_host.so.3"
             "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12"
             "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
         )
@@ -151,6 +153,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libcudart.so.12"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libnvshmem_host.so.3"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
             "libcupti.so.12"

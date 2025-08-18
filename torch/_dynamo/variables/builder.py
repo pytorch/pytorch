@@ -36,7 +36,6 @@ import re
 import sys
 import traceback
 import types
-import warnings
 import weakref
 from collections.abc import MutableMapping
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
@@ -52,6 +51,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import TracingContext
+from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -104,6 +104,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -132,6 +133,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
+    is_function,
     is_function_or_wrapper,
     is_invoke_subgraph,
     is_lru_cache_wrapped_function,
@@ -161,6 +163,7 @@ from .base import (
     VariableTracker,
     VariableTrackerMeta,
 )
+from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -304,8 +307,7 @@ DimList = list
 
 
 def safe_has_grad(t):
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+    with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
 
 
@@ -445,8 +447,18 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
+        def _is_deduplicable_sym_variable(value, vt):
+            # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
+            # should NOT track them. If we use a single SymNodeVariable instance to track them
+            # across multiple uses, then guards created for one usage will incorrectly apply to
+            # all other usages of that constant, leading to unnecessary recompilations.
+            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+
         if (
-            self._can_lift_attrs_to_inputs(vt)
+            (
+                self._can_lift_attrs_to_inputs(vt)
+                or _is_deduplicable_sym_variable(value, vt)
+            )
             and value not in self.tx.output.side_effects
             and not is_wrapper_or_member_descriptor(value)
         ):
@@ -1214,6 +1226,12 @@ class VariableBuilder:
         ) and BuiltinMethodVariable.is_supported_builtin_method(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return BuiltinMethodVariable(value, source=self.source)
+        elif is_function(value) and value in (float.fromhex, float.hex):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return GetAttrVariable(
+                BuiltinVariable(float, source=self.source),
+                value.__name__,
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1315,9 +1333,16 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
-            # This is a userdefined class, so install an ID_MATCH even if its a
-            # global variable.
-            self.install_guards(GuardBuilder.ID_MATCH)
+
+            if not is_from_closure_source(self.source):
+                # For closure source, the variable comes from LOAD_SUPER_ATTR,
+                # which calls self.__class__. This is internal Cpython
+                # implementation, and it is rare for the user to modify
+                # self.__class__ manually.
+                # For other cases, this is a userdefined class, so install an
+                # ID_MATCH even if its a global variable.
+                self.install_guards(GuardBuilder.ID_MATCH)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1632,6 +1657,8 @@ class VariableBuilder:
                 source=source,
             )
 
+            # Apply relevant logic from `VariableTracker.build(value[i])`
+            # (except for the `create_graph_input` stuff).
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
@@ -1640,7 +1667,6 @@ class VariableBuilder:
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
-
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
@@ -1656,6 +1682,27 @@ class VariableBuilder:
                 is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
+
+            # The following is very important for maintaining the "python object
+            # <==> variable tracker" 1-to-1 mapping, which is mainly handled via
+            # `side_effects`. Note that constructing `tensor_variable` above
+            # already adds it to graph arg, but we never registered it with
+            # `side_effects`. The preemptive `realize` calls here basically
+            # does that registration (at the end of `self.__call__`).
+            #
+            # A slightly cleaner alternative is to register the
+            # `tensor_variable`s above with `side_effects` directly, and just
+            # return the `list_variable`, but that breaks some tensor-subclass
+            # related tests like `test_inputs_aliasing_bytecode_stack_restore`,
+            # because `tensor_variable` is constructed via
+            # `handle_traced_output`, which doesn't really expect/handle tensor
+            # subclass.
+            #
+            # Eventually, we expect to fix remove all of these by having Dynamo
+            # auto-boxing inputs to the compiled graph, see
+            # https://github.com/pytorch/pytorch/issues/153701.
+            for vt in output:
+                vt.realize()
 
         result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
         if istype(value, (list, collections.deque)):
@@ -1696,6 +1743,11 @@ class VariableBuilder:
 
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
+
+        # See [Note] Static Addresses and Precompile
+        # https://github.com/pytorch/pytorch/issues/159228
+        if torch._dynamo.config.caching_precompile:
+            return
 
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
@@ -1897,6 +1949,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
+                    process_automatic_dynamic(
+                        self.tx,
+                        self.source.name(),
+                        FrameStateSizeEntry.make_scalar(value),
+                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                    )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -2966,6 +3024,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif (
+        isinstance(example_value, (int, float, bool))
+        and proxy.node.target is flat_apply
+    ):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3183,7 +3247,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3300,12 +3363,10 @@ def _automatic_dynamic(
         if is_dynamic_source(name):
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         if is_unbacked_source(name):
             log.debug("%s marked unbacked via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 
@@ -3534,6 +3595,12 @@ class SourcelessBuilder:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
+        elif callable(value) and UserDefinedClassVariable.is_supported_new_method(
+            value
+        ):
+            # NamedTuple._make uses an alias of tuple.__new__
+            obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
+            return GetAttrVariable(obj, "__new__")
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
         elif isinstance(

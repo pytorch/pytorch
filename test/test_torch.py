@@ -43,7 +43,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo, set_warn_always_context)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
+    xfailIfS390X, set_warn_always_context)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -58,13 +59,14 @@ import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU,
     _create_scaling_case, _create_scaling_models_optimizers)
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes, all_types_complex_float8_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 if TEST_WITH_TORCHINDUCTOR:
     from torch._inductor.test_case import TestCase
@@ -157,6 +159,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.inf, math.inf)
 
     @onlyNativeDeviceTypes
+    @slowTestIf(IS_WINDOWS)
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.uint16, torch.uint32, torch.uint64)
@@ -189,6 +192,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.uint16, torch.uint32, torch.uint64)
+    @slowTestIf(IS_WINDOWS)
     def test_storage(self, device, dtype):
         v = make_tensor((3, 5), dtype=dtype, device=device, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
@@ -219,6 +223,7 @@ class TestTorchDeviceType(TestCase):
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128, torch.quint8, torch.qint8, torch.qint32,
             torch.quint4x2)
+    @slowTestIf(IS_WINDOWS)
     def test_storage_setitem(self, device, dtype):
         # Skip quantized dtypes for CUDA, since they're not supported
         if torch.device(device).type == 'cuda':
@@ -250,10 +255,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @onlyNativeDeviceTypes
-    @unittest.skipIf(
-        "RelWithAssert" in torch.__config__.show(),
-        "failing in debug build, see https://github.com/pytorch/pytorch/pull/156731 for example",
-    )
+    @slowTestIf(IS_WINDOWS)
     def test_storage_use_count(self, device):
         a = torch.randn(10, device=device)
         prev_cf = torch._C._storage_Use_Count(a.untyped_storage()._cdata)
@@ -264,6 +266,7 @@ class TestTorchDeviceType(TestCase):
     @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_tensor_storage_type(self, device, dtype):
         a = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
 
@@ -274,6 +277,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
+    @slowTestIf(IS_WINDOWS)
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
@@ -291,6 +295,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_set_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
@@ -329,6 +334,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_typed_storage_meta(self, device, dtype):
         args_list = [
             [],
@@ -342,6 +348,7 @@ class TestTorchDeviceType(TestCase):
             self._check_storage_meta(s, s_check)
 
     @onlyNativeDeviceTypes
+    @slowTestIf(IS_WINDOWS)
     def test_untyped_storage_meta(self, device):
         args_list = [
             [],
@@ -356,6 +363,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_storage_meta_from_tensor(self, device, dtype):
         t_check = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         t = t_check.to('meta')
@@ -365,6 +373,7 @@ class TestTorchDeviceType(TestCase):
         self._check_storage_meta(s, s_check)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_storage_meta_errors(self, device, dtype):
         s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
 
@@ -405,6 +414,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_storage_meta_ok(self, device, dtype):
         s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
 
@@ -420,6 +430,7 @@ class TestTorchDeviceType(TestCase):
         model.share_memory()
 
     @dtypes(torch.float32, torch.complex64)
+    @slowTestIf(IS_WINDOWS)
     def test_deepcopy(self, device, dtype):
         from copy import deepcopy
         a = torch.randn(5, 5, dtype=dtype, device=device)
@@ -447,6 +458,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(deepcopy(a).foo, 3)
 
     @dtypes(torch.float32, torch.complex64)
+    @slowTestIf(IS_WINDOWS)
     def test_deepcopy_scalar(self, device, dtype):
         from copy import deepcopy
         a = torch.tensor(5, dtype=dtype, device=device)
@@ -1094,7 +1106,7 @@ class TestTorchDeviceType(TestCase):
             small2_expanded = small2.expand(*dims_full)
 
         if small.is_cuda and fn in ['map', 'map2']:
-            # map and map2 are not implementd on CUDA tensors
+            # map and map2 are not implemented on CUDA tensors
             return
 
         if hasattr(large_expanded, fn):
@@ -2560,7 +2572,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.08)
+    @reduced_f32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2571,7 +2583,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
-    @bf32_on_and_off(0.08)
+    @reduced_f32_on_and_off(0.08)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2581,7 +2593,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.04)
+    @reduced_f32_on_and_off(0.04)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2609,7 +2621,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.04)
+    @reduced_f32_on_and_off(0.04)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -2680,7 +2692,7 @@ else:
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid
+            # Check that the backward pass does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
@@ -2712,7 +2724,7 @@ else:
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
-        # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative sum over a zero length dimension doesn't crash on backprop.
         # Also check that cumsum over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -2764,7 +2776,7 @@ else:
                                              [0, 0, 0],
                                              [1, 1, 1]]))
 
-        # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -3699,6 +3711,7 @@ else:
 
     # FIXME: find a test suite for the take operator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
     def test_take(self, device, dtype):
         idx_size = (4,)
 
@@ -3809,7 +3822,7 @@ else:
         # Test for parallel adds with accumulate == True
         low_precision = dtype == torch.half or dtype == torch.bfloat16
         # Less numbers to avoid overflow with low_precision
-        # Grainsize is 3000 for the for_loop to be parallized on CPU
+        # Grainsize is 3000 for the for_loop to be parallelized on CPU
         sizes = ((100,)) if low_precision else ((200,), (3002,))
         # Bfloat16 has a particularly bad performance here
         # This operation is nondeterministic on GPU, so we are generous with the rtol
@@ -7066,7 +7079,7 @@ class TestTorch(TestCase):
                 dest.index_add(0, index, source)
 
     def test_linspace_logspace(self):
-        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # Ensure the output does not require grad regardless of inputs requiring guard or not.
         # The output of factory functions should not be part of any computational graph.
         start = 0.0
         end = 3.0
@@ -8340,7 +8353,7 @@ class TestTorch(TestCase):
         self.assertExpectedInline(str(x), '''tensor([1.0000e+02, 1.0000e-02])''')
         torch.set_printoptions(sci_mode=False)
         self.assertEqual(x.__repr__(), str(x))
-        self.assertExpectedInline(str(x), '''tensor([  100.0000,     0.0100])''')
+        self.assertExpectedInline(str(x), '''tensor([100.0000,   0.0100])''')
         torch.set_printoptions(sci_mode=None)  # reset to the default value
 
         # test no leading space if all elements positive
@@ -8703,7 +8716,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(2 * size, (1, 2, 3, 1, 2, 3))
 
     def test_Size_concat_non_tuple_sequence(self):
-        # check that TypeError get's raised on adding non-tuple sequences.
+        # check that TypeError gets raised on adding non-tuple sequences.
         from collections.abc import Sequence
 
         class DummySequence(Sequence):
@@ -9435,7 +9448,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                    f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
-            with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+            with self.assertRaisesRegex(ValueError, r'Overflow when unpacking long long'):
                 torch.manual_seed(invalid_seed)
 
         torch.set_rng_state(rng_state)
@@ -9726,6 +9739,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x.type(torch.int32).dtype, torch.int32)
 
     # FIXME: port to a quantization test suite
+    @xfailIfS390X
     def test_qengine(self):
         qengines = torch.backends.quantized.supported_engines
         original_qe = torch.backends.quantized.engine
@@ -10853,8 +10867,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_invalid_arg_error_handling(self) -> None:
         """ Tests that errors from old TH functions are propagated back """
         for invalid_val in [-1, 2**65]:
-            self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
-            self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises((ValueError, RuntimeError), lambda: torch.set_num_interop_threads(invalid_val))
 
     def _get_tensor_prop(self, t):
         preserved = (
@@ -11106,7 +11120,7 @@ def add_neg_dim_tests():
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# TODO: these empy classes are temporarily instantiated for XLA compatibility
+# TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
     pass
