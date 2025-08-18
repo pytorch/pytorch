@@ -16,11 +16,11 @@ from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
     canonicalize_dim,
+    contiguous_for_memory_format_or_false,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
     is_contiguous,
-    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_float_dtype,
     is_integer_dtype,
@@ -1339,13 +1339,13 @@ def make_fast_binary_impl(
                     continue
                 definitely_contiguous = (
                     definitely_contiguous
-                    and is_contiguous_for_memory_format_or_false(
+                    and contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )
                 )
                 definitely_channels_last = (
                     definitely_channels_last
-                    and is_contiguous_for_memory_format_or_false(
+                    and contiguous_for_memory_format_or_false(
                         op, memory_format=torch.channels_last
                     )
                 )
