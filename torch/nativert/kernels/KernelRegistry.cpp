@@ -196,8 +196,11 @@ static at::Tensor& mul_out(
   const auto& t_output = output.scalar_type();
   TORCH_CHECK(at::native::result_type(self, other) == t_output);
 
-  auto self_sizes = self.sizes();
-  at::native::resize_(output, self_sizes, std::nullopt);
+  at::native::resize_impl_cpu_(
+      output.unsafeGetTensorImpl(),
+      self.sizes(),
+      self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
+                           : self.strides());
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
