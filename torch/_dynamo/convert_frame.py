@@ -1005,6 +1005,7 @@ def _compile(
                 log.debug(
                     "No graph captured with one_graph=True or error_on_graph_break=True"
                 )
+            assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
