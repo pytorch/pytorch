@@ -1611,8 +1611,11 @@ class MultiProcContinuousTest(TestCase):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         assert rdvz_file is not None
+        # rank should be local_rank for tests running on <= 8gpus which is how all these tests are designed
+        # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
+        # issuing a warning
+        os.environ["LOCAL_RANK"] = str(rank)
         store = c10d.FileStore(rdvz_file, world_size)
-
         # create nccl processgroup with opts
         c10d.init_process_group(
             backend=cls.backend_str(),
@@ -1649,7 +1652,7 @@ class MultiProcContinuousTest(TestCase):
         cls._init_pg(rank, world_size, rdvz_file)
 
         # End of bootstrap
-        logger.info("Setup complete")
+        logger.debug("Setup complete")
 
         # Loop forever, waiting for a test name to run
         while True:
@@ -1674,7 +1677,7 @@ class MultiProcContinuousTest(TestCase):
                 completion_queue.put(enhanced_ex)
 
         # Termination
-        logger.info("Terminating ...")
+        logger.debug("Terminating ...")
         # Calling destroy_process_group when workers have exceptions
         # while others are doing collectives will cause a deadlock since
         # it waits for enqueued collectives to finish.
@@ -1711,7 +1714,7 @@ class MultiProcContinuousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.info("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
+            logger.debug("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
     def setUpClass(cls):
