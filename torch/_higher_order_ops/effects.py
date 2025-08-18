@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
+from enum import Enum
 from typing import Any, Optional, Union
+from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.custom_ops import CustomOpDef
-from torch._library.effects import EffectType
-from torch._library.utils import RegistrationHandle
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -18,50 +17,79 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-_op_identifier = Union[
-    str,
-    "torch._ops.OpOverload",
-    "torch._library.custom_ops.CustomOpDef",
-    "torch._ops.HigherOrderOperator",
-]
-OpType = Union["torch._ops.HigherOrderOperator", "torch._ops.OpOverload"]
-
-_EffectType = EffectType
+class _EffectType(Enum):
+    ORDERED = "Ordered"
 
 
-def _get_op_qualname(op: _op_identifier) -> str:
-    """Convert an op identifier to a qualified string key."""
-    if isinstance(op, torch._ops.OpOverload):
-        return op._name
-    elif isinstance(op, torch._ops.HigherOrderOperator):
-        return f"{op.namespace}::{op.name()}"
-    elif isinstance(op, CustomOpDef):
-        return op._qualname
-    elif isinstance(op, str):
-        return op
-
-    raise ValueError(f"Invalid operator input {op}")
+OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-def _register_effectful_op(
-    op: _op_identifier, effect: Optional[EffectType]
-) -> RegistrationHandle:
-    qualname = _get_op_qualname(op)
-    entry = torch._library.simple_registry.singleton.find(qualname)
-    handle = entry.effect.register(effect)
-    return handle
+SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
+    [
+        (torch.ops.aten._print.default, _EffectType.ORDERED),
+        (call_torchbind, _EffectType.ORDERED),
+    ]
+)
 
 
-def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
-    qualname = _get_op_qualname(op)
-    entry = torch._library.simple_registry.singleton.find(qualname)
-    return entry.effect.effect
+# Register synchronization functions as side-effectful on module load
+def _register_synchronize_effects():
+    """Register synchronization operations as side-effectful."""
+    try:
+        # Register torch.cuda.synchronize if available
+        import torch.cuda
+        if hasattr(torch.cuda, 'synchronize'):
+            # This won't work directly because torch.cuda.synchronize is not an OpOverload
+            # but we handle it in get_effect_key instead
+            pass
+            
+        # Try to register aten synchronize operations if they exist
+        sync_aten_ops = [
+            'aten._cuda_synchronize',
+            'aten._mps_synchronize', 
+            'aten._xpu_synchronize'
+        ]
+        
+        for op_path in sync_aten_ops:
+            try:
+                namespace, op_name = op_path.split('.', 1)
+                if hasattr(torch.ops, namespace):
+                    ns = getattr(torch.ops, namespace)
+                    if hasattr(ns, op_name):
+                        op_obj = getattr(ns, op_name)
+                        if hasattr(op_obj, 'default'):
+                            actual_op = op_obj.default
+                            if isinstance(actual_op, torch._ops.OpOverload):
+                                SIDE_EFFECTS[actual_op] = _EffectType.ORDERED
+            except Exception:
+                continue
+                
+    except Exception:
+        # If registration fails, the get_effect_key fallback will handle it
+        pass
 
 
-_register_effectful_op("aten::_print", _EffectType.ORDERED)
-_register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
-_register_effectful_op(call_torchbind, _EffectType.ORDERED)
-_register_effectful_op(hop_print, _EffectType.ORDERED)
+# Register synchronization effects on import
+_register_synchronize_effects()
+
+
+def _register_effectful_op(op: OpType, effect: _EffectType):
+    assert isinstance(
+        op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ) and not has_aliasing(op)
+    if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
+        raise RuntimeError(
+            f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
+            f"trying to register a different effect type {effect}."
+        )
+    SIDE_EFFECTS[op] = effect
+
+
+def _deregister_effectful_op(op: OpType):
+    if op not in SIDE_EFFECTS:
+        raise RuntimeError(f"Op {op} is not registered as effectful")
+
+    del SIDE_EFFECTS[op]
 
 
 class WithEffects(HigherOrderOperator):
@@ -90,6 +118,7 @@ class WithEffects(HigherOrderOperator):
     ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
+        assert has_effects(op, args, kwargs)
         assert isinstance(kwargs, dict)
         return super().__call__(token, op, *args, **kwargs)
 
@@ -100,7 +129,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return False
+        return op not in SIDE_EFFECTS
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
@@ -111,12 +140,50 @@ def has_aliasing(op: OpType):
     return False
 
 
-def has_effects(op) -> bool:
+def has_effects(op, args, kwargs) -> bool:
+    # Skip over the profiler's RecordFunction as they should not show up in the graph
+    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
+    if op in _skip_ops:
+        return False
+
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
-        and _get_effect(op) is not None
+        and get_effect_key(op, args, kwargs) is not None
     )
+
+
+def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
+    if op in SIDE_EFFECTS:
+        return SIDE_EFFECTS[op]
+    
+    # Special handling for synchronization operations
+    if hasattr(op, '__name__'):
+        op_name = op.__name__
+        if any(sync_pattern in op_name for sync_pattern in ['synchronize', '_cuda_synchronize', '_mps_synchronize', '_xpu_synchronize']):
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+    
+    # Special handling for torch.cuda.synchronize function object
+    if op is torch.cuda.synchronize:
+        SIDE_EFFECTS[op] = _EffectType.ORDERED 
+        return _EffectType.ORDERED
+
+    for arg in args:
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
+            # Add it to the table so that next time we see the same op we don't
+            # have to parse through the args again
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+
+    for arg in kwargs.values():
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
+            # Add it to the table so that next time we see the same op we don't
+            # have to parse through the args again
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            return _EffectType.ORDERED
+
+    return None
 
 
 def new_token_tensor() -> torch.Tensor:
@@ -191,15 +258,11 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
+def _get_schema(op, args) -> torch.FunctionSchema:
     if isinstance(op, torch._ops.OpOverload):
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif op == hop_print:
-        # hop_print currently expects (format_str, *kwargs) as its arguments
-        extra_kwargs = kwargs or {}
-        return op.gen_schema(*args, **extra_kwargs)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
 
@@ -227,7 +290,7 @@ def handle_effects(
     # Get a token. We can't do `tokens.get(op, torch.tensor([]))` because
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
-    key = _get_effect(op)
+    key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
         assert allow_token_discovery, (
@@ -272,7 +335,7 @@ def handle_effects(
             unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
-    schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
+    schema = _get_schema(op, unwrapped_args)
     if len(schema.returns) == 0:
         assert unwrapped_outs[0] is None
         unwrapped_outs = None  # type: ignore[assignment]
@@ -288,5 +351,4 @@ def handle_effects(
     assert isinstance(wrapped_token, torch.Tensor)
     tokens[key] = wrapped_token
 
-    # pyrefly: ignore [bad-argument-type]
     return ctx.wrap_tensors(unwrapped_outs)
