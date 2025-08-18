@@ -1256,7 +1256,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
         elif fn(sympy.Lt(index, -size)):
             return 0
         return None
-        
+
     start_index = compute_slice_index(start, size)
     end_index = compute_slice_index(end, size)
     if start_index is not None and end_index is not None:
