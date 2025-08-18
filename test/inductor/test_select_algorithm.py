@@ -497,6 +497,9 @@ class TestTemplateRender(TestCase):
                     self.render_hooks,
                 )
 
+            def inductor_meta_common(self):
+                return super().inductor_meta_common()
+
         class ExtensionTritonTemplate(TritonTemplate):
             kernel_type = ExtensionTritonTemplateKernel
 
