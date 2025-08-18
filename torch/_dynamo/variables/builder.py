@@ -226,6 +226,7 @@ from .misc import (
     ComptimeVariable,
     DebuggingVariable,
     DelayGraphBreakVariable,
+    ExceptionVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     LambdaVariable,
@@ -1306,6 +1307,14 @@ class VariableBuilder:
             # match user defined exceptions
             self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedExceptionClassVariable(value)
+        elif isinstance(value, BaseException):
+            # match user defined exceptions
+            self.install_guards(GuardBuilder.ID_MATCH)
+            args = [
+                LazyVariableTracker.create(arg, source=GetItemSource(self.source, i))
+                for i, arg in enumerate(value.args)
+            ]
+            return ExceptionVariable(type(value), args, source=self.source)
         elif issubclass(type(value), type):
             if value in (
                 torch.utils.hooks.BackwardHook,
