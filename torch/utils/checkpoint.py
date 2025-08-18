@@ -328,18 +328,15 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
-# Note: [torch.compile and checkpoint]
-# TorchDynamo does not step inside utils.checkpoint function.  The flow
-# looks likes this
-#  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
-#     speculatively checking if the forward function is safe to trace.
-#  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
-#     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
-#  3) If not, then TorchDynamo falls back to eager by performing a graph
-#     break. And here, the following disable wrapper ensures that
-#     TorchDynamo does not trigger again on the frames created by
-#     utils.checkpoint innards.
-@torch._disable_dynamo
+
+_is_checkpoint_enabled = False
+
+
+def is_checkpoint_enabled():
+    """Returns whether we are currently in a checkpoint region"""
+    return _is_checkpoint_enabled
+
+
 def checkpoint(
     function,
     *args,
@@ -466,6 +463,45 @@ def checkpoint(
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    try:
+        global _is_checkpoint_enabled
+        _is_checkpoint_enabled = True
+        kwargs["use_reentrant"] = use_reentrant
+        if kwargs.get("context_fn", noop_context_fn) is not noop_context_fn:
+            kwargs["context_fn"] = context_fn
+        kwargs["determinism_check"] = determinism_check
+        kwargs["debug"] = debug
+        kwargs["early_stop"] = early_stop
+        return _checkpoint_inner(
+            function,
+            *args,
+            **kwargs
+        )
+    finally:
+        _is_checkpoint_enabled = False
+
+# Note: [torch.compile and checkpoint]
+# TorchDynamo does not step inside utils.checkpoint function.  The flow
+# looks likes this
+#  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+#     speculatively checking if the forward function is safe to trace.
+#  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+#     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+#  3) If not, then TorchDynamo falls back to eager by performing a graph
+#     break. And here, the following disable wrapper ensures that
+#     TorchDynamo does not trigger again on the frames created by
+#     utils.checkpoint innards.
+@torch._disable_dynamo
+def _checkpoint_inner(
+    function,
+    *args,
+    use_reentrant: Optional[bool] = None,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    **kwargs
+):
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
