@@ -1346,7 +1346,47 @@ class IndentedBuffer:
             buf.write(line)
             buf.write("\n")
             p += 1 + line.count("\n")
-        return ValueWithLineMap(buf.getvalue(), linemap)
+        
+        code = buf.getvalue()
+        
+        # Process code to inject NaN assertions
+        if " = " in code:
+            lines = code.split("\n")
+            new_lines = []
+            
+            for line in lines:
+                new_lines.append(line)
+                
+                stripped_line = line.lstrip()
+
+#                 if "tmp17 = (tmp15 / tmp16)" in stripped_line:
+#                     indent = line[:len(line) - len(stripped_line)]
+#                     new_lines.append(f'''
+# {indent}pos_inf_m_tmp15 = tmp15 ==  float('inf')
+# {indent}neg_inf_m_tmp15 = tmp15 == -float('inf')
+# {indent}inf_m_tmp15 = pos_inf_m_tmp15 | neg_inf_m_tmp15
+# {indent}tl.device_assert(~inf_m_tmp15, "+Inf or -Inf detected in tmp15")
+# {indent}pos_inf_m_tmp16 = tmp16 ==  float('inf')
+# {indent}neg_inf_m_tmp16 = tmp16 == -float('inf')
+# {indent}inf_m_tmp16 = pos_inf_m_tmp16 | neg_inf_m_tmp16
+# {indent}tl.device_assert(~inf_m_tmp16, "+Inf or -Inf detected in tmp16")
+# {indent}mask      = (tmp16 == 0.0)               # bool tensor → 0 / 1
+# {indent}count_zer = tl.sum(mask.to(tl.int32))     # scalar int
+# {indent}num_elem  = mask.numel  # total elements
+# {indent}all_zero  = count_zer == num_elem        # scalar bool
+# {indent}tl.device_assert(all_zero, "tmp16 contains non-zero values")
+# ''')                
+
+#                 if line.startswith("    ") and " = " in stripped_line and "tmp" in stripped_line and ": tl.constexpr" not in stripped_line and "triton_helper" not in stripped_line and ' = float("nan")' not in stripped_line:
+#                     var_part = stripped_line.split("=")[0].strip()
+#                     # Get the indentation of the original line
+#                     indent = line[:len(line) - len(stripped_line)]
+#                     # Add assertion with same indentation
+#                     new_lines.append(f'{indent}tl.device_assert({var_part} == {var_part}, "{var_part} is NaN")')
+            
+            code = "\n".join(new_lines)
+        
+        return ValueWithLineMap(code, linemap)
 
     def getvalue(self) -> str:
         return self.getvaluewithlinemap().value

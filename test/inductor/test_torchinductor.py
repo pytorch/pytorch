@@ -11576,6 +11576,77 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @requires_gpu()
+    def test_sdpa_gqa_padded_slice_stride_fix(self):
+        class MaskedMHA(torch.nn.Module):
+            def __init__(self, H_q, H_kv, D):
+                super().__init__()
+                self.H_kv = H_kv
+                num_heads_total = H_q + 2 * H_kv
+                self.qkv_proj_vid = torch.nn.Linear(H_q*D, num_heads_total*D)
+                self.qkv_proj_txt = torch.nn.Linear(H_q*D, num_heads_total*D)
+                self.out_proj = torch.nn.Linear(H_q*D, H_q*D)
+                self.H_q = H_q
+                self.D = D
+
+                
+            def forward(self, x_vid, x_txt, attn_mask):
+                qkv_vid = self.qkv_proj_vid(x_vid)
+                qkv_txt = self.qkv_proj_txt(x_txt)
+                qkv_vid = qkv_vid.reshape((*qkv_vid.shape[:-1], -1, self.D))
+                qkv_txt = qkv_txt.reshape((*qkv_txt.shape[:-1], -1, self.D))
+
+                
+                q_vid = qkv_vid[..., :self.H_q, :]
+                k_vid = qkv_vid[..., self.H_q:self.H_q + self.H_kv, :]
+                v_vid = qkv_vid[..., self.H_q + self.H_kv:, :]
+
+                q_txt = qkv_txt[..., :self.H_q, :]
+                k_txt = qkv_txt[..., self.H_q:self.H_q + self.H_kv, :]
+                v_txt = qkv_txt[..., self.H_q + self.H_kv:, :]
+
+                q = torch.cat([q_vid, q_txt], dim=-3)
+                k = torch.cat([k_vid, k_txt], dim=-3)
+                v = torch.cat([v_vid, v_txt], dim=-3)
+
+                out = torch.nn.functional.scaled_dot_product_attention(q.transpose(-2,-3), k.transpose(-2,-3), v.transpose(-2,-3), attn_mask=attn_mask, enable_gqa=True)
+                out = out.transpose(-2,-3)
+
+                return out
+
+        def test_masked_mha():
+            S_vid = 300
+            S_txt = S - S_vid
+            x1 = torch.randn(B, S_vid, H*D, requires_grad=True, device=device)
+            x2 = torch.randn(B, S_txt, H*D, requires_grad=True, device=device)
+            attn_mask = torch.ones(B, 1, S, S, dtype=torch.bool, device=device)
+
+            H_kv = H // 4
+            mha = MaskedMHA(H, H_kv, D)
+            mha = mha.to(device)
+            mha = torch.compile(mha, fullgraph=True)
+            with torch.autocast(device_type="cuda", dtype=dtype, cache_enabled=False):
+                out_vid = mha(x1, x2, attn_mask)
+                target_vid = torch.randn_like(out_vid)
+
+                loss_vid = (out_vid - target_vid).mean()
+                loss = loss_vid
+            loss.backward()
+            torch.cuda.synchronize()
+            print(f"x1 grad any nan={torch.any(x1.grad.isnan()).item()}")
+            print(f"x2 grad any nan={torch.any(x2.grad.isnan()).item()}")
+            print(f"loss={loss.item()}")
+            for param_idx, param in enumerate(mha.parameters()):
+                print(f"{param_idx=} {param.grad.max() if param.grad is not None else None}")
+
+
+        B, H, S, D = 64, 32, 555, 128
+        device = "cuda"
+        dtype = torch.bfloat16
+        torch.compiler.reset()
+
+        test_masked_mha()
+
     def test_fft_real_input(self):
         def fn(x):
             return torch.fft.fftn(x)
