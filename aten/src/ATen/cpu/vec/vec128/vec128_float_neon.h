@@ -330,7 +330,7 @@ class Vectorized<float> {
   }
   
   Vectorized<float> fexp_u20() const {
-    return exp();
+    return exp_20();
   }
   DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
       fmod,
