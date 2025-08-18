@@ -603,12 +603,10 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
-    def get_stack_traces(self) -> dict[str, str]:
+    def get_stack_traces(self) -> OrderedSet[str]:
         # Return stack traces to user model code
         # A single IRNode could correspond to multiple lines of code
-
-        # Group nodes by their stack traces to deduplicate
-        nodes_to_stack_trace = {}
+        stack_traces: OrderedSet[str] = OrderedSet()
         origins = self.origins
         if isinstance(self, ExternKernel):
             origin_node = self.get_origin_node()
@@ -617,7 +615,7 @@ class IRNode:
         for node in origins:
             if hasattr(node, "stack_trace") and node.stack_trace:
                 # nodes in the backward graph don't have mapping to pre_grad_graph
-                nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
+                stack_traces.add(node.stack_trace)
             else:
                 pre_grad_nodes = (
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes.get(
@@ -633,9 +631,8 @@ class IRNode:
                         )
                     )
                     if stack_trace:
-                        nodes_to_stack_trace["pre_grad+" + node_name] = stack_trace
-
-        return nodes_to_stack_trace
+                        stack_traces.add(stack_trace)
+        return stack_traces
 
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
@@ -646,8 +643,8 @@ class IRNode:
             return [origins]
 
         stack_trace_str = []
-        for stack_trace in self.get_stack_traces().values():
-            stack_trace_str.append("stack_traces = {{")
+        for stack_trace in self.get_stack_traces():
+            stack_trace_str.append("stack_traces = {")
             stack_trace_str += stack_trace.split("\n")
             stack_trace_str.append("}")
         return [origins] + stack_trace_str
@@ -5135,6 +5132,37 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class CuteDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
+    Similar to other template buffers but specialized for CuteDSL operations.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.mutated_inputs = mutated_inputs
+        self.outputs: list[Buffer] = [self]
+
+        if mutated_inputs is not None:
+            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
 ) -> TypeIs[Sequence[IRNode]]:
@@ -5754,8 +5782,7 @@ class ExternKernel(InputsKernel):
         if (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
-            and isinstance(x_unwrap_view, (ReinterpretView, Buffer))
-            # and hasattr(x_unwrap_view, "layout")
+            and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
                 x_unwrap_view_fx_node.meta["val"].is_contiguous(
@@ -8659,38 +8686,38 @@ class WhileLoop(ExternKernel):
         )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
-        real_outputs = {
-            idx: out
-            for idx, out in enumerate(body_outputs)
-            if idx not in mutated_idx_set
-        }
-        real_outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                while_loop,
-                [(list, idx)],
-            )
-            for idx, output in real_outputs.items()
-        ]
-        while_loop.outputs = real_outputs
-        while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[attr-defined, union-attr]
-            for inp in mutated_inputs
-        ]
 
-        outputs_iter = iter(real_outputs)
+        # Create all outputs first
         mutated_inputs_iter = iter(mutated_inputs)
-        all_outputs = [
-            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
-            for idx in range(len(body_outputs))
-        ]
+        all_outputs = []
+        while_loop.outputs = []
+        while_loop.mutation_outputs = []
+
+        for idx, output in enumerate(body_outputs):
+            if idx in mutated_idx_set:
+                assert idx < len(carried_inputs), "only carries can be mutated."
+                # Create MutationOutput for mutated inputs
+                mutated_input = next(mutated_inputs_iter)
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
+                all_outputs.append(mutated_input)
+            else:
+                # Create MultiOutput for regular outputs
+                multi_out = MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    while_loop,
+                    [(list, idx)],
+                )
+                while_loop.outputs.append(multi_out)
+                all_outputs.append(multi_out)
+
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
