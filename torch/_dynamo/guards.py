@@ -139,6 +139,7 @@ from .source import (
     GradSource,
     ListGetItemSource,
     LocalSource,
+    NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
@@ -727,6 +728,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___dataclass_fields": dataclass_fields,
+            "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -756,6 +758,13 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
             for fs in reversed(guard.user_stack):
                 if fs.filename not in uninteresting_files():
                     extra = f"  # {format_frame(fs, line=True)}"
+                    if len(extra) > 1024:
+                        # For fx graphs, the line can be very long in case of
+                        # torch.stack ops, where many inputs are set to None
+                        # after the operation.  This increases the size of the
+                        # guards log file.  In such cases, do not print the line
+                        # contents.
+                        extra = f"  # {format_frame(fs)}"
                     break
         elif guard.stack:
             summary = guard.stack.summary()
@@ -837,6 +846,16 @@ def raise_local_type_error(obj: Any) -> NoReturn:
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
+    )
+
+
+def should_optimize_getattr_on_nn_module(value: Any) -> bool:
+    # If inline_inbuilt_nn_modules flag is True, Dynamo has already traced
+    # through the __getattr__, and therefore it is always safe to optimize
+    # getattr on nn modules.
+    return isinstance(value, torch.nn.Module) and (
+        config.inline_inbuilt_nn_modules
+        or get_custom_getattr(value) is unpatched_nn_module_getattr
     )
 
 
@@ -1425,11 +1444,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 assert base_source_name
                 out = self.getattr_on_nn_module(
                     source,
@@ -1667,6 +1682,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, NamedTupleFieldsSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x._fields,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, CodeSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.code_manager(
@@ -1803,11 +1826,7 @@ class GuardBuilder(GuardBuilderBase):
 
             # if the base value is nn.Module, check if we can speedup the
             # guard by going through __dict__ attrs.
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 self.getattr_on_nn_module(
                     source,
                     base_manager,
