@@ -47,8 +47,14 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -2989,7 +2995,7 @@ main()
                 b = MyFunc.apply(a)
                 b.sum().backward()
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -3029,7 +3035,7 @@ main()
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
             32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
@@ -3051,7 +3057,7 @@ main()
             2 if inductor_config.cpp_wrapper else 0,
         )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -3079,10 +3085,19 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
+        )
 
     @scoped_load_inline
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -3144,9 +3159,18 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        elif inductor_config.cpp_wrapper:
+            expected_cudagraph_skips = 2
+        else:
+            expected_cudagraph_skips = 1
+
         self.assertEqual(
             counters["inductor"]["cudagraph_skips"],
-            2 if inductor_config.cpp_wrapper else 1,
+            expected_cudagraph_skips,
         )
 
     def test_logs(self):
@@ -3710,7 +3734,7 @@ class CompiledAutograd0(torch.nn.Module):
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_flex_attention(self):
         def _squared(score, b, h, m, n):
             """Joint graph needed for correctness"""
@@ -3878,7 +3902,7 @@ class CompiledAutograd0(torch.nn.Module):
                 compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cpu_offloading(self):
         def fn():
             def pack(x):
@@ -5046,7 +5070,7 @@ def wrap_test_class(orig_cls):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
             backend = lookup_backend(name)
-            if not HAS_CUDA and backend == "inductor":
+            if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
             ctxs = [
                 compiled_autograd._enable(
@@ -5283,7 +5307,7 @@ xfail_divergence_from_eager = {
 
 skipped_tests = set()
 
-if not HAS_CUDA:
+if not HAS_CUDA_AND_TRITON:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     skipped_tests.add("test_type_conversions")
 
@@ -5309,7 +5333,7 @@ ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.ActivationCheckpointingTests
 )
 
-if torch.distributed.is_available() and HAS_CUDA:
+if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile
