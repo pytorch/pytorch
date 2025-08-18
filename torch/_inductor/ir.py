@@ -7656,7 +7656,7 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         )
 
-        V.graph.extern_kernel_nodes.append(node)
+        V.extern_kernel_nodes.append(node)
 
         return [*args, *ordered_kwargs]
 

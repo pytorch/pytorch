@@ -1390,7 +1390,10 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                     )
-                    with V.set_graph_handler(const_graph):
+                    with (
+                        V.set_graph_handler(const_graph),
+                        V.set_extern_kernel_nodes([]),
+                    ):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                         const_graph.run()
                         const_wrapper_code, const_kernel_code = (
@@ -1425,7 +1428,7 @@ class _InProcessFxCompile(FxCompile):
                 # We are going to start code generating runtime asserts, so make sure
                 # you don't start adding new ones in the lowering process
                 graph.freeze_runtime_asserts()
-                with V.set_graph_handler(graph):
+                with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
@@ -1472,11 +1475,9 @@ class _InProcessFxCompile(FxCompile):
                                 )
 
                             serialized_extern_kernel_nodes = None
-                            if graph.extern_kernel_nodes:
+                            if V.extern_kernel_nodes:
                                 serialized_extern_kernel_nodes = (
-                                    graph.extern_node_serializer(
-                                        graph.extern_kernel_nodes
-                                    )
+                                    graph.extern_node_serializer(V.extern_kernel_nodes)
                                 )
                                 output_code_log.debug(
                                     "Serialized Extern Kernel Nodes: \n%s",
