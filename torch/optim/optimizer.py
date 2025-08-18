@@ -1042,7 +1042,7 @@ class Optimizer:
                                 per_device_and_dtype_grads[p.grad.device][
                                     p.grad.dtype
                                 ].append(p.grad)
-            if foreach:
+            if not set_to_none and foreach:
                 assert per_device_and_dtype_grads is not None
                 for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
