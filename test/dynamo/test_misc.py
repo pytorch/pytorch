@@ -8571,7 +8571,6 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_manager = torch._dynamo.guards.CheckFunctionManager(
                 foo.__code__,
                 guards_state.output_graph,
-                guards_serialization_mode="load",
                 shape_code_parts=guards_state.shape_code_parts,
                 runtime_global_scope=new_globals,
             ).guard_manager
