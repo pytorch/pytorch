@@ -208,7 +208,7 @@ if __name__ == "__main__":
     print("Building PyTorch wheel")
     build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
-    if enable_cuda:
+    if enable_cuda and os.getenv("MAX_JOBS") is None:
         build_vars += "MAX_JOBS=5 "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
