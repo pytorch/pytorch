@@ -1140,6 +1140,7 @@ class TritonTemplateKernel(TritonKernel):
         mask: Optional[Union[str, tuple[str]]] = None,
         indent_width: int = 4,
         use_tma: bool = False,
+        subgraph_name: str = "<STORE_OUTPUT>"
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1153,8 +1154,10 @@ class TritonTemplateKernel(TritonKernel):
             indent_width (int): The number of spaces to use for indentation. This is used when the call to
                 store_output is indented in the kernel definition.
             use_tma (bool): Should TMA be enable for this output?
+            subgraph_name (str): Name of the subgraph to use. This is to attempt to enable multiple calls
+                to store_output in the same function, for example with epilogue subtiling.
         """
-        with self.create_subgraph_body("<STORE_OUTPUT>"):
+        with self.create_subgraph_body(subgraph_name):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
@@ -1215,7 +1218,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Write out the intermediate lines
                 if output_name not in V.graph.removed_buffers:
                     for line in intermediate_lines:
-                        self.body.writeline(DeferredLine(output_name, line))
+                        self.body.writeline(line)
             else:
                 # glue to make generated code use same indexing from template
                 for name, range_tree_entry in zip(
@@ -1279,15 +1282,16 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
 
         def hook():
-            # more stuff might have been added since the codegen_body above
-            self.codegen_body()
-            self.cse.invalidate(OrderedSet())
+            with self.set_subgraph_body(subgraph_name):
+                # more stuff might have been added since the codegen_body above
+                self.codegen_body()
+                self.cse.invalidate(OrderedSet())
 
-            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+                return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        assert "<STORE_OUTPUT>" not in self.render_hooks
-        self.render_hooks["<STORE_OUTPUT>"] = hook
-        return "<STORE_OUTPUT>"
+        assert subgraph_name not in self.render_hooks
+        self.render_hooks[subgraph_name] = hook
+        return subgraph_name
 
     def render(self, template, kwargs, record_input_dependent_tracked_event=False):
         if record_input_dependent_tracked_event:

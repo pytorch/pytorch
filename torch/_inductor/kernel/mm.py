@@ -277,8 +277,8 @@ _blackwell_ws_persistent_device_tma = r"""
     )
     stride_cm = {{stride(None, 0)}}
     stride_cn = {{stride(None, 1)}}
-    # TODO: Add EPILOGUE_SUBTILE
-    {{generate_output_tensor_descriptor(block_sizes=("BLOCK_M", "BLOCK_N"), strides=("stride_cm", "stride_cn"), shapes=("M", "N"))}}
+    BLOCK_N_SHAPE: tl.constexpr = BLOCK_N // 2 if EPILOGUE_SUBTILE else BLOCK_N
+    {{generate_output_tensor_descriptor(block_sizes=("BLOCK_M", "BLOCK_N_SHAPE"), strides=("stride_cm", "stride_cn"), shapes=("M", "N"))}}
 
     # tile_id_c is used in the epilogue to break the dependency between
     # the prologue and the epilogue
@@ -317,8 +317,15 @@ _blackwell_ws_persistent_device_tma = r"""
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
-        # TODO: Add EPILOGUE_SUBTILE
-        {{store_output(("offs_cm", "offs_cn"), "accumulator", indent_width=8, use_tma=True)}}
+        if EPILOGUE_SUBTILE:
+            acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
+            acc = tl.permute(acc, (0, 2, 1))
+            acc0, acc1 = tl.split(acc)
+            {{store_output(("offs_cm", "offs_cn"), "acc0", indent_width=12, use_tma=True, subgraph_name="<SUBTILE_STORE_OUTPUT0>")}}
+            offs_cn2 = offs_cn + BLOCK_N // 2
+            {{store_output(("offs_cm", "offs_cn2"), "acc1", indent_width=12, use_tma=True, subgraph_name="<SUBTILE_STORE_OUTPUT1>")}}
+        else:
+            {{store_output(("offs_cm", "offs_cn"), "accumulator", indent_width=12, use_tma=True)}}
 """
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(

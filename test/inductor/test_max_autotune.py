@@ -36,6 +36,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.template_heuristics import (
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -252,11 +253,13 @@ class TestMaxAutotune(TestCase):
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
     def test_blackwell_max_autotune_regular_mm_persistent_tma(
         self,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
+        epilogue_subtile: bool,
     ):
         def mm(a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -283,6 +286,10 @@ class TestMaxAutotune(TestCase):
             .to(GPU_TYPE)
         )
 
+        # Force a subtiling decision for testing.
+        CUDABlackwellPersistentTMATemplateConfigHeuristic._determine_epilogue_subtile = (
+            staticmethod(lambda *args, **kwargs: epilogue_subtile)
+        )
         with config.patch(
             {
                 "max_autotune": True,
@@ -490,11 +497,13 @@ class TestMaxAutotune(TestCase):
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
     def test_blackwell_max_autotune_addmm_persistent_tma(
         self,
         a_transposed: bool,
         b_transposed: bool,
         dynamic: bool,
+        epilogue_subtile: bool,
     ):
         def addmm(x, a, b):
             # TMA requires 16-byte alignment: here we repeat the dims
@@ -524,6 +533,10 @@ class TestMaxAutotune(TestCase):
         )
         x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
 
+        # Force a subtiling decision for testing.
+        CUDABlackwellPersistentTMATemplateConfigHeuristic._determine_epilogue_subtile = (
+            staticmethod(lambda *args, **kwargs: epilogue_subtile)
+        )
         with config.patch(
             {
                 "max_autotune": True,

@@ -1594,6 +1594,23 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
         # TODO: Tune these for blackwell.
         self.mm_configs = self.persistent_mm_configs
 
+    @staticmethod
+    def _determine_epilogue_subtile(BLOCK_M: int, BLOCK_N: int) -> bool:
+        """
+        Determine the logic for forcing epilogue subtiling based on BLOCK_M
+        and BLOCK_N. This is written as a separate function to enable overwriting
+        it for testing.
+
+        Args:
+            BLOCK_M (int): Size of BLOCK_M
+            BLOCK_N (int): Size of BLOCK_N
+        Returns:
+            (bool): Should we set EPILOGUE_SUBTILE for a config?
+        """
+        # TODO: Tune properly. This is just hard coding to a default based on the assumption
+        # we want to use less shared memory.
+        return (BLOCK_M > 128) or (BLOCK_N > 128)
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -1611,6 +1628,11 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
             # TODO: Consider making these tunable.
             template_kwargs["FLATTEN"] = True
             template_kwargs["WARP_SPECIALIZE"] = True
+            # TODO: Tune properly. This is just hard coding to a default based on the assumption
+            # we want to use less shared memory.
+            template_kwargs["EPILOGUE_SUBTILE"] = self._determine_epilogue_subtile(
+                template_kwargs["BLOCK_M"], template_kwargs["BLOCK_N"]
+            )
 
             yield template_kwargs
 
