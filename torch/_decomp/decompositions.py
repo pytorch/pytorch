@@ -5348,9 +5348,9 @@ def median_impl(x, dim, keepdim=False, ignore_nan=True):
         result_ind = aten._unsafe_index(sorted_idxs.flatten(), [indices.flatten()])
     else:
         k = (size - 1) // 2
-        val_indices: List[Optional[TensorLike]] = [None] * x.ndim
+        val_indices: list[Optional[TensorLike]] = [None] * x.ndim
         val_indices[dim] = torch.tensor([k], device=x.device)
-        mask_indices: List[Optional[TensorLike]] = [None] * x.ndim
+        mask_indices: list[Optional[TensorLike]] = [None] * x.ndim
         mask_indices[dim] = torch.tensor([x.shape[dim] - 1], device=x.device)
 
         result_val = aten._unsafe_index(sorted_vals, val_indices)
