@@ -535,6 +535,32 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
 
     result: CompiledFxGraph
 
+    def recheck_autotune_results(self) -> None:
+        """
+        Run during PrecompileContext.serialize(). We recheck the autotune cache
+        again before saving results, to see if autotuning has completed for our generated
+        triton kernels. If so, it edits the statically compiled triton kernel so that only
+        the best config is preserved.
+        """
+        triton_bundle = self.result._triton_bundle
+        if triton_bundle is None:
+            return
+        static_autotuners = triton_bundle.static_autotuners
+        for autotuner in static_autotuners:
+            from torch._inductor.codecache import _load_triton_kernel_from_source
+
+            reload_kernel_from_src = functools.partial(
+                _load_triton_kernel_from_source,
+                autotuner.kernel_name,
+                autotuner.source_code,
+            )
+            autotuner.kernel.recheck_autotune_cache(
+                reload_kernel_from_src,
+            )
+            # Clear any extra state created by this check
+            autotuner.kernel.prepare_for_pickle()
+            autotuner.kernel.prepare_for_caching()
+
     def pre_save(self) -> None:
         disk_compiled_graph = copy(self.result)
         disk_compiled_graph.prepare_for_serialization()
@@ -997,6 +1023,18 @@ class BundledAOTAutogradCacheEntry(
     AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
     of relying on cache keys from FxGraphCache
     """
+
+    @staticmethod
+    def update_autotune_results(
+        entry: BundledAOTAutogradCacheEntry,
+    ) -> BundledAOTAutogradCacheEntry:
+        """
+        Update the autotune results in the cache entry.
+        """
+        entry.compiled_fw.recheck_autotune_results()
+        if entry.compiled_bw is not None:
+            entry.compiled_bw.recheck_autotune_results()
+        return entry
 
 
 @contextlib.contextmanager

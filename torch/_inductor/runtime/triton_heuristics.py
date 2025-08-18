@@ -386,13 +386,14 @@ class CachingAutotuner(KernelInterface):
         assert self.is_statically_launchable()
 
         configs = [result.config for result in self.compile_results]
-
+        if len(configs) <= 1:
+            return
         (cached_configs, _, autotune_cache_info) = check_autotune_cache(
             configs, self.filename, self.inductor_meta
         )
         self.autotune_cache_info = autotune_cache_info
         # I.e. there was an autotune cache hit
-        if len(cached_configs) == 1 and len(configs) > 1:
+        if len(cached_configs) == 1:
             best_config = cached_configs[0]
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
@@ -421,7 +422,7 @@ class CachingAutotuner(KernelInterface):
         self,
         warm_cache_only=False,
         reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
-        static_triton_bundle_key: Optional[str] = None,
+        source_code: Optional[str] = None,  # Used for static_triton_bundle_key
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -434,8 +435,9 @@ class CachingAutotuner(KernelInterface):
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
             self._precompile_worker()
-            if static_triton_bundle_key is not None and self.is_statically_launchable():
-                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
+
+            if source_code is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(source_code, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
 
