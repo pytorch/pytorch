@@ -52,21 +52,21 @@ def _zeropower_via_newtonschulz(
         raise ValueError("Input tensor gradient must be a 2D matrix")
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
-    a, b, c = ns_coefficients[0], ns_coefficients[1], ns_coefficients[2]
-    X = grad.bfloat16()
+    a, b, c = ns_coefficients
+    ortho_grad = grad.bfloat16()
     if grad.size(0) > grad.size(1):
-        X = X.T
+        ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
-    X = X / (X.norm() + eps)
+    ortho_grad = ortho_grad / (ortho_grad.norm() + eps)
     # Perform the NS iterations
     for _ in range(ns_steps):
-        A = X @ X.T
-        B = b * A + c * A @ A
-        X = a * X + B @ X
+        gram_matrix = ortho_grad @ ortho_grad.T
+        gram_update = b * gram_matrix + c * gram_matrix @ gram_matrix
+        ortho_grad = a * ortho_grad + gram_update @ ortho_grad
 
     if grad.size(0) > grad.size(1):
-        X = X.T
-    return X
+        ortho_grad = ortho_grad.T
+    return ortho_grad
 
 
 def _adjust_lr(lr: float, param_shape: torch.Size) -> float:
@@ -81,12 +81,6 @@ def _adjust_lr(lr: float, param_shape: torch.Size) -> float:
 
 
 class Muon(Optimizer):
-    """Implements the Muon optimizer.
-
-    This optimizer performs momentum SGD followed by an optional orthogonalization
-    step computed via a user provided callable.
-    """
-
     def __init__(
         self,
         params: ParamsT,
@@ -209,8 +203,6 @@ Muon.__doc__ = (
             &\rule{110mm}{0.4pt} \\
             &\textbf{for}\ t=1\ \textbf{to}\ \ldots\ \textbf{do} \\[0.25ex]
             &\hspace{5mm} g_t \leftarrow \nabla_{\theta} f_t(\theta_{t-1}) \\[0.25ex]
-            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma\,\lambda\,\theta_{t-1}
-               \quad\text{(decoupled weight decay)} \\[0.25ex]
             &\hspace{5mm} B_t \leftarrow \mu B_{t-1} + g_t \\[0.25ex]
             &\hspace{5mm} \widetilde{B}_t \leftarrow
                 \begin{cases}
@@ -218,6 +210,10 @@ Muon.__doc__ = (
                    B_t,           & \text{if nesterov}=False
                 \end{cases} \\[1.0ex]
             &\hspace{5mm} O_t \leftarrow \mathrm{NS}^{(a,b,c)}_{k}\!\big(\widetilde{B}_t;\ \varepsilon\big) \\[0.5ex]
+            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma\,\lambda\,\theta_{t-1}
+               \quad\text{(decoupled weight decay)} \\[0.25ex]
+
+            &\hspace{5mm} \gamma \leftarrow \mathrm{AdjustLR}\!\big(\gamma;\ \marthm{shape}\!\big(\theta_t \big) \big) \\[0.25ex]
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
@@ -228,12 +224,23 @@ Muon.__doc__ = (
     Newton–Schulz orthogonalization operator parameterized by coefficients :math:`(a,b,c)`
     with numerical stabilization :math:`\varepsilon`.
 
+    The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \marthm{shape}\!\big(\theta_t \big) \big)`
+    is to match updating :math:`RMS` of AdamW. The adjustment is computed as: :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}` 
+    where :math:`A` and :math:`B` are dimension of the matrix being optimized.
+    The method is adopted from `Muon is Scalable for LLM Training`_. Research
+    result shows that with this adjustment Muon can directly reuse the learning rate 
+    and weight decay tuned for AdamW.
+
+    Note that Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`, which
+    is equivalent to the above if all matrices have the same second dimension.
+
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
     and `Muon is Scalable for LLM Training`_.
     """
     + rf"""
     Args:
-        {_params_doc}
+        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. for other
+            parameters such as bias, and embedding, should beoptimized by a standard method such as AdamW.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
         weight_decay (float, optional): weight decay (L2 penalty). According to Moonshot's scaling law experiments,
             weight decay addresses the issue that model weight grew too large over time and demonstrate
