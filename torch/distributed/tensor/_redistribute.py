@@ -21,11 +21,6 @@ from torch.distributed.tensor.placement_types import (
 
 logger = logging.getLogger(__name__)
 
-from typing import TypeVar
-
-
-TOrder = TypeVar("TOrder", bound=tuple[int, ...])
-
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
