@@ -213,7 +213,7 @@ Muon.__doc__ = (
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma\,\lambda\,\theta_{t-1}
                \quad\text{(decoupled weight decay)} \\[0.25ex]
 
-            &\hspace{5mm} \gamma \leftarrow \mathrm{AdjustLR}\!\big(\gamma;\ \marthm{shape}\!\big(\theta_t \big) \big) \\[0.25ex]
+            &\hspace{5mm} \gamma \leftarrow \mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big) \\[0.25ex]
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
@@ -224,8 +224,9 @@ Muon.__doc__ = (
     Newton–Schulz orthogonalization operator parameterized by coefficients :math:`(a,b,c)`
     with numerical stabilization :math:`\varepsilon`.
 
-    The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \marthm{shape}\!\big(\theta_t \big) \big)`
-    is to match updating :math:`RMS` of AdamW. The adjustment is computed as: :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
+    The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big)`
+    is to match updating :math:`RMS` of AdamW. The adjustment is computed as:
+    :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     where :math:`A` and :math:`B` are dimension of the matrix being optimized.
     The method is adopted from `Muon is Scalable for LLM Training`_. Research
     result shows that with this adjustment Muon can directly reuse the learning rate
