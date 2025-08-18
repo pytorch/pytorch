@@ -839,9 +839,51 @@ class DynamoOutput:
 
 def compile_frame(
     code: types.CodeType,
-    transform: Callable[[list[Instruction], dict[str, Any]], DynamoTracerOutput],
+    globals: dict[str, object],
+    locals: dict[str, object],
+    builtins: dict[str, object],
+    closure: tuple[CellType],
+    compiler_fn: CompilerFn,
+    one_graph: bool,
     restart_reasons: set[str],
+    *,
+    export: bool = False,
+    export_constraints: Optional[typing.Never] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    distributed_state: Optional[DistributedState] = None,
+    package: Optional[CompilePackage] = None,
 ) -> DynamoOutput:
+    # This is shared across restarts
+    speculation_log = SpeculationLog()
+
+    def transform(
+        instructions: list[Instruction], code_options: dict[str, object]
+    ) -> DynamoTracerOutput:
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+            torch.overrides._get_current_function_mode_stack()
+        )
+        tracer_output = trace_frame(
+            code,
+            globals,
+            locals,
+            builtins,
+            closure,
+            compiler_fn,
+            tf_mode_stack,
+            one_graph,
+            speculation_log,
+            instructions,
+            code_options,
+            export=export,
+            export_constraints=export_constraints,
+            frame_state=frame_state,
+            distributed_state=distributed_state,
+            package=package,
+        )
+
+        assert tracer_output is not None
+        return tracer_output
+
     last_attempt_start_time = None
     for attempt in itertools.count():
         CompileContext.get().attempt = attempt
@@ -922,40 +964,11 @@ def _compile(
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
 
-    def transform(
-        instructions: list[Instruction], code_options: dict[str, object]
-    ) -> DynamoTracerOutput:
-        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-            torch.overrides._get_current_function_mode_stack()
-        )
-        tracer_output = trace_frame(
-            code,
-            globals,
-            locals,
-            builtins,
-            closure,
-            compiler_fn,
-            tf_mode_stack,
-            one_graph,
-            speculation_log,
-            instructions,
-            code_options,
-            export=export,
-            export_constraints=export_constraints,
-            frame_state=frame_state,
-            distributed_state=distributed_state,
-            package=package,
-        )
-
-        assert tracer_output is not None
-        return tracer_output
-
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType,
         one_graph: bool,
-        hooks: Hooks,
-        transform: Callable[[list[Instruction], dict[str, Any]], Any],
+        hooks: Hooks
     ) -> tuple[ConvertFrameReturn, Optional[DynamoTracerOutput]]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
@@ -964,7 +977,7 @@ def _compile(
                 )
             )
             stack.enter_context(CompileTimeInstructionCounter.record())
-            return _compile_inner(code, one_graph, hooks, transform)
+            return _compile_inner(code, one_graph, hooks)
 
         return (
             ConvertFrameReturn(),
@@ -976,7 +989,6 @@ def _compile(
         code: CodeType,
         one_graph: bool,
         hooks: Hooks,
-        transform: Callable[[list[Instruction], dict[str, Any]], Any],
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput]:
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()
@@ -999,7 +1011,21 @@ def _compile(
 
         out_code = None
         try:
-            dynamo_output = compile_frame(code, transform, restart_reasons)
+            dynamo_output = compile_frame(
+                code,
+                globals,
+                locals,
+                builtins,
+                closure,
+                compiler_fn,
+                one_graph,
+                restart_reasons,
+                export=export,
+                export_constraints=export_constraints,
+                frame_state=frame_state,
+                distributed_state=frame.distributed_state if frame else None,
+                package=package,
+            )
         except exc.SkipFrame as e:
             if one_graph or _is_error_on_graph_break(e._torch_dynamo_tracer_output):
                 log.debug(
@@ -1140,8 +1166,7 @@ def _compile(
         code_context,
     ):
         restart_reasons: set[str] = set()
-        # This is shared across restarts
-        speculation_log = SpeculationLog()
+
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
         else:
@@ -1273,7 +1298,7 @@ def _compile(
         guarded_code = None
         try:
             guarded_code, tracer_output = compile_inner(
-                code, one_graph, hooks, transform
+                code, one_graph, hooks
             )
 
             # NB: We only put_code_state in success case.  Success case here
