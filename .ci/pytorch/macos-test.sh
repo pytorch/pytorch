@@ -181,6 +181,8 @@ checkout_install_torchbench() {
   # its current version 0.12.0 doesn't work with transformers 4.54.0
   pip uninstall -y torchao
 
+  pip install transformers==4.54.0
+
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
 }
