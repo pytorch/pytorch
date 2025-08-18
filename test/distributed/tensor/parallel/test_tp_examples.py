@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -184,12 +185,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
     # @parametrize("recompute_activation", [True, False])
     @parametrize("recompute_activation", [False])
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_mlp_training(self, is_seq_parallel, recompute_activation):
         self._test_mlp_training_e2e(
             is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
         )
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_mlp_inference(self):
         device_mesh = DeviceMesh(
             self.device_type,
@@ -281,6 +284,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("dtype", [torch.float64, torch.float32])
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
         EXP_BASE_CC = ExpCommCounts(
             fwd={all_reduce: 6, all_gather: 1}, bwd={all_reduce: 9}
@@ -412,6 +416,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         + f"{str(dtype).split('.')[-1]}_"
         + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
     )
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
         # Sample a subset of `requires_grad` patterns
 
@@ -494,6 +499,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(id(model.embedding.weight.grad), id(model.fc.weight.grad))
 
     @with_comms
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     def test_loss_parallel(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
