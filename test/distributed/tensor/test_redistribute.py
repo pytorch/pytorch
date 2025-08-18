@@ -739,7 +739,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
             ),
         ]
-        excepted_comm_counts = [5, 5, 4, 3, 2]
+        excepted_comm_counts = [3, 3, 4, 3, 2]
         comm_mode = CommDebugMode()
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
             sharding_src_dst_pairs_with_order
