@@ -1,12 +1,13 @@
 # Stub file for torch.linalg module
 # Type annotations for PyTorch Linear Algebra functions
 
-from typing import Literal, Optional, Union, Sequence
+from collections.abc import Sequence
+from typing import Literal, Optional, Union
 
-from torch import Tensor, SymInt
+import torch.return_types
+from torch import SymInt, Tensor
 from torch._C import dtype
 from torch.types import _float, _int
-import torch.return_types
 
 # Exception class
 class LinAlgError(RuntimeError): ...
@@ -144,7 +145,10 @@ def pinv(
     out: Optional[Tensor] = None,
 ) -> Tensor: ...
 def qr(
-    A: Tensor, mode: Literal["reduced", "complete", "r"] = "reduced", *, out: Optional[tuple[Tensor, Tensor]] = None
+    A: Tensor,
+    mode: Literal["reduced", "complete", "r"] = "reduced",
+    *,
+    out: Optional[tuple[Tensor, Tensor]] = None,
 ) -> torch.return_types.qr: ...
 def slogdet(
     A: Tensor, *, out: Optional[tuple[Tensor, Tensor]] = None
