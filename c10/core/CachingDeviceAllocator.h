@@ -228,6 +228,12 @@ using GenericAllocatorTraceTracker =
 
 using CreateContextFnPtr = std::shared_ptr<GatheredContext> (*)();
 
+using OutOfMemoryObserver = std::function<void(
+    int64_t device,
+    size_t allocated,
+    size_t device_total,
+    size_t device_free)>;
+
 enum struct RecordContext {
   NEVER = 0,
   STATE = 1, // only keep stacks for active allocations
@@ -864,8 +870,11 @@ struct CachingDeviceAllocatorImpl {
 
   virtual ~CachingDeviceAllocatorImpl() = default;
 
-  CachingDeviceAllocatorImpl(c10::DeviceIndex device_index)
+  CachingDeviceAllocatorImpl(
+      c10::DeviceIndex device_index,
+      c10::DeviceType device_type)
       : device_index_(device_index),
+        device_type_(device_type),
         large_blocks(/*small=*/false),
         small_blocks(/*small=*/true) {
     stats.max_split_size =
@@ -931,16 +940,233 @@ struct CachingDeviceAllocatorImpl {
               release_cached_blocks(context, {0, 0}) &&
               alloc_block(params, true, context, lock));
     }
+
+    // we are about to oom, try to use existing mempools as a last resort
+    if (!block_found && params.status == AllocParamsT::OOM) {
+      // if already trying to use a mempool, then just oom
+      bool active_pool = params.pool->owner_PrivatePool;
+      if (!active_pool) {
+        for (MempoolId_t mempool_id : use_on_oom_pools) {
+          auto tid = std::this_thread::get_id();
+          auto filter = [tid](StreamT) {
+            return std::this_thread::get_id() == tid;
+          };
+          beginAllocateToPool(mempool_id, filter);
+          auto& mempool = get_pool(size, stream);
+          AllocParamsT mempool_params(
+              device, size, stream, &mempool, alloc_size);
+          mempool_params.stat_types = mempool.get_stat_types();
+          block_found = get_free_block(mempool_params);
+          endAllocateToPool(mempool_id);
+          releasePool(mempool_id);
+          if (block_found) {
+            params = mempool_params;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!block_found) {
+      // For any error code other than cudaErrorMemoryAllocation,
+      // alloc_block should have thrown an exception already.
+      TORCH_INTERNAL_ASSERT(params.status == AllocParamsT::OOM);
+
+      size_t device_free = 0;
+      size_t device_total = 0;
+      get_memory_info(device, device_free, device_total);
+      std::string allowed_info;
+
+      if (set_fraction) {
+        allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+      }
+
+      std::string proc_info = reportProcessMemoryInfo(device);
+
+      record_trace(
+          GenericTraceEntry::OOM,
+          device_free,
+          params.size(),
+          params.stream(),
+          params.device(),
+          params.pool->owner_MempoolId(),
+          std::move(context));
+      stats.num_ooms += 1;
+
+      c10::reportOutOfMemoryToProfiler(
+          static_cast<int64_t>(size),
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+              .current,
+          c10::Device(device_type_, device));
+
+      auto allocated_bytes =
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto reserved_bytes =
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto observers_local = oom_observers_;
+
+      size_t allocated_in_private_pools = 0;
+      auto get_size_block = [](const BlockPoolT& pool) {
+        size_t res = 0;
+        for (const auto& block : pool.blocks) {
+          res += block->size;
+        }
+        return res;
+      };
+      for (const auto& p : graph_pools) {
+        allocated_in_private_pools += get_size_block(p.second->large_blocks);
+        allocated_in_private_pools += get_size_block(p.second->small_blocks);
+      }
+
+      std::string private_pool_msg;
+
+      if (allocated_in_private_pools > 0) {
+        private_pool_msg = "with " + format_size(allocated_in_private_pools) +
+            " allocated in private pools (e.g., CUDA Graphs), ";
+      }
+
+      // Make sure we do not have the device lock before calling our
+      // observers which might need hold the GIL
+      // It is safe to release at this point because will no longer
+      // be reading any allocator state.
+
+      lock.unlock();
+
+      for (const auto& obs : observers_local) {
+        obs(device,
+            alloc_size,
+            set_fraction ? allowed_memory_maximum : device_total,
+            device_free);
+      }
+
+      // "total capacity": total global memory on GPU
+      // "allowed": memory is allowed to use, which set by fraction.
+      // "already allocated": memory allocated by the program using the
+      //                      caching allocator
+      // "free": free memory as reported by the CUDA API
+      // "cached": memory held by the allocator but not used by the program
+      //
+      // The "allocated" amount  does not include memory allocated outside
+      // of the caching allocator, such as memory allocated by other programs
+      // or memory held by the driver.
+      //
+      // The sum of "allocated" + "free" + "cached" may be less than the
+      // total capacity due to memory held by the driver and usage by other
+      // programs.
+      //
+      // Note that at this point free_cached_blocks has already returned all
+      // possible "cached" memory to the driver. The only remaining "cached"
+      // memory is split from a larger block that is partially in-use.
+      TORCH_CHECK_WITH(
+          OutOfMemoryError,
+          false,
+          "Out of memory. Tried to allocate ",
+          format_size(alloc_size),
+          ". GPU ",
+          static_cast<int>(device),
+          " has a total capacity of ",
+          format_size(device_total),
+          " of which ",
+          format_size(device_free),
+          " is free. ",
+          proc_info,
+          allowed_info,
+          "Of the allocated memory ",
+          format_size(allocated_bytes + allocated_in_private_pools),
+          " is allocated by PyTorch, ",
+          private_pool_msg,
+          "and ",
+          format_size(
+              reserved_bytes - allocated_bytes - allocated_in_private_pools),
+          " is reserved by PyTorch but unallocated.",
+          " If reserved but unallocated memory is large try setting",
+          " PYTORCH_ALLOC_CONF=expandable_segments:True to avoid"
+          " fragmentation.  See documentation for Memory Management "
+          " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
+    }
+
+    bool split_remainder = should_split(params.block, params.size());
+    return alloc_found_block(
+        params, orig_size, std::move(context), split_remainder);
+  }
+
+  // See Note [Interaction with CUDA graph capture]
+
+  // Called by Graph::capture_begin
+  void beginAllocateToPool(
+      MempoolId_t mempool_id,
+      std::function<bool(StreamT)> filter) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    create_or_incref_pool(mempool_id);
+    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
+         ++it2) {
+      TORCH_CHECK(
+          it2->first != mempool_id,
+          "beginAllocateToPool: already recording to mempool_id");
+    }
+    captures_underway.emplace_back(mempool_id, std::move(filter));
+  }
+
+  // Called by Graph::capture_end
+  void endAllocateToPool(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    for (auto it = captures_underway.begin(); it != captures_underway.end();
+         ++it) {
+      if (it->first == mempool_id) {
+        captures_underway.erase(it);
+        return;
+      }
+    }
+    TORCH_CHECK(
+        false, "endAllocatePool: not currently recording to mempool_id");
+  }
+
+  // Called by Graph::reset and MemPool::~MemPool()
+  void releasePool(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
+    // delete and cudaFree the mempool its capture used, because
+    //  1. other graph(s) might share the same pool
+    //  2. the user might still hold references to output tensors allocated
+    //  during capture.
+    // To handle 1 and 2, we track the number of graphs using this particular
+    // mempool. When the count reaches 0, we tell free_cached_blocks it may now
+    // cudaFree blocks from this graph's pool when it discovers they're unused
+    // (unsplit).
+    auto pp = get_private_pool(mempool_id);
+    auto uc = --(pp->use_count);
+    TORCH_INTERNAL_ASSERT(uc >= 0);
+    if (uc == 0) {
+      // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
+      // and makes sure this pool wasn't somehow made freeable already.
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+      bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
+      TORCH_INTERNAL_ASSERT(inserted);
+    }
   }
 
  private:
-  /* Internal methods for processing runtime Stream/Event */
+  /* Internal methods for processing runtime */
 
   // Deallocate a device memory pointer associated with the given block.
   virtual void deallocate_device_ptr(BlockT* block) = 0;
 
   // Allocate a device memory pointer of the given size and parameters.
   virtual void allocate_device_ptr(void** ptr, AllocParamsT& p) = 0;
+
+  // Returns the size of free and total memory in bytes on the device.
+  virtual void get_memory_info(
+      c10::DeviceIndex device,
+      size_t& free_bytes,
+      size_t& total_bytes) = 0;
+
+  virtual std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
+    return "";
+  }
 
   // Allocate a device memory pointer for a primitive type.
   void allocPrimitive(void** ptr, AllocParamsT& p) {
@@ -1204,6 +1430,104 @@ struct CachingDeviceAllocatorImpl {
     return true;
   }
 
+  BlockT* alloc_found_block(
+      const AllocParamsT& params,
+      size_t orig_size,
+      std::shared_ptr<GatheredContext> context,
+      bool split_remainder) {
+    auto size = params.size();
+    auto device = params.device();
+    auto pool = params.pool;
+    auto stream = params.stream();
+
+    TORCH_INTERNAL_ASSERT(
+        params.status == AllocParamsT::OOM && params.block != nullptr &&
+        params.block->ptr != nullptr);
+    BlockT* block = params.block;
+    BlockT* remaining = nullptr;
+
+    const bool already_split = block->is_split();
+    if (split_remainder) {
+      remaining = block;
+
+      block = new BlockT(device, stream, size, pool, block->ptr);
+      block->expandable_segment_ = remaining->expandable_segment_;
+      block->prev = remaining->prev;
+      if (block->prev) {
+        block->prev->next = block;
+      }
+      block->next = remaining;
+
+      remaining->prev = block;
+      remaining->ptr = static_cast<char*>(remaining->ptr) + size;
+      remaining->size -= size;
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+      bool inserted = pool->insert_into_blocks(remaining).second;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+      if (already_split && !block->expandable_segment_) {
+        // An already-split inactive block is being shrunk by size bytes.
+        decrease_stat_array(
+            stats.inactive_split_bytes, block->size, params.stat_types);
+      } else if (!block->expandable_segment_) {
+        // A new split inactive block is being created from a previously unsplit
+        // block, size remaining->size bytes.
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split_bytes[stat_type].increase(remaining->size);
+          stats.inactive_split[stat_type].increase(1);
+        });
+      }
+    } else if (already_split && !block->expandable_segment_) {
+      // An already-split block is becoming active
+      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+        stats.inactive_split_bytes[stat_type].decrease(block->size);
+        stats.inactive_split[stat_type].decrease(1);
+      });
+    }
+
+    block->allocated = true;
+    block->requested_size = orig_size;
+
+    block->context_when_allocated = std::move(context);
+    record_trace(
+        GenericTraceEntry::ALLOC,
+        block->ptr,
+        orig_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        block->context_when_allocated);
+
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    bool inserted = active_blocks.insert(block).second;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].increase(1);
+      stats.allocated_bytes[stat_type].increase(block->size);
+      stats.active[stat_type].increase(1);
+      stats.active_bytes[stat_type].increase(block->size);
+      stats.requested_bytes[stat_type].increase(block->requested_size);
+    });
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+      stats.oversize_allocations.increase(1);
+
+    auto allocated_bytes_gauge =
+        STATIC_GAUGE(pytorch.CachingAllocator.allocated_bytes);
+    allocated_bytes_gauge.record(
+        stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
+
+    c10::reportMemoryUsageToProfiler(
+        block->ptr,
+        static_cast<int64_t>(block->size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(device_type_, device));
+
+    return block;
+  }
+
   // Moves a block into a pool of cached free blocks
   void free_block(
       BlockT* block,
@@ -1214,7 +1538,7 @@ struct CachingDeviceAllocatorImpl {
 
     record_trace(
         GenericTraceEntry::FREE_COMPLETED,
-        int64_t(block->ptr),
+        block->ptr,
         block->requested_size,
         block->stream,
         block->device,
@@ -1287,7 +1611,7 @@ struct CachingDeviceAllocatorImpl {
     stats.num_device_free++;
     record_trace(
         GenericTraceEntry::SEGMENT_FREE,
-        int64_t(block->ptr),
+        block->ptr,
         block->size,
         block->stream,
         block->device,
@@ -1603,6 +1927,18 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
+  bool should_split(const BlockT* block, size_t size) {
+    size_t remaining = block->size - size;
+    if (block->pool->is_small ||
+        AcceleratorAllocatorConfig::use_expandable_segments() &&
+            is_expandable_segment_supported()) {
+      return remaining >= kMinBlockSize;
+    } else {
+      return (size < AcceleratorAllocatorConfig::max_split_size()) &&
+          (remaining > kSmallSize);
+    }
+  }
+
   /* Internal methods for managing expandable segments */
 
   virtual bool is_expandable_segment_supported() const {
@@ -1857,6 +2193,36 @@ struct CachingDeviceAllocatorImpl {
         context ? context : block->context_when_segment_allocated);
   }
 
+  /* Internal methods for private pool for Graph feature */
+
+  void create_or_incref_pool(
+      MempoolId_t mempool_id,
+      DeviceAllocator* allocator = nullptr) {
+    auto it = graph_pools.find(mempool_id);
+    if (it == graph_pools.end()) {
+      // mempool_id does not reference an existing pool.
+      // Make a new pool for CUDAGraph capture or torch.cuda.use_mem_pool
+      // usage. use_count is initially 1, which means the pool is
+      // being used since somebody called createOrIncrefPool.
+      graph_pools.emplace(
+          mempool_id, std::make_unique<PrivatePoolT>(mempool_id, allocator));
+    } else {
+      // mempool_id references an existing pool, which the current CUDAGraph
+      // capture or torch.cuda.use_mem_pool will
+      // share. Check this pool is live (at least one other capture already
+      // references it). Increment it to establish the usage.
+      TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
+      TORCH_INTERNAL_ASSERT(allocator == nullptr);
+      it->second->use_count++;
+    }
+  }
+
+  PrivatePoolT* get_private_pool(MempoolId_t mempool_id) {
+    auto it = graph_pools.find(mempool_id);
+    TORCH_INTERNAL_ASSERT(it != graph_pools.end());
+    return it->second.get();
+  }
+
   /* Internal methods for utils: tracing, stats, gc... */
 
   // Must be called outside of `mutex` or deadlocks are possible with Python
@@ -1914,6 +2280,8 @@ struct CachingDeviceAllocatorImpl {
 
   c10::DeviceIndex device_index_;
 
+  c10::DeviceType device_type_;
+
   // lock around all operations
   mutable std::recursive_mutex mutex;
 
@@ -1953,6 +2321,12 @@ struct CachingDeviceAllocatorImpl {
 
   // Ring buffer for memory snapshot TraceEntry's
   RingBuffer<GenericTraceEntry> alloc_buffer;
+
+  // Tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
+
+  // XXX - maybe we should generalize and have multiple events
+  std::vector<OutOfMemoryObserver> oom_observers_;
 
   // Tracks if we are diverting some allocations to a specific pool. Most of
   // the time it's empty, in which case malloc can avoid calling query

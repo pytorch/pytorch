@@ -38,6 +38,7 @@ namespace c10::cuda::CUDACachingAllocator {
 using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
+using c10::CachingDeviceAllocator::OutOfMemoryObserver;
 using c10::CachingDeviceAllocator::RecordContext;
 using c10::CachingDeviceAllocator::trace_time_;
 
@@ -162,12 +163,6 @@ struct CheckpointDelta {
   std::vector<void*> ptrs_freed;
   std::vector<at::DataPtr> dataptrs_allocd;
 };
-
-using OutOfMemoryObserver = std::function<void(
-    int64_t device,
-    size_t allocated,
-    size_t device_total,
-    size_t device_free)>;
 
 using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
