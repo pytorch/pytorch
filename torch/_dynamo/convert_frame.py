@@ -771,7 +771,6 @@ def trace_frame(
 
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
-
     tracer = InstructionTranslator(
         instructions,
         code,
@@ -792,7 +791,6 @@ def trace_frame(
         package=package,
     )
 
-    @preserve_global_state
     def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
