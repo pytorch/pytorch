@@ -25,6 +25,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
+from torch._utils_internal import signpost_event
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -893,10 +894,17 @@ def create_mapping_pre_post_grad_nodes(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_pre_post_grad_nodes",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
         log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
-        log.error(traceback.format_exc())
         return empty_return
 
 
@@ -945,11 +953,18 @@ def create_node_mapping_kernel_to_post_grad(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_kernel_to_post_grad",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         log.error(
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error(traceback.format_exc())
         return empty_return
 
 
@@ -982,9 +997,15 @@ def dump_inductor_provenance_info(
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        # TODO: log the error to scuba table for better signal
-        log.error("Unexpected error in dump_inductor_provenance_info: %s", e)
-        log.error(traceback.format_exc())
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "dump_inductor_provenance_info",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         return {}
 
 
@@ -1040,9 +1061,15 @@ def set_kernel_post_grad_provenance_tracing(
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        # TODO: log the error to scuba table for better signal
-        log.error("Unexpected error in set_kernel_post_grad_provenance_tracing: %s", e)
-        log.error(traceback.format_exc())
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "set_kernel_post_grad_provenance_tracing",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
