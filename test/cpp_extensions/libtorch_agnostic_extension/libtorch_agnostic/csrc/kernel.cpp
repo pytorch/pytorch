@@ -370,7 +370,7 @@ void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs)
 }
 
 Tensor my_amax_vec(Tensor t) {
-  std::vector<int64_t> v = {0};
+  std::vector<int64_t> v = {0,1};
   return amax(t, v, false);
 }
 

@@ -219,9 +219,9 @@ if not IS_WINDOWS:
         def test_my_amax_vec(self, device):
             import libtorch_agnostic
 
-            t = torch.rand(2, 7, device=device)
+            t = torch.rand(2, 7, 5, device=device)
             out = libtorch_agnostic.ops.my_amax_vec(t)
-            self.assertEqual(out, torch.amax(t, 0))
+            self.assertEqual(out, torch.amax(t, (0,1)))
 
         def test_fill_infinity(self, device):
             import libtorch_agnostic
