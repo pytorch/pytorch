@@ -66,7 +66,9 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
-    pass
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._torch_dynamo_tracer_output = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
