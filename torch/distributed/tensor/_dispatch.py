@@ -279,7 +279,20 @@ class OpDispatcher:
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
-                return args[0]
+                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
+                # the inplace argument's tensor meta. Here we choose to special case
+                # this op because as far as I know this is the only inplace op that
+                # has such as behavior. We can extend this special case if necessary.
+                if op_call == aten.squeeze_.dim:
+                    output_spec = output_sharding.output_spec
+                    assert isinstance(output_spec, DTensorSpec)
+                    assert isinstance(args[0], dtensor.DTensor)
+                    args[0]._spec = output_spec
+                    # use return_and_correct_aliasing to match the outer and the inner
+                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
+                    return return_and_correct_aliasing(op_call, args, kwargs, args[0])
+                else:
+                    return args[0]
             else:
                 return None
         elif op_info.schema.is_out_variant_op():
