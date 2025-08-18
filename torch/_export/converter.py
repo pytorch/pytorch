@@ -1512,8 +1512,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             lambda path, x: (
                 [Dim.AUTO] * x.dim()
                 if (
-                    isinstance(x, torch.Tensor)
-                    and not (x.ndim == 1 and x.numel() <= 1)
+                    isinstance(x, torch.Tensor) and not (x.ndim == 1 and x.numel() <= 1)
                     # skip 0/1-element tensors
                 )
                 else None
