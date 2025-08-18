@@ -1602,7 +1602,8 @@ class OutputGraph(OutputGraphGuardsState):
                 "encoding": "json",
             },
             payload_fn=lambda: {
-                "reason": reason,
+                # precede with underscore so it always appear first in JSON in tlparse
+                "_reason": reason,
                 **kwargs,
             },
         )
