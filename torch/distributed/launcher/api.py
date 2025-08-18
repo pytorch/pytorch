@@ -6,6 +6,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import os
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -95,6 +96,7 @@ class LaunchConfig:
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
     numa_options: Optional[NumaOptions] = None
+    signals_to_handle: str = "SIGTERM,SIGINT,SIGHUP,SIGQUIT"
 
     def __post_init__(self):
         default_timeout = 900
@@ -241,6 +243,7 @@ def launch_agent(
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
             "numa_options": config.numa_options,
+            "signals_to_handle": config.signals_to_handle,
         },
     )
 
@@ -255,6 +258,9 @@ def launch_agent(
     )
 
     master_addr, master_port = _get_addr_and_port(rdzv_parameters)
+
+    # Set the signals to handle in the environment variable
+    os.environ["TORCHELASTIC_SIGNALS_TO_HANDLE"] = config.signals_to_handle
 
     spec = WorkerSpec(
         role=config.role,
