@@ -69,6 +69,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     OutputSpec,
     OutputTokenSpec,
+    ParameterMutationSpec,
     RangeConstraint,
     ScalarType,
     SCHEMA_VERSION,
@@ -1241,6 +1242,15 @@ class GraphModuleSerializer(metaclass=Final):
                     buffer_name=spec.target,
                 )
             )
+        elif spec.kind == ep.OutputKind.PARAMETER_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                parameter_mutation=ParameterMutationSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    parameter_name=spec.target,
+                )
+            )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_PARAMETER:
             assert spec.target is not None
             assert isinstance(spec.arg, ep.TensorArgument)
@@ -2108,11 +2118,12 @@ class GraphModuleDeserializer(metaclass=Final):
 
         # handle ShapeEnv asserts
         if target == torch.ops.aten._assert_scalar.default:
-            expr = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
-            if isinstance(expr, torch.SymBool):
-                self.shape_env.guard_or_defer_runtime_assert(
-                    expr.node.expr, "", fx_node
-                )
+            if not isinstance((arg := fx_node.args[0]), bool):
+                expr = arg.meta["val"]  # type: ignore[union-attr]
+                if isinstance(expr, torch.SymBool):
+                    self.shape_env.guard_or_defer_runtime_assert(
+                        expr.node.expr, "", fx_node
+                    )
         elif target == torch.ops.aten.sym_constrain_range_for_size.default:
             sym = fx_node.args[0].meta["val"]  # type: ignore[union-attr]
             if isinstance(sym, torch.SymInt):
@@ -2197,6 +2208,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 kind=ep.OutputKind.BUFFER_MUTATION,
                 arg=ep.TensorArgument(name=o.buffer_mutation.arg.name),
                 target=o.buffer_mutation.buffer_name,
+            )
+        elif o.type == "parameter_mutation":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.PARAMETER_MUTATION,
+                arg=ep.TensorArgument(name=o.parameter_mutation.arg.name),
+                target=o.parameter_mutation.parameter_name,
             )
         elif o.type == "gradient_to_parameter":
             return ep.OutputSpec(
@@ -3376,17 +3393,19 @@ def canonicalize(
         idx, (_arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
-            return 3, None, idx
+            return 4, None, idx
         elif spec.type == "loss_output":
-            return 3, None, idx
+            return 4, None, idx
+        elif spec.type == "parameter_mutation":
+            return 1, spec.parameter_mutation.parameter_name, idx
         elif spec.type == "buffer_mutation":
-            return 1, spec.buffer_mutation.buffer_name, idx
+            return 2, spec.buffer_mutation.buffer_name, idx
         elif spec.type == "gradient_to_parameter":
-            return 4, spec.gradient_to_parameter.parameter_name, idx
+            return 5, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
-            return 5, None, idx
+            return 6, None, idx
         elif spec.type == "user_input_mutation":
-            return 2, None, idx
+            return 3, None, idx
         elif spec.type == "token":
             return 0, None, idx
         else:
@@ -3498,6 +3517,9 @@ def canonicalize(
             t.name = replace_table[t.name]
         elif spec.type == "buffer_mutation":
             t = spec.buffer_mutation.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "parameter_mutation":
+            t = spec.parameter_mutation.arg
             t.name = replace_table[t.name]
         elif spec.type == "gradient_to_parameter":
             t = spec.gradient_to_parameter.arg

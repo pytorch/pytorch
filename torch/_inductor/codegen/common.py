@@ -253,6 +253,9 @@ class WorkspaceArg(CodegenSymbol):
     def get_name(self) -> str:
         return self.outer_name
 
+    def get_is_pinned(self) -> bool:
+        return False
+
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
@@ -359,8 +362,8 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(
-        self, idx: int, workspace: TritonScratchWorkspace
+    def cpp_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
     ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
@@ -458,15 +461,18 @@ def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
 
 
 def get_wrapper_codegen_for_device(
-    device: str, cpp_wrapper: bool = False
+    device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
 ) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
-        return (
-            wrapper_codegen_obj.cpp_wrapper_codegen
-            if cpp_wrapper
-            else wrapper_codegen_obj.wrapper_codegen
-        )
+        if fx_wrapper:
+            from .wrapper_fxir import WrapperFxCodegen
+
+            return WrapperFxCodegen
+        elif cpp_wrapper:
+            return wrapper_codegen_obj.cpp_wrapper_codegen
+        else:
+            return wrapper_codegen_obj.wrapper_codegen
     return None
 
 
@@ -484,6 +490,10 @@ def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
 
 @functools.cache
 def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
@@ -492,6 +502,7 @@ def init_backend_registration() -> None:
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -539,6 +550,14 @@ def init_backend_registration() -> None:
             CppWrapperMps,
         )
 
+    if get_scheduling_for_device("mtia") is None:
+        register_backend_for_device(
+            "mtia",
+            TritonScheduling,
+            PythonWrapperMtia,
+            CppWrapperGpu,
+        )
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
@@ -584,6 +603,7 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     if not device_op_overrides_dict:
         from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     return device_op_overrides_dict[device]

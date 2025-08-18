@@ -17,6 +17,7 @@ from .template_heuristics import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
@@ -67,6 +68,8 @@ class InductorChoices:
             return XPUConfigHeuristic()
         elif device_type == "cpu":
             return CPUConfigHeuristic()
+        elif device_type == "mtia":
+            return MTIAConfigHeuristic()
         else:
             return BaseConfigHeuristic()
 
@@ -124,7 +127,7 @@ class InductorChoices:
         device_type = kernel_inputs.device_type
         assert device_type is not None, "get_mm_configs requires a valid device type"
         # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, device_type)
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
 
         yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
 
@@ -192,18 +195,6 @@ class InductorChoices:
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
-
-    @staticmethod
-    def want_no_x_dim(features: SIMDKernelFeatures) -> bool:
-        """
-        Heuristic to decide if we should drop the X dimension from a persistent reduction kernel.
-        So the [XBLOCK, RBLOCK] block becomes a [RBLOCK] block and XBLOCK is forced to be always 1.
-        Strangely this is faster than a [1, RBLOCK] block in some cases.
-        """
-        return (
-            features.get_reduction_hint() == ReductionHint.INNER
-            and V.graph.sizevars.statically_known_geq(features.reduction_numel, 256)
-        )
 
     @staticmethod
     def reduction_split_factor(

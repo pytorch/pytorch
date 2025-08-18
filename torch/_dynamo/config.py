@@ -282,13 +282,6 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # Defaults to False for BC.
 allow_unspec_int_on_nn_module = False
 
-# Mirrors `allow_unspec_int_on_nn_module`, but for FSDP: for <=2.8 versions,
-# integer attributes on FSDP modules were treated as dynamic, while the same
-# attributes on plain nn.Modules were static. We unified the behaviour by making
-# FSDP ints static too. Set this flag to True to restore the legacy dynamic
-# handling if needed.
-allow_unspec_int_on_fsdp_module = False
-
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
@@ -333,6 +326,10 @@ dont_skip_tracing = False
 # No longer used
 optimize_ddp_lazy_compile = False
 
+# lambda guarding on object aliasing to improve opportunity for dict tag
+# optimization
+use_lamba_guard_for_object_aliasing = True
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 # Whether to apply torch._dynamo.disable() to FSDP2 hooks.
@@ -353,6 +350,36 @@ skip_no_tensor_aliasing_guards_on_parameters = True
 # Considers a tensor immutable if it is one of the values of a dictionary, and
 # the dictionary tag is same across invocation calls.
 skip_tensor_guards_with_matching_dict_tags = True
+
+# Skips guards on func.__defaults__ if the element to be guarded is a constant
+skip_guards_on_constant_func_defaults = True
+
+
+# The recursive-dict-tag guard relies on the class/function identity staying
+# stable.  We therefore assume that the following function dunder attributes
+# are **never rebound** to a different object:
+#
+#     • __code__        • __closure__
+#     • __defaults__    • __kwdefaults__
+#     • __annotations__ • __mro__
+#
+# It is fine to mutate the objects they already point to (e.g. tweak an element
+# inside __defaults__), but assignments like
+#
+#     foo.__defaults__ = (3, 4)          # REBIND  - NOT SUPPORTED
+#
+# would invalidate the optimization.  This type of rebinding is rare, so we
+# assume that the rebinding never happens for guard purposes.  Set the flag
+# below to False only in environments where such rebinding is known to occur.
+assume_dunder_attributes_remain_unchanged = True
+
+# Speedup guard execution of nested nn modules by recursively checking for dict
+# tags to avoid full guard execution.
+use_recursive_dict_tags_for_guards = True
+
+# Maximum number of objects for which we check dict pointers tags. This is
+# useful for regional compilation.
+max_saved_pointers_for_recursive_dict_tags_check = 256
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True

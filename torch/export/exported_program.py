@@ -653,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
@@ -789,9 +792,9 @@ def _remove_unneccessary_copy_op_pass(
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
-                    if (
-                        isinstance(out, torch.fx.Node)
-                        and out.name in new_graph_signature.buffers_to_mutate
+                    if isinstance(out, torch.fx.Node) and (
+                        out.name in new_graph_signature.buffers_to_mutate
+                        or out.name in new_graph_signature.parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"

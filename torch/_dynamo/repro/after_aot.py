@@ -34,6 +34,22 @@ from tempfile import TemporaryFile
 from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
+
+try:
+    from triton.runtime.autotuner import Autotuner, Heuristics
+    from triton.runtime.jit import JITFunction
+except ImportError:
+
+    class Autotuner:  # type: ignore[no-redef]
+        pass
+
+    class JITFunction:  # type: ignore[no-redef]
+        pass
+
+    class Heuristics:  # type: ignore[no-redef]
+        pass
+
+
 import torch
 import torch.fx as fx
 import torch.nn as nn
@@ -58,6 +74,8 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
+from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
@@ -289,6 +307,8 @@ def generate_compiler_repro_string(
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
 ) -> str:
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
     # Add distributed imports if needed
     distributed_imports = ""
     if has_distributed_ops:
@@ -296,6 +316,16 @@ def generate_compiler_repro_string(
             """
 import torch.distributed as dist
 from torch.testing._internal.distributed.fake_pg import FakeStore
+        """
+        ).strip()
+
+    triton_imports = ""
+
+    if len(kernel_side_table.id_to_kernel) > 0:
+        triton_imports = textwrap.dedent(
+            """
+import triton
+import triton.language as tl
         """
         ).strip()
 
@@ -309,6 +339,7 @@ from torch._dynamo.testing import rand_strided
 from math import inf
 import torch._inductor.inductor_prims
 {distributed_imports}
+{triton_imports}
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -326,6 +357,57 @@ isolate_fails_code_str = None
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
+
+    kernel_side_table_prefix = (
+        "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
+    )
+    # Track which grid entry corresponds to the best config
+    for id in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(id)
+
+        try:
+            if isinstance(kernel, Autotuner):
+                if isinstance(kernel.fn, Heuristics):
+                    model_str += "ERROR: Repro will not work as intended, "
+                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+                    break
+
+                config_strs = []
+                for kernel_config in kernel.configs:
+                    config_strs.append(f"""triton.Config(
+                            {str(kernel_config.kwargs)},
+                            num_warps={kernel_config.num_warps},
+                            num_stages={kernel_config.num_stages},
+                        )""")
+
+                config_str = ",".join(config_strs)
+                model_str += textwrap.dedent(f"""
+                @triton.autotune(
+                    configs=[
+                        {config_str}
+                    ],
+                    key=[]
+                )
+                """).strip()
+
+            model_str += "\n@triton.jit\n"
+            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+            fn_name = (
+                kernel._fn_name
+                if isinstance(kernel, JITFunction)
+                else kernel.fn._fn_name
+            )
+            fn_name = fn_name.split(".")[-1]
+
+            model_str += src_code
+            model_str += "\n"
+            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+        except AttributeError as e:
+            model_str += "ERROR: Repro will not work as intended, "
+            model_str += f"User defined triton kernel exception: {e}\n"
+
+    if len(kernel_side_table.constant_args) > 0:
+        model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
 
@@ -396,6 +478,9 @@ def save_graph_repro(
             "Repro is not generated due to existence of BackwardState in graph input"
         )
         return
+
+    if save_dir is not None:
+        save_dir = normalize_path_separator(save_dir)
 
     # Check if the graph contains distributed operations
     has_distributed_ops = any(
