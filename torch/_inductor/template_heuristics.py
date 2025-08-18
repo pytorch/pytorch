@@ -1581,6 +1581,42 @@ class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeurist
 
 # TODO(coconutruben): replace with template.name once templates are importable
 @register_template_heuristic(
+    "blackwell_ws_persistent_device_tma", "cuda", register=torch.version.hip is None
+)
+class CUDABlackwellPersistentTMATemplateConfigHeuristic(
+    TMAConfigMixin, CUDAConfigHeuristic
+):
+    """Blackwell WS Persistent TMA template heuristic for CUDA"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use persistent_mm_configs
+        # TODO: Tune these for blackwell.
+        self.mm_configs = self.persistent_mm_configs
+
+    def get_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Any,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate blackwell TMA template configs with both scaled MM and TMA-specific options.
+        """
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super().get_template_configs(
+            kernel_inputs, layout, op_name
+        ):
+            template_kwargs["NUM_SMS"] = get_num_sms()
+            # TODO: Consider making these tunable.
+            template_kwargs["FLATTEN"] = True
+            template_kwargs["WARP_SPECIALIZE"] = True
+
+            yield template_kwargs
+
+
+# TODO(coconutruben): replace with template.name once templates are importable
+@register_template_heuristic(
     "mm", "cuda", register=torch.version.hip is None, op_name="scaled_mm"
 )
 class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeuristic):
