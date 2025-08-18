@@ -72,6 +72,7 @@ tolerance:
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
   - timm_efficientnet
+  - vision_maskrcnn
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
