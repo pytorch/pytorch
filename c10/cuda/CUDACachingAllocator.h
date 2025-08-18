@@ -37,6 +37,7 @@ namespace c10::cuda::CUDACachingAllocator {
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using CreateContextFn = c10::CachingDeviceAllocator::CreateContextFnPtr;
 using c10::CachingAllocator::kLargeBuffer;
+using c10::CachingDeviceAllocator::AnnotationEntry;
 using c10::CachingDeviceAllocator::BlockInfo;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::OutOfMemoryObserver;
@@ -109,22 +110,6 @@ struct TraceEntry {
   MempoolId_t mempool_;
   trace_time_ time_{};
   std::string compile_context_{};
-};
-
-// Calls made by record_function will save annotations
-struct AnnotationEntry {
-  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
-      : device_(device) {
-    time_.approx_t_ = time;
-  }
-
-  void recordUserMetadata(const std::string& name, std::string value) {
-    metadata_[name] = std::move(value);
-  }
-
-  c10::DeviceIndex device_;
-  trace_time_ time_{};
-  std::unordered_map<std::string, std::string> metadata_;
 };
 
 struct AllocatorConfigInfo {
