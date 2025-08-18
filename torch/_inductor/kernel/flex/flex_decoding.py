@@ -66,10 +66,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
     ratio = Hq // Hkv
 
     power_of_2 = V.graph.sizevars.evaluate_expr(
-        sympy.And(
-            sympy.Gt(ratio, 0),
-            sympy.Eq(ratio & (ratio - 1), 0)
-        )
+        sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
     )
 
     return (

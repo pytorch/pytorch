@@ -1746,8 +1746,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         value = torch.randn(1, 2, 4096, 16, device="cuda")
 
         flex_compiled = torch.compile(flex_attention)
-        flex_compiled(query, key, value, enable_gqa = True)
-
+        flex_compiled(query, key, value, enable_gqa=True)
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
