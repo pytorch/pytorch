@@ -21,6 +21,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import operator
 import random
 import re
 import sys
@@ -496,6 +497,10 @@ class ExceptionVariable(VariableTracker):
             [tb] = args
             self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
             return self
+        elif name == "__eq__":
+            return variables.BuiltinVariable(operator.is_).call_function(
+                tx, [self, *args], kwargs
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
