@@ -1568,7 +1568,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self.run_test(test_name, parent_pipe)
 
 
-class MultiProcContinousTest(TestCase):
+class MultiProcContinuousTest(TestCase):
     # Class variables:
     MAIN_PROCESS_RANK = -1
     # number of test processes
