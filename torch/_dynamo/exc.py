@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
@@ -68,7 +69,7 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 class TorchDynamoException(RuntimeError):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._torch_dynamo_tracer_output = None
+        self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -364,7 +365,7 @@ observed_exception_map = {
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
         name = getattr(exc_type, "__name__", str(exc_type))
-        observed_exception_map[exc_type] = type(
+        observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
     return observed_exception_map[exc_type]
