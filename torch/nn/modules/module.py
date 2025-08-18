@@ -6,7 +6,7 @@ import itertools
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
@@ -450,29 +450,29 @@ class Module:
     the change."""
 
     training: bool
-    _parameters: dict[str, Optional[Parameter]]
-    _buffers: dict[str, Optional[Tensor]]
+    _parameters: MutableMapping[str, Optional[Parameter]]
+    _buffers: MutableMapping[str, Optional[Tensor]]
     _non_persistent_buffers_set: set[str]
-    _backward_pre_hooks: dict[int, Callable]
-    _backward_hooks: dict[int, Callable]
+    _backward_pre_hooks: MutableMapping[int, Callable]
+    _backward_hooks: MutableMapping[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: dict[int, Callable]
+    _forward_hooks: MutableMapping[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_hooks_with_kwargs: dict[int, bool]
+    _forward_hooks_with_kwargs: MutableMapping[int, bool]
     # forward hooks that should always be called even if an exception is raised
-    _forward_hooks_always_called: dict[int, bool]
-    _forward_pre_hooks: dict[int, Callable]
+    _forward_hooks_always_called: MutableMapping[int, bool]
+    _forward_pre_hooks: MutableMapping[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
-    _forward_pre_hooks_with_kwargs: dict[int, bool]
-    _state_dict_hooks: dict[int, Callable]
-    _load_state_dict_pre_hooks: dict[int, Callable]
-    _state_dict_pre_hooks: dict[int, Callable]
-    _load_state_dict_post_hooks: dict[int, Callable]
-    _modules: dict[str, Optional["Module"]]
+    _forward_pre_hooks_with_kwargs: MutableMapping[int, bool]
+    _state_dict_hooks: MutableMapping[int, Callable]
+    _load_state_dict_pre_hooks: MutableMapping[int, Callable]
+    _state_dict_pre_hooks: MutableMapping[int, Callable]
+    _load_state_dict_post_hooks: MutableMapping[int, Callable]
+    _modules: MutableMapping[str, Optional["Module"]]
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
@@ -3021,8 +3021,8 @@ class Module:
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
         replica._parameters = {}
-        replica._buffers = replica._buffers.copy()
-        replica._modules = replica._modules.copy()
+        replica._buffers = dict(replica._buffers)
+        replica._modules = dict(replica._modules)
         replica._is_replica = True  # type: ignore[assignment]
 
         return replica

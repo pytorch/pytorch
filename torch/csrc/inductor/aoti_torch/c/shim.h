@@ -400,6 +400,22 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);
 
+struct AtenRecordFunctionOpaque;
+using AtenRecordFunctionHandle = AtenRecordFunctionOpaque*;
+
+struct IValueMapOpaque;
+using IValueMapHandle = IValueMapOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_record_function_start(
+    const char* name,
+    IValueMapHandle kwargs,
+    const C10IValueHandle* inputs,
+    const uint64_t n_inputs,
+    AtenRecordFunctionHandle* guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_record_function_end(AtenRecordFunctionHandle guard);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
