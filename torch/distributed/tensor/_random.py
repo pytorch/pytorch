@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
+from logging import getLogger
 from typing import Optional, Union
 
 import torch
@@ -10,6 +11,8 @@ from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import Shard
 
+
+logger = getLogger(__name__)
 
 __all__ = [
     "is_rng_supported_mesh",
@@ -177,12 +180,20 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
             )
 
-        # rng_state = self._get_device_state()
-        # if run_state_sync:
-        #     # synchronize RNG state using rank 0's current one
-        #     dist.broadcast(rng_state, 0)
-
-        # self.rng_states["parallel-rng"] = rng_state.to("cpu")
+        rng_state = self._get_device_state()
+        if run_state_sync:
+            # synchronize RNG state using rank 0's current one
+            torch.distributed.broadcast(rng_state, 0)
+            my_rng_state = self._get_device_state()
+            if not all(my_rng_state == rng_state):
+                logger.warning(
+                    "DTensor is synchronizing RNG states of every rank with the state from rank 0. "
+                    "This behavior is deprecated. "
+                    "Please call `torch.manual_seed()` on every rank that participates in SPMD DTensor Operations with "
+                    "the same seed. If using Pipeline Parallelism, each pipeling state would use a different seed, "
+                    "but all ranks belonging to one pipeline stage would use the same seed."
+                )
+            self._set_device_state(rng_state)
 
     def _get_device_state(self) -> torch.Tensor:
         if self._device.type == "hpu":
@@ -217,12 +228,6 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             g_name = "parallel-rng"
             assert g_name not in self.rng_states
             self.rng_states[g_name] = self._get_device_state().to("cpu")
-        # check if the parallel rng state has been synchronized or not
-        # if not self.rng_state_is_sync("parallel-rng"):
-        #     raise RuntimeError(
-        #         "OffsetBasedRNGTracker requires the random state to be synchronized "
-        #         "before entering into a distribute region!"
-        #     )
 
         if self.distribute_region_enabled:
             if self._device.type == "hpu":
