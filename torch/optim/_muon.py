@@ -57,7 +57,7 @@ def _zeropower_via_newtonschulz(
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
     # Ensure spectral norm is at most 1
-    ortho_grad = ortho_grad / (ortho_grad.norm() + eps)
+    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
     # Perform the NS iterations
     for _ in range(ns_steps):
         gram_matrix = ortho_grad @ ortho_grad.T
