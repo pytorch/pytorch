@@ -248,8 +248,9 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
         lambda: {"stack": stack},
     )
 
+    REVERSE_INTERN_TABLE = {v: k for k, v in structured.INTERN_TABLE.items()}
     stack_strings = [
-        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
+        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {REVERSE_INTERN_TABLE[frame['filename']]}"
         for frame in stack
     ]
     return stack_strings
