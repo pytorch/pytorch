@@ -916,12 +916,13 @@ def _sink_waits_iterative_internal(
         pre_group_mem = (
             _curr_memory[group_head][0] - snodes_allocfree[group_head].size_alloc
         )
+        # Stash memory tracing updates to not recompute them after swap
         _post_alloc_update: dict[BaseSchedulerNode, int] = {}
-        _size_free_delta_update = {}
+        _size_free_delta_update: dict[BaseSchedulerNode, int] = {}
 
         potential_peak = 0
         if not group_n_to_bufs_after_swap_dealloc_instead_of_candidate:
-            # Not accounting for buffers last use change
+            # Not accounting for buffers liveliness change
             potential_peak = max(
                 group_peak_memory + candidate_delta_mem,
                 pre_group_mem + candidate_allocfree.size_alloc,
