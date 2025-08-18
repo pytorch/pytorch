@@ -1329,6 +1329,42 @@ def quantized_decomposed_quantize_per_channel(
     )
 
 
+def _assert_async(cond, msg):
+    cond = to_dtype(cond, torch.bool)
+    cond_loader = cond.make_loader()
+
+    def inner_fn(index):
+        p = cond_loader(index)
+        return ops.device_assert_async(p, msg)
+
+    sentinel = Pointwise.create(
+        device=cond.get_device(),
+        dtype=torch.bool,
+        inner_fn=inner_fn,
+        ranges=list(cond.get_size()),
+    )
+
+    def has_side_effects():
+        return True
+
+    assert hasattr(sentinel, "data")
+    assert hasattr(sentinel.data, "data")
+    pointwise_node = sentinel.data.data
+    object.__setattr__(pointwise_node, "has_side_effects", has_side_effects)
+    sentinel.realize()
+    return sentinel
+
+
+@register_lowering(aten._assert_async.msg)
+def lower_assert_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
+@register_lowering(aten._functional_assert_async.msg)
+def lower_assert_functional_async(cond, msg):
+    return _assert_async(cond, msg)
+
+
 @register_lowering(
     quantized_decomposed.dequantize_per_channel, type_promotion_kind=None
 )
@@ -3367,26 +3403,6 @@ def empty_strided(
         stride=stride,
     )
     return pointwise
-
-
-@register_lowering(torch.ops.aten._assert_async.msg, type_promotion_kind=None)
-def lower_assert_async_msg(cond, msg):
-    dev = getattr(V.graph, "device", None) or torch.device("cpu")
-    msg = msg or ""
-    device_assert = ir.DeviceAssert(cond, msg, dev)
-    V.graph.register_buffer(device_assert, set_name=True)
-    V.graph.register_operation(device_assert)
-
-
-@register_lowering(
-    torch.ops.aten._functional_assert_async.msg, type_promotion_kind=None
-)
-def lower_functional_assert_async_msg(cond, msg):
-    dev = getattr(V.graph, "device", None) or torch.device("cpu")
-    msg = msg or ""
-    device_assert = ir.DeviceAssert(cond, msg, dev)
-    V.graph.register_buffer(device_assert, set_name=True)
-    V.graph.register_operation(device_assert)
 
 
 @register_lowering(aten.new_empty_strided)

@@ -1276,6 +1276,16 @@ class SchedulerNode(BaseSchedulerNode):
                     )
         return buffers_store_as_atomic_add
 
+    def has_side_effects(self) -> bool:
+        if (
+            self.node is not None
+            and hasattr(self.node, "data")
+            and hasattr(self.node.data, "has_side_effects")
+            and callable(self.node.data.has_side_effects)
+        ):
+            return self.node.data.has_side_effects()
+        return super().has_side_effects()
+
 
 def refresh_group_node_dependencies(
     group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
