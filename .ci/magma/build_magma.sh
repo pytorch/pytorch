@@ -27,8 +27,8 @@ popd
 pushd ${PACKAGE_DIR}/magma-${MAGMA_VERSION}
 patch < ${PACKAGE_FILES}/CMake.patch
 patch < ${PACKAGE_FILES}/cmakelists.patch
-patch -p0 < ${PACKAGE_FILES}/cuda13.patch
 patch -p0 < ${PACKAGE_FILES}/thread_queue.patch
+patch -p1 < ${PACKAGE_FILES}/cuda13.patch
 patch -p1 < ${PACKAGE_FILES}/getrf_shfl.patch
 patch -p1 < ${PACKAGE_FILES}/getrf_nbparam.patch
 # The build.sh script expects to be executed from the sources root folder
