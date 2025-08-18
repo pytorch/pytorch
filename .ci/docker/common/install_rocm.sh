@@ -30,7 +30,7 @@ EOF
 
     # we want the patch version of 6.4 instead
     if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.2"
+        ROCM_VERSION="${ROCM_VERSION}.3"
     fi
 
     # Default url values
