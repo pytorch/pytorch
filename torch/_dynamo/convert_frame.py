@@ -749,13 +749,12 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 class TracerError(Exception):
     def __init__(
-        self, inner: Exception, tracer_output_partial: DynamoTracerOutput
+        self, inner: Exception, tracer_output_partial: Optional[DynamoTracerOutput]
     ) -> None:
         self.inner = inner
         self.tracer_ouptut_partial = tracer_output_partial
 
 
-@preserve_global_state
 def trace_frame(
     code: types.CodeType,
     globals: dict[str, object],
@@ -764,7 +763,6 @@ def trace_frame(
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
-    tf_mode_stack: list[torch.overrides.TorchFunctionMode],
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
     code_options: dict[str, object],
@@ -775,42 +773,40 @@ def trace_frame(
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
 ):
-    try:
-        from torch.fx.experimental.validator import (
-            bisect,
-            translation_validation_enabled,
-        )
+    from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
-        speculation_log.restart()  # type: ignore[has-type]
-        exn_vt_stack = ExceptionStack()
+    speculation_log.restart()  # type: ignore[has-type]
+    exn_vt_stack = ExceptionStack()
+    tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+        torch.overrides._get_current_function_mode_stack()
+    )
 
-        tracer_output = None
-        tracer = InstructionTranslator(
-            instructions,
-            code,
-            locals,
-            globals,
-            builtins,
-            closure,
-            tf_mode_stack,
-            code_options,
-            compiler_fn,
-            one_graph,
-            export,
-            export_constraints,
-            frame_state=frame_state,
-            speculation_log=speculation_log,  # type: ignore[has-type]
-            exn_vt_stack=exn_vt_stack,
-            distributed_state=distributed_state,  # type: ignore[has-type]
-            package=package,
-        )
+    tracer = InstructionTranslator(
+        instructions,
+        code,
+        locals,
+        globals,
+        builtins,
+        closure,
+        tf_mode_stack,
+        code_options,
+        compiler_fn,
+        one_graph,
+        export,
+        export_constraints,
+        frame_state=frame_state,
+        speculation_log=speculation_log,  # type: ignore[has-type]
+        exn_vt_stack=exn_vt_stack,
+        distributed_state=distributed_state,  # type: ignore[has-type]
+        package=package,
+    )
 
-        output = None
+    @preserve_global_state
+    def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
-            output = tracer.output
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]
             raise
@@ -825,22 +821,23 @@ def trace_frame(
                 bisect(tracer.output.shape_env)
             raise
         finally:
-            tracer_output = DynamoTracerOutput(
-                error_on_graph_break=tracer.error_on_graph_break,
-                is_tracing_resume_prologue=tracer.is_tracing_resume_prologue,
-                output_graph=output,
-            )
             tracer.output.call_cleanup_hooks()
 
-        assert output is not None
-        assert output.output_instructions
-        instructions[:] = output.output_instructions
-        code_options.update(output.code_options)
-        propagate_inst_exn_table_entries(instructions)
-        check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+    try:
+        run_tracer()
     except Exception as e:
-        raise TracerError(e, tracer_output) from e
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)
+        raise
+
+    tracer_output = DynamoTracerOutput(tracer)
+    output = tracer_output.output_graph
+    assert output is not None
+    assert output.output_instructions
+    instructions[:] = output.output_instructions
+    code_options.update(output.code_options)
+    propagate_inst_exn_table_entries(instructions)
+    check_inst_exn_tab_entries_valid(instructions)
+    instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     return tracer_output
 
@@ -883,9 +880,7 @@ def _compile(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
         nonlocal tracer_output
-        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-            torch.overrides._get_current_function_mode_stack()
-        )
+
         try:
             tracer_output = trace_frame(
                 code,
@@ -895,7 +890,6 @@ def _compile(
                 closure,
                 compiler_fn,
                 one_graph,
-                tf_mode_stack,
                 speculation_log,
                 instructions,
                 code_options,
@@ -905,9 +899,9 @@ def _compile(
                 distributed_state=distributed_state,
                 package=package,
             )
-        except TracerError as e:
-            tracer_output = e.tracer_ouptut_partial
-            raise e.inner from None
+        except Exception as e:
+            tracer_output = e._torch_dynamo_tracer_output
+            raise
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(

@@ -22,7 +22,6 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
@@ -1451,11 +1450,18 @@ def get_code_keys() -> list[str]:
     return keys
 
 
-@dataclass
 class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
-    output_graph: Optional["OutputGraph"] = None
+    output_graph: Optional["OutputGraph"]
+
+    def __init__(self, tracer, error=None):
+        self.error_on_graph_break = tracer.error_on_graph_break
+        self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
+        if error:
+            self.output_graph = None
+        else:
+            self.output_graph = tracer.output
 
 
 def transform_code_object(
