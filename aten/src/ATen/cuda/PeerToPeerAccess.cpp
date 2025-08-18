@@ -66,6 +66,8 @@ bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
 }
 
 namespace {
+#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
+
 nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
   static bool nvml_init [[maybe_unused]] = []() {
@@ -91,11 +93,10 @@ nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
           pci_id, &nvml_device));
   return nvml_device;
 #else
-  return nullptr;
+  return (nvmlDevice_t) nullptr;
 #endif
 }
 
-#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
 bool isFabricSupported() {
   // 1. try allocating memory
   CUmemGenericAllocationHandle handle = 0;
