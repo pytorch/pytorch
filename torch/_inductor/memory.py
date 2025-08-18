@@ -6,6 +6,7 @@ import heapq
 import logging
 from typing import Callable, Optional, TYPE_CHECKING, TypedDict, Union
 
+from torch._environment import is_fbcode
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
@@ -75,7 +76,7 @@ def get_freeable_input_buf(
     Create and keep track of all input buffers that can be freed during the program
 
     Returns:
-        A dictionary containing all freeble input buffers, keyed by their names.
+        A dictionary containing all freeable input buffers, keyed by their names.
     """
 
     def _dep_size_hint(dep: Dep) -> int:
@@ -341,7 +342,7 @@ def compute_memory_timeline(
 
     # 1. for freeable input buffers
     for buf_name, input_buf in name_to_freeable_input_buf.items():
-        end_step = len(nodes) - 1
+        end_step = -1
         if buf_name not in graph_outputs:
             end_step, end_step_snode = _get_end_step_and_snode(input_buf)
             assert end_step_snode is not None
@@ -364,11 +365,12 @@ def compute_memory_timeline(
             # to be only used by its defining op (e.g., due to fusion when all consumers of
             # the buffer are fused with its defining op). In such cases, end_step is step.
             buf_name = sched_buf.get_name()
-            end_step = len(nodes) - 1
+            end_step = -1
             if buf_name not in graph_outputs:
                 end_step, end_step_snode = _get_end_step_and_snode(sched_buf)
                 if end_step == -1:
                     end_step = step
+                    buf_to_snode_last_use[sched_buf] = node
                 else:
                     assert end_step_snode is not None
                     buf_to_snode_last_use[sched_buf] = end_step_snode
@@ -393,35 +395,17 @@ def estimate_peak_memory(
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
-    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
+    keeping track of the liveness of SchedulerBuffers and FreeableInputBuffers.
 
     Returns:
         int: peak memory
         List[int]: memory usage at each node (or each step).
     """
-
-    buf_info_list, _, _ = compute_memory_timeline(
-        nodes, name_to_freeable_input_buf, graph_outputs
+    # Use estimate_peak_memory_allocfree to keep one impl.
+    peak_memory, snodes_curr_memory, snodes_allocfree, buf_to_snode_last_use = (
+        estimate_peak_memory_allocfree(nodes, name_to_freeable_input_buf, graph_outputs)
     )
-
-    # incremental memory changes at each step
-    memory = [0 for _ in range(len(nodes) + 1)]
-
-    # for each buffer, update memory when created and when freed
-    for buf_info in buf_info_list:
-        memory[buf_info.start_step] += buf_info.size_alloc
-        memory[buf_info.end_step + 1] -= buf_info.size_free
-
-    # get peak memory by compute the cumulative memories
-    max_memory = 0
-    cur_memory = 0
-    memories_at_nodes = []
-    for t in range(len(nodes) + 1):
-        cur_memory += memory[t]
-        memories_at_nodes.append(cur_memory)
-        max_memory = max(max_memory, cur_memory)
-
-    return (max_memory, memories_at_nodes)
+    return peak_memory, [(curr_mem[0] + curr_mem[1]) for curr_mem in snodes_curr_memory]
 
 
 @dataclasses.dataclass
@@ -463,7 +447,8 @@ def estimate_peak_memory_allocfree(
     # for each buffer, update memory when created and when freed
     for buf_info in buf_info_list:
         step_idx_allocfree[buf_info.start_step].size_alloc += buf_info.size_alloc
-        step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
+        if buf_info.end_step != -1:
+            step_idx_allocfree[buf_info.end_step].size_free += buf_info.size_free
 
     snodes_allocfree = {}
     for i, node in enumerate(nodes):
@@ -503,7 +488,7 @@ def topological_sort_lpmf(
     Buffer memory optimization for video codec application modeled in Simulink
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
-    The algorithm maintain the max memory so far.
+    The algorithm maintains the max memory so far.
     At every iteration, for each scheduleable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
@@ -729,6 +714,92 @@ def topological_sort_dfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
     return result
 
 
+def validate_graph_acyclic(nodes: list[BaseSchedulerNode]) -> None:
+    """
+    Validate that the graph is acyclic by checking predecessor relationships.
+
+    Raises:
+        RuntimeError: If a cycle is detected in the graph
+    """
+    # DFS coloring scheme for cycle detection:
+    # WHITE (0): Node has not been visited yet
+    # GRAY (1): Node is currently being processed (in the recursion stack)
+    # BLACK (2): Node has been completely processed (finished exploring all its predecessors)
+    # A back edge (cycle) is detected when we encounter a GRAY node during DFS traversal
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = dict.fromkeys(nodes, WHITE)
+    path: list[BaseSchedulerNode] = []  # Track current DFS path
+
+    def dfs_visit(node: BaseSchedulerNode) -> None:
+        if color[node] == BLACK:
+            return
+
+        if color[node] == GRAY:
+            path.append(node)
+            path_info = " -> ".join([node.get_name() for node in path])
+
+            raise RuntimeError(
+                f"Cycle detected in memory planning graph"
+                f"Path containing cycle (i -> j: j is a dependency of i): {path_info} "
+                f"This indicates invalid dependency relationships in the scheduler graph"
+            )
+
+        color[node] = GRAY
+        path.append(node)
+
+        for pred_node in node.mpi_node.pred_nodes:
+            dfs_visit(pred_node)
+
+        path.pop()
+        color[node] = BLACK
+
+    # Start DFS from all unvisited nodes
+    for node in nodes:
+        if color[node] == WHITE:
+            dfs_visit(node)
+
+
+def validate_unique_buffer_names(
+    nodes: list[BaseSchedulerNode],
+    name_to_buf: dict[str, SchedulerBuffer],
+    name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
+) -> None:
+    """
+    Validate that for each node's output buffer, the name_to_buf mapping is correct.
+    For each output buffer buf, we should have name_to_buf[buf.get_name()] == buf.
+    Also validate that no buffer names overlap with freeable input buffer names.
+
+    Raises:
+        RuntimeError: If buffer name mapping is incorrect or names overlap
+    """
+    for node in nodes:
+        for buf in node.get_outputs():
+            buf_name = buf.get_name()
+
+            # Check if buffer name exists in the mapping
+            if buf_name not in name_to_buf:
+                raise RuntimeError(
+                    f"{buf_name} from {node.get_name()} is not found in name_to_buf mapping."
+                    f" This indicates a missing buffer mapping."
+                )
+
+            # Check if the mapping points to the correct buffer object
+            if name_to_buf[buf_name] != buf:
+                raise RuntimeError(
+                    f"Buffer name mapping is incorrect for '{buf_name}'."
+                    f"Expected name_to_buf['{buf_name}'] to be {buf.debug_str()}"
+                    f"but got {name_to_buf[buf_name].debug_str()}"
+                    f"This indicates some buffers share the same name"
+                )
+
+            # Check if buffer name conflicts with freeable input buffer names
+            if buf_name in name_to_freeable_input_buf:
+                raise RuntimeError(
+                    f"Buffer name conflict detected: '{buf_name}' from node {node.get_name()} "
+                    f"is also used as a freeable input buffer name. "
+                )
+
+
 def prepare_planning_info(
     nodes: list[BaseSchedulerNode],
     name_to_buf: dict[str, SchedulerBuffer],
@@ -785,6 +856,15 @@ def reorder_for_peak_memory(
         graph_outputs,
     )
 
+    # Validate planning info before proceeding with reordering
+    try:
+        validate_graph_acyclic(nodes)
+        validate_unique_buffer_names(nodes, name_to_buf, name_to_freeable_input_buf)
+    except RuntimeError as e:
+        torch_log.error("Memory planning validation failed: %s", e)
+        if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
+            raise
+
     # keep track of the peak memory estimates of different methods
     peak_memory_diff_methods: list[PeakMemoryResult] = []
     peak_memory_diff_methods.append(
@@ -811,6 +891,8 @@ def reorder_for_peak_memory(
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
         except Exception as e:
             torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+            if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
+                raise
 
     signpost_event(
         category="inductor",
