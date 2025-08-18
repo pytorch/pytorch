@@ -21,7 +21,6 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
-import collections
 import copy
 import dataclasses
 import functools
@@ -447,6 +446,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",
@@ -503,7 +503,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
-        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
@@ -2963,6 +2962,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu.random.seed_all",
         "torch.xpu.random.seed",
         "torch.xpu.set_stream",
+        "torch.xpu.stream",
         "torch.xpu.synchronize",
     ],
     TorchInGraphFunctionVariable,
@@ -3291,7 +3291,6 @@ def is_numpy_type_info(obj: Any) -> bool:
 
 BUILTIN_SKIPLIST = (
     abc,
-    collections,
     copy,
     random,
     traceback,
