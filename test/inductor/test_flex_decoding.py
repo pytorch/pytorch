@@ -1740,6 +1740,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_not_pw_of_two(self):
         query = torch.randn(1, 12, 1, 16, device="cuda")
         key = torch.randn(1, 2, 4096, 16, device="cuda")
