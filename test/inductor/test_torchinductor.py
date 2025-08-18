@@ -1473,8 +1473,8 @@ class CommonTemplate:
         def fn(a, b, alpha):
             return torch.add(a, b, alpha=alpha)
 
-        x = torch.rand(1, dtype=torch.complex64, device=self.device)
-        y = torch.rand(1, dtype=torch.complex64, device=self.device)
+        x = torch.rand((), dtype=torch.complex64, device=self.device)
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
 
         self.common(fn, (x, y, 2))
 
@@ -1507,8 +1507,7 @@ class CommonTemplate:
             return torch.add(a, b, alpha=alpha)
 
         x = torch.randn(2, 3, dtype=torch.complex64, device=self.device)
-        y = torch.tensor(1 + 1j, dtype=torch.complex64, device=self.device)
-
+        y = torch.rand((), dtype=torch.complex64, device=self.device)
         self.common(fn, (x, y, 2))
 
     def test_concat_add_inplace(self):
