@@ -837,7 +837,7 @@ class DynamoOutput:
     last_attempt_start_time: Optional[float]
 
 
-def compile_frame(
+def compile_frame(  # type: ignore[return]
     code: types.CodeType,
     transform: Callable[[list[Instruction], dict[str, Any]], DynamoTracerOutput],
     restart_reasons: set[str],
