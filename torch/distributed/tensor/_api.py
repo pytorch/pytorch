@@ -561,7 +561,11 @@ class DTensor(torch.Tensor):
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
-        device_order = tuple(device_order) if device_order is not None else None
+        device_order = (
+            tuple(device_order)
+            if device_order is not None
+            else tuple(range(device_mesh.ndim))
+        )
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
             self,
