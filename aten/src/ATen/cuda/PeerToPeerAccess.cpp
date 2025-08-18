@@ -66,10 +66,9 @@ bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
 }
 
 namespace {
-#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
+#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040 && defined PYTORCH_C10_DRIVER_API_SUPPORTED
 
 nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
-#ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
   static bool nvml_init [[maybe_unused]] = []() {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
     return true;
@@ -92,9 +91,6 @@ nvmlDevice_t get_nvml_device(c10::DeviceIndex dev) {
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
           pci_id, &nvml_device));
   return nvml_device;
-#else
-  return (nvmlDevice_t) nullptr;
-#endif
 }
 
 bool isFabricSupported() {
@@ -148,7 +144,7 @@ bool isFabricSupported() {
 } // namespace
 
 bool get_fabric_access(c10::DeviceIndex dev) {
-#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040
+#if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040 && defined PYTORCH_C10_DRIVER_API_SUPPORTED
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   TORCH_CHECK(dev >= 0 || dev < num_devices_, dev, " is not a device");
