@@ -188,7 +188,6 @@ def get_bucketing_plan(
         ) and _check_ir_node_fsdp(snode.node):
             has_fsdp_comm = True
             fsdp_world_size = get_ag_node_pg_info(snode)[0]
-            break
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
