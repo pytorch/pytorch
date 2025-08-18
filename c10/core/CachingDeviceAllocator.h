@@ -11,6 +11,7 @@
 #include <deque>
 #include <set>
 #include <stack>
+#include <thread>
 
 namespace c10::CachingDeviceAllocator {
 
