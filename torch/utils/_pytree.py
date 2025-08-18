@@ -1116,7 +1116,8 @@ class TreeSpec:
     @property
     @deprecated(
         "`treespec.children_specs` is deprecated. "
-        "Use `treespec.children()` or `treespec.child(index)` instead.",
+        "Use `treespec.child(index)` to access a single child, "
+        "or `treespec.children()` to get all children.",
         category=FutureWarning,
     )
     def children_specs(self) -> list[Self]:
@@ -1266,7 +1267,7 @@ class TreeSpec:
 # again, with fields that have `init=False`.
 @deprecated(
     "`isinstance(treespec, LeafSpec)` is deprecated, "
-    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
 @dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
@@ -1303,7 +1304,7 @@ def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
     """Make a tuple treespec from an iterable of child treespecs."""
     children = list(iterable)
     if any(not isinstance(child, TreeSpec) for child in children):
-        raise ValueError(f"Expected a tuple of TreeSpecs, got: {children!r}.")
+        raise ValueError(f"Expected a tuple of TreeSpec values, got: {children!r}.")
     return TreeSpec(tuple, None, children)
 
 
@@ -1315,7 +1316,7 @@ def treespec_dict(
     """Make a dict treespec from a dict of child treespecs."""
     dct = dict(mapping, **kwargs)
     if any(not isinstance(child, TreeSpec) for child in dct.values()):
-        raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
+        raise ValueError(f"Expected a dictionary of TreeSpec values, got: {dct!r}.")
     return TreeSpec(dict, list(dct.keys()), list(dct.values()))
 
 
