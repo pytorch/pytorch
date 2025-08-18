@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_sort.py b/test/dynamo/cpython/3_13/test_sort.py
-index 2a7cfb7affa..58b9b796362 100644
+index 2a7cfb7affa..4805f1fcceb 100644
 --- a/test/dynamo/cpython/3_13/test_sort.py
 +++ b/test/dynamo/cpython/3_13/test_sort.py
 @@ -1,3 +1,57 @@
@@ -69,7 +69,61 @@ index 2a7cfb7affa..58b9b796362 100644
      def testStressfully(self):
          # Try a variety of sizes at and around powers of 2, and at powers of 10.
          sizes = [0]
-@@ -151,7 +205,7 @@ class TestBase(unittest.TestCase):
+@@ -48,32 +102,33 @@ class TestBase(unittest.TestCase):
+             sizes.extend(range(n-1, n+2))
+         sizes.extend([10, 100, 1000])
+ 
+-        class Complains(object):
+-            maybe_complain = True
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class Complains(object):
++                maybe_complain = True
+ 
+-            def __init__(self, i):
+-                self.i = i
++                def __init__(self, i):
++                    self.i = i
+ 
+-            def __lt__(self, other):
+-                if Complains.maybe_complain and random.random() < 0.001:
+-                    if verbose:
+-                        print("        complaining at", self, other)
+-                    raise RuntimeError
+-                return self.i < other.i
++                def __lt__(self, other):
++                    if Complains.maybe_complain and random.random() < 0.001:
++                        if verbose:
++                            print("        complaining at", self, other)
++                        raise RuntimeError
++                    return self.i < other.i
+ 
+-            def __repr__(self):
+-                return "Complains(%d)" % self.i
++                def __repr__(self):
++                    return "Complains(%d)" % self.i
+ 
+-        class Stable(object):
+-            def __init__(self, key, i):
+-                self.key = key
+-                self.index = i
++            class Stable(object):
++                def __init__(self, key, i):
++                    self.key = key
++                    self.index = i
+ 
+-            def __lt__(self, other):
+-                return self.key < other.key
++                def __lt__(self, other):
++                    return self.key < other.key
+ 
+-            def __repr__(self):
+-                return "Stable(%d, %d)" % (self.key, self.index)
++                def __repr__(self):
++                    return "Stable(%d, %d)" % (self.key, self.index)
+ 
+         for n in sizes:
+             x = list(range(n))
+@@ -151,20 +206,21 @@ class TestBase(unittest.TestCase):
                  self.assertEqual(forced, native)
  #==============================================================================
  
@@ -78,7 +132,28 @@ index 2a7cfb7affa..58b9b796362 100644
  
      def test_bug453523(self):
          # bug 453523 -- list.sort() crasher.
-@@ -188,7 +242,7 @@ class TestBugs(unittest.TestCase):
+         # If this fails, the most likely outcome is a core dump.
+         # Mutations during a list sort should raise a ValueError.
+ 
+-        class C:
+-            def __lt__(self, other):
+-                if L and random.random() < 0.75:
+-                    L.pop()
+-                else:
+-                    L.append(3)
+-                return random.random() < 0.5
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class C:
++                def __lt__(self, other):
++                    if L and random.random() < 0.75:
++                        L.pop()
++                    else:
++                        L.append(3)
++                    return random.random() < 0.5
+ 
+         L = [C() for i in range(50)]
+         self.assertRaises(ValueError, L.sort)
+@@ -188,7 +244,7 @@ class TestBugs(unittest.TestCase):
  
  #==============================================================================
  
@@ -87,7 +162,51 @@ index 2a7cfb7affa..58b9b796362 100644
  
      def test_decorated(self):
          data = 'The quick Brown fox Jumped over The lazy Dog'.split()
-@@ -309,7 +363,7 @@ def check_against_PyObject_RichCompareBool(self, L):
+@@ -228,26 +284,28 @@ class TestDecorateSortUndecorate(unittest.TestCase):
+ 
+     def test_key_with_mutating_del(self):
+         data = list(range(10))
+-        class SortKiller(object):
+-            def __init__(self, x):
+-                pass
+-            def __del__(self):
+-                del data[:]
+-                data[:] = range(20)
+-            def __lt__(self, other):
+-                return id(self) < id(other)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class SortKiller(object):
++                def __init__(self, x):
++                    pass
++                def __del__(self):
++                    del data[:]
++                    data[:] = range(20)
++                def __lt__(self, other):
++                    return id(self) < id(other)
+         self.assertRaises(ValueError, data.sort, key=SortKiller)
+ 
+     def test_key_with_mutating_del_and_exception(self):
+         data = list(range(10))
+         ## dup = data[:]
+-        class SortKiller(object):
+-            def __init__(self, x):
+-                if x > 2:
+-                    raise RuntimeError
+-            def __del__(self):
+-                del data[:]
+-                data[:] = list(range(20))
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class SortKiller(object):
++                def __init__(self, x):
++                    if x > 2:
++                        raise RuntimeError
++                def __del__(self):
++                    del data[:]
++                    data[:] = list(range(20))
+         self.assertRaises(RuntimeError, data.sort, key=SortKiller)
+         ## major honking subtlety: we *can't* do:
+         ##
+@@ -309,7 +367,7 @@ def check_against_PyObject_RichCompareBool(self, L):
              self.assertIs(opt, ref)
              #note: not assertEqual! We want to ensure *identical* behavior.
  
@@ -96,7 +215,49 @@ index 2a7cfb7affa..58b9b796362 100644
      def test_safe_object_compare(self):
          heterogeneous_lists = [[0, 'foo'],
                                 [0.0, 'foo'],
-@@ -408,4 +462,4 @@ class TestOptimizedCompares(unittest.TestCase):
+@@ -331,17 +389,18 @@ class TestOptimizedCompares(unittest.TestCase):
+         # This test is by ppperry. It ensures that unsafe_object_compare is
+         # verifying ms->key_richcompare == tp->richcompare before comparing.
+ 
+-        class WackyComparator(int):
+-            def __lt__(self, other):
+-                elem.__class__ = WackyList2
+-                return int.__lt__(self, other)
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class WackyComparator(int):
++                def __lt__(self, other):
++                    elem.__class__ = WackyList2
++                    return int.__lt__(self, other)
+ 
+-        class WackyList1(list):
+-            pass
++            class WackyList1(list):
++                pass
+ 
+-        class WackyList2(list):
+-            def __lt__(self, other):
+-                raise ValueError
++            class WackyList2(list):
++                def __lt__(self, other):
++                    raise ValueError
+ 
+         L = [WackyList1([WackyComparator(i), i]) for i in range(10)]
+         elem = L[-1]
+@@ -355,9 +414,10 @@ class TestOptimizedCompares(unittest.TestCase):
+ 
+         # The following test is also by ppperry. It ensures that
+         # unsafe_object_compare handles Py_NotImplemented appropriately.
+-        class PointlessComparator:
+-            def __lt__(self, other):
+-                return NotImplemented
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class PointlessComparator:
++                def __lt__(self, other):
++                    return NotImplemented
+         L = [PointlessComparator(), PointlessComparator()]
+         self.assertRaises(TypeError, L.sort)
+         self.assertRaises(TypeError, [(x,) for x in L].sort)
+@@ -408,4 +468,4 @@ class TestOptimizedCompares(unittest.TestCase):
  #==============================================================================
  
  if __name__ == "__main__":
