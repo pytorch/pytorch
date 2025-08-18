@@ -1430,9 +1430,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 torch.amp.autocast_mode._exit_autocast,
             ]:
                 node.meta["val"] = None
+            # For autocast, the python APIs run so we don't have to run them again
+            # here.
+            if func is torch._C._set_grad_enabled:
+                func(*args, **kwargs)
             return node
-            # Don't actually run the function! We just want to trace the calls
-            # into a graph. We don't actually want to change global autograd state.
         return func(*args, **kwargs)
 
 
@@ -1959,7 +1961,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         # nn_module_stack
         if node.op not in ["placeholder", "output"]:
             if "nn_module_stack" not in node.meta:
-                node.meta["nn_module_stack"] = self.module_stack
+                node.meta["nn_module_stack"] = self.module_stack.copy()
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
             for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
                 if isinstance(mod_cls, type):
@@ -2343,7 +2345,8 @@ def make_fx(
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops,
-        record_stack_traces=record_stack_traces or config.trace.provenance_tracking,
+        record_stack_traces=record_stack_traces
+        or config.trace.provenance_tracking_level == 1,
     )
 
     @functools.wraps(f)

@@ -97,6 +97,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return ComplexType::get();
       case Tag::Int:
         return IntType::get();
+      case Tag::UInt:
+        return IntType::get();
       case Tag::SymInt:
         return c10::SymIntType::get();
       case Tag::SymFloat:
@@ -320,6 +322,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
+    case Tag::UInt:
+      return rhs.isUnsigned() && lhs.toUInt() == rhs.toUInt();
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::SymFloat:
@@ -379,6 +383,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Int:
       return c10::get_hash(v.payload.u.as_int);
     // NB: these are technically strict aliasing violations
+    case Tag::UInt:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:
@@ -806,6 +812,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
+    case IValue::Tag::UInt:
+      return out << v.toUInt();
     case IValue::Tag::SymInt:
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:

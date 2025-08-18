@@ -96,10 +96,10 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
@@ -338,15 +338,26 @@ def requires_gloo():
 
 
 def requires_nccl_version(version, msg):
-    if not c10d.is_nccl_available():
-        return skip_but_pass_in_sandcastle(
-            "c10d was not compiled with the NCCL backend",
-        )
+    if TEST_CUDA:
+        if not c10d.is_nccl_available():
+            return skip_but_pass_in_sandcastle(
+                "c10d was not compiled with the NCCL backend",
+            )
+        else:
+            return skip_but_pass_in_sandcastle_if(
+                torch.cuda.nccl.version() < version,
+                f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
+            )
     else:
-        return skip_but_pass_in_sandcastle_if(
-            torch.cuda.nccl.version() < version,
-            f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
-        )
+
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
 
 def requires_nccl():
@@ -435,9 +446,10 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns True if the device's compute capability is (major, minor) or higher.
     Error out if the device is not a CUDA device.
     Returns False if device is a RoCM device.
+    Returns True if device is a non-CUDA device.
     """
     if device.type != "cuda":
-        raise ValueError("sm_is_or_later() is only supported for CUDA devices")
+        return True
 
     if torch.version.hip is not None:
         # ROCm devices may have different compute capability codes
@@ -1456,12 +1468,19 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend="nccl", init_pg=True, fake_pg=False
+    rank, world_size, backend=None, init_pg=True, fake_pg=False
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
         torch.accelerator.set_device_index(rank)
+
+    device_type = (
+        acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+    )
+    if backend is None:
+        backend = c10d.get_default_backend_for_device(device_type)
+
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6789"
     if init_pg:
@@ -1508,9 +1527,12 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+        device = torch.accelerator.current_accelerator().type
+        cls.device = f"{device}:{cls.rank}"
+        cls.device_ids = None if device in cls.device else [cls.rank]
+        c10d.init_process_group(
+            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+        )
 
     @classmethod
     def tearDownClass(cls):
