@@ -21,6 +21,11 @@ from torch.distributed.tensor.placement_types import (
 
 logger = logging.getLogger(__name__)
 
+from typing import TypeVar
+
+
+TOrder = TypeVar("TOrder", bound=tuple[int, ...])
+
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
@@ -371,13 +376,13 @@ class DTensorRedistributePlanner:
         src_spec: DTensorSpec,
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
-        src_device_order: Optional[tuple[int, ...]],
-        dst_device_order: Optional[tuple[int, ...]],
+        src_device_order: Optional[TOrder],
+        dst_device_order: Optional[TOrder],
     ) -> list[_TransformInfo]:
         if src_device_order is None:
-            src_device_order = tuple(range(self.device_mesh.ndim))
+            src_device_order = cast(TOrder, tuple(range(self.device_mesh.ndim)))
         if dst_device_order is None:
-            dst_device_order = tuple(range(self.device_mesh.ndim))
+            dst_device_order = cast(TOrder, tuple(range(self.device_mesh.ndim)))
         src_state = self.DistState(src_spec.placements, src_device_order)
         dst_state = self.DistState(dst_spec.placements, dst_device_order)
         transform_infos: list[_TransformInfo] = []
@@ -563,8 +568,8 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    src_device_order: tuple[int, ...],
-    dst_device_order: tuple[int, ...],
+    src_device_order: TOrder,
+    dst_device_order: TOrder,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, src_device_order, dst_device_order
@@ -575,8 +580,8 @@ def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
-    src_device_order: Optional[tuple[int, ...]] = None,
-    dst_device_order: Optional[tuple[int, ...]] = None,
+    src_device_order: Optional[TOrder] = None,
+    dst_device_order: Optional[TOrder] = None,
     *,
     async_op: bool = False,
     is_backward: bool = False,
@@ -592,9 +597,9 @@ def redistribute_local_tensor(
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
     if not src_device_order:
-        src_device_order = tuple(range(current_spec.device_mesh.ndim))
+        src_device_order = cast(TOrder, tuple(range(current_spec.device_mesh.ndim)))
     if not dst_device_order:
-        dst_device_order = tuple(range(target_spec.device_mesh.ndim))
+        dst_device_order = cast(TOrder, tuple(range(target_spec.device_mesh.ndim)))
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
