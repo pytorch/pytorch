@@ -1031,7 +1031,7 @@ def _compile(
                 log.debug(
                     "No graph captured with one_graph=True or error_on_graph_break=True"
                 )
-            return ConvertFrameReturn()
+            return ConvertFrameReturn(), tracer_output
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
@@ -1106,7 +1106,7 @@ def _compile(
         # are extra graphs now.
 
         if output.export and output.is_empty_graph():
-            return ConvertFrameReturn()
+            return ConvertFrameReturn(), tracer_output
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
