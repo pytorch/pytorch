@@ -1643,7 +1643,9 @@ def use_triton_template(
     )
 
 
-def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
+def can_use_tma(
+    *matrices: IRNode, output_layout: Optional[Layout] = None, add_guards: bool = False
+) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1665,11 +1667,31 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
     def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
 
-    def _is_tma_compatible(x: IRNode) -> bool:
-        sizes = x.get_size()
-        strides = x.get_stride()
+    def _is_tma_compatible_layout(layout: Optional[Layout]) -> bool:
+        if layout is None:
+            return True
+        sizes = layout.size
+        strides = layout.stride
+        dtype = layout.dtype
+
+        # TODO: Check Base pointer 16-byte aligned for output?
+        return _is_tma_compatible(sizes, strides, dtype)
+
+    def _is_tma_compatible_matrix(m: IRNode) -> bool:
+        sizes = m.get_size()
+        strides = m.get_stride()
+        dtype = m.get_dtype()
+
+        # Base pointer 16-byte aligned
+        if m.get_name() in V.graph.unaligned_buffers:
+            return False
+
+        return _is_tma_compatible(sizes, strides, dtype)
+
+    def _is_tma_compatible(
+        sizes: Sequence[sympy.Expr], strides: Sequence[_IntLike], dtype: torch.dtype
+    ) -> bool:
         rank = len(sizes)
-        dtype = x.get_dtype()
         itemsize = dtype.itemsize
 
         # 2 ≤ rank ≤ 5
@@ -1678,10 +1700,6 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
         # dtype ∈ {FP16, BF16, FP8-E4M3FN}
         if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
-            return False
-
-        # Base pointer 16-byte aligned
-        if x.get_name() in V.graph.unaligned_buffers:
             return False
 
         if add_guards:
@@ -1725,13 +1743,19 @@ def can_use_tma(*matrices: IRNode, add_guards: bool = False) -> bool:
 
         return True
 
-    return has_triton_tma_device() and all(_is_tma_compatible(m) for m in matrices)
+    return (
+        has_triton_tma_device()
+        and all(_is_tma_compatible_matrix(m) for m in matrices)
+        and _is_tma_compatible_layout(output_layout)
+    )
 
 
-def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
+def use_triton_tma_template(
+    *matrices: IRNode, output_layout: Optional[Layout], add_guards: bool = False
+) -> bool:
     return (
         all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, add_guards=add_guards)
+        and can_use_tma(*matrices, output_layout=output_layout, add_guards=add_guards)
         and config.triton.enable_persistent_tma_matmul
     )
 
