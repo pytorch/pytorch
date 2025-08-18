@@ -550,7 +550,6 @@ def _gen_transform_infos_non_cached(
     else:
         use_greedy_transform = False
 
-    use_greedy_transform = False
     drp = _get_dtensor_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
