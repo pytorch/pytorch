@@ -841,7 +841,7 @@ def compile_frame(
     code: types.CodeType,
     transform: Callable[[list[Instruction], dict[str, Any]], DynamoTracerOutput],
     restart_reasons: set[str],
-):
+) -> DynamoOutput:
     last_attempt_start_time = None
     for attempt in itertools.count():
         CompileContext.get().attempt = attempt
@@ -925,7 +925,7 @@ def _compile(
 
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
-    ) -> None:
+    ) -> DynamoTracerOutput:
         nonlocal tracer_output
 
         tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
@@ -954,6 +954,7 @@ def _compile(
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)  # type: ignore[attr-defined]
             raise
 
+        assert tracer_output is not None
         return tracer_output
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
