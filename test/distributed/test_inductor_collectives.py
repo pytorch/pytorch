@@ -421,7 +421,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             func_compiled = torch.compile(func)
-            inp = torch.tensor(self.rank, dtype=torch.long, device="cuda")
+            inp = torch.tensor(self.rank, dtype=torch.long, device=self.device_type)
             out = func_compiled(inp, self.world_size)
             correct = func(inp, self.world_size)
             self.assertTrue(same(out, correct))
@@ -1560,12 +1560,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
             return y, ag_0_out, ag_1_out, ag_2_out, ag_3_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_2 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_3 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device_type, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        ag_2 = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        ag_3 = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
         correct = func(*inputs, **self.get_world_trs())
 
@@ -1617,10 +1617,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             return y, rs_0_out, rs_1_out
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device_type, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        rs_0 = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        rs_1 = torch.ones(384, 256, device=self.device_type, dtype=torch.float32)
         inputs = [x, w, rs_0, rs_1]
         func(*inputs, **self.get_world_trs())
 
@@ -1728,12 +1728,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 rs_3_out,
             )
 
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_0 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
-        ag_2 = torch.ones(1024, 512, device="cuda", dtype=torch.float32)
-        ag_3 = torch.ones(512, 1024, device="cuda", dtype=torch.float32)
+        x = torch.ones(4, 384, device=self.device_type, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device_type, dtype=torch.float32)
+        ag_0 = torch.ones(1024, 512, device=self.device_type, dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device=self.device_type, dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device=self.device_type, dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device=self.device_type, dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
