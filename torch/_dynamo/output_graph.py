@@ -30,6 +30,7 @@ import operator
 import re
 import sys
 import traceback
+import warnings
 import weakref
 from collections.abc import Generator, Sequence
 from dataclasses import dataclass, field as dc_field
@@ -97,8 +98,9 @@ from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .side_effects import AttributeMutationExisting, SideEffects
+from .side_effects import AttributeMutationExisting, SideEffects, ValueMutationExisting
 from .source import (
+    _get_source_debug_name,
     AttrSource,
     BackwardStateSource,
     ConstantSource,
@@ -153,6 +155,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
+from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -316,24 +319,23 @@ class OutputGraphGuardsState:
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
     global_state_guard: torch._C._dynamo.guards.GlobalStateGuard
-    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
+    _guards: torch._guards.GuardsSet
+    _aotautograd_guards: list[torch._guards.GuardEnvExpr]
 
     export: bool = False
     export_constraints: bool = False
-
-    _guards: Optional[torch._guards.GuardsSet] = None
-    _aotautograd_guards: Optional[list[torch._guards.GuardEnvExpr]] = None
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     @property
     def shape_env(self) -> ShapeEnv:
         raise AssertionError(f"shape_env shouldn't be accessed from {type(self)}")
 
     @property
-    def guards(self) -> Optional[torch._guards.GuardsSet]:
+    def guards(self) -> torch._guards.GuardsSet:
         return self._guards
 
     @property
-    def aotautograd_guards(self) -> Optional[list[torch._guards.GuardEnvExpr]]:
+    def aotautograd_guards(self) -> list[torch._guards.GuardEnvExpr]:
         return self._aotautograd_guards
 
 
@@ -409,6 +411,9 @@ class OutputGraph(OutputGraphGuardsState):
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
             or torch._C._dynamo.guards.GlobalStateGuard(),
+            # These are set by @property instead, just initialize them as blank
+            _guards=torch._guards.GuardsSet(),
+            _aotautograd_guards=[],
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -683,6 +688,7 @@ class OutputGraph(OutputGraphGuardsState):
         return [pack_subgraph_name, unpack_subgraph_name]
 
     def dump_guards_state(self) -> OutputGraphGuardsState:
+        # Dump a serializable version of self without extras
         return OutputGraphGuardsState(
             local_scope=self.local_scope,
             global_scope=self.global_scope,
@@ -1482,6 +1488,35 @@ class OutputGraph(OutputGraphGuardsState):
             self.add_output_instructions(
                 [local_restore_cg.create_delete(graph_output_var)]
             )
+
+        if self.export:
+            from torch.export._trace import _ExportModuleSpecTrackerDict
+
+            potential_side_effects = []
+            for var in self.side_effects._get_modified_vars():
+                if hasattr(var, "mutation_type"):
+                    mut_type = var.mutation_type
+                    # Make sure to skip codegen specific mutations
+                    if isinstance(
+                        mut_type, (AttributeMutationExisting, ValueMutationExisting)
+                    ):
+                        # export uses tracepoint pass to dump submodule inp/out spec
+                        # into global state, so we filter it here
+                        if not (
+                            isinstance(var, UserDefinedDictVariable)
+                            and isinstance(var.value, _ExportModuleSpecTrackerDict)
+                        ):
+                            potential_side_effects.append(var)
+
+            side_effect_refs = [
+                _get_source_debug_name(var.source) for var in potential_side_effects
+            ]
+
+            if len(side_effect_refs):
+                warnings.warn(
+                    f"While exporting, we found certain side effects happened in the model.forward. "
+                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                )
 
         return all_stack_locals_metas
 
