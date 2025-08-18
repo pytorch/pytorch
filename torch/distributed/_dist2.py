@@ -7,13 +7,16 @@ This is intended as a proving ground for more flexible and object oriented distr
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Protocol, Union
+from typing import cast, Optional, Protocol, Union
 
 import torch
 from torch._C._distributed_c10d import (
     _current_process_group,
     _set_process_group,
+    AllgatherOptions,
+    AllreduceOptions,
     ProcessGroup,
+    Backend,
     ReduceOp,
     Store,
 )
@@ -31,6 +34,72 @@ __all__ = [
     "current_process_group",
     "process_group",
 ]
+
+class Communicator:
+    pg: ProcessGroup
+    backend: Backend
+
+    def __init__(
+        self,
+        backend: str,
+        timeout: timedelta,
+        device: Union[str, torch.device],
+        **kwargs: object,
+    ) -> None:
+        self.pg = new_group(backend, timeout, device, **kwargs)
+        if isinstance(device, str):
+            device = torch.device(device)
+        self.backend = self.pg._get_backend(device)
+
+    def all_reduce(self, tensor: torch.Tensor, op: ReduceOp.RedOpType = ReduceOp.SUM, timeout: Optional[timedelta]=None) -> None:
+        opts = AllreduceOptions()
+        opts.reduceOp = cast(ReduceOp, op)
+        opts.asyncOp = False
+        if timeout is not None:
+            opts.timeout = timeout
+        self.pg.allreduce(tensor, opts).wait()
+
+    def all_gather(self, tensor_list: list[torch.Tensor], tensor:torch.Tensor, timeout: Optional[timedelta]=None) -> None:
+        opts = AllgatherOptions()
+        opts.asyncOp = False
+        if timeout is not None:
+            opts.timeout = timeout
+        self.pg.allgather([tensor_list], [tensor], opts).wait()
+
+    def register_attr(self, name: str, func: object) -> None:
+        setattr(Communicator, name, func)
+
+    def __getattr__(self, name: str):
+        # Do we want to throw a warning here?
+        if hasattr(self.backend, name):
+            return getattr(self.backend, name)
+        if hasattr(self.pg, name):
+            return getattr(self.pg, name)
+        raise AttributeError(f"Communicator has no attribute {name}")
+
+
+def new_comm(
+    backend: str,
+    timeout: timedelta,
+    device: Union[str, torch.device],
+    **kwargs: object,
+) -> Communicator:
+    """
+    Create a new communicator with the given backend and options. This is a thin wrapper
+    of process group and its single backend. So that users can use the same API to call 
+    collective operations and direct access to backend specific functions.
+
+    Args:
+        backend: The backend to use for the process group.
+        timeout: The timeout for collective operations.
+        device: The device to use for the process group.
+        **kwargs: All remaining arguments are passed to the backend constructor.
+                  See the backend specific documentation for details.
+
+    Returns:
+        A new communicator.
+    """
+    return Communicator(backend, timeout, device, **kwargs)
 
 
 class ProcessGroupFactory(Protocol):
