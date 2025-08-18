@@ -71,7 +71,7 @@ from .utils import (
     maybe_log_cudagraph_partition,
     sympy_product,
 )
-from .virtualized import NullHandler, V
+from .virtualized import V
 
 
 log = logging.getLogger(__name__)
@@ -1140,7 +1140,7 @@ class SchedulerNode(BaseSchedulerNode):
             f"{name}.sizes = {self._sizes}",
         ]
         for dep in self.read_writes.reads_and_writes():
-            if not isinstance(dep, WeakDep) and not isinstance(V.graph, NullHandler):
+            if not isinstance(dep, WeakDep):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 if not isinstance(buf, ir.TorchBindObject):

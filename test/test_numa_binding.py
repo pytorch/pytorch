@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing.spawn as spawn
 import os
 import subprocess
@@ -13,6 +14,7 @@ from unittest import skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
+from torch._utils_internal import signpost_event
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, start_processes
 from torch.numa.binding import (
     _get_ranges_str_from_ints,
@@ -68,6 +70,7 @@ class NumaBindingTest(TestCase):
             patch("shutil.which", return_value="/usr/bin/numactl"),
             patch("torch.numa.binding.run"),
             patch("torch.numa.binding.mkstemp", self._mock_mkstemp),
+            patch("torch.numa.binding.signpost_event", self._mock_signpost_event),
         ]
 
         for context_manager in self._context_managers_to_apply_to_all_tests:
@@ -85,6 +88,11 @@ class NumaBindingTest(TestCase):
         for context_manager in self._context_managers_to_apply_to_all_tests:
             context_manager.__exit__(None, None, None)
         super().tearDown()
+
+    def _mock_signpost_event(self, *args, **kwargs) -> None:
+        # Please keep these parameters JSON serializable for logging purposes
+        json.dumps(kwargs["parameters"])
+        return signpost_event(*args, **kwargs)
 
     def _mock_mkstemp(self, *args, **kwargs):
         # Just keep track of temp files so we can delete them
