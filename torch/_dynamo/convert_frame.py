@@ -837,7 +837,7 @@ class DynamoOutput:
     last_attempt_start_time: Optional[float]
 
 
-def compile_frame(
+def compile_frame(  # type: ignore[return]
     code: types.CodeType,
     globals: dict[str, object],
     locals: dict[str, object],
@@ -1023,7 +1023,7 @@ def _compile(
                 export=export,
                 export_constraints=export_constraints,
                 frame_state=frame_state,
-                distributed_state=frame.distributed_state if frame else None,
+                distributed_state=distributed_state,
                 package=package,
             )
         except exc.SkipFrame as e:
@@ -1166,7 +1166,6 @@ def _compile(
         code_context,
     ):
         restart_reasons: set[str] = set()
-
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
         else:
@@ -1375,8 +1374,9 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
-            assert tracer_output is not None
-            output = tracer_output.output_graph
+            output = None
+            if tracer_output:
+                output = tracer_output.output_graph
             if output:
                 output.local_scope = {}
                 # tracer should already be None, keep an extra check here just in case.
