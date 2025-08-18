@@ -552,6 +552,11 @@ def _handle_call_function_node_with_lowering(
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
         op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
+        # If final inputs are None, strip them from the node inputs
+        for input_ in reversed(onnx_args):
+            if input_ is not None:
+                break
+            onnx_args.pop()
         onnx_node = ir.Node(
             "",
             op_type,
@@ -721,6 +726,12 @@ def _handle_output_node(
     # node.args[0] can be a tuple with more than one elements. This happens when,
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
     for output in node.args[0]:  # type: ignore[index,union-attr]
+        if output is None:
+            logger.warning(
+                "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
+                node.name,
+            )
+            continue
         output_value_name = output.name  # type: ignore[union-attr]
         assert isinstance(output_value_name, str), (
             f"Bug: Expected {output_value_name!r} to be a string"
@@ -943,7 +954,7 @@ def exported_program_to_ir(
     Args:
         exported_program: The exported program to convert.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """
@@ -1021,7 +1032,7 @@ def _exported_program_to_onnx_program(
         exported_program: The exported program to convert. The exported program
             should be the one that is after decompositions have been applied.
         lower: Whether to lower the graph to core ONNX operators.
-            at_conversion: Lower whe translating the FX graph to ONNX IR.
+            at_conversion: Lower when translating the FX graph to ONNX IR.
             none: Do not lower the graph.
         registry: The registry of all ONNX Script decomposition.
     """

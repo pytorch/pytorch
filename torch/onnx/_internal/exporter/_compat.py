@@ -4,15 +4,16 @@
 # mypy: disable-error-code=attr-defined
 from __future__ import annotations
 
+import io
 import logging
 import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx import _constants as onnx_constants
+from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
-    _constants,
     _core,
     _dynamic_shapes,
     _onnx_program,
@@ -50,7 +51,7 @@ def export_compat(
     verbose: bool | None = None,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    opset_version: int | None = _constants.TORCHLIB_OPSET,
+    opset_version: int | None = onnx_constants.ONNX_DEFAULT_OPSET,
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
@@ -60,15 +61,17 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool = True,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
+    fallback: bool = True,
+    # Legacy export parameters for fallback
+    legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        opset_version = _constants.TORCHLIB_OPSET
+        opset_version = onnx_constants.ONNX_DEFAULT_OPSET
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -151,6 +154,10 @@ def export_compat(
                 dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
                     dynamic_shapes=dynamic_shapes, input_names=input_names, exception=e
                 )
+            # Use the legacy export kwargs prepared in __init__.py
+            if legacy_export_kwargs is None:
+                legacy_export_kwargs = {}
+
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
@@ -159,9 +166,10 @@ def export_compat(
                 export_params=export_params,
                 input_names=input_names,
                 output_names=output_names,
-                opset_version=17,  # TODO(justinchuby): Hard coded to 17 for now
+                opset_version=opset_version,
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
+                **legacy_export_kwargs,
             )
             onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
 
@@ -183,11 +191,23 @@ def export_compat(
         onnx_program.optimize()
 
     if f is not None:
-        onnx_program.save(
-            f,
-            include_initializers=export_params,
-            keep_initializers_as_inputs=keep_initializers_as_inputs,
-            external_data=external_data,
-        )
+        if isinstance(f, io.BytesIO):
+            # For legacy export compatibility, we allow f to be a BytesIO object.
+            # This is not explicitly supported but we may need to maintain the
+            # behavior indefinitely.
+            warnings.warn(
+                "Saving ONNX model to a BytesIO object is deprecated. "
+                "Please use a file path instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            onnx.save(onnx_program.model_proto, f)
+        else:
+            onnx_program.save(
+                f,
+                include_initializers=export_params,
+                keep_initializers_as_inputs=keep_initializers_as_inputs,
+                external_data=external_data,
+            )
 
     return onnx_program

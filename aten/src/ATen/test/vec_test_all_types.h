@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
@@ -21,7 +22,9 @@
 #else
 #define CACHE_LINE 32
 #endif
-
+#ifndef _WIN32
+#include <ATen/native/cpu/utils.h>
+#endif
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))
@@ -528,7 +531,7 @@ template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_div_ub(T& val1, T& val2) {
     //missing
-    //at least consdier zero division
+    //at least consider zero division
     auto ret = std::abs(val2);
     if (ret == 0) {
         val2 = T(1, 2);
@@ -1288,7 +1291,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T y_real = y.real();
     T y_imag = y.imag();
 #if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1359,7 +1362,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     return Complex<T>(rr, ii);
 #else /* defined(CPU_CAPABILITY_ZVECTOR) */
 #if defined(CPU_CAPABILITY_VSX)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;

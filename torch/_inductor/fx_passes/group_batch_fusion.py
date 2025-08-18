@@ -1052,7 +1052,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
-            # check the input has the same shape and its uers have the same target
+            # check the input has the same shape and its users have the same target
             # check all clamp operators have the same min and max values, and
             # nan_to_num operators use the same default value.
             child = next(iter(node.users.keys()))
@@ -1365,10 +1365,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             print_output=False, include_stride=True, include_device=True
         )
 
+        name = f"optimus_{str(rule.__class__.__name__)}"
+        if "MTIA" in name:
+            name = f"cff_{str(rule.__class__.__name__)}"
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "name": name,
                 "encoding": "string",
             },
             payload_fn=lambda: graph_str,
