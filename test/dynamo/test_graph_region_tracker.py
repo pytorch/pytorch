@@ -317,6 +317,17 @@ class GraphRegionTrackerTests(TestCase):
             """{sin_: OrderedSet([0]), add_: OrderedSet([0])}""",
         )
 
+    def test_mutation_tracking_setitem(self):
+        def fn(x):
+            y = x + 1
+            y[0] = 3
+            return y
+
+        self.assertExpectedInline(
+            self.get_mutation_tracking(fn, torch.rand(10, 10)),
+            """{setitem: OrderedSet([0])}""",
+        )
+
     def test_mutation_tracking_allow_in_graph(self):
         @torch._dynamo.allow_in_graph
         def fn_mut(x, y):
@@ -337,6 +348,64 @@ class GraphRegionTrackerTests(TestCase):
             ),
             """{o0: OrderedSet([0]), sin_: OrderedSet([0])}""",
         )
+
+    def test_non_tensor_arg_hashing(self):
+        def inner(x, w, t):
+            y = x + x
+            return torch.conv2d(y, w, None, *t)
+
+        def fn(x, y):
+            o1 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o2 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o3 = inner(x, y, ((1, 1), (0, 0), (1, 1), 1))
+            o4 = inner(x, y, ((2, 2), (0, 0), (1, 1), 1))
+            return o1.sum() + o2.sum() + o3.sum() + o4.sum()
+
+        self.assertExpectedInline(
+            self.get_result(
+                fn,
+                torch.rand(32, 256, 56, 56),
+                torch.nn.Parameter(torch.rand(512, 256, 1, 1)),
+            ),
+            """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
+        )
+
+    def test_region_sorting(self):
+        from torch._dynamo.graph_region_tracker import _sort_with_ref_region
+
+        index_to_rank = {0: 0, 2: 1, 1: 2}
+        regions = [[0, 1, 2], [1, 2, 0]]
+        _sort_with_ref_region(index_to_rank, regions)
+        self.assertExpectedInline(regions, """[[0, 2, 1], [1, 0, 2]]""")
+
+    def test_no_duplicate_tracking(self):
+        def inner_fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = torch.sin(y)
+            o2 = inner_fn(x, o1)
+            o3 = inner_fn(x, y)
+            o4 = o3 * o3
+            return o2 * o4 + o0
+
+        graph, tracker = extract_graph_and_tracker(
+            fn, torch.rand(10, 10), torch.ones(10, 20)
+        )
+        self.assertExpectedInline(
+            tracker.node_to_duplicates,
+            """{l_x_: [l_x_], x0: [x0, x0_1, x0_2], l_y_: [l_y_], y0: [y0, y0_1, y0_2], sum_1: \
+[sum_1, sum_3, sum_5], sum_2: [sum_2, sum_4, sum_6], z: [z, z_1, z_2], o1: [o1], x0_1: [x0, x0_1, x0_2], y0_1: [y0, y0_1, y0_2], \
+sum_3: [sum_1, sum_3, sum_5], sum_4: [sum_2, sum_4, sum_6], \
+z_1: [z, z_1, z_2], x0_2: [x0, x0_1, x0_2], y0_2: [y0, y0_1, y0_2], sum_5: [sum_1, sum_3, sum_5], sum_6: [sum_2, sum_4, sum_6], \
+z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
+        )
+        key = next(iter(tracker.node_to_duplicates.keys()))
+        tracker.track_node(None, key)  # this will fail if the node is added again
 
 
 if __name__ == "__main__":

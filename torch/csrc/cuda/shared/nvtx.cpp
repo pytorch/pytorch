@@ -41,7 +41,7 @@ static void device_callback_range_start(void* userData) {
 }
 
 static void* device_nvtxRangeStart(const char* msg, std::intptr_t stream) {
-  RangeHandle* handle = (RangeHandle*)calloc(sizeof(RangeHandle), 1);
+  auto handle = static_cast<RangeHandle*>(calloc(1, sizeof(RangeHandle)));
   handle->msg = strdup(msg);
   handle->id = 0;
   TORCH_CHECK(

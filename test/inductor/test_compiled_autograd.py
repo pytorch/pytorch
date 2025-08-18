@@ -29,9 +29,11 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
+from torch._inductor.cpp_builder import is_msvc_cl
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.overrides import BaseTorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -39,13 +41,21 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
+    IS_WINDOWS,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
 )
 from torch.testing._internal.hop_db import hop_db
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+)
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
@@ -99,14 +109,23 @@ def reset():
     torch._logging.set_logs(compiled_autograd_verbose=False)
     config.compiled_autograd = False
     compiled_autograd.reset()
+    torch._dynamo.utils.counters.clear()
+
+
+class BaseCustomOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x * 2
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        raise NotImplementedError("must override")
 
 
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
-        self.exit_stack.enter_context(
-            config.patch("record_pre_graph_bytecode_in_traces", False)
-        )
+        self.exit_stack.enter_context(config.patch("record_runtime_overhead", False))
         super().setUp()
         reset()
 
@@ -128,9 +147,12 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
@@ -178,6 +200,18 @@ main()
         # Run it three times to catch bad dynamo state resets
         for _ in range(3):
             self.run_as_subprocess(script)
+
+    def gen_cache_miss_log_prefix(self):
+        if IS_WINDOWS:
+            if is_msvc_cl():
+                return "Cache miss due to new autograd node: struct "
+            else:
+                self.fail(
+                    "Compilers other than msvc have not yet been verified on Windows."
+                )
+                return ""
+        else:
+            return "Cache miss due to new autograd node: "
 
     def test_reset(self):
         compiled_autograd.compiled_autograd_enabled = True
@@ -706,6 +740,44 @@ main()
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 2)
 
+    @parametrize("api", ("compile", "optimize"))
+    @parametrize("backend", ("eager", "aot_eager", "inductor"))
+    def test_compile_api_disable(self, api, backend):
+        def wrap(fn, backend):
+            if api == "compile":
+                return torch.compile(fn, backend=backend)
+            elif api == "optimize":
+                return torch._dynamo.optimize(backend)(fn)
+
+        def fn(model, inputs):
+            res = []
+            for inp in inputs:
+                result = model(inp).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        torch.manual_seed(123)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        inputs = [
+            torch.randn([1, 4]),
+            torch.randn([2, 4]),
+            torch.randn([3, 4]),
+        ]
+
+        expected = fn(model, inputs)
+        with config.patch(compiled_autograd=True):
+            compiled_fn = wrap(fn, backend)
+        with torch._dynamo.compiled_autograd._disable():
+            actual = compiled_fn(model, inputs)
+        self.assertEqual(expected, actual)
+        self.assertTrue("compiled_autograd" not in counters)
+
     @parametrize("backend", ("eager", "aot_eager", "inductor"))
     def test_optimize_assert(self, backend):
         # can be merged into the test above once we support
@@ -735,6 +807,88 @@ main()
         actual = [p.grad for p in model.parameters()]
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
+    @config.patch(compiled_autograd=True)
+    def test_nested_context_manager(self):
+        def ctx():
+            return compiled_autograd._enable(torch.compile)
+
+        # ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        inner.__exit__(None, None, None)
+        outer.__exit__(None, None, None)
+
+        # not ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Nested Compiled Autograd Contexts must return before their parent context",
+        ):
+            outer.__exit__(None, None, None)
+
+    @config.patch(compiled_autograd=True)
+    def test_nested_compile(self):
+        with torch.library._scoped_library("testlib", "FRAGMENT") as lib:
+            lib.define("square(Tensor x) -> Tensor")
+
+            @torch.library.impl("testlib::square", "CPU")
+            def square_impl(x: torch.Tensor) -> torch.Tensor:
+                # nested inference graph compile
+                @torch.compile(backend="eager")
+                def fn(x):
+                    return x**2
+
+                return fn(x)
+
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, x):
+                    return torch.ops.testlib.square(x)
+
+            x = torch.tensor([2.0, 3.0], requires_grad=True)
+
+            @torch.compile
+            def fn(x):
+                return MyFn.apply(x)
+
+            fn(x).sum().backward()
+
+    @config.patch(compiled_autograd=True)
+    def test_no_nested_compiled_autograd(self):
+        # We disable CA before entering the CA graph
+        # So re-entrants should be running with the eager autograd engine
+
+        def unrelated_autograd_call():
+            x = torch.randn(20, 20, requires_grad=True)
+            y = torch.randn(20, 20, requires_grad=True)
+            loss = torch.matmul(x, y).sum()
+            loss.backward()
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                unrelated_autograd_call()
+                return gO
+
+        x = torch.randn(10, 10, requires_grad=True)
+        loss = MyFn.apply(x).sum()
+
+        torch.compile(lambda: loss.backward(create_graph=True))()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
@@ -874,8 +1028,8 @@ main()
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
-        activ = torch.ones(100) * 2
-        inputs = [param, activ]
+        active = torch.ones(100) * 2
+        inputs = [param, active]
         _, proxies, _, _ = compiler.begin_capture(
             inputs=inputs,
             sizes=[],
@@ -926,7 +1080,7 @@ main()
         try:
             runtime_wrapper(
                 compiled_fn=compiled_fn,
-                inputs=[param, activ],
+                inputs=[param, active],
                 sizes=(),
                 scalars=(),
                 hooks=[],
@@ -1647,9 +1801,9 @@ main()
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverload):
-                    assert (
-                        node.target._name != "aten::_to_copy"
-                    ), "there should be no implicit copies (e.g. dtype casting)"
+                    assert node.target._name != "aten::_to_copy", (
+                        "there should be no implicit copies (e.g. dtype casting)"
+                    )
 
             def inner_compiler(gm_, example_inputs_):
                 counters["compiled_autograd"]["compiles"] += 1
@@ -2841,7 +2995,7 @@ main()
                 b = MyFunc.apply(a)
                 b.sum().backward()
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -2851,8 +3005,9 @@ main()
         loss = reduce_to_scalar_loss(out)
 
         stderr_msgs = io.StringIO()
-        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd._enable(
-            compiler_fn
+        with (
+            mock.patch("sys.stderr", stderr_msgs),
+            compiled_autograd._enable(compiler_fn),
         ):
             torch._inductor.config.triton.cudagraphs = True
             loss.backward()
@@ -2880,7 +3035,7 @@ main()
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
             32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
@@ -2889,8 +3044,9 @@ main()
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.sum().backward())
             opt_bwd()
@@ -2901,7 +3057,7 @@ main()
             2 if inductor_config.cpp_wrapper else 0,
         )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -2919,8 +3075,9 @@ main()
 
         x = torch.randn(10, requires_grad=True, device="cuda")
         out = MyFn.apply(x)
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.backward())
             opt_bwd()
@@ -2928,10 +3085,19 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        else:
+            expected_cudagraph_skips = 1
+
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
+        )
 
     @scoped_load_inline
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2978,8 +3144,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
         x = torch.randn(2, 2, requires_grad=True, device="cuda")
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
                 x
@@ -2992,9 +3159,18 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
+        if inductor_config.graph_partition:
+            # instead of skipping cudagraph, graph partition splits off cpu inputs/outputs and ops
+            # and cudagraphify the remaining computation. So there is no cudagraph skip.
+            expected_cudagraph_skips = 0
+        elif inductor_config.cpp_wrapper:
+            expected_cudagraph_skips = 2
+        else:
+            expected_cudagraph_skips = 1
+
         self.assertEqual(
             counters["inductor"]["cudagraph_skips"],
-            2 if inductor_config.cpp_wrapper else 1,
+            expected_cudagraph_skips,
         )
 
     def test_logs(self):
@@ -3008,7 +3184,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
         assert "torch::autograd::AccumulateGrad (NodeCall" in logs.getvalue()
         assert (
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot"
+            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
 
@@ -3215,7 +3391,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
         )
 
-    @skipIfWindows(msg="AssertionError: Scalars are not equal!")
     def test_verbose_logs_cpp(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -3243,8 +3418,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             self.check_output_and_recompiles(fn)
 
         patterns1 = [
-            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
-            r"previous key sizes=\[\]\n",
+            r".*"
+            + self.gen_cache_miss_log_prefix()
+            + r"torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), previous key sizes=\[\]\n",
         ]
 
         all_logs = logs.getvalue()
@@ -3257,6 +3433,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
         self.assertEqual(len(matches1), len(patterns1))
 
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_verbose_logs_dynamic_shapes(self):
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
@@ -3281,7 +3458,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         actual_logs = logs.getvalue()
         expected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
+            self.gen_cache_miss_log_prefix()
+            + "torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]",
         ]
         for expected in expected_logs:
             self.assertTrue(expected in actual_logs)
@@ -3312,7 +3490,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 fn()
 
         unexpected_logs = [
-            "Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0)"
+            self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot (NodeCall 0)"
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
@@ -3369,9 +3547,12 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graphs.append(gm)
                 return inner_compiler_fn(gm)
 
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 res = fn(x)
                 res.sum().backward()
@@ -3439,11 +3620,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
         getitem_39 = validate_outputs_2[0]
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
+        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_4, getitem_39, False);  getitem_4 = getitem_39 = call_accumulate_grad_1 = None
 
         getitem_40 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_40);  getitem_3 = getitem_40 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_3, getitem_40, False);  getitem_3 = getitem_40 = call_accumulate_grad = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3451,6 +3632,10 @@ class CompiledAutograd0(torch.nn.Module):
             )
 
     # https://github.com/pytorch/pytorch/issues/138920
+    # Inductor has a joint graph pattern to remove pointless view pairs.
+    # That will remove the no-op view pairs this test is checking. Disable
+    # pattern matcher for this test.
+    @inductor_config.patch(pattern_matcher=False)
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):
@@ -3549,7 +3734,7 @@ class CompiledAutograd0(torch.nn.Module):
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_flex_attention(self):
         def _squared(score, b, h, m, n):
             """Joint graph needed for correctness"""
@@ -3599,9 +3784,10 @@ class CompiledAutograd0(torch.nn.Module):
 
         x = torch.ones(4, requires_grad=True)
         y = torch.ones(4, requires_grad=False)
-        with torch.autograd.graph.saved_tensors_hooks(
-            pack_hook, unpack_hook
-        ), compiled_autograd._enable(make_compiler_fn(fullgraph=False)):
+        with (
+            torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook),
+            compiled_autograd._enable(make_compiler_fn(fullgraph=False)),
+        ):
             out_test = f(x, y)
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 0)
@@ -3704,7 +3890,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3716,7 +3902,7 @@ class CompiledAutograd0(torch.nn.Module):
                 compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
             )
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @requires_cuda_and_triton
     def test_cpu_offloading(self):
         def fn():
             def pack(x):
@@ -4182,11 +4368,14 @@ class CompiledAutograd1(torch.nn.Module):
             model = DDP(model)
             inputs = torch.randn(10, 10)
             loss = model(inputs).sum()
-            with compiled_autograd._enable(compiler_fn), self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
-                    r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+            with (
+                compiled_autograd._enable(compiler_fn),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    (
+                        r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
+                        r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+                    ),
                 ),
             ):
                 loss.backward()
@@ -4215,6 +4404,622 @@ class CompiledAutograd1(torch.nn.Module):
             self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         finally:
             dist.destroy_process_group()
+
+    # Case 1.1: Stealable dense new_grad
+    # if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
+    #     !new_grad.is_sparse_csr() &&
+    #     !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
+    #     at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
+    #     (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
+    @unittest.expectedFailure
+    def test_accumulate_grad_polyfill_case_1_1(self):
+        def fn():
+            class StealableDenseOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output, requires_grad=False) * 5
+
+            pre_hook_storage_id = None
+
+            def check(grad):
+                nonlocal pre_hook_storage_id
+                assert pre_hook_storage_id is None
+                pre_hook_storage_id = id(grad.untyped_storage())
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.register_hook(check)
+            output = StealableDenseOp.apply(var)
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert torch.equal(var.grad, torch.ones_like(var) * 5), (
+                "Grad content should be as returned by backward"
+            )
+            assert var.grad.requires_grad is False, (
+                "Detached grad should not require grad"
+            )
+            assert id(var.grad.untyped_storage()) == pre_hook_storage_id, (
+                "Should be stolen"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=make_compiler_fn(fullgraph=False),
+            count=[1, 2],
+        )
+
+    # Case 1.2: Stealable sparse new_grad
+    # } else if (!GradMode::is_enabled() && new_grad.is_sparse() &&
+    #            new_grad._indices().is_contiguous() &&
+    #            new_grad._values().is_contiguous() &&
+    #            new_grad._indices().use_count() <= 1 &&
+    #            new_grad._values().use_count() <= 1 &&
+    #            new_grad.use_count() <= num_expected_refs) {
+    @unittest.expectedFailure
+    def test_accumulate_grad_polyfill_case_1_2(self):
+        def fn():
+            class StealableSparseOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    size = grad_output.size()
+                    indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+                    values = torch.tensor([5.0, 5.0])
+                    return torch.sparse_coo_tensor(
+                        indices, values, size, requires_grad=False
+                    )
+
+            pre_hook_storages_id = None
+
+            def check(grad):
+                nonlocal pre_hook_storages_id
+                assert pre_hook_storages_id is None
+                pre_hook_storages_id = [
+                    id(grad._indices().untyped_storage()),
+                    id(grad._values().untyped_storage()),
+                ]
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.register_hook(check)
+            output = StealableSparseOp.apply(var)
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert var.grad.is_sparse, "Grad should be sparse"
+            expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
+            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
+                "Content should be equal after shallow copy"
+            )
+            assert var.grad.requires_grad is False, (
+                "Detached grad should not require grad"
+            )
+            assert (
+                id(var.grad._indices().untyped_storage()) == pre_hook_storages_id[0]
+            ), "Should be stolen"
+            assert (
+                id(var.grad._values().untyped_storage()) == pre_hook_storages_id[1]
+            ), "Should be stolen"
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=make_compiler_fn(fullgraph=False),
+            count=[1, 2],
+        )
+
+    # Case 1.3: Cloning sparse/nested new_grad
+    # else {
+    #   if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
+    #       new_grad.is_nested()) {
+    def test_accumulate_grad_polyfill_case_1_3(self):
+        def fn():
+            class CloneSparseGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    size = grad_output.size()
+                    indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+                    values = torch.tensor(
+                        [5.0, 5.0], requires_grad=True
+                    )  # Requires grad
+                    return torch.sparse_coo_tensor(
+                        indices, values, size, requires_grad=True
+                    )
+
+            pre_hook_storages_id = None
+
+            def check(grad):
+                nonlocal pre_hook_storages_id
+                assert pre_hook_storages_id is None
+                pre_hook_storages_id = [
+                    id(grad._indices().untyped_storage()),
+                    id(grad._values().untyped_storage()),
+                ]
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.register_hook(check)
+            output = CloneSparseGradOp.apply(var)
+            output.backward(
+                torch.ones_like(output), create_graph=True
+            )  # grad mode == create_graph
+
+            assert var.grad is not None, "Grad should be defined"
+            assert var.grad.is_sparse, "Grad should be sparse"
+            expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
+            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
+                "Content should be equal after clone"
+            )
+            assert var.grad.requires_grad, (
+                "Grad should require grad for double backward"
+            )
+            assert (
+                id(var.grad._indices().untyped_storage()) != pre_hook_storages_id[0]
+            ), "Should be copied"
+            assert (
+                id(var.grad._values().untyped_storage()) != pre_hook_storages_id[1]
+            ), "Should be copied"
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=make_compiler_fn(fullgraph=False),
+            count=[1, 2],
+        )
+
+    # Case 1.5.1: Dense variable gradient layout contract
+    # else { // Covers various deep copy scenarios not covered by specific stealable paths
+    #   ...
+    #   if (new_grad.is_mkldnn()) {
+    #     ...
+    #   } else {
+    #       // Deep copies new_grad according to the "Gradient Layout Contract."
+    #       update_grad(utils::clone_obey_contract(new_grad, variable));
+    #   }
+    # }
+    def test_accumulate_grad_polyfill_case_1_5_1(self):
+        def fn():
+            class NotStealableRefsOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output, requires_grad=False) * 10.0
+
+            var = torch.randn(2, 2, requires_grad=True)
+            grad_ref_holder = [None]
+
+            def check(grad):
+                # forces a clone due to refcount
+                grad_ref_holder[0] = grad
+                return grad
+
+            var.register_hook(check)
+            output = NotStealableRefsOp.apply(var)
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert torch.equal(var.grad, torch.ones_like(var) * 10.0), (
+                "Grad content should be as returned by backward"
+            )
+            assert (
+                grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
+            ), "Should be copied"
+            yield var.grad
+
+        self.check_output_and_recompiles(fn)
+
+    # Case 1.5.2: Non-dense variable gradient layout contract
+    # else { // Covers various deep copy scenarios not covered by specific stealable paths
+    #   ...
+    #   if (new_grad.is_mkldnn()) {
+    #     ...
+    #   } else {
+    #       // Deep copies new_grad according to the "Gradient Layout Contract."
+    #       update_grad(utils::clone_obey_contract(new_grad, variable));
+    #   }
+    # }
+    def test_accumulate_grad_polyfill_case_1_5_2(self):
+        def fn():
+            class SimpleDenseGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output, requires_grad=False) * 7.0
+
+            # Create a non-contiguous variable
+            base_tensor = torch.randn(4, 4)
+            var = base_tensor[::2, ::2]
+            assert not var.is_contiguous(), (
+                "Variable should be non-contiguous for this test"
+            )
+            var.requires_grad_(True)
+
+            grad_ref_holder = [None]
+
+            def check(grad):
+                # forces a clone due to refcount
+                grad_ref_holder[0] = grad
+                return grad
+
+            var.register_hook(check)
+            output = SimpleDenseGradOp.apply(var)
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            # The `clone_obey_contract` branch 2 (`new_grad.clone(at::MemoryFormat::Contiguous)`)
+            # will make the resulting grad contiguous.
+            assert var.grad.is_contiguous(), (
+                "Resulting grad should be contiguous due to branch 2 of clone_obey_contract"
+            )
+            assert torch.equal(var.grad, torch.ones_like(var) * 7.0), (
+                "Grad content should be as returned by backward"
+            )
+            assert (
+                grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
+            ), "Should be copied"
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+        )
+
+    # Case 2.1: Sparse variable_grad + Dense new_grad
+    # } else if (!GradMode::is_enabled()) {
+    #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
+    #       auto result = new_grad + variable_grad;
+    def test_accumulate_grad_polyfill_case_2_1(self):
+        def fn():
+            class SparseVarGradDenseNewGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output) * 3.0
+
+            var = torch.randn(2, 2, requires_grad=True)
+            indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+            values = torch.tensor([1.0, 1.0])
+            var.grad = torch.sparse_coo_tensor(
+                indices, values, var.size(), requires_grad=False
+            )
+            initial_grad_ref = var.grad
+            output = SparseVarGradDenseNewGradOp.apply(var)
+
+            expected_sum = (torch.ones_like(var) * 3.0) + initial_grad_ref.to_dense()
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert not var.grad.is_sparse, "Resulting grad should be dense"
+            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=lambda gm: gm,  # https://github.com/pytorch/pytorch/issues/154161
+            count=[1, 0],
+        )
+
+    # Case 2.3.1: Dense/Dense in-place addition
+    # } else if (!GradMode::is_enabled()) {
+    #   ...
+    # } else {
+    #   variable_grad += new_grad;
+    def test_accumulate_grad_polyfill_case_2_3_1(self):
+        def fn():
+            class DenseVarGradDenseNewGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output) * 3.0
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.grad = torch.ones_like(var) * 1.0
+            initial_grad_ref = var.grad
+            output = DenseVarGradDenseNewGradOp.apply(var)
+            expected_sum = initial_grad_ref + (torch.ones_like(var) * 3.0)
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert not var.grad.is_sparse, "Resulting grad should be dense"
+            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(fn)
+
+    # Case 2.3.2: Sparse/Sparse in-place addition
+    # } else if (!GradMode::is_enabled()) {
+    #   ...
+    # } else {
+    #   variable_grad += new_grad;
+    def test_accumulate_grad_polyfill_case_2_3_2(self):
+        def fn():
+            class SparseVarGradSparseNewGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    size = grad_output.size()
+                    indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+                    values = torch.tensor([3.0, 3.0])
+                    return torch.sparse_coo_tensor(
+                        indices, values, size, requires_grad=False
+                    )
+
+            var = torch.randn(2, 2, requires_grad=True)
+            indices_v = torch.tensor([[0, 0], [0, 1]], dtype=torch.int64)
+            values_v = torch.tensor([1.0, 2.0])
+            var.grad = torch.sparse_coo_tensor(
+                indices_v, values_v, var.size(), requires_grad=False
+            )
+            initial_grad_ref = var.grad
+
+            output = SparseVarGradSparseNewGradOp.apply(var)
+
+            new_grad_for_sum = torch.sparse_coo_tensor(
+                torch.tensor([[0, 1], [0, 1]], dtype=torch.int64),
+                torch.tensor([3.0, 3.0]),
+                var.size(),
+            )
+            expected_sum_dense = (
+                initial_grad_ref.to_dense() + new_grad_for_sum.to_dense()
+            )
+
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert var.grad.is_sparse, "Resulting grad should remain sparse"
+            assert torch.equal(var.grad.to_dense(), expected_sum_dense), (
+                "Grad content should be the sum of sparse grads"
+            )
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=lambda gm: gm,  # https://github.com/pytorch/pytorch/issues/154161
+            count=[1, 0],
+        )
+
+    # Case 2.3.3: Dense/Sparse in-place addition
+    # } else if (!GradMode::is_enabled()) {
+    #   ...
+    # } else {
+    #   variable_grad += new_grad;
+    def test_accumulate_grad_polyfill_case_2_3_3(self):
+        def fn():
+            class DenseVarGradSparseNewGradOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    size = grad_output.size()
+                    indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+                    values = torch.tensor([3.0, 3.0])  # New sparse values
+                    return torch.sparse_coo_tensor(
+                        indices, values, size, requires_grad=False
+                    )
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.grad = torch.ones_like(var) * 1.0  # Initial value
+            initial_grad_ref = var.grad
+            output = DenseVarGradSparseNewGradOp.apply(var)
+
+            new_grad_for_sum = torch.sparse_coo_tensor(
+                torch.tensor([[0, 1], [0, 1]], dtype=torch.int64),
+                torch.tensor([3.0, 3.0]),
+                var.size(),
+            ).to_dense()
+            expected_sum = initial_grad_ref + new_grad_for_sum
+
+            output.backward(torch.ones_like(output))
+
+            assert var.grad is not None, "Grad should be defined"
+            assert not var.grad.is_sparse, "Resulting grad should be dense"
+            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
+            assert var.grad is initial_grad_ref, (
+                "Grad object should be modified in-place (same object)"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=make_compiler_fn(fullgraph=False),
+            count=[1, 2],
+        )
+
+    # Case 3.1: Sparse variable_grad + Dense new_grad (reorder into Dense + Sparse)
+    # } else { // if GradMode::is_enabled()
+    #   at::Tensor result;
+    #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
+    #     result = new_grad + variable_grad;
+    #   }
+    # }
+    def test_accumulate_grad_polyfill_case_3_1(self):
+        def fn():
+            class SparseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output, requires_grad=True) * 3.0
+
+            var = torch.randn(2, 2, requires_grad=True)
+            indices = torch.tensor([[0, 1], [0, 1]], dtype=torch.int64)
+            values = torch.tensor([1.0, 1.0], requires_grad=True)
+            var.grad = torch.sparse_coo_tensor(
+                indices, values, var.size(), requires_grad=True
+            )
+            initial_grad_ref = var.grad
+
+            output = SparseVarGradDenseNewGradDoubleBackwardOp.apply(var)
+
+            expected_sum = (
+                torch.ones_like(var, requires_grad=True) * 3.0
+            ) + initial_grad_ref.to_dense()
+
+            output.backward(torch.ones_like(output), create_graph=True)
+
+            assert var.grad is not None, "Grad should be defined"
+            assert not var.grad.is_sparse, "Resulting grad should be dense"
+            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
+            assert var.grad.requires_grad, (
+                "Resulting grad should track history for double backward"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=lambda gm: gm,  # https://github.com/pytorch/pytorch/issues/154161
+            count=[1, 0],
+        )
+
+    # Case 3.2: variable_grad.defined() & GradMode::is_enabled() - Double backward (dense variable_grad + dense new_grad)
+    # } else { // if GradMode::is_enabled()
+    #   at::Tensor result;
+    #   ...
+    #   } else {
+    #     result = variable_grad + new_grad;
+    #   }
+    # }
+    def test_accumulate_grad_polyfill_case_3_2(self):
+        def fn():
+            class DenseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return torch.ones_like(grad_output, requires_grad=True) * 3.0
+
+            var = torch.randn(2, 2, requires_grad=True)
+            var.grad = torch.ones_like(var) * 1.0
+            initial_grad_ref = var.grad
+
+            output = DenseVarGradDenseNewGradDoubleBackwardOp.apply(var)
+
+            expected_sum = initial_grad_ref + (
+                torch.ones_like(var, requires_grad=True) * 3.0
+            )
+
+            output.backward(torch.ones_like(output), create_graph=True)
+
+            assert var.grad is not None, "Grad should be defined"
+            assert not var.grad.is_sparse, "Resulting grad should be dense"
+            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
+            assert var.grad is not initial_grad_ref, (
+                "Grad object should be replaced (out-of-place)"
+            )
+            assert var.grad.requires_grad, (
+                "Resulting grad should track history for double backward"
+            )
+            yield var.grad
+
+        self.check_output_and_recompiles(
+            fn,
+            compiler_fn=make_compiler_fn(fullgraph=False),
+            count=[1, 3],
+        )
+
+    def test_torch_function_mode(self):
+        called_funcs = []
+
+        class LoggingTorchFunctionMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called_funcs.append(str(func.__name__))
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class MyLoss(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, out):
+                ctx.save_for_backward(out)
+                return out.sum()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                return torch.ones_like(saved) * grad_output
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2)
+        z = torch.randn(2, 2)
+
+        def fwd(x, y, z):
+            out = x * y * z
+            loss = MyLoss.apply(out)
+            return loss
+
+        with LoggingTorchFunctionMode():
+            called_funcs.append("Forward")
+            loss = fwd(x, y, z)
+            called_funcs.append("Backward")
+            with torch._dynamo.compiled_autograd._enable(torch.compile):
+                loss.backward()
+
+        self.assertExpectedInline(
+            "\n".join(called_funcs),
+            """\
+Forward
+mul
+mul
+sum
+Backward
+_set_multithreading_enabled
+backward
+_set_multithreading_enabled""",
+        )  # noqa: B950
+
+    def test_torch_dispatch_mode(self):
+        called_funcs = []
+
+        class LoggingTorchDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                called_funcs.append(str(func.__name__))
+                return func(*args, **kwargs)
+
+        class MyLoss(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, out):
+                ctx.save_for_backward(out)
+                return out.sum()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                return torch.ones_like(saved) * grad_output
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2)
+        z = torch.randn(2, 2)
+
+        def fwd(x, y, z):
+            out = x * y * z
+            loss = MyLoss.apply(out)
+            return loss
+
+        with LoggingTorchDispatchMode():
+            called_funcs.append("Forward")
+            loss = fwd(x, y, z)
+            called_funcs.append("Backward")
+            with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                loss.backward()
+
+        self.assertExpectedInline(
+            "\n".join(called_funcs),
+            """\
+Forward
+mul.Tensor
+mul.Tensor
+sum.default
+Backward
+ones_like.default
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+ones_like.default
+mul.Tensor
+mul.Tensor
+mul.Tensor
+new_empty_strided.default
+copy_.default""",
+        )  # noqa: B950
 
 
 def load_test_module(name):
@@ -4265,7 +5070,7 @@ def wrap_test_class(orig_cls):
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
             backend = lookup_backend(name)
-            if not HAS_CUDA and backend == "inductor":
+            if not HAS_CUDA_AND_TRITON and backend == "inductor":
                 continue
             ctxs = [
                 compiled_autograd._enable(
@@ -4405,8 +5210,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-        "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-        "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode not yet implemented
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
         "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
         "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
@@ -4498,11 +5301,13 @@ xfail_divergence_from_eager = {
     "test_grad_call_compiled_backward_fn",  # different functorch error
     "test_vjp_call_compiled_backward_fn",  # different functorch error
     "test_vmap_call_compiled_backward_fn",  # different functorch error
+    "test_accumulate_grad",  # always out of place add for compiled autograd
+    "test_current_node",  # slightly different dispatched ops
 }
 
 skipped_tests = set()
 
-if not HAS_CUDA:
+if not HAS_CUDA_AND_TRITON:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     skipped_tests.add("test_type_conversions")
 
@@ -4528,7 +5333,7 @@ ActivationCheckpointingTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.ActivationCheckpointingTests
 )
 
-if torch.distributed.is_available() and HAS_CUDA:
+if torch.distributed.is_available() and HAS_CUDA_AND_TRITON:
     test_dtensor = load_test_module("distributed/tensor/test_dtensor_compile")
     TestDTensorCompileWithCompiledAutograd = wrap_test_class(
         test_dtensor.TestDTensorCompile

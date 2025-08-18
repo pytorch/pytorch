@@ -9,24 +9,26 @@ import requests
 
 CONFIGS = {
     "dynamo39": {
-        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-jammy-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.9-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "dynamo311": {
-        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
-        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
-        "linux-jammy-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
+    "dynamo313": {
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
+        "linux-jammy-py3.13-clang12 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "eager311": {
-        "linux-jammy-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
-        "linux-jammy-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
-        "linux-jammy-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+    "eager313": {
+        "linux-jammy-py3.13-clang12 / test (default, 1, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 2, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 3, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 4, 5, linux.4xlarge)",
+        "linux-jammy-py3.13-clang12 / test (default, 5, 5, linux.4xlarge)",
     },
 }
 
 
-def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
+def download_reports(commit_sha, configs=("dynamo39", "dynamo313", "eager313")):
     log_dir = "tmp_test_reports_" + commit_sha
 
     def subdir_path(config):

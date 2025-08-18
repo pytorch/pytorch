@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
+    check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
@@ -31,9 +32,9 @@ aten = torch._ops.ops.aten
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
-    assert (
-        len(args) == 2 * num_leaves
-    ), f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+    assert len(args) == 2 * num_leaves, (
+        f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+    )
     lhs = pytree.tree_unflatten(args[:num_leaves], spec)
     rhs = pytree.tree_unflatten(args[num_leaves:], spec)
     return combine_fn(lhs, rhs)
@@ -79,9 +80,9 @@ class AssociativeScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(
-            additional_inputs, (tuple, list)
-        ), "additional_inputs must be a tuple."
+        assert isinstance(additional_inputs, (tuple, list)), (
+            "additional_inputs must be a tuple."
+        )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
@@ -89,6 +90,58 @@ class AssociativeScanOp(HigherOrderOperator):
         )
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
+
+    def gen_schema(self, combine_fn, xs, additional_inputs):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import materialize_as_graph
+
+        # For associative scan, we need two copies of xs for the combine function
+        # The combine function takes two elements and returns one element
+        xs_slice1 = [first_slice_copy(x) for x in xs]
+        xs_slice2 = [first_slice_copy(x) for x in xs]
+        all_inputs = tuple(xs_slice1 + xs_slice2 + list(additional_inputs))
+
+        combine_gm: torch.fx.GraphModule = (
+            combine_fn
+            if isinstance(combine_fn, torch.fx.GraphModule)
+            else materialize_as_graph(combine_fn, all_inputs)
+        )
+
+        example_inputs = [
+            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
+            for n in combine_gm.graph.find_nodes(op="placeholder")
+        ]
+
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(combine_gm, example_inputs)
+        if len(mutated_inputs) > 0:
+            raise RuntimeError(
+                "For associative_scan, combine_fn cannot have in-place mutations but found "
+                f"{mutated_inputs}-th inputs are mutated."
+            )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("combine_fn", combine_gm)
+
+        for idx, x in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", x)
+
+        for idx, arg in enumerate(additional_inputs):
+            schema_gen.add_arg(
+                f"additional_input{idx}",
+                arg,
+            )
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(combine_fn, xs, additional_inputs)
+        return schema_gen.gen_schema()
 
 
 associative_scan_op = AssociativeScanOp()
@@ -133,6 +186,7 @@ def associative_scan(
 
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
+
 
         cumsum = associative_scan(add, x, dim)
 
@@ -377,9 +431,9 @@ def trace_associative_scan(
 
     assert outputs is not None
     outputs = pytree.tree_leaves(outputs)
-    assert len(outputs) == len(
-        xs
-    ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    assert len(outputs) == len(xs), (
+        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+    )
 
     xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         first_slice_copy(x) for x in xs
