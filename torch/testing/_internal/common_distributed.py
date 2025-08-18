@@ -395,7 +395,7 @@ def requires_accelerator_dist_backend(backends=None):
         }.get(backend, lambda: False)()
         for backend in backends
     )
-    else:
+
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
         f"No accelerator communication backend available among {backends}",
