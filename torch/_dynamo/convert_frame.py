@@ -81,7 +81,6 @@ from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
-    DynamoTracerOutput,
     Instruction,
     is_generator,
     propagate_inst_exn_table_entries,
@@ -121,6 +120,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .output_graph import DynamoTracerOutput
 from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
@@ -747,14 +747,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
-class TracerError(Exception):
-    def __init__(
-        self, inner: Exception, tracer_output_partial: Optional[DynamoTracerOutput]
-    ) -> None:
-        self.inner = inner
-        self.tracer_ouptut_partial = tracer_output_partial
-
-
+@preserve_global_state
 def trace_frame(
     code: types.CodeType,
     globals: dict[str, object],
@@ -762,6 +755,7 @@ def trace_frame(
     builtins: dict[str, object],
     closure: tuple[CellType],
     compiler_fn: CompilerFn,
+    tf_mode_stack: list[torch.overrides.TorchFunctionMode],
     one_graph: bool,
     speculation_log: SpeculationLog,
     instructions: list[Instruction],
@@ -772,14 +766,11 @@ def trace_frame(
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
-):
+) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
     speculation_log.restart()  # type: ignore[has-type]
     exn_vt_stack = ExceptionStack()
-    tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-        torch.overrides._get_current_function_mode_stack()
-    )
 
     tracer = InstructionTranslator(
         instructions,
@@ -825,19 +816,18 @@ def trace_frame(
 
     try:
         run_tracer()
+        tracer_output = DynamoTracerOutput(tracer)
+        output = tracer_output.output_graph
+        assert output is not None
+        assert output.output_instructions
+        instructions[:] = output.output_instructions
+        code_options.update(output.code_options)
+        propagate_inst_exn_table_entries(instructions)
+        check_inst_exn_tab_entries_valid(instructions)
+        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
     except Exception as e:
-        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
-
-    tracer_output = DynamoTracerOutput(tracer)
-    output = tracer_output.output_graph
-    assert output is not None
-    assert output.output_instructions
-    instructions[:] = output.output_instructions
-    code_options.update(output.code_options)
-    propagate_inst_exn_table_entries(instructions)
-    check_inst_exn_tab_entries_valid(instructions)
-    instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     return tracer_output
 
@@ -881,6 +871,9 @@ def _compile(
     ) -> None:
         nonlocal tracer_output
 
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+            torch.overrides._get_current_function_mode_stack()
+        )
         try:
             tracer_output = trace_frame(
                 code,
@@ -889,6 +882,7 @@ def _compile(
                 builtins,
                 closure,
                 compiler_fn,
+                tf_mode_stack,
                 one_graph,
                 speculation_log,
                 instructions,
@@ -900,7 +894,7 @@ def _compile(
                 package=package,
             )
         except Exception as e:
-            tracer_output = e._torch_dynamo_tracer_output
+            tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)  # type: ignore[attr-defined]
             raise
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
