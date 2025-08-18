@@ -92,6 +92,7 @@ class DTensorRedistributePlanner:
         all_reduce_cost: int = 4,
         all_to_all_cost: int = 1,
         all_gather_cost: int = 2,
+        reduce_scatter_cost: int = 2,
         chunk_cost: int = 0,
     ) -> None:
         """
@@ -106,6 +107,7 @@ class DTensorRedistributePlanner:
         self.all_reduce_cost = all_reduce_cost
         self.all_to_all_cost = all_to_all_cost
         self.all_gather_cost = all_gather_cost
+        self.reduce_scatter = reduce_scatter_cost
         self.chunk_cost = chunk_cost
 
     def generate_device_order_permutation(
@@ -176,14 +178,22 @@ class DTensorRedistributePlanner:
         #   > device order of `z` and `k` (need confirm)
 
         # case 2. Shard() -> Replicate(), use all gather, apply to case:
-        #   S(a)[x,y,z] -> S(a)[x,y]R[z]
+        #   S(a)[x,y,z] -> S(a)[x,y]
 
         # case 3. Partial() -> Replicate(), use all reduce, apply to case:
-        #   P[x,y] -> P[y]R[x] or P[x]R[y]
+        #   P[x,y] -> P[y] or P[x]
+        # Note: this case can be disabled because all reduce technically is not
+        # a primitive since it combines a ReduceScatter + AllGather
 
         # case 4. Replicate() -> Shard(), use chunk, apply to case:
-        #   R[x,y]S(a)[z] -> R[x]S(a)[z,y] (`a` can be any tensor dim). Note that
+        #   S(a)[z] -> S(a)[z,y] (`a` can be any tensor dim). Note that
         #   `y` must be after `z`.
+
+        # case 5. Partial() -> Shard(), use reduce scatter, apply to case:
+        #   P[x] -> S(a)[x] or P[x,y] -> P[x]S(a)[y]
+
+        # case 6. Replicate() -> Partial(), local math op, apply to case:
+        #   *->P[x]
 
         # list of [DistState, cost]
         all_next_state: dict[DTensorRedistributePlanner.DistState, int] = {}
@@ -247,6 +257,26 @@ class DTensorRedistributePlanner:
                         new_placement[src_mesh_dim] = Shard(tensor_dim)
                         dist_state = self.DistState(tuple(new_placement), device_order)
                         all_next_state[dist_state] = self.chunk_cost
+
+        # handle case 5: Partial() -> Shard()
+        for mesh_dim, (order, p) in enumerate(zip(device_order, placements)):
+            if isinstance(p, Partial):
+                for tensor_dim, (target_order, target_mesh_dim) in enumerate(
+                    tensor_sharded_dim_to_last_mesh_dim
+                ):
+                    if order > target_order:
+                        new_placement = list(placements)
+                        new_placement[mesh_dim] = Shard(tensor_dim)
+                        dist_state = self.DistState(tuple(new_placement), device_order)
+                        all_next_state[dist_state] = self.reduce_scatter
+
+        # handle case 6: Replicate() -> Partial(), default to partial(sum)
+        for mesh_dim, (order, p) in enumerate(zip(device_order, placements)):
+            if isinstance(p, Replicate):
+                new_placement = list(placements)
+                new_placement[mesh_dim] = Partial()  # use default partial sum
+                dist_state = self.DistState(tuple(new_placement), device_order)
+                all_next_state[dist_state] = self.chunk_cost  # needs a better number
 
         # expand with device order permutations
         expanded_all_next_state = all_next_state.copy()
@@ -510,13 +540,15 @@ def _gen_transform_infos_non_cached(
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
 
-    if src_device_order == range(src_spec.mesh.ndim) and dst_device_order == range(
-        src_spec.mesh.ndim
-    ):
+    assert src_spec.mesh == src_spec.device_mesh
+    if src_device_order == tuple(
+        range(src_spec.mesh.ndim)
+    ) and dst_device_order == tuple(range(src_spec.mesh.ndim)):
         use_greedy_transform = True
     else:
         use_greedy_transform = False
 
+    use_greedy_transform = False
     drp = _get_dtensor_redistribute_planner(device_mesh, len(src_spec.shape))
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
