@@ -874,7 +874,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
  private:
-  /* Internal methods for processing runtime Stream/Event */
+  /* Internal methods for processing runtime */
 
   // Deallocate a device memory pointer associated with the given block.
   virtual void deallocate_device_ptr(BlockT* block) = 0;
@@ -1043,7 +1043,7 @@ struct CachingDeviceAllocatorImpl {
 
     record_trace(
         GenericTraceEntry::FREE_COMPLETED,
-        int64_t(block->ptr),
+        block->ptr,
         block->requested_size,
         block->stream,
         block->device,
@@ -1116,7 +1116,7 @@ struct CachingDeviceAllocatorImpl {
     stats.num_device_free++;
     record_trace(
         GenericTraceEntry::SEGMENT_FREE,
-        int64_t(block->ptr),
+        block->ptr,
         block->size,
         block->stream,
         block->device,
