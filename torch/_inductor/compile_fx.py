@@ -1070,6 +1070,16 @@ def _compile_fx_inner(
                 torch._inductor.debug.dump_inductor_provenance_info()
             ),
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(
+                torch._inductor.debug._inductor_kernel_stack_trace
+            ),
+        )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1516,10 +1526,10 @@ class _InProcessFxCompile(FxCompile):
                             },
                         )
 
-                    # Collect and dump op runtimes for TLParse
+                    # Collect and dump op runtimes and tensor metadata for TLParse
                     if config.log_tlparse:
                         _, _, node_runtimes = graph.count_bytes()
-                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
+                        torch._inductor.debug.log_runtime_and_tensor_meta(node_runtimes)
 
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
