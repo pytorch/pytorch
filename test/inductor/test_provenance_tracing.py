@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
+import io
 import json
 import logging
 import re
@@ -19,13 +21,16 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
     from test_aot_inductor_utils import AOTIRunnerUtil
+
+
+trace_log = logging.getLogger("torch.__trace")
 
 
 class Model(torch.nn.Module):
@@ -62,7 +67,7 @@ class Model3(torch.nn.Module):
 
 
 @config.patch("trace.enabled", True)
-@config.patch("trace.provenance_tracking", True)
+@config.patch("trace.provenance_tracking_level", 1)
 class TestProvenanceTracingArtifact(TestCase):
     """
     This test checks that generated provenance tracing artifact from "post_grad" to
@@ -229,7 +234,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_cuda(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cuda")
 
@@ -237,7 +242,7 @@ class TestProvenanceTracingArtifact(TestCase):
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
         M = 8
         N = 6
@@ -285,7 +290,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def _test_pt_tracing_combo_kernel(self, backend):
         """This test checks that generated provenance tracing artifact from triton combo kernel to post grad nodes"""
         a = torch.randn(10, 10, device="cuda")
@@ -320,7 +325,7 @@ class TestProvenanceTracingArtifact(TestCase):
             expected_data = {"triton_poi_fused_0": ["relu", "sigmoid", "tanh"]}
             self._check_provenance_tracing_artifact(filepath, expected_data)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_combo_kernel(self):
         self._test_pt_tracing_combo_kernel(backend="inductor")
         self._test_pt_tracing_combo_kernel(backend="aot_inductor")
@@ -437,7 +442,7 @@ class TestProvenanceTracingNodeMeta(TestCase):
         """
         return next(iter([node for node in gm.graph.nodes if node.target == target]))
 
-    @requires_cuda  # test only works for cuda pattern matcher
+    @requires_cuda_and_triton  # test only works for cuda pattern matcher
     def test_pattern_matcher_transfer_meta(self):
         """
         Test that stack trace is transfered when node is decomposed in post_grad_passes
@@ -481,6 +486,106 @@ class TestProvenanceTracingNodeMeta(TestCase):
 
         self.assertEqual(add_node.meta["stack_trace"], stack_trace)
         self.assertEqual(mm_node.meta["stack_trace"], stack_trace)
+
+
+class ProvenanceArtifactFilter(logging.Filter):
+    def filter(self, record):
+        if "artifact" in record.metadata:
+            return (
+                record.metadata["artifact"]["name"]
+                == "inductor_provenance_tracking_kernel_stack_traces"
+            )
+        return False
+
+
+class StructuredTracePayloadFormatter(logging.Formatter):
+    def format(self, record):
+        return record.payload.strip()
+
+
+class TestProvenanceTracingStackTraces(TestCase):
+    @contextlib.contextmanager
+    def _setup_provenance_capture(self):
+        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(ProvenanceArtifactFilter())
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+    def extract_code_line(self, s):
+        # Extract last non-empty line
+        return s.split("\n")[-2].strip()
+
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "trace.provenance_tracking_level": 2}
+    )
+    @requires_cuda_and_triton
+    def test_tlparse_kernel_stack_traces(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b, c):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                d = a * 3.14
+                y = torch.addmm(c, d, b)
+                z = torch.nn.functional.gelu(y)
+                return x, z
+
+        device = "cuda"
+        model = Model().to(device)
+        x = torch.randn(8, 10).to(device)
+        a = torch.randn(10, 20).to(device)
+        b = torch.randn(20, 30).to(device)
+        c = torch.randn(10, 30).to(device)
+        example_inputs = (x, a, b, c)
+
+        expected = {
+            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0": [
+                "x = self.sigmoid(x)",
+                "x = self.fc1(x)",
+                "x = self.relu(x)",
+            ],
+            "triton_poi_fused_mul_1": [
+                "d = a * 3.14",
+            ],
+            "triton_poi_fused_addmm_gelu_2": [
+                "z = torch.nn.functional.gelu(y)",
+                "y = torch.addmm(c, d, b)",
+            ],
+            "extern_kernels.mm": [
+                "y = torch.addmm(c, d, b)",
+            ],
+        }
+
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            compiled(*example_inputs)
+            payload_content = payload_buffer.getvalue().strip()
+            if payload_content:
+                data = json.loads(payload_content)
+                self.assertEqual(set(data.keys()), set(expected.keys()))
+                for key, expected_lines in expected.items():
+                    actual_lines = [self.extract_code_line(s) for s in data[key]]
+                    print(key)
+                    print(actual_lines)
+                    print(expected_lines)
+                    self.assertEqual(
+                        sorted(actual_lines),
+                        sorted(expected_lines),
+                        f"Mismatch for key: {key}",
+                    )
 
 
 if __name__ == "__main__":
