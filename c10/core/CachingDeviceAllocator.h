@@ -1143,7 +1143,7 @@ struct CachingDeviceAllocatorImpl {
       return false;
       // Temporarily disable checkpointing & cudagraphs internally
     } else if (
-        AcceleratorAllocatorConfig::expandable_segments() &&
+        AcceleratorAllocatorConfig::use_expandable_segments() &&
         is_expandable_segment_supported() &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
       TORCH_CHECK(
