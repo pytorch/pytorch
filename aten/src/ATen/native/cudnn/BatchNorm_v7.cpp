@@ -121,7 +121,7 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
 
 } // namespace
 
-size_t _get_cudnn_batch_norm_reserve_space_size(
+size_t _get_cudnn_batch_norm_reserve_space_size_v7(
     const Tensor& input_t,
     bool training) {
   size_t reserve_size;
@@ -141,7 +141,7 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 // auto reserve = torch::empty({0}, torch::device(torch::kCUDA));
 // at::native::cudnn_batch_norm_out(..., epsilon, output, save_mean, save_var,
 // reserve);
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out_v7(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_t_opt,
@@ -222,7 +222,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
 
     // get the reserved size and allocate as tensor
     size_t reserve_size =
-        _get_cudnn_batch_norm_reserve_space_size(input_t, true /* training */);
+        _get_cudnn_batch_norm_reserve_space_size_v7(input_t, true /* training */);
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(
@@ -277,7 +277,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
       output_t, save_mean, save_var, reserve};
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
+std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm_v7(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_t_opt,
@@ -300,7 +300,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     save_var = at::empty({0}, weight_t.options());
   }
 
-  return cudnn_batch_norm_out(
+  return cudnn_batch_norm_out_v7(
       input_t,
       weight_t,
       bias_t_opt,
@@ -318,7 +318,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 // NB: CuDNN only implements the backward algorithm for batchnorm
 // in training mode (evaluation mode batchnorm has a different algorithm),
 // which is why this doesn't accept a 'training' parameter.
-std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward_v7(
     const Tensor& input_t,
     const Tensor& grad_output_t,
     const Tensor& weight_t,
