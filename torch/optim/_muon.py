@@ -225,10 +225,10 @@ Muon.__doc__ = (
     with numerical stabilization :math:`\varepsilon`.
 
     The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \marthm{shape}\!\big(\theta_t \big) \big)`
-    is to match updating :math:`RMS` of AdamW. The adjustment is computed as: :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}` 
+    is to match updating :math:`RMS` of AdamW. The adjustment is computed as: :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     where :math:`A` and :math:`B` are dimension of the matrix being optimized.
     The method is adopted from `Muon is Scalable for LLM Training`_. Research
-    result shows that with this adjustment Muon can directly reuse the learning rate 
+    result shows that with this adjustment Muon can directly reuse the learning rate
     and weight decay tuned for AdamW.
 
     Note that Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`, which
