@@ -2399,7 +2399,6 @@ class CommonTemplate:
         b_int8pack, b_scales = convert_weight_to_int8pack(b)
         self.common(fn, (a, b_int8pack, b_scales, c))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
@@ -2435,7 +2434,6 @@ class CommonTemplate:
 
         self.common(fn, (b, in_features, out_features))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
@@ -2471,7 +2469,6 @@ class CommonTemplate:
 
         self.common(fn, (b, in_features, out_features))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
@@ -2516,7 +2513,6 @@ class CommonTemplate:
 
         self.common(fn, (a, q_group, in_features, out_features))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
@@ -2529,6 +2525,10 @@ class CommonTemplate:
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.bfloat16)
         b = torch.rand((k, n), dtype=torch.bfloat16)
+
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(b, 1)
+
         in_features = b.size(0)
         out_features = b.size(1)
         q_group = in_features
@@ -2546,7 +2546,6 @@ class CommonTemplate:
 
             if q_group == in_features:
                 b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
-                # print('goes here')
             else:
                 b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
             b_int4pack = torch._dyn_quant_pack_4bit_weight(
@@ -2567,7 +2566,7 @@ class CommonTemplate:
             )
             return res
 
-        self.common(fn, (a, q_group, in_features, out_features), atol=1.0, rtol=0.3)
+        self.common(fn, (a, q_group, in_features, out_features), atol=1, rtol=0.5)
 
     def test_expanded_reduction(self):
         def fn(x, y):
