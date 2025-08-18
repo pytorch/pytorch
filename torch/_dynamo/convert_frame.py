@@ -1005,7 +1005,7 @@ def _compile(
 
         out_code = None
         try:
-            out_code = compile_frame(code, transform, restart_reasons).bytecode
+            dynamo_output = compile_frame(code, transform, restart_reasons)
         except exc.SkipFrame:
             if one_graph or _is_error_on_graph_break(tracer_output):
                 log.debug(
@@ -1016,6 +1016,9 @@ def _compile(
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
         )
+        out_code = dynamo_output.bytecode
+        if dynamo_output.last_attempt_start_time is not None:
+            last_attempt_start_time = dynamo_output.last_attempt_start_time
 
         assert out_code is not None
         log_bytecode(
