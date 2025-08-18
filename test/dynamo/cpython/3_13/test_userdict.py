@@ -134,8 +134,9 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
         u2c = u2b.copy() # making a copy of a UserDict is special cased
         self.assertEqual(u2b, u2c)
 
-        class MyUserDict(collections.UserDict):
-            def display(self): print(self)
+        with torch._dynamo.set_fullgraph(False):
+            class MyUserDict(collections.UserDict):
+                def display(self): print(self)
 
         m2 = MyUserDict(u2)
         m2a = m2.copy()
@@ -226,18 +227,20 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
         # (E) subclass defines __missing__ method raising RuntimeError
         # (F) subclass sets __missing__ instance variable (no effect)
         # (G) subclass doesn't define __missing__ at all
-        class D(collections.UserDict):
-            def __missing__(self, key):
-                return 42
+        with torch._dynamo.set_fullgraph(False):
+            class D(collections.UserDict):
+                def __missing__(self, key):
+                    return 42
         d = D({1: 2, 3: 4})
         self.assertEqual(d[1], 2)
         self.assertEqual(d[3], 4)
         self.assertNotIn(2, d)
         self.assertNotIn(2, d.keys())
         self.assertEqual(d[2], 42)
-        class E(collections.UserDict):
-            def __missing__(self, key):
-                raise RuntimeError(key)
+        with torch._dynamo.set_fullgraph(False):
+            class E(collections.UserDict):
+                def __missing__(self, key):
+                    raise RuntimeError(key)
         e = E()
         try:
             e[42]
@@ -245,11 +248,12 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
             self.assertEqual(err.args, (42,))
         else:
             self.fail("e[42] didn't raise RuntimeError")
-        class F(collections.UserDict):
-            def __init__(self):
-                # An instance variable __missing__ should have no effect
-                self.__missing__ = lambda key: None
-                collections.UserDict.__init__(self)
+        with torch._dynamo.set_fullgraph(False):
+            class F(collections.UserDict):
+                def __init__(self):
+                    # An instance variable __missing__ should have no effect
+                    self.__missing__ = lambda key: None
+                    collections.UserDict.__init__(self)
         f = F()
         try:
             f[42]
@@ -257,8 +261,9 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
             self.assertEqual(err.args, (42,))
         else:
             self.fail("f[42] didn't raise KeyError")
-        class G(collections.UserDict):
-            pass
+        with torch._dynamo.set_fullgraph(False):
+            class G(collections.UserDict):
+                pass
         g = G()
         try:
             g[42]
