@@ -8498,8 +8498,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(
                 fn,
                 [
-                    torch.tensor([0], dtype=dtype),
-                    torch.tensor([0], dtype=torch.float32),
+                    torch.tensor([1, 9], dtype=dtype),
+                    torch.tensor([1, 9], dtype=torch.float32),
                 ],
             )
 
