@@ -737,8 +737,7 @@ def forward(self, pred_1, x_1):
     getitem_1 = cond_1[0];  getitem_1 = None
     getitem_2 = cond_1[1]
     getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  getitem_4 = None
-    getitem_5 = cond_1[4];  cond_1 = getitem_5 = None
+    getitem_4 = cond_1[3];  cond_1 = getitem_4 = None
     return (getitem_2,)""",  # noqa: B950
         )
 
@@ -854,10 +853,7 @@ def forward(self, pred_1, a_1, b_1, c_1):
     cond_1 = torch.ops.higher_order.cond(pred_1, true_graph_1, false_graph_1, (a_1, b_1, sym_size_int, sym_size_int_1, c_1, sym_size_int_2, ones_like));  pred_1 = true_graph_1 = false_graph_1 = a_1 = b_1 = sym_size_int = sym_size_int_1 = c_1 = sym_size_int_2 = ones_like = None
     getitem_1 = cond_1[0]
     getitem_2 = cond_1[1]
-    getitem_3 = cond_1[2];  getitem_3 = None
-    getitem_4 = cond_1[3];  getitem_4 = None
-    getitem_5 = cond_1[4];  getitem_5 = None
-    getitem_6 = cond_1[5];  cond_1 = getitem_6 = None
+    getitem_3 = cond_1[2];  cond_1 = getitem_3 = None
     return (getitem_1, getitem_2)""",  # noqa: B950
         )
         # Forward
@@ -877,7 +873,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     clone = torch.ops.aten.clone.default(arg6_1)
     clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
     zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
-    return [clone, clone_1, None, None, zeros_like, None]""",
+    return [clone, clone_1, zeros_like]""",
         )
 
     def test_cond_autograd_pytree_input(self):
@@ -1302,15 +1298,11 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
-    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
-    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
-    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @skipIfTorchDynamo("don't test compile on compile")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
-    @unittest.expectedFailure
     def test_cond_autograd_zeros_unused_branch_complex_compile_fail(
         self, compile_mode, scalar
     ):
