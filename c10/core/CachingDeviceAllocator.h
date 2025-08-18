@@ -882,7 +882,7 @@ struct CachingDeviceAllocatorImpl {
     context_recorder_.store(nullptr);
   }
 
-  BlockT* malloc(DeviceIndex device, size_t orig_size, StreamT stream) {
+  virtual BlockT* malloc(DeviceIndex device, size_t orig_size, StreamT stream) {
     // done outside the lock because we don't know what locks the recorder
     // needs to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -974,7 +974,7 @@ struct CachingDeviceAllocatorImpl {
 
       size_t device_free = 0;
       size_t device_total = 0;
-      get_memory_info(device, device_free, device_total);
+      getMemoryInfo(device, device_free, device_total);
       std::string allowed_info;
 
       if (set_fraction) {
@@ -1094,10 +1094,139 @@ struct CachingDeviceAllocatorImpl {
         params, orig_size, std::move(context), split_remainder);
   }
 
+  virtual void free(BlockT* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    block->allocated = false;
+
+    // following logic might modifying underlying Block, causing the size
+    // changed. We store ahead for reporting
+    auto orig_block_ptr = block->ptr;
+    auto orig_block_size = block->size;
+
+    StatTypes stat_types = block->pool->get_stat_types();
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].decrease(1);
+      stats.allocated_bytes[stat_type].decrease(block->size);
+    });
+    auto allocated_bytes_gauge =
+        STATIC_GAUGE(pytorch.CachingAllocator.allocated_bytes);
+    allocated_bytes_gauge.record(
+        stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
+
+    record_trace(
+        GenericTraceEntry::FREE_REQUESTED,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_allocated);
+
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+      stats.oversize_allocations.decrease(1);
+
+    if (!block->stream_uses.empty()) {
+      if (C10_UNLIKELY(!captures_underway.empty())) {
+        // It's forbidden to cudaEventQuery an event recorded during CUDA graph
+        // capture. We conservatively defer recording end-of-life events until
+        // the next call to process_events() (which won't happen until no
+        // captures are underway)
+        needs_events_deferred_until_no_capture.push_back(block);
+      } else {
+        insert_events(block);
+      }
+    } else {
+      free_block(block, context);
+    }
+
+    c10::reportMemoryUsageToProfiler(
+        orig_block_ptr,
+        -static_cast<int64_t>(orig_block_size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(device_type_, block->device));
+  }
+
+  virtual void recordStream(BlockT* block, StreamT stream) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (stream.stream() == block->stream) {
+      // ignore uses on the allocation stream, since those don't require any
+      // special synchronization
+      return;
+    }
+    block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      block_to_graph_stream_uses[block].insert(stream);
+    }
+  }
+
+  /** returns cached blocks to the system allocator **/
+  virtual void emptyCache(MempoolId_t mempool_id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    release_cached_blocks(context, mempool_id);
+  }
+
+  /** Resets the historical accumulation stats for the device **/
+  virtual void resetAccumulatedStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_accumulated();
+      stats.segment[statType].reset_accumulated();
+      stats.active[statType].reset_accumulated();
+      stats.inactive_split[statType].reset_accumulated();
+      stats.allocated_bytes[statType].reset_accumulated();
+      stats.reserved_bytes[statType].reset_accumulated();
+      stats.active_bytes[statType].reset_accumulated();
+      stats.inactive_split_bytes[statType].reset_accumulated();
+      stats.requested_bytes[statType].reset_accumulated();
+    }
+
+    stats.num_alloc_retries = 0;
+    stats.num_ooms = 0;
+    stats.num_sync_all_streams = 0;
+    stats.num_device_alloc = 0;
+    stats.num_device_free = 0;
+    stats.oversize_allocations.reset_accumulated();
+    stats.oversize_segments.reset_accumulated();
+  }
+
+  /** Resets the historical peak stats for the device **/
+  virtual void resetPeakStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_peak();
+      stats.segment[statType].reset_peak();
+      stats.active[statType].reset_peak();
+      stats.inactive_split[statType].reset_peak();
+      stats.allocated_bytes[statType].reset_peak();
+      stats.reserved_bytes[statType].reset_peak();
+      stats.active_bytes[statType].reset_peak();
+      stats.inactive_split_bytes[statType].reset_peak();
+      stats.requested_bytes[statType].reset_peak();
+    }
+    stats.oversize_allocations.reset_peak();
+    stats.oversize_segments.reset_peak();
+  }
+
+  // Returns the size of free and total memory in bytes on the device.
+  virtual void getMemoryInfo(
+      c10::DeviceIndex device,
+      size_t& free_bytes,
+      size_t& total_bytes) = 0;
+
   // See Note [Interaction with CUDA graph capture]
 
   // Called by Graph::capture_begin
-  void beginAllocateToPool(
+  virtual void beginAllocateToPool(
       MempoolId_t mempool_id,
       std::function<bool(StreamT)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -1112,7 +1241,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Called by Graph::capture_end
-  void endAllocateToPool(MempoolId_t mempool_id) {
+  virtual void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     for (auto it = captures_underway.begin(); it != captures_underway.end();
          ++it) {
@@ -1126,7 +1255,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Called by Graph::reset and MemPool::~MemPool()
-  void releasePool(MempoolId_t mempool_id) {
+  virtual void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
     // delete and cudaFree the mempool its capture used, because
@@ -1157,12 +1286,6 @@ struct CachingDeviceAllocatorImpl {
 
   // Allocate a device memory pointer of the given size and parameters.
   virtual void allocate_device_ptr(void** ptr, AllocParamsT& p) = 0;
-
-  // Returns the size of free and total memory in bytes on the device.
-  virtual void get_memory_info(
-      c10::DeviceIndex device,
-      size_t& free_bytes,
-      size_t& total_bytes) = 0;
 
   virtual std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     return "";
@@ -1930,8 +2053,8 @@ struct CachingDeviceAllocatorImpl {
   bool should_split(const BlockT* block, size_t size) {
     size_t remaining = block->size - size;
     if (block->pool->is_small ||
-        AcceleratorAllocatorConfig::use_expandable_segments() &&
-            is_expandable_segment_supported()) {
+        (AcceleratorAllocatorConfig::use_expandable_segments() &&
+         is_expandable_segment_supported())) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < AcceleratorAllocatorConfig::max_split_size()) &&
