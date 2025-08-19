@@ -1705,16 +1705,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             if hasattr(packed, "b"):
                 b = packed.b + 1
             c = packed[2]
-            return a + b + c
+            d = len(packed._fields)
+            return a + b + c + d
 
         v1 = torch.Tensor([1])
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 10)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_namedtuple3(self):
         def fn(x, packed):
@@ -8571,7 +8572,6 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             guard_manager = torch._dynamo.guards.CheckFunctionManager(
                 foo.__code__,
                 guards_state.output_graph,
-                guards_serialization_mode="load",
                 shape_code_parts=guards_state.shape_code_parts,
                 runtime_global_scope=new_globals,
             ).guard_manager

@@ -5605,7 +5605,10 @@ class ExternKernel(InputsKernel):
         from .codegen.cpp_wrapper_cpu import CppWrapperCpu
 
         device = d.type if (d := self.get_device()) else V.graph.device_type
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            assert self.python_kernel_name is not None
+            return self.python_kernel_name
+        elif V.graph.cpp_wrapper:
             assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
                 V.graph.wrapper_code
             )
@@ -7157,10 +7160,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
@@ -7350,7 +7353,10 @@ class AssertScalar(ExternKernel):
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            # TODO fix
+            pass
+        elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
@@ -8562,6 +8568,8 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
+    """IR node for while_loop, which supports input mutations"""
+
     carried_inputs: Optional[Sequence[IRNode]] = None
     additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
@@ -8593,6 +8601,38 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    # Accidental aliasing can be created due to cse, where the empty buffers we
+    # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
+    # See test_scan_multiple_layers_gradient for a concrete example.
+    @staticmethod
+    def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
+        if not _has_aliased_buffers(carried_inputs):
+            return carried_inputs
+
+        # Import clone from lowering module
+        from .lowering import clone
+
+        # Unwrap views to get the underlying buffers for comparison
+        unwrapped_buffers = [
+            buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+            for buffer in carried_inputs
+        ]
+
+        # Track which buffers we've seen and their indices
+        seen_buffers: OrderedSet[int] = OrderedSet()
+        result = []
+
+        for i, (original_input, unwrapped_buffer) in enumerate(
+            zip(carried_inputs, unwrapped_buffers)
+        ):
+            if id(unwrapped_buffer) in seen_buffers:
+                result.append(clone(original_input))
+            else:
+                seen_buffers.add(id(unwrapped_buffer))
+                result.append(original_input)
+
+        return result
 
     @classmethod
     def create(
@@ -8629,6 +8669,7 @@ class WhileLoop(ExternKernel):
         fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
         carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
         additional_inputs_ = [cls.realize_input(x) for x in additional_inputs]
         additional_inputs_ = _require_exact_strides(
