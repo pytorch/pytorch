@@ -139,16 +139,6 @@ namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
-void decrease_stat_array(
-    StatArray& stat_array,
-    size_t amount,
-    const StatTypes& stat_types) {
-  for_each_selected_stat_type(
-      stat_types, [&stat_array, amount](size_t stat_type) {
-        stat_array[stat_type].decrease(amount);
-      });
-}
-
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
@@ -251,12 +241,6 @@ std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
   block->gc_count_base = get_free_blocks_call_count;
   return blocks.insert(block);
 }
-
-struct SegmentRange {
-  char* ptr;
-  size_t size;
-  SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
-};
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
