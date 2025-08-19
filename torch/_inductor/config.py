@@ -399,7 +399,6 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
 
 reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
 sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
-estimate_runtime_benchmark: bool = False
 
 reorder_iterative_unsafe_collectives_reorder: bool = False
 sink_waits_iterative_unsafe_collectives_reorder: bool = False
@@ -413,6 +412,8 @@ bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
 bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int]] = (
     None
 )
+
+estimate_runtime_benchmark: bool = False
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle

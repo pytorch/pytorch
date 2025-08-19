@@ -90,7 +90,7 @@ def reorder_compute_for_overlap(
 
 
 def reorder_communication_preserving_peak_memory(
-    snodes: list[BaseSchedulerNode], runtime_estimations
+    snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
     """
     Reorders communication ops relative to computation ops to improve communication-compute overlapping and hide comm
@@ -250,7 +250,7 @@ def _op_runtime_estimate_mult(snode):
 
 
 def _reorder_communication_preserving_peak_memory_internal(
-    snodes: list[BaseSchedulerNode], runtime_estimations=None
+    snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
     """
     Internal testing helper that also returns debug info.
@@ -280,14 +280,9 @@ def _reorder_communication_preserving_peak_memory_internal(
         name_to_freeable_input_buf,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
-    def _op_runtime_estimate(snode):
-        if runtime_estimations:
-            est = runtime_estimations[snode]
-            return est["COMM"] + est["COMP"]
-        return estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
-
     runtimes: dict[BaseSchedulerNode, float] = {
-        snode: _op_runtime_estimate(snode) for snode in snodes
+        snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+        for snode in snodes
     }
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
@@ -919,7 +914,7 @@ class SinkWaitInfo:
 
 
 def _sink_waits_iterative_internal(
-    snodes: list[BaseSchedulerNode], runtime_estimations=None
+    snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
@@ -1050,14 +1045,9 @@ def _sink_waits_iterative_internal(
                 post_alloc - snodes_allocfree[n].size_free,
             )
 
-    def _op_runtime_estimate(snode):
-        if runtime_estimations:
-            est = runtime_estimations[snode]
-            return est["COMM"] + est["COMP"]
-        return estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
-
     runtimes: dict[BaseSchedulerNode, float] = {
-        snode: _op_runtime_estimate(snode) for snode in snodes
+        snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+        for snode in snodes
     }
 
     def exposed_communication_time(snodes_to_wait):
@@ -1392,10 +1382,8 @@ def _sink_waits_iterative_internal(
     return new_snodes, stats
 
 
-def sink_waits_iterative(
-    snodes: list[BaseSchedulerNode], runtime_estimations=None
-) -> list[BaseSchedulerNode]:
-    return _sink_waits_iterative_internal(snodes, runtime_estimations)[0]
+def sink_waits_iterative(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+    return _sink_waits_iterative_internal(snodes)[0]
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -1481,7 +1469,6 @@ def visualize_overlap(order):
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
-    runtime_estimations: Optional[dict[str, float]] = None,
 ) -> list[BaseSchedulerNode]:
     order = snodes
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
@@ -1504,7 +1491,7 @@ def reorder_compute_and_comm_for_overlap(
             except Exception as e:
                 overlap_log.debug("", exc_info=e)
         t0 = time.time()
-        order = p(order, runtime_estimations)  # type: ignore[operator]
+        order = p(order)  # type: ignore[operator]
         t = time.time() - t0
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
