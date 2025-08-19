@@ -19,9 +19,7 @@ struct GridSamplerOffsets {
 static GridSamplerOffsets find_grid_sampler_offsets(
     constant int32_t* output_sizes,
     constant int32_t* output_strides,
-    constant int32_t* input_sizes,
     constant int32_t* input_strides,
-    constant int32_t* grid_sizes,
     constant int32_t* grid_strides,
     int32_t sampler_dims,
     uint tid) {
@@ -61,7 +59,7 @@ static GridSamplerOffsets find_grid_sampler_offsets(
   return offsets;
 }
 
-// Mod function which gives postive output when `a` is negative
+// Mod function which gives positive output when `a` is negative
 static int32_t mod(int32_t a, int32_t b) {
   auto r = a % b;
   return r + (r < 0 ? b : 0);
@@ -193,9 +191,9 @@ void grid_sampler_single_element(
   int32_t right_indices[3];
   opmath_t<T> scales[3];
 
-  // For each dimension, find the pair of indices in the cooresponding dimension
+  // For each dimension, find the pair of indices in the corresponding dimension
   // of `input` which surround the grid coordinate in that dimension. We'll do
-  // this by mapping different coordiante spaces onto each other. There are
+  // this by mapping different coordinate spaces onto each other. There are
   // basically three different coordinate spaces to keep in mind:
   //
   //  * aligned grid space
@@ -278,16 +276,13 @@ kernel void grid_sampler(
   auto output_strides = params.output_strides.data();
   auto input_sizes = params.input_sizes.data();
   auto input_strides = params.input_strides.data();
-  auto grid_sizes = params.grid_sizes.data();
   auto grid_strides = params.grid_strides.data();
   auto sampler_dims = params.sampler_dims;
 
   auto offsets = find_grid_sampler_offsets(
       output_sizes,
       output_strides,
-      input_sizes,
       input_strides,
-      grid_sizes,
       grid_strides,
       sampler_dims,
       tid);
