@@ -139,12 +139,10 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
   const auto num_args = 6;
   StableIValue stack[num_args];
 
-  int32_t t_dtype;
-  aoti_torch_get_dtype(t.get(), &t_dtype);
   auto mf = aoti_torch_memory_format_contiguous_format();
 
   stack[0] = from(t);
-  stack[1] = from(std::optional(t_dtype));    // dtype
+  stack[1] = from(std::optional(t.scalar_type()));    // dtype
   stack[2] = from(std::nullopt);              // layout
   stack[3] = from(std::optional(device));     // device
   stack[4] = from(std::optional(false));      // pin_memory
