@@ -78,7 +78,7 @@ PyTorch provides Tensors that can live either on the CPU or the GPU and accelera
 computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, mathematical operations, linear algebra, and reductions.
+such as slicing, indexing, mathematical operations, linear algebra, reductions.
 And they are fast!
 
 ### Dynamic Neural Networks: Tape-Based Autograd
