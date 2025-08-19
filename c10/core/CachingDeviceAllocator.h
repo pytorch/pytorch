@@ -682,16 +682,7 @@ struct ExpandableSegmentTraits {
 template <typename StreamT>
 struct ExpandableSegment {
   using HandleT = typename ExpandableSegmentTraits<StreamT>::HandleT;
-
-  struct VirtualMemoryAddressDeleter {
-    void operator()(void* ptr) const noexcept {
-      if (ptr) {
-        releaseVirtualMemoryAddress(ptr);
-      }
-    }
-  };
-
-  using PtrT = std::unique_ptr<void, VirtualMemoryAddressDeleter>;
+  using PtrT = std::unique_ptr<void, std::function<void(void*)>>;
 
   ExpandableSegment() = default;
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
@@ -715,7 +706,10 @@ struct ExpandableSegment {
         !ptr_, "ExpandableSegment::init() has already been called");
     void* ptr = nullptr;
     createVirtualMemoryAddress(&ptr);
-    ptr_.reset(ptr);
+    ptr_ = PtrT(ptr, [this](void* p) {
+      if (p)
+        this->releaseVirtualMemoryAddress(p);
+    });
   }
 
   // Maps a virtual memory range to physical memory.
@@ -2763,15 +2757,14 @@ struct CachingDeviceAllocatorInterface : BaseDeviceAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
-    void* r = nullptr;
 
     c10::impl::VirtualGuardImpl impl(deviceType);
     c10::Device device = impl.getDevice();
     void* devPtr = nullptr;
     c10::Stream stream = impl.getStream(device);
-    malloc(&r, device, nbytes, StreamT(stream));
+    malloc(&devPtr, device, nbytes, StreamT(stream));
 
-    return r;
+    return devPtr;
   }
 
   void raw_delete(void* ptr) override {
