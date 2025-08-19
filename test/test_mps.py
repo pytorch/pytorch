@@ -5321,6 +5321,9 @@ class TestMPS(TestCaseMPS):
 
         helper()
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/160738
+        self.assertTrue(torch.var(torch.tensor(3.13, device='mps'), dim=0).isnan().item())
+
     # Test forward amax
     def test_amax(self):
         def helper(shape, dim, keepdim):

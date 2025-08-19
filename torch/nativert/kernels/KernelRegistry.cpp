@@ -196,8 +196,11 @@ static at::Tensor& mul_out(
   const auto& t_output = output.scalar_type();
   TORCH_CHECK(at::native::result_type(self, other) == t_output);
 
-  auto self_sizes = self.sizes();
-  at::native::resize_(output, self_sizes, std::nullopt);
+  at::native::resize_impl_cpu_(
+      output.unsafeGetTensorImpl(),
+      self.sizes(),
+      self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
+                           : self.strides());
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
@@ -1139,7 +1142,7 @@ REGISTER_CPU_KERNEL(
     {
       const auto& in_0 = KernelInput(0).toTensor();
       const auto& weight = KernelInput(1).toTensor();
-      const auto& bias = KernelInput(2).toTensor();
+      auto bias = KernelInput(2).toOptional<at::Tensor>();
 
       if (auto& out_0 = KernelOutput(0); out_0.isNone()) {
         out_0 = create_empty_from(in_0, at::kFloat);
@@ -1148,7 +1151,8 @@ REGISTER_CPU_KERNEL(
       auto& out_0 = KernelOutput(0).toTensor();
       fastResizeToZero(out_0);
 
-      at::native::fbgemm_linear_fp16_weight(in_0, weight, bias, out_0);
+      at::native::fbgemm_linear_fp16_weight(
+          in_0, weight, bias.value_or(at::Tensor()), out_0);
     })
 
 REGISTER_CPU_KERNEL(
