@@ -1202,7 +1202,6 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_unary
 def adaptive_max_pool3d_with_indices(
     input: Tensor,
     output_size: BroadcastingList3[int],
@@ -1221,6 +1220,14 @@ def adaptive_max_pool3d_with_indices(
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            adaptive_max_pool3d_with_indices,
+            (input,),
+            input,
+            output_size,
+            return_indices=return_indices,
+        )
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
@@ -1268,7 +1275,6 @@ Args:
 )
 
 
-@_handle_torch_function_unary
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1278,11 +1284,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
         output_size: the target output size (single integer or
             double-integer tuple)
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
-@_handle_torch_function_unary
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
     r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
@@ -1292,6 +1299,8 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
@@ -1342,7 +1351,6 @@ def alpha_dropout(
     )
 
 
-@_handle_torch_function_unary
 def dropout1d(
     input: Tensor,
     p: float = 0.5,
@@ -1363,6 +1371,10 @@ def dropout1d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            dropout1d, (input,), input, p=p, training=training, inplace=inplace
+        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1390,7 +1402,6 @@ def dropout1d(
     return result
 
 
-@_handle_torch_function_unary
 def dropout2d(
     input: Tensor,
     p: float = 0.5,
@@ -1411,6 +1422,10 @@ def dropout2d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            dropout2d, (input,), input, p=p, training=training, inplace=inplace
+        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1446,7 +1461,6 @@ def dropout2d(
     return result
 
 
-@_handle_torch_function_unary
 def dropout3d(
     input: Tensor,
     p: float = 0.5,
@@ -1467,6 +1481,10 @@ def dropout3d(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            dropout3d, (input,), input, p=p, training=training, inplace=inplace
+        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
@@ -1495,7 +1513,6 @@ def dropout3d(
     return result
 
 
-@_handle_torch_function_unary
 def feature_alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1521,6 +1538,15 @@ def feature_alpha_dropout(
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            feature_alpha_dropout,
+            (input,),
+            input,
+            p=p,
+            training=training,
+            inplace=inplace,
+        )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
@@ -1566,13 +1592,14 @@ In-place version of :func:`~threshold`.
 )
 
 
-@_handle_torch_function_unary
 def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu(input, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(relu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.relu_(input)
     else:
@@ -2710,7 +2737,6 @@ def rms_norm(
     return torch.rms_norm(input, normalized_shape, weight, eps)
 
 
-@_handle_torch_function_variadic
 def group_norm(
     input: Tensor,
     num_groups: int,
@@ -2722,6 +2748,20 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            group_norm,
+            (
+                input,
+                weight,
+                bias,
+            ),
+            input,
+            num_groups,
+            weight=weight,
+            bias=bias,
+            eps=eps,
+        )
     if input.dim() < 2:
         raise RuntimeError(
             f"Expected at least 2 dimensions for input tensor but received {input.dim()}"
@@ -2735,7 +2775,6 @@ def group_norm(
     )
 
 
-@_handle_torch_function_variadic
 def local_response_norm(
     input: Tensor,
     size: int,
@@ -2750,6 +2789,10 @@ def local_response_norm(
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            local_response_norm, (input,), input, size, alpha=alpha, beta=beta, k=k
+        )
     dim = input.dim()
     if dim < 3:
         raise ValueError(
@@ -2908,7 +2951,6 @@ def nll_loss(
     )
 
 
-@_handle_torch_function_variadic
 def poisson_nll_loss(
     input: Tensor,
     target: Tensor,
