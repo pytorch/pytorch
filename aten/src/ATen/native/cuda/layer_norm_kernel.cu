@@ -24,8 +24,10 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
+#ifndef USE_ROCM
 #include <ATen/native/cudnn/LayerNorm_v8.h>
 #include <ATen/native/cudnn/RMSNorm_v8.h>
+#endif
 
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
