@@ -3478,6 +3478,52 @@ def lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim):
     return hy, cy
 
 
+def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
+    """
+    1 layer fn for while loop LSTM
+    """
+    from torch._higher_order_ops import while_loop
+
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+    hr_weight = (
+        params[4] if len(params) == 5 else params[2] if len(params) == 3 else None
+    )
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
+    precomputed_input = F.linear(inp, ih_weight, ih_bias)
+    precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    # while loop rewrite
+    step_output = torch.empty(
+        precomputed_input.size(0),
+        *tuple(hx.shape[1:]),
+        dtype=hx.dtype,
+        device=hx.device,
+    )
+
+    def cond_fn(i, out, hx, cx):
+        return i < precomputed_input.size(0)
+
+    def body_fn(idx, out, hx, cx):
+        i = idx.item()
+        torch._check_is_size(i)
+        torch._check_is_size(i, max=precomputed_input.size(0) - 1)
+        hx, cx = lstm_cell(
+            precomputed_input[i], hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2
+        )
+        out = out.clone()
+        out[i] = hx
+        return idx + 1, out, hx, cx  # this clone to avoid aliasing is annoying
+
+    cnt = torch.full((), 0, dtype=torch.int64)
+    _, out, _, _ = while_loop(cond_fn, body_fn, [cnt, step_output, hx, cx])
+    if reverse:
+        out = out.flip(0)
+    return out, (hx.squeeze(1), cx.squeeze(1))
+
+
 def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     ih_weight = params[0]
     hh_weight = params[1]
@@ -3616,7 +3662,7 @@ def select_one_layer_lstm_function(input, hx, params):
     if use_mkldnn(input, hx, params):
         return mkldnn_one_layer_lstm
     else:
-        return one_layer_lstm
+        return one_layer_while_loop_lstm
 
 
 @register_decomposition(aten.lstm.input)
