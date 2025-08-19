@@ -20,20 +20,16 @@ void cuda_symm_free(void* ptr, size_t size, int device, void* stream) {
   allocator->free(ptr);
 }
 
+// Register allocator for CUDA MemPool
+struct RegisterCUDAMemPoolAllocator {
+  RegisterCUDAMemPoolAllocator() {
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator =
+        torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+            cuda_symm_alloc, cuda_symm_free);
+    register_mempool_allocator(c10::DeviceType::CUDA, allocator);
+  }
+};
+
+static RegisterCUDAMemPoolAllocator register_cuda_mempool_allocator_;
+
 } // namespace
-
-namespace c10d::symmetric_memory {
-
-// Get allocator for MemPool
-std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
-  TORCH_CHECK(
-      device.type() == c10::DeviceType::CUDA,
-      "SymmetricMemory MemPool supports CUDA device only");
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
-      mempool_allocator =
-          torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-              cuda_symm_alloc, cuda_symm_free);
-  return mempool_allocator;
-}
-
-} // namespace c10d::symmetric_memory
