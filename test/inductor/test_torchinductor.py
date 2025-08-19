@@ -10579,11 +10579,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x.sum(dim=0)
 
         x_small = torch.randn(4096, 512, device=GPU_TYPE)
-        code = run_and_get_triton_code(no_override, [x_small])
+        code = run_and_get_triton_code(no_override, x_small)
         self.assertTrue("xnumel = 512" in code)
 
         torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 1000)
-        code = run_and_get_triton_code(override, [x_small])
+        code = run_and_get_triton_code(override, x_small)
         self.assertTrue("xnumel = 16384" in code)
 
         self.assertEqual(no_override(x_small), override(x_small))
