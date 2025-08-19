@@ -136,6 +136,7 @@ def greedy_bucket_collective_by_mb(
 
     nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
 
+    # TODO: pearce kelly algorithm for detecting cycles
     node_descendents = collect_node_descendants(gm.graph)
 
     for node in g.nodes:
@@ -505,8 +506,6 @@ def merge_all_gather(
     )
     n_buckets = len(ag_buckets)
 
-    ag_node_to_pre_nodes = defaultdict(list)
-
     ag_ins: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
     ag_waits: list[list[torch.fx.Node]] = [[] for _ in range(n_buckets)]
     for bucket_idx, ag_bucket in enumerate(ag_buckets):
@@ -570,5 +569,3 @@ def merge_all_gather(
         for ag_n, wait_n in zip(ag_buckets[bucket_idx], _ag_waits):
             g.erase_node(wait_n)
             g.erase_node(ag_n)
-            for n in reversed(ag_node_to_pre_nodes[ag_n]):
-                g.erase_node(n)  # type: ignore[arg-type]
