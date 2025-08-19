@@ -1647,6 +1647,8 @@ def init_process_group(
 
     set_pytorch_distributed_envs_from_justknobs()
 
+    print(f"init pg: backend={backend}, device_id = {device_id}")
+
     # Depending on the import order, some trace_rules functions may be evaluated
     # during the import phase. In such a case, these functions may not correctly
     # add the distributed related rules due to import circular dependency.
@@ -1773,6 +1775,7 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
+        print(f"default_pg has backend: {default_pg._get_backend_name()}, device_types: {default_pg._device_types}")
         _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
@@ -4797,19 +4800,23 @@ def barrier(
     # Detect the accelerator on the machine. If no accelerator is available, it
     # returns CPU.
     device = torch._C._get_accelerator()
+    print(f"barrier: device_ids = {device_ids}, devices = {opts.device_ids}, device = {opts.device}, PG={group._device_types}")
     if isinstance(device_ids, list):
         opts.device_ids = device_ids
         # use only the first device id
         opts.device = torch.device(device.type, device_ids[0])
+        print(f"use device {opts.device}")
     elif getattr(group, "bound_device_id", None) is not None:
         # Use device id from `init_process_group(device_id=...)`
         opts.device = group.bound_device_id  # type: ignore[assignment]
     elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        print("cpu barrier")
         opts.device = torch.device("cpu")
     else:
         # Use the current device set by the user. If user did not set any, this
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
+        print("no device in barrier")
         opts.device = device
         warnings.warn(  # warn only once
             "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
