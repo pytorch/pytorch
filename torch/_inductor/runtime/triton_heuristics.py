@@ -2537,7 +2537,7 @@ def _reduction_configs(
             x_block = 64
         else:
             x_block = max(min(max_x_block, next_power_of_2(x // 4096)), 64)
-            if load_factor < 4:
+            if load_factor < 4 or rnumel <= 128:
                 outer_r_block = 512 // x_block
             else:
                 # Heavier reductions contain a lot more overhead per loop iteration
