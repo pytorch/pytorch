@@ -799,7 +799,6 @@ struct ReduceOp {
       reduce_buffer[offset] = value;
     }
 
-    __threadfence(); // make sure writes are globally visible
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
