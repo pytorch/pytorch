@@ -296,7 +296,7 @@ class TestDynamoTimed(TestCase):
 
         self.warmup()
         self.run_forward_backward()
-        
+
         # Dummy code object
         def sample_func():
             pass
@@ -305,8 +305,14 @@ class TestDynamoTimed(TestCase):
         stack_strings = convert_frame.log_dynamo_start(code)
         last_entry = stack_strings[-1]
         # Check if the last entry is a valid stack trace i.e for the sample_func
-        self.assertIn(f"Line: {code.co_firstlineno}", last_entry, "Log does not contain a Line no.")
-        self.assertIn(f"Name: {code.co_name}", last_entry, "Log does not contain a Name")
+        self.assertIn(
+            f"Line: {code.co_firstlineno}",
+            last_entry,
+            "Log does not contain a Line no.",
+        )
+        self.assertIn(
+            f"Name: {code.co_name}", last_entry, "Log does not contain a Name"
+        )
         self.assertIn(
             "test_utils.py",
             last_entry,
