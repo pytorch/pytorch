@@ -468,6 +468,186 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
     return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
+""" associative_scan backward
+    Example::
+        xs = torch.arange(1, 5) = [1, 2, 3, 4]
+
+        def combine_fn(a: torch.Tensor, b: torch.Tensor):
+            return a * b
+
+        ys = associative_scan(comine_fn, xs),
+        which can be unpacked as:
+        ys_0 = xs_0                                          = 1
+        ys_1 = combine_fn(ys_0, xs_1) = combine_fn(1, 2)     = 2
+        ...
+        ys_T = combine_fn(ys_(T-1), xs_T) = combine_fn(6, 4) = 24
+        ys = [1, 2, 6, 24]
+
+        This creates a recursive data dependency structure where each output ys_t
+        depends on all prior inputs xs_0 through xs_t. The dependency can be visualized as:
+
+Level 0 (Input):    x0    x1    x2    x3    x4
+                     \    /      |     |     |
+                      \  /       |     |     |
+Level 1:               y1 ───────┘     |     |
+                        \              /     |
+                         \            /      |
+Level 2:                  y2 ─────────┘     |
+                           \                /
+                            \              /
+Level 3:                     y3 ──────────┘
+                              \
+                               \
+Level 4:                        y4
+
+
+We could get the following backward gradient graph:
+
+
+Level 0 (output):   gx0   gx1   gx2   gx3   gx4
+                     \    /      |     |     |
+                      \  /       |     |     |
+Level 1:    gl_y1  ─> gy1  ──────┘     |     |
+                        \              /     |
+                         \            /      |
+Level 2:    gl_y2     ─> gy2  ────────┘      |
+                           \                 /
+                            \               /
+Level 3:    gl_y3        ─> gy3    ─────────┘
+                              \
+                               \
+Level 4:    gl_y4           ─> gy4
+
+
+, where gl_y1 is the gradient of the loss with respect to y1 and is the input of backward.
+
+
+To calculate output, the chain rule suggests:
+
+gx0 = gy1 * bw(y1, x0)
+gx1 = gy1 * bw(y1, x1)
+gx2 = gy1 * bw(y1, x2)
+gx3 = gy2 * bw(y2, x3)
+gx4 = gy3 * bw(y3, x4)
+
+Noice the bw(...) is just the single step bw, whose formula can be computed from combine_fn.
+
+Let's break down how to calculate gy_t by recursively substituting the unknowns:
+
+gy1 = gl_y1 + gy2 * bw(y2, y1)
+    = gl_y1 + (gl_y2  + gy3 * bw(y3, y2))* bw(y2, y1)
+    = gl_y1 + gl_y2 * bw(y2, y1) + gy3 * bw(y3, y2) * bw(y2, y1)
+    = gl_y1 + gl_y2 * bw(y2, y1) + gl_y3 * bw(y3, y2) * bw(y2, y1) + gy4 * bw(y4, y3) * bw(y3, y2) * bw(y2, y1)
+    = gl_y1 + gl_y2 * bw(y2, y1) + gl_y3 * bw(y3, y2) * bw(y2, y1) + gl_y4 * bw(y4, y3) * bw(y3, y2) * bw(y2, y1)
+
+Let's do the same for more terms:
+gy2 = gl_y2 +  gl_y3 * bw(y3, y2) + gl_y4 * bw(y4, y3) * bw(y3, y2)
+gy3 = gl_y3 + gl_y4 * bw(y4, y3)
+gy4 = gl_y4
+
+Notice that the above can be re-written as a matrix vector multiplication of y_mat and gy:
+
+gy1      1, bw21, bw321, bw4321       gl_y1
+gy2   =  0,  1  , bw321, bw4321   @   gl_y2
+gy3      0,  0  ,   1  , bw4321       gl_y3
+gy4      0,  0  ,   0  ,    1         gl_y4
+
+, where bw4321 is an abreviation for bw(y4, y3) * bw(y3, y2) * bw(y2, y1) so on and so forth.
+
+We could effectively compute the upper triangular matrix y_mat with:
+
+cumprod([1, bw21, bw32, bw43]) then masking out the values as needed.
+
+
+    Refences: https://justintchiu.com/blog/pscan_diff/
+
+    NOTE: [associative_scan autograd implementation]
+
+
+    The forward of associative_scan can be computed with the following steps:
+
+    1.) Compute the forward output of the associative_scan
+        ys = associative_scan(combine_fn, xs, additional_inputs)
+
+    The backward of associative_scan can be computed with the following steps:
+
+    2.) Prepare the backward graph
+        We prepare the backward graph to be used in the backward function.
+        We utilize ``create_bw_fn`` to generate the joint function:
+        combine_fn_bw = create_bw_fn(combine_fn, operands)
+        where operands = [ys_{t-1}, xs_t, additional_inputs]
+
+    3.) Materialize the ``combine_fn_bw``
+        This is required because torch.compile and torch.autograd.grad cannot trace through the joint backward function dynamically.
+
+    4.) Compute the instantaneous gradients at every step t
+        g_y_t, g_x_t = combine_fn_bw(y_{t-1}, x_t, 1.)
+        Here we pass 1 as the upstream gradient to obtain the local partial derivatives.
+
+        This gives:
+            g_y = [g_y_0, g_y_1, ..., g_y_T] # i.e. (bw(y1, y0), bw(y2, y1)...)
+            g_x = [g_x_0, g_x_1, ..., g_x_T] # i.e. (bw(y1, x0), bw(y1, x1)...)
+
+    5.) Compute the gradient transition matrix
+
+        As shown in the example above, each input xs_t affects all later outputs ys_i for i ≥ t.
+        According to the chain rule, each such path contributes a product of local gradients g_ys_k.
+
+        For example:
+            ∂ys_T/∂xs_t = ∂ys_T/∂ys_{T-1} * ∂ys_{T-1}/∂ys_{T-2} * ... * ∂ys_{t+1}/∂ys_t * ∂ys_t/∂xs_t
+                    = g_y_T * g_y_{T-1} * ... * g_y_{t+1} * g_x_t
+
+        This motivates the use of a cumulative product over g_y to compute all such paths efficiently.
+
+        We now construct the matrix of gradient transition paths:
+
+        5.1 Repeat g_y values to form the base matrix
+            y_mat = [[1, g_y_1, g_y_2, g_y_3],
+                     [1, g_y_1, g_y_2, g_y_3],
+                     [1, g_y_1, g_y_2, g_y_3],
+                     [1, g_y_1, g_y_2, g_y_3]]
+
+        5.2 Mask the lower triangle (inclusive) with 1s
+            y_mat = [[1, g_y_1, g_y_2, g_y_3],
+                     [1, 1    , g_y_2, g_y_3],
+                     [1, 1    , 1    , g_y_3],
+                     [1, 1    , 1    , 1    ]]
+
+        5.3 Apply cumulative product row-wise
+            y_mat = cumprod(y_mat, dim=1)
+            Resulting in:
+            y_mat = [[1, g_y_1, g_y_2 * g_y_1, g_y_3 * g_y_2 * g_y_1],
+                    [1, 1     , g_y_2        , g_y_3 * g_y_2        ],
+                    [1, 1     , 1            , g_y_3                ],
+                    [1, 1     , 1            , 1                    ]]
+
+        5.4 Zero out the lower triangle (exclusive)
+            Final y_mat:
+            y_mat = [[1, g_y_1, g_y_2 * g_y_1, g_y_3 * g_y_2 * g_y_1],
+                    [0, 1    , g_y_2         , g_y_3 * g_y_2        ],
+                    [0, 0    , 1             , g_y_3                ],
+                    [0, 0    , 0             , 1                    ]]
+
+    6.) Scale the y_mat with the upstream gradients g_ys
+        scaled_y_mat = y_mat * g_ys
+        Each entry now holds the full contribution of ∂L/∂y_j to ∂L/∂x_i via the path through y_j.
+
+    7.) Reduce the scaled_y_mat with a row-wise sum
+        summed_y_mat = scaled_y_mat.sum(dim=1)
+        This accumulates all downstream contributions for each x_t.
+
+    8.) Scale with the instantaneous input gradients g_x
+        g_xs = summed_y_mat * g_x
+
+        This gives the final input gradients:
+            g_xs = [∂L/∂x_0, ∂L/∂x_1, ..., ∂L/∂x_T]
+
+    NOTE: [scan partial grad handling]
+        If any element of xs or of the outputs does not require gradients
+        (i.e., requires_grad=False), then the corresponding gradients will be returned
+        as tensors of zeros with the same shape as the element.
+"""
+
 associative_scan_op.py_autograd_impl(
     autograd_not_implemented(associative_scan_op, deferred_error=True)
 )
