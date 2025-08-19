@@ -36,6 +36,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.template_heuristics import (
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
 )
@@ -47,7 +48,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_blackwell_tma_device,
+    has_triton_stable_tma_api,
+    has_triton_tma_device,
+)
 
 
 aten = torch.ops.aten
@@ -160,8 +165,25 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(mm, dynamic=dynamic)(a, b)
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
             c_expected = mm(a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = (
+                "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            )
+            read_api = "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_mm").check(make_desc_api).check(
+            read_api
+        ).check(write_api).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
@@ -225,6 +247,68 @@ class TestMaxAutotune(TestCase):
         ).run(code[0])
 
     @unittest.skipIf(
+        not has_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
+    def test_blackwell_max_autotune_regular_mm_persistent_tma(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+        epilogue_subtile: bool,
+    ):
+        def mm(a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        M, N, K = 32, 16, 48
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+
+        # Force a subtiling decision for testing.
+        CUDABlackwellPersistentTMATemplateConfigHeuristic._determine_epilogue_subtile = (
+            staticmethod(lambda *args, **kwargs: epilogue_subtile)
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_mm").check(
+            "triton.language.make_tensor_descriptor"
+        ).check("tl.load_tensor_descriptor").check(
+            "triton.language.store_tensor_descriptor"
+        ).run(code[0])
+
+    @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
     @parametrize("dynamic", (False, True))
@@ -247,6 +331,42 @@ class TestMaxAutotune(TestCase):
             ),
         ):
             torch.compile(mm, dynamic=dynamic)(a, b)
+
+        # Lowering to the persistent+TMA Triton template should be skipped
+        # if any of the input inner dims are not 16-byte aligned. As a result,
+        # given the config flags above, we should have no choices left.
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_illegal_output_alignment(
+        self, dynamic
+    ):
+        def mm(a, b, out):
+            torch.mm(a, b, out=out)
+            return out
+
+        M, N, K = 21, 31, 32
+        a = torch.empty_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
+        a[:] = torch.randn((M, K), dtype=torch.float16)
+        b = torch.empty_strided((K, N), (1, K), dtype=torch.float16, device=GPU_TYPE)
+        b[:] = torch.randn((K, N), dtype=torch.float16)
+        # allocate an output with a stride not divisble by 16, so it can't satisfy TMA alignment checks.
+        out = torch.empty_strided((M, N), (N, 1), dtype=torch.float16, device=GPU_TYPE)
+
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
+        ):
+            torch.compile(mm, dynamic=dynamic)(a, b, out)
 
         # Lowering to the persistent+TMA Triton template should be skipped
         # if any of the input inner dims are not 16-byte aligned. As a result,
@@ -347,8 +467,96 @@ class TestMaxAutotune(TestCase):
                 "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
             }
         ):
-            c_actual = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            c_actual, code = run_and_get_code(
+                torch.compile(addmm, dynamic=dynamic), x, a, b
+            )
             c_expected = addmm(x, a, b)
+
+        if has_triton_stable_tma_api():
+            make_desc_api = "triton.language.make_tensor_descriptor"
+            read_api = "tl.load_tensor_descriptor"
+            write_api = "triton.language.store_tensor_descriptor"
+        else:
+            make_desc_api = (
+                "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+            )
+            read_api = "tl._experimental_descriptor_load"
+            # TMA store is not supported with the experimental API
+            write_api = "tl.store"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_addmm").check(make_desc_api).check(
+            read_api
+        ).check(write_api).run(code[0])
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_blackwell_tma_device(), "Need Blackwell with device-side TMA support in Triton"
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    @parametrize("epilogue_subtile", (False, True))
+    def test_blackwell_max_autotune_addmm_persistent_tma(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+        epilogue_subtile: bool,
+    ):
+        def addmm(x, a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            x = x.repeat(8)
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = (
+            torch.randn(*((K, M) if a_transposed else (M, K)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        b = (
+            torch.randn(*((N, K) if b_transposed else (K, N)))
+            .to(torch.float16)
+            .to(GPU_TYPE)
+        )
+        x = torch.randn(N).to(torch.float16).to(GPU_TYPE)
+
+        # Force a subtiling decision for testing.
+        CUDABlackwellPersistentTMATemplateConfigHeuristic._determine_epilogue_subtile = (
+            staticmethod(lambda *args, **kwargs: epilogue_subtile)
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_device_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(
+                torch.compile(addmm, dynamic=dynamic), x, a, b
+            )
+            c_expected = addmm(x, a, b)
+
+        make_desc_api = "triton.language.make_tensor_descriptor"
+        read_api = "tl.load_tensor_descriptor"
+        write_api = "triton.language.store_tensor_descriptor"
+
+        # Verify that we are using a TMA implementation
+        FileCheck().check("triton_tem_fused_addmm").check(make_desc_api).check(
+            read_api
+        ).check(write_api).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
