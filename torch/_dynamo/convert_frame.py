@@ -227,7 +227,7 @@ def fx_forward_from_src_skip_result(
 
 def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
-    captured_tb = CapturedTraceback.extract(skip=4 + skip.summary()
+    captured_tb = CapturedTraceback.extract(skip=4 + skip).summary()
     frames_interned = structured.from_traceback(captured_tb)
     # Extract and filter the stack
     stack = list(
