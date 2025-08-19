@@ -722,7 +722,7 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::native_enum<c10::DispatchKey>(m, "DispatchKey", "enum.Enum")
+  py::native_enum<c10::DispatchKey>(m, "DispatchKey", "enum.IntEnum")
       // clang-format off
       DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
