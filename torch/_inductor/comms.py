@@ -242,6 +242,12 @@ def is_corresponding_collective_wait(collective_snode, wait_snode):
 
 
 def _op_runtime_estimate_mult(snode):
+    # Empirically comparing "benchmark" estimations:
+    # mm was underestimated x2-3
+    # collectives were overestimated x3-4
+    # TODO(ivankobzarev): Tune estimations to be more reliable,
+    # In favor of doing at least enough prefetching and sinking,
+    # just correcting linearly.
     if contains_collective(snode):
         return 0.5
     elif is_gemm_like(snode):
@@ -1190,24 +1196,7 @@ def _sink_waits_iterative_internal(
                             f"\n non_group_reason:{grp_reason}"
                         )
                         break
-                # Unlimit sink of Wait showed increase in "reserved" peak memory,
-                # keeping "active" peak memory under control.
-                #
-                # Heuristic for "reserved" peak memory:
-                # Pushing Wait beyond next collective will delay deallocation of
-                # corresponding to this Wait collective input.
-                # And overlap with next collective input allocation.
-                # If we deallocate input before collective, this memory can be used
-                # by next collective for input etc.
-                # TODO(ivankobzarev): This works only for Wait and Collective from the same
-                # process group, as allocations in CudaCachingAllocator are reused (normally)
-                # only for the same stream.
-                if contains_collective(candidate):
-                    info.limiting_factor = (
-                        "candidate is collective"
-                        f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
-                    )
-                    break
+
                 # Check if we already have sinked enough
                 if (
                     num_swapped_gemm_like_limit is not None
