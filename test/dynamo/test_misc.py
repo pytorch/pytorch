@@ -73,6 +73,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -12406,6 +12407,28 @@ fn
         ones = torch.ones(4, requires_grad=True)
         fn(ones)
         nonlocal_fn()
+
+    def test_scale_dot_product_attention_no_graphbreaks(self):
+        SDPA_BACKEND_PRIORITY = [
+            SDPBackend.MATH,
+            SDPBackend.EFFICIENT_ATTENTION,
+            SDPBackend.FLASH_ATTENTION,
+        ]
+        counter = CompileCounter()
+
+        @sdpa_kernel(backends=SDPA_BACKEND_PRIORITY, set_priority=True)
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        x = torch.rand(128, 64, 64, 256, dtype=torch.float16, device="cpu")
+        f(x)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_compare_tensor_with_none(self):
         @torch.compile()
