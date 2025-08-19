@@ -10,7 +10,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Optional
-from unittest import skipUnless
+from unittest import skipIf, skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
@@ -22,7 +22,7 @@ from torch.numa.binding import (
     AffinityMode,
     NumaOptions,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
 
 
 @dataclass(frozen=True)
@@ -702,6 +702,7 @@ class NumaBindingTest(TestCase):
                 target_local_rank=0,
             )
 
+    @skipIf(IS_MACOS, "sched_getaffinity doesn't exist")
     def test_binds_to_node_0_if_node_stored_as_minus_one(self) -> None:
         self._add_mock_hardware(
             num_sockets=1,
