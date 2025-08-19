@@ -2563,7 +2563,6 @@ class InstructionTranslatorBase(
 
     def MAKE_FUNCTION(self, inst: Instruction) -> None:
         flags = inst.arg
-        assert flags is not None
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -2579,14 +2578,15 @@ class InstructionTranslatorBase(
 
         if sys.version_info < (3, 13):
             # in 3.13, this is handled in SET_FUNCTION_ATTRIBUTE
-            if flags & 0x08:
-                closure = self.pop()
-            if flags & 0x04:
-                annotations = self.pop()
-            if flags & 0x02:
-                kwdefaults = self.pop()
-            if flags & 0x01:
-                defaults = self.pop()
+            if flags is not None:
+                if flags & 0x08:
+                    closure = self.pop()
+                if flags & 0x04:
+                    annotations = self.pop()
+                if flags & 0x02:
+                    kwdefaults = self.pop()
+                if flags & 0x01:
+                    defaults = self.pop()
 
         self.push(
             NestedUserFunctionVariable(
