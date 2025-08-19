@@ -1,4 +1,4 @@
-# torch.cuda
+# torch.cuda 
 
 ```{eval-rst}
 .. automodule:: torch.cuda
