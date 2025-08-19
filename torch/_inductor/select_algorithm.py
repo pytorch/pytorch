@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -168,12 +168,15 @@ class PartialRender:
     """
 
     HookFn = Callable[[], str]
-    MaybeHookFn = Union[HookFn, Literal["finalized"]]
 
-    def __init__(self, code: str, replacement_hooks: dict[str, MaybeHookFn]) -> None:
+    def __init__(
+        self, code: str, replacement_hooks: dict[str, Optional[HookFn]]
+    ) -> None:
         super().__init__()
         self._code: str = code
-        self.replacement_hooks: dict[str, PartialRender.MaybeHookFn] = replacement_hooks
+        self.replacement_hooks: dict[str, Optional[PartialRender.HookFn]] = (
+            replacement_hooks
+        )
 
     @property
     def code(self) -> str:
@@ -182,7 +185,7 @@ class PartialRender:
         finalized.
         """
         remaining_active_hooks = [
-            key for key, fn in self.replacement_hooks.items() if fn != "finalized"
+            key for key, fn in self.replacement_hooks.items() if fn is not None
         ]
         assert len(remaining_active_hooks) == 0, (
             f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
@@ -206,10 +209,10 @@ class PartialRender:
                 return
 
         hook = self.replacement_hooks[hook_key]
-        assert hook != "finalized", "hook_key can only be called once"
+        assert hook is not None, f"Hook key {hook_key} can only be called once"
         self._code = self._code.replace(hook_key, hook())
 
-        self.replacement_hooks[hook_key] = "finalized"
+        self.replacement_hooks[hook_key] = None
 
     def finalize_remaining(self) -> str:
         """
@@ -220,7 +223,7 @@ class PartialRender:
         finalize active hooks.
         """
         for key, fn in self.replacement_hooks.items():
-            if fn != "finalized":
+            if fn is not None:
                 self.finalize_hook(key)
         return self.code
 
