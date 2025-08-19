@@ -1414,7 +1414,7 @@ class _ROCmFABackend(Enum):
 # There is a chance this is due to a recent change in the semantics of enum
 # membership. If so, use `member = value` to mark an enum member, instead of
 # `member: type`
-class ConvBackend(Enum): ...  # type: ignore[misc]
+class ConvBackend(IntEnum): ...  # type: ignore[misc]
 
 class Tag(Enum):
     ${tag_attributes}
@@ -1769,7 +1769,7 @@ def _set_only_lift_cpu_tensors(value: _bool) -> None: ...
 def _set_throw_on_mutable_data_ptr(tensor: Tensor) -> None: ...
 def _set_warn_deprecated_on_mutable_data_ptr(tensor: Tensor) -> None: ...
 
-class DispatchKey(Enum):
+class DispatchKey(IntEnum):
     ${dispatch_key_hints}
 
 class DispatchKeySet:
