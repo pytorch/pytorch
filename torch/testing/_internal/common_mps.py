@@ -74,6 +74,7 @@ if torch.backends.mps.is_available():
             "H",
             "hsplit",
             "imag",
+            "index_add",
             "index_copy",
             "index_select",
             "index_put",
@@ -419,7 +420,6 @@ if torch.backends.mps.is_available():
             ],
             # Unsupported dtypes
             "histc": [torch.float16, torch.bfloat16],
-            "index_add": [torch.int64],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,

@@ -3028,6 +3028,32 @@ def forward(self, causal_mask, fill_value):
                 },
             )
 
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+
+        # check unbacked bindings
+        # should be 4 symbols: u0, u1, output size, output storage offset
+        bound_unbacked = set()
+        for node in ep.graph.nodes:
+            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
+        self.assertEqual(len(bound_unbacked), 4)
+
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -5704,7 +5730,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice(self):
+    def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr
