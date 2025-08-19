@@ -53,7 +53,11 @@ class StaticallyLaunchedAutotuner:
     Statically saved here have their cubin files saved by a corresponding TritonBundleEntry.
     """
 
-    cache_key: str
+    # We store the kernel's python source code here which we use for two things:
+    # First, to calculate a cache key for CompiledTritonKernels
+    # Second, in case we need to reload the kernel on load,
+    # we can do so by reading the source code from the cache entry.
+    source_code: str
     kernel_name: str
     kernel: "CachingAutotuner"  # type: ignore[name-defined] # noqa: F821
 
@@ -164,7 +168,7 @@ class TritonBundler:
             )
 
     @classmethod
-    def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
+    def put_static_autotuner(cls, source_code: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
         from torch._inductor import config
 
         assert config.use_static_cuda_launcher
@@ -178,7 +182,7 @@ class TritonBundler:
 
             entries.append(
                 StaticallyLaunchedAutotuner(
-                    key,
+                    source_code,
                     new_kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
                     new_kernel,
                 )
@@ -240,8 +244,9 @@ class TritonBundler:
                 # kernels that are not statically launchable (i.e. cache miss)
                 # can launch a worker without waiting on the blocking step of
                 # StaticAutotunerFuture.result().
-                CompiledTritonKernels._cache[result.cache_key] = StaticAutotunerFuture(
-                    result.kernel
+                cache_key = CompiledTritonKernels.key(result.source_code)
+                CompiledTritonKernels._cache[cache_key] = StaticAutotunerFuture(
+                    result.kernel, result.kernel_name, result.source_code
                 )
                 counters["inductor"]["triton_bundler_load_static_autotuner"] += 1
                 kernel_names.append(result.kernel_name)

@@ -169,7 +169,16 @@ class PrecompileContext(CacheArtifactManager):
         by artifact type. This function transfers artifacts from _new_cache_artifacts_by_key to _new_cache_artifacts
         """
         for artifact in cls._new_cache_artifacts_by_key.values():
+            from torch._functorch._aot_autograd.autograd_cache import (
+                BundledAOTAutogradCacheEntry,
+            )
+
             if isinstance(artifact, EditablePrecompileCacheArtifact):
+                if isinstance(artifact.content, BundledAOTAutogradCacheEntry):
+                    # BundledAOTAutogradCacheEntries should update their autotune results
+                    artifact.edit_contents(
+                        BundledAOTAutogradCacheEntry.update_autotune_results
+                    )
                 artifact = artifact.real_encode()
             cls._new_cache_artifacts[artifact.__class__.type()].append(artifact)
         cls._new_cache_artifacts_by_key.clear()
@@ -195,6 +204,15 @@ class PrecompileContext(CacheArtifactManager):
         """
         result = cls._new_cache_artifacts_by_key.get(key, None)
         if isinstance(result, EditablePrecompileCacheArtifact):
+            from torch._functorch._aot_autograd.autograd_cache import (
+                BundledAOTAutogradCacheEntry,
+            )
+
+            if isinstance(result.content, BundledAOTAutogradCacheEntry):
+                # BundledAOTAutogradCacheEntries should update their autotune results
+                result.edit_contents(
+                    BundledAOTAutogradCacheEntry.update_autotune_results
+                )
             result = result.real_encode()
         return result
 

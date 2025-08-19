@@ -16,7 +16,7 @@ from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._functorch import config as functorch_config
-from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
+from torch._inductor.mock_cache import global_stats, PatchCaches
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -452,27 +452,33 @@ def add(x, y):
         def fn(x, y):
             return x.sin() + y
 
-        arg1 = torch.randn(3, 3, device=device)
-        arg2 = torch.randn(3, 3, device=device)
+        arg1 = torch.randn(32, 32, device=device)
+        arg2 = torch.randn(32, 32, device=device)
         expected = fn(arg1, arg2).clone()
 
         with PatchCaches():
             compiled_fn1 = torch.compile(fn, mode="max-autotune")
             result = compiled_fn1(arg1, arg2).clone()
             self.assertEqual(expected, result)
-            self.assertEqual(global_stats.autotune_local, Stats(1, 0, 1))
+            self.assertEqual(global_stats.autotune_local.num_get_miss, 1)
             DynamoCache.clear()
 
             total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
             self._save_and_reload(
                 expected_backends=1, expected_dynamo=1, expected_autotune=1
             )
+            # During save, we check the autotune cache another time, and now it should hit
+            self.assertEqual(global_stats.autotune_local.num_get_hit, 1)
             compiled_fn1 = torch.compile(fn, mode="max-autotune")
             with torch.compiler.set_stance("fail_on_recompile"):
                 result1 = compiled_fn1(arg1, arg2).clone()
                 self.assertEqual(expected, result1)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
-            self.assertEqual(global_stats.autotune_local, Stats(2, 1, 1))
+            # No new hits or misses
+            # Unfortunately, we don't *actually* know how many puts there will be, because
+            # it's possible the best autotune config was found by coordesc.
+            self.assertEqual(global_stats.autotune_local.num_get_hit, 1)
+            self.assertEqual(global_stats.autotune_local.num_get_miss, 1)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

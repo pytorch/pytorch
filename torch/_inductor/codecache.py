@@ -4209,24 +4209,28 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+    def __init__(
+        self, static_autotuner: CachingAutotuner, kernel_name: str, source_code: str
+    ) -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
-        # This needs to be set in AsyncCompile.triton, in case
-        # we need to reload the CachingAutotuner from its source code
-        # We don't store the source code on the CachingAutotuner itself
-        # since it can be very large.
-        self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
+        self.kernel_name = kernel_name
+        # The python source code of the kernel is relatively small and stored by StaticallyLaunchedAutotuner.
+        # We do not store the compiled cuda code here as it's very large,
+        # it's stored via the regular TritonBundler
+        self.source_code = source_code
 
     def result(self) -> CachingAutotuner:
-        assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            reload_kernel_from_src = functools.partial(
+                _load_triton_kernel_from_source, self.kernel_name, self.source_code
+            )
             self.static_autotuner.recheck_autotune_cache(
-                reload_kernel_from_src=self.reload_kernel_from_src
+                reload_kernel_from_src=reload_kernel_from_src
             )
             self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
-                reload_kernel=self.reload_kernel_from_src,
-                static_triton_bundle_key=None,  # no need to save again
+                reload_kernel=reload_kernel_from_src,
+                source_code=None,  # no need to save again
             )
             return self.static_autotuner
