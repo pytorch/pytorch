@@ -327,7 +327,7 @@ if not IS_WINDOWS:
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
-                # set use_deterministic_algorithms to fill unintialized memory
+                # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
                 t = torch.randn(3, 4, device=device)
                 out = libtorch_agnostic.ops.my_new_empty_dtype_variant(t)
