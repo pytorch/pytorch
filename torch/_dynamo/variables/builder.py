@@ -3459,15 +3459,10 @@ def _automatic_dynamic(
     )
 
 
-in_wrap_to_fake_tensor_and_record = False
-
-
 # See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(
     e, tx, *, source: Optional[Source], is_tensor: bool, parent_context=None
 ):
-    global in_wrap_to_fake_tensor_and_record
-    in_wrap_to_fake_tensor_and_record = True
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
         or isinstance(e, torch.Tensor)
@@ -3561,9 +3556,9 @@ def wrap_to_fake_tensor_and_record(
             )
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
 
-        e = fake_e
-    in_wrap_to_fake_tensor_and_record = True
-    return e
+        return fake_e
+    else:
+        return e
 
 
 class SourcelessBuilder:
