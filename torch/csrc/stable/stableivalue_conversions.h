@@ -1,12 +1,15 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/tensor-struct.h>
+#include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
 
+// use anonymous namespace to avoid collisions between differing
+// versions of this file that may be included by different sources
 namespace {
 
 // forward declare so that the from/to() implementations in the detail
@@ -57,7 +60,7 @@ struct FromImpl {
         reinterpret_cast<const void*>(&val),
         sizeof(val));
 #else
-#error Unexpected or undefined __BYTE_ORDER__
+#error "Unexpected or undefined __BYTE_ORDER__"
 #endif
     return result;
   }
@@ -164,8 +167,7 @@ struct FromImpl<std::optional<T>> {
     if (!val.has_value()) {
       return from(std::nullopt);
     }
-    StableIValue* heap_val = new StableIValue(from(val.value()));
-    return from(heap_val);
+    return from(new StableIValue(from(val.value())));
   }
 };
 
@@ -175,7 +177,7 @@ template <>
 struct FromImpl<torch::stable::Tensor> {
   static StableIValue call(const torch::stable::Tensor& val) {
     AtenTensorHandle new_ath;
-    aoti_torch_new_tensor_handle(val.get(), &new_ath);
+    TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle(val.get(), &new_ath));
     return from(new_ath);
   }
 };
@@ -213,7 +215,7 @@ struct ToImpl {
             sizeof(result),
         sizeof(result));
 #else
-#error Unexpected or undefined __BYTE_ORDER__
+#error "Unexpected or undefined __BYTE_ORDER__"
 #endif
     return result.t;
   }
@@ -266,7 +268,8 @@ struct ToImpl<ScalarType> {
       return ScalarType::UInt64;
     } else {
       throw std::runtime_error(
-          "Not yet supported ScalarType, please file an issue describing your use case.");
+          "Not yet supported ScalarType " + std::to_string(shim_scalartype) +
+          ", please file an issue describing your use case.");
     }
   }
 };
