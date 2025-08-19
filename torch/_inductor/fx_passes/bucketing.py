@@ -10,6 +10,7 @@ from torch._dynamo.utils import detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
+import collections
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ def bucket_all_gather(
     ag_buckets = bucket_all_gather_by_mb(gm, bucket_cap_mb_by_bucket_idx)
     if len(ag_buckets) == 0:
         return
+
     merge_all_gather(gm, ag_buckets)
 
 
@@ -86,6 +88,39 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
+def collect_node_descendants(graph: torch.fx.Graph) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
+    """
+    Collects the descendants of each node in the graph.
+    Args:
+        graph (torch.fx.Graph): The graph to collect descendants from.
+    Returns:
+        dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendants.
+    """
+    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = collections.defaultdict(OrderedSet)
+    outdegree = collections.defaultdict(int)
+    queue = []
+
+    for node in graph.nodes:
+        n_outdegree = len(node.users)
+        if n_outdegree == 0:
+            queue.append(node)
+        else:
+            outdegree[node] = len(node.users)
+
+    while queue:
+        node = queue.pop()
+        for input_node in node.all_input_nodes:
+            node_descendants[input_node] |= node_descendants[node]
+            node_descendants[input_node].add(node)
+            outdegree[input_node] -= 1
+
+            if outdegree[input_node] == 0:
+                queue.append(input_node)
+
+    return node_descendants
+
+
+
 def greedy_bucket_collective_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
@@ -93,24 +128,17 @@ def greedy_bucket_collective_by_mb(
     node_group_key: Callable[[torch.fx.Node], Any],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> list[list[torch.fx.Node]]:
-    g = gm.graph
-    found_candidates = False
-    for node in g.nodes:
-        if filter_node(node):
-            found_candidates = True
-            break
-    if not found_candidates:
+
+    if not gm.graph.find_nodes(op="call_function", target=torch.ops._c10d_functional.wait_tensor.default):
         return []
 
+    g = gm.graph
+
     nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
-    nodes_successors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(
-        OrderedSet
-    )
+
+    node_descendents = collect_node_descendants(gm.graph)
 
     for node in g.nodes:
-        for n, successors in nodes_successors.items():
-            if any(arg in successors for arg in node.args):
-                successors.add(n)
         if is_wait_tensor(node) and filter_node(node.args[0]):
             if (filter_wait_node is None) or filter_wait_node(node):
                 coll_node = node.args[0]
@@ -118,17 +146,18 @@ def greedy_bucket_collective_by_mb(
                 nodes_groups[group_key].append(coll_node)
 
     buckets: list[list[torch.fx.Node]] = []
+
     for nodes in nodes_groups.values():
         cur_bucket: list[torch.fx.Node] = []
-        cur_bucket_successors: OrderedSet[torch.fx.Node] = OrderedSet()
+        cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
         bucket_size_bytes = int(
             bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
         )
         for node in nodes:
-            if node in cur_bucket_successors:
-                # We can not bucket successors with the node
+            if node in cur_bucket_descendents:
+                # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
@@ -143,10 +172,10 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket = []
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
-                cur_bucket_successors = OrderedSet()
+                cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_successors |= nodes_successors[node]
+            cur_bucket_descendents |= node_descendents[node]
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
@@ -242,6 +271,8 @@ def reduce_scatter_merge_fn_to_trace(
 
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
 
+    # TODO - either use torch.cat or make sure inductor foreach codegen
+    # fires more reliably
     new_rs_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.reduce_scatter_tensor.default(
             new_rs_in, reduce_op, group_size, group_name
@@ -330,8 +361,11 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     fake_mode = detect_fake_mode(inps)
     assert fake_mode is not None
     with fake_mode, enable_python_dispatcher():
-        return make_fx(fn)(*inps)
-
+        out = make_fx(fn)(*inps)
+        for node in out.graph.find_nodes(op="call_function", target=torch.ops.aten.detach.default):
+            node.replace_all_uses_with(node.args[0])
+            out.graph.erase_node(node)
+        return out
 
 def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     g: torch.fx.Graph,
@@ -491,13 +525,6 @@ def merge_all_gather(
                 and ag_node.meta["val"].dtype == dtype
             )
             ag_node_in = ag_node.args[0]
-            if (
-                ag_node_in.op == "call_function"  # type: ignore[union-attr]
-                and ag_node_in.target == torch.ops.prims.convert_element_type.default  # type: ignore[union-attr]
-                and len(ag_node_in.users) == 1  # type: ignore[union-attr]
-            ):
-                ag_node_to_pre_nodes[ag_node].append(ag_node_in)
-                ag_node_in = ag_node_in.args[0]  # type: ignore[union-attr]
 
             ag_ins[bucket_idx].append(ag_node_in)  # type: ignore[union-attr, arg-type]
             ag_waits[bucket_idx].append(wait_node)
