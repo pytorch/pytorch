@@ -134,8 +134,8 @@ numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
 numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
-numpy==2.1.2; python_version >= "3.13"
+numpy==1.26.2; python_version == "3.11"
+numpy==2.1.2; python_version >= "3.12"
 
 pandas==2.0.3; python_version < "3.13"
 pandas==2.2.3; python_version >= "3.13"
