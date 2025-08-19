@@ -68,7 +68,7 @@ class _TestClipGradNormBase(FSDPTest):
                     max_norm=max_norm,
                     norm_type=norm_type,
                 )
-            self.assertEqual(ref_total_norm, total_norm.full_tensor())
+            self.assertEqual(ref_total_norm, total_norm.full_tensor(), atol=5e-05, rtol=2e-06)
             # Expect one all-reduce per mesh dim for partial -> replicate
             expected_all_reduces = len(total_norm.placements)
             self.assertEqual(

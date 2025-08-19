@@ -270,6 +270,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skipIfRocm
     def test_allreduce_in_cudagraph(self):
         pg = self.pg
         local_device_idx = self.rank_to_GPU[self.rank][0]

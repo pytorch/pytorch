@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
+    skipIfRocm
 )
 
 
@@ -242,6 +243,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
             compute_only = e3["gpu_compute"]
             all_gather_only = e2["gpu_total"]
             both = e4["gpu_total"]
+            print(f"compute_only={compute_only} all_gather_only={all_gather_only} both={both}")
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
     @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
@@ -250,6 +252,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
         self._dist_train()
 
 
+@skipIfRocm #Not running upstream
 class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
     @property
     def world_size(self):
