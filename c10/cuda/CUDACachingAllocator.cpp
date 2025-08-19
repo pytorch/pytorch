@@ -139,108 +139,7 @@ namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
-struct Block;
-struct PrivatePool;
-typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorSize(const Block* a, const Block* b);
-static bool BlockComparatorAddress(const Block* a, const Block* b);
-
-struct BlockPool {
-  BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSize),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
-
-  // Do not insert a Block to blocks directly; use insert_into_blocks(),
-  // instead.
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> unmapped;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const bool is_small;
-  PrivatePool* owner_PrivatePool;
-  int64_t get_free_blocks_call_count{0};
-
-  // Add a Block into blocks set with updating gc counter.
-  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
-      Block* block);
-
-  MempoolId_t owner_MempoolId() const;
-};
-
-struct ExpandableSegment;
-
-struct Block {
-  c10::DeviceIndex device; // gpu
-  cudaStream_t stream; // allocation stream
-  stream_set stream_uses; // streams on which the block was used
-  size_t size; // block size in bytes
-  size_t requested_size; // memory originally requested
-  BlockPool* pool{nullptr}; // owning memory pool
-  void* ptr{nullptr}; // memory address
-  bool allocated{false}; // in-use flag
-  bool mapped{true}; // is the virtual address range this Block references
-                     // backed by physical pages. Always true when
-                     // expandable_segment_ is null. When false
-                     // This Block will be aligned to the segment size
-                     // of its expandable_segment_.
-  Block* prev{nullptr}; // prev block if split from a larger allocation
-  Block* next{nullptr}; // next block if split from a larger allocation
-  int event_count{0}; // number of outstanding CUDA events
-  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
-  std::shared_ptr<GatheredContext> context_when_allocated;
-  // only set for the first block in the segment (when prev == null)
-  // this records the frame information when cudaMalloc was called
-  // whereas context_when_allocated records the last time we handed this
-  // memory out from our cache.
-  std::shared_ptr<GatheredContext> context_when_segment_allocated;
-
-  ExpandableSegment* expandable_segment_{nullptr};
-
-  Block(
-      c10::DeviceIndex device,
-      cudaStream_t stream,
-      size_t size,
-      BlockPool* pool,
-      void* ptr)
-      : device(device),
-        stream(stream),
-        size(size),
-        requested_size(0),
-        pool(pool),
-        ptr(ptr) {}
-
-  // constructor for search key
-  Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {}
-
-  size_t gc_count() {
-    TORCH_INTERNAL_ASSERT(pool);
-    return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
-  }
-
-  bool is_split() const {
-    return (prev != nullptr) || (next != nullptr);
-  }
-  void splice(Block* before, Block* after) {
-    if (before) {
-      TORCH_INTERNAL_ASSERT(before->next == after);
-      before->next = this;
-    }
-    prev = before;
-    if (after) {
-      TORCH_INTERNAL_ASSERT(after->prev == before);
-      after->prev = this;
-    }
-    next = after;
-  }
-};
-
-std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
-    insert_into_blocks(Block* block) {
-  block->gc_count_base = get_free_blocks_call_count;
-  return blocks.insert(block);
-}
+using Block = DeviceBlock<cuda::CUDAStream>;
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
@@ -338,6 +237,43 @@ Instead these mapping have to be done manually. The allocator now has an
 `enablePeerAccess` method to do this.
 */
 
+template <>
+struct ExpandableSegmentTraits<cuda::CUDAStream> {
+  struct Handle {
+    CUmemGenericAllocationHandle handle;
+    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+  };
+  using HandleT = Handle*;
+};
+
+struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
+
+  private:
+  size_t getReservedVirtualMemorySize() override {
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
+    // we allocate enough address space for 1 1/8 the total memory on the GPU.
+    // This allows for some cases where we have to unmap pages earlier in the
+    // segment to put them at the end.
+    return prop.totalGlobalMem + prop.totalGlobalMem / 8;
+  }
+
+  void createVirtualMemoryAddress(void** ptr) override {
+    CUdeviceptr devPtr{};
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
+      &devPtr, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    *ptr = reinterpret_cast<void*>(devPtr);
+  }
+
+
+
+
+  struct ShareHeader {
+    pid_t pid;
+    size_t segment_size;
+    size_t num_handles;
+  };
+}
 struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
@@ -699,11 +635,7 @@ struct ExpandableSegment {
     CUmemGenericAllocationHandle handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
   };
-  struct ShareHeader {
-    pid_t pid;
-    size_t segment_size;
-    size_t num_handles;
-  };
+  
   std::vector<std::optional<Handle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
