@@ -396,7 +396,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
-            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -431,7 +430,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
-            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -470,7 +468,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             custom_opsets={"com.microsoft": 1},
             input_names=["x"],
             dynamic_axes={"x": {0: "batch"}},
-            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -511,7 +508,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
-            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
