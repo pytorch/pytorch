@@ -9,6 +9,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -383,6 +384,16 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
       f(stat_type);
     }
   }
+}
+
+void decrease_stat_array(
+    StatArray& stat_array,
+    size_t amount,
+    const StatTypes& stat_types) {
+  for_each_selected_stat_type(
+      stat_types, [&stat_array, amount](size_t stat_type) {
+        stat_array[stat_type].decrease(amount);
+      });
 }
 
 // Structure for keeping timing information

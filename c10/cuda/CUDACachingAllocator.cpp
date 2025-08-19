@@ -55,8 +55,7 @@ typedef CUmemFabricHandle_v1 CUmemFabricHandle;
 
 namespace c10 {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
+C10_DEFINE_REGISTRY(FreeMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
 
@@ -130,15 +129,6 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
-constexpr size_t kMinBlockSize =
-    512; // all sizes are rounded to at least 512 bytes
-constexpr size_t kSmallSize = 1048576; // largest "small" allocation is 1 MiB
-constexpr size_t kSmallBuffer =
-    2097152; // "small" allocations are packed in 2 MiB blocks
-constexpr size_t kMinLargeAlloc =
-    10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
-
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
@@ -148,16 +138,6 @@ enum ShareableHandleType : char {
 namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
-
-void decrease_stat_array(
-    StatArray& stat_array,
-    size_t amount,
-    const StatTypes& stat_types) {
-  for_each_selected_stat_type(
-      stat_types, [&stat_array, amount](size_t stat_type) {
-        stat_array[stat_type].decrease(amount);
-      });
-}
 
 struct Block;
 struct PrivatePool;
@@ -261,12 +241,6 @@ std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
   block->gc_count_base = get_free_blocks_call_count;
   return blocks.insert(block);
 }
-
-struct SegmentRange {
-  char* ptr;
-  size_t size;
-  SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
-};
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
@@ -980,12 +954,6 @@ PrivatePoolState::PrivatePoolState(
   }
 }
 
-struct MempoolIdHash {
-  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
-    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
-  }
-};
-
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
@@ -1009,69 +977,6 @@ cudaError_t cudaMallocMaybeCapturing(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
-template <class T>
-class RingBuffer {
- public:
-  RingBuffer() {
-    // alloc_trace is a pointer because we need to intentionally
-    // leak this on deallocation it can hold references to Python
-    // state which will already be destroyed when we are in exit handlers
-    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    alloc_trace = new std::vector<T>();
-  }
-
-  void setMaxEntries(size_t size) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_max_entries_ = std::max(size_t(1), size);
-  }
-
-  void insertEntries(const T& entry) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(entry);
-    } else {
-      (*alloc_trace)[alloc_trace_next++] = entry;
-      if (alloc_trace_next == alloc_trace_max_entries_) {
-        alloc_trace_next = 0;
-      }
-    }
-  }
-
-  void getEntries(std::vector<T>& result) {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    result.reserve(alloc_trace->size());
-    result.insert(
-        result.end(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next),
-        alloc_trace->end());
-    result.insert(
-        result.end(),
-        alloc_trace->begin(),
-        alloc_trace->begin() +
-            static_cast<typename std::vector<T>::difference_type>(
-                alloc_trace_next));
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> lk(alloc_trace_lock);
-    alloc_trace_next = 0;
-    alloc_trace->clear();
-  }
-
- private:
-  size_t alloc_trace_max_entries_ = 1;
-
-  // Both alloc_trace and alloc_trace_next needs to be used
-  // under alloc_trace_lock.
-  std::mutex alloc_trace_lock;
-  size_t alloc_trace_next = 0;
-  std::vector<T>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
-};
 } // anonymous namespace
 } // namespace Native
 
@@ -1325,7 +1230,7 @@ class DeviceCachingAllocator {
       //    effect on memory use during capture should be small.
       process_events(context);
     }
-    size_t size = round_size(orig_size);
+    const size_t size = get_round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size);
@@ -2166,46 +2071,6 @@ class DeviceCachingAllocator {
     return result;
   }
 
-  // This function takes the size and number of divisions argument and rounds
-  // up the size argument for the nearest power-of-2 division.
-  // For example, if we need to round-up 1200 and number of divisions is 4,
-  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
-  // them, the values are 1024, 1280, 1536, and 1792. So the function will
-  // return 1280 as the nearest ceiling of power-2 division.
-  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (llvm::isPowerOf2_64(size)) {
-      return size;
-    }
-
-    TORCH_CHECK(divisions >= 2, "Only 2 or more divisions are supported");
-
-    // divide the space between these 2's power into equal divisions
-    // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
-        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
-      return (power2_floor << 1);
-    }
-    size_t round_size_floor = size & (~(power2_divison - 1));
-    return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
-  }
-
-  static size_t round_size(size_t size) {
-    if (size < kMinBlockSize) {
-      return kMinBlockSize;
-    } else {
-      auto divisions =
-          AcceleratorAllocatorConfig::roundup_power2_divisions(size);
-      if (divisions > 1 && size > (kMinBlockSize * divisions)) {
-        return roundup_power2_next_division(size, divisions);
-      } else {
-        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
-      }
-    }
-  }
-
   void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
@@ -2681,16 +2546,6 @@ class DeviceCachingAllocator {
     }
   }
 
-  static size_t get_allocation_size(size_t size) {
-    if (size <= kSmallSize) {
-      return kSmallBuffer;
-    } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
-    } else {
-      return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
-    }
-  }
-
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
@@ -2753,9 +2608,8 @@ class DeviceCachingAllocator {
 
   bool trigger_free_memory_callbacks(AllocParams& p) {
     bool freed_memory = false;
-    for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
-      freed_memory |=
-          FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+    for (const auto& name : FreeMemoryCallbacksRegistry()->Keys()) {
+      freed_memory |= FreeMemoryCallbacksRegistry()->Create(name)->Execute();
     }
     return freed_memory;
   }
@@ -3432,11 +3286,6 @@ static void uncached_delete(void* ptr) {
 
 static void local_raw_delete(void* ptr);
 thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
-#ifdef __cpp_lib_hardware_interference_size
-using std::hardware_destructive_interference_size;
-#else
-static constexpr std::size_t hardware_destructive_interference_size = 64;
-#endif
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
