@@ -86,20 +86,14 @@ class TestONNXScriptExport(common_utils.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model_selu = torch.nn.SELU()
         selu_onnx = io.BytesIO()
-        torch.onnx.export(
-            model_selu, x, selu_onnx, opset_version=self.opset_version, dynamo=False
-        )
+        torch.onnx.export(model_selu, x, selu_onnx, opset_version=self.opset_version)
 
         N, C = 3, 4
         y = torch.randn(N, C)
         model_layer_norm = torch.nn.LayerNorm(C)
         layer_norm_onnx = io.BytesIO()
         torch.onnx.export(
-            model_layer_norm,
-            y,
-            layer_norm_onnx,
-            opset_version=self.opset_version,
-            dynamo=False,
+            model_layer_norm, y, layer_norm_onnx, opset_version=self.opset_version
         )
 
         # 4. test on models
@@ -162,11 +156,7 @@ class TestONNXScriptExport(common_utils.TestCase):
 
         saved_model = io.BytesIO()
         torch.onnx.export(
-            torch.jit.script(model),
-            inputs,
-            f=saved_model,
-            opset_version=15,
-            dynamo=False,
+            torch.jit.script(model), inputs, f=saved_model, opset_version=15
         )
         loop_selu_proto = onnx.load(io.BytesIO(saved_model.getvalue()))
         self.assertEqual(len(loop_selu_proto.functions), 1)
