@@ -261,7 +261,7 @@ class Guard:
     # it is meaningless.  Example create_fns that are like this include
     # GRAD_MODE and SHAPE_ENV.
     originating_source: Source
-    create_fn: Callable[[GuardBuilderBase, Guard], Any]
+    create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[list[str]] = None
