@@ -25,7 +25,7 @@ from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
-    is_batch_stride_largest,
+    is_batch_stride_largest_or_zero,
     mm_args,
 )
 
@@ -95,7 +95,7 @@ bmm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -215,9 +215,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
                 **kwargs,
             )
     _, is_nonzero = _is_static_problem(layout)
-    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
+    batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
     if (
-        batch_stride_largest
+        batch_stride_largest_or_zero
         and is_nonzero
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
