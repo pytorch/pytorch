@@ -2680,7 +2680,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bs", (5,))
-    @parametrize("Mdim", (64,))
+    @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
     def test_bmm_self_square(self, bs, Mdim, dtype):
         class M(torch.nn.Module):
