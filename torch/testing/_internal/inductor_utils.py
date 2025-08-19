@@ -71,6 +71,8 @@ else:
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
+HAS_CUDA_AND_TRITON_NO_ROCM = HAS_CUDA_AND_TRITON and torch.version.hip is None
+
 HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()

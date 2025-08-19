@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON_NO_ROCM
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -122,7 +122,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
-if HAS_CUDA_AND_TRITON:
+if HAS_CUDA_AND_TRITON_NO_ROCM:
 
     def get_all_cudagraph_segments():
         segments = torch.cuda.memory_snapshot()
@@ -4351,5 +4351,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_CUDA_AND_TRITON_NO_ROCM:
         run_tests(needs="filelock")
