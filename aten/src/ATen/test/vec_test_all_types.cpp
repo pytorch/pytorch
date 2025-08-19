@@ -586,7 +586,7 @@ namespace {
         }
       }
     }
-#if (defined(CPU_CAPABILITY_SVE) || defined(CPU_CAPABILITY_SVE256)) && defined(__ARM_FEATURE_BF16)
+#if (defined(CPU_CAPABILITY_SVE256)) && defined(__ARM_FEATURE_BF16)
     TEST(NanBfloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::BFloat16 val(ii, c10::BFloat16::from_bits());
@@ -594,6 +594,19 @@ namespace {
         CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::SVE256::Vectorized<c10::BFloat16>::size()];
         at::vec::SVE256::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
         for (int jj = 0; jj < at::vec::SVE256::Vectorized<c10::BFloat16>::size(); ++jj) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        }
+      }
+    }
+#endif
+#if (defined(CPU_CAPABILITY_SVE)) && defined(__ARM_FEATURE_BF16)
+    TEST(NanBfloat16, IsNan) {
+      for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
+        c10::BFloat16 val(ii, c10::BFloat16::from_bits());
+        bool expected = std::isnan(val);
+        CACHE_ALIGN c10::BFloat16 actual_vals[at::vec::SVE::Vectorized<c10::BFloat16>::size()];
+        at::vec::SVE::Vectorized<c10::BFloat16>(val).isnan().store(actual_vals);
+        for (int jj = 0; jj < at::vec::SVE::Vectorized<c10::BFloat16>::size(); ++jj) {
           EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "bf16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
       }

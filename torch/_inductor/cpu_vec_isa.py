@@ -173,7 +173,7 @@ class VecSVE256(VecISA):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
     _macro = [
-        "CPU_CAPABILITY_SVE",
+        "HAVE_SVE_CPU_DEFINITION",
         "CPU_CAPABILITY_SVE256",
         "AT_BUILD_ARM_VEC256_WITH_SLEEF",
         "__ARM_FEATURE_BF16",
@@ -197,8 +197,9 @@ class VecSVE(VecISA):
         "HAVE_SVE_CPU_DEFINITION",
         "CPU_CAPABILITY_SVE",
         "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+        "__ARM_FEATURE_BF16",
     ]
-    _arch_flags = "-march=armv8-a+sve"
+    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=128"
     _dtype_nelements = {torch.float: int(_bit_width / 32), torch.bfloat16: int(_bit_width / 16), torch.float16: int(_bit_width / 16)}
 
     def __str__(self) -> str:
