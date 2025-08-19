@@ -3536,7 +3536,6 @@ def linear_cross_entropy(
     return cross_entropy(
         linear(input=input, weight=linear_weight, bias=bias),
         target,
-        chunking_strategy=chunking_strategy,
         ignore_index=ignore_index,
         label_smoothing=label_smoothing,
         reduce=reduce,
