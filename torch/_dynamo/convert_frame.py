@@ -80,6 +80,7 @@ from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
+    DynamoTracerOutput,
     Instruction,
     is_generator,
     propagate_inst_exn_table_entries,
@@ -517,7 +518,7 @@ class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
 
 
-def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
+def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
     if tx is None:
         return _get_error_on_graph_break()
     return tx.error_on_graph_break
@@ -731,9 +732,6 @@ from collections import OrderedDict
 from torch.utils.hooks import RemovableHandle
 
 
-if typing.TYPE_CHECKING:
-    from .output_graph import OutputGraph
-
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
 
@@ -782,8 +780,7 @@ def _compile(
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
-    output: Optional[OutputGraph] = None
-    tracer: Optional[InstructionTranslator] = None
+    tracer_output: Optional[DynamoTracerOutput] = None
 
     tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
         torch.overrides._get_current_function_mode_stack()
@@ -793,8 +790,7 @@ def _compile(
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
-        nonlocal output
-        nonlocal tracer
+        nonlocal tracer_output
         speculation_log.restart()  # type: ignore[has-type]
         exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
@@ -817,10 +813,12 @@ def _compile(
             package=package,
         )
 
+        output = None
         try:
             tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
+            output = tracer.output
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]
             raise
@@ -835,9 +833,13 @@ def _compile(
                 bisect(tracer.output.shape_env)
             raise
         finally:
+            tracer_output = DynamoTracerOutput(
+                error_on_graph_break=tracer.error_on_graph_break,
+                is_tracing_resume_prologue=tracer.is_tracing_resume_prologue,
+                output_graph=output,
+            )
             tracer.output.call_cleanup_hooks()
 
-        output = tracer.output
         assert output is not None
         assert output.output_instructions
         instructions[:] = output.output_instructions
@@ -932,7 +934,7 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph or _is_error_on_graph_break(tracer):
+                if one_graph or _is_error_on_graph_break(tracer_output):
                     log.debug(
                         "No graph captured with one_graph=True or error_on_graph_break=True"
                     )
@@ -960,7 +962,8 @@ def _compile(
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
-        assert output is not None
+        assert tracer_output is not None and tracer_output.output_graph is not None
+        output = tracer_output.output_graph
 
         # Tests for new code objects.
         # The rationale for these tests can be found in torch/csrc/dynamo/eval_frame.c
@@ -1018,7 +1021,7 @@ def _compile(
                 cache_entry,
                 hooks.guard_fail_fn if hooks else None,
                 hooks.guard_filter_fn if hooks else None,
-                guards_serialization_mode="save" if package else None,
+                save_guards=True if package else False,
             )
 
         if package is not None:
@@ -1139,7 +1142,7 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _is_error_on_graph_break(tracer):
+            elif one_graph or _is_error_on_graph_break(tracer_output):
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1232,7 +1235,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            if tracer and tracer.is_tracing_resume_prologue:
+            if tracer_output and tracer_output.is_tracing_resume_prologue:
                 # Do not allow any errors to be suppressed if tracer is currently tracing
                 # through resume function.
                 raise ResumePrologueTracingError(
@@ -1273,9 +1276,14 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
-            if tracer:
-                tracer.output.local_scope = {}
-                tracer.f_locals = {}
+            output = None
+            if tracer_output:
+                output = tracer_output.output_graph
+            if output:
+                output.local_scope = {}
+                # tracer should already be None, keep an extra check here just in case.
+                if tracer := output.root_tx:
+                    tracer.f_locals = {}
 
             from .utils import curr_frame
 
@@ -1346,8 +1354,8 @@ def _compile(
             # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
-                    tracer.error_on_graph_break
-                    if tracer
+                    tracer_output.error_on_graph_break
+                    if tracer_output
                     else _get_error_on_graph_break()
                 )
 
