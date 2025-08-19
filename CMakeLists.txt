@@ -181,8 +181,9 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
-# tested and likely won't work without additional changes.
+# For non-supported platforms, turn USE_DISTRIBUTED off by default.
+# NB: USE_DISTRIBUTED simply disables the backend; distributed code
+# still gets built
 if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED
       OFF
@@ -261,18 +262,18 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
-option(USE_DISTRIBUTED "Use distributed" ON)
+option(USE_DISTRIBUTED "Enable default distributed backends" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_XPU;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
-                       "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+                       "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
@@ -336,7 +337,7 @@ cmake_dependent_option(USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC"
                        OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+    "USE_DISTRIBUTED AND NOT APPLE" OFF)
 cmake_dependent_option(
   USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
@@ -429,11 +430,10 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
-      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
           "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
       )
     else()
