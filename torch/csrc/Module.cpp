@@ -2633,6 +2633,13 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 #undef SET_STR_DEFINE
 
+#ifdef PYBIND11_VERSION_HEX
+  ASSERT_TRUE(set_module_attr(
+      "_PYBIND11_VERSION", THPUtils_packUInt32(PYBIND11_VERSION_HEX)));
+#else
+  ASSERT_TRUE(set_module_attr("_PYBIND11_VERSION", Py_None));
+#endif
+
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
