@@ -1742,6 +1742,83 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    # Regression test to make sure dynamo won't crash on these kwargs.
+    def test_sdpa_kernel_ctx_manager_kwargs(self):
+        backends = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                set(backends),
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=True):
+                x = x + 1
+                check_backend_state_is_modified()
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
+
+    # Regression test to make sure dynamo won't graph break on calling functions
+    # decorated with special context manager.
+    def test_sdpa_kernel_ctx_manager_as_decorator(self):
+        SDPA_BACKEND_PRIORITY = [
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+
+        @torch.nn.attention.sdpa_kernel(
+            backends=SDPA_BACKEND_PRIORITY, set_priority=True
+        )
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.rand(16, 16, 64, 256, dtype=torch.float16)
+        ref = f(x)
+        res = opt_f(x)
+
+        self.assertEqual(ref, res)
+
+    # Regression test to make sure the value of set_priority is used correctly.
+    def test_sdpa_kernel_ctx_manager_set_priority(self):
+        backends = [torch.nn.attention.SDPBackend.MATH]
+        default_priority = torch._C._get_sdp_priority_order()
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_priority(changed: bool):
+            self.assertEqual(
+                changed,
+                torch._C._get_sdp_priority_order() != default_priority,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=True):
+                x = x + 1
+                check_backend_priority(changed=True)
+                x = x + 1
+
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=False):
+                x = x + 1
+                check_backend_priority(changed=False)
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
+
     def test_torch_profiler_use_after_with_block(self):
         counters.clear()
 
