@@ -12305,12 +12305,14 @@ op_db: list[OpInfo] = [
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
+                                                                             
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfXPU=custom_types(torch.float16, torch.float32, torch.bfloat16),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -13238,6 +13240,7 @@ op_db: list[OpInfo] = [
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
+                    dtypesIfXPU=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.half),
                     sample_kwargs=lambda device, dtype, input:
                         ({"rounding_mode": "trunc"}, {"rounding_mode": "trunc"}),
                     # https://github.com/pytorch/pytorch/issues/80411
@@ -19322,6 +19325,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('eye',
            dtypes=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
@@ -22078,6 +22082,7 @@ python_ref_db = [
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            skipXPU,
         )
     ),
     PythonRefInfo(
@@ -22220,6 +22225,13 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
 
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="xpu"),
+
             # cuda implementation is off-by-one on some inputs due to precision issues
             # https://github.com/pytorch/pytorch/issues/82230
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
@@ -22248,6 +22260,11 @@ python_ref_db = [
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
+
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         device_type="xpu"),
 
             # cuda implementation is off-by-one on some inputs due to precision issues
             # https://github.com/pytorch/pytorch/issues/82230
@@ -22288,6 +22305,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         device_type="xpu"),
         ),
     ),
     PythonRefInfo(
@@ -22309,6 +22335,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+
             # TODO copy doesn't have prim refs
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -23033,6 +23068,7 @@ python_ref_db = [
         "_refs.nn.functional.alpha_dropout",
         torch_opinfo_name="nn.functional.alpha_dropout",
         decorators=(
+            skipXPU,
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
                          'test_python_ref'),
@@ -23265,6 +23301,9 @@ python_ref_db = [
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="xpu"
             ),
         ),
     ),
@@ -23640,7 +23679,7 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32,),
+                dtypes=(torch.complex32,), active_if=(not torch.xpu.is_available())
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -23682,6 +23721,7 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
+                active_if=(not torch.xpu.is_available())
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -23792,6 +23832,7 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
+                active_if=(not torch.xpu.is_available())
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
@@ -24344,6 +24385,7 @@ python_ref_db = [
         error_inputs_func=partial(error_inputs_dot_vdot, is_ref=True),
         # .conj() does not set ._is_view() correctly in ATen
         validate_view_consistency=False,
+        decorators=[skipXPU, ],
         skips=(
             # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),

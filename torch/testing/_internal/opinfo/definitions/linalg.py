@@ -34,6 +34,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -2180,6 +2181,7 @@ op_db: list[OpInfo] = [
         aten_name="linalg_svd",
         decomp_aten_name="_linalg_svd",
         dtypes=floating_and_complex_types(),
+        dtypesIfXPU=floating_types(),
         # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_fwgrad_bwgrad=True,
@@ -2266,6 +2268,7 @@ op_db: list[OpInfo] = [
         "linalg.tensorinv",
         ref=np.linalg.tensorinv,
         dtypes=floating_and_complex_types(),
+        dtypesIfXPU=floating_types(),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
