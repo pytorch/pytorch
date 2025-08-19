@@ -117,7 +117,8 @@ auto get_fe_dtype(const Tensor& t) {
   } else if (dtype == at::ScalarType::Float) {
     fe_dtype = fe::DataType_t::FLOAT;
   } else {
-    TORCH_INTERNAL_ASSERT(false, "cuDNN batch norm got unsupported dtype: ", dtype);
+    TORCH_INTERNAL_ASSERT(
+        false, "cuDNN batch norm got unsupported dtype: ", dtype);
   }
   return fe_dtype;
 }
@@ -155,8 +156,9 @@ using graph_and_tensors_forward = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes>, // Y
     std::shared_ptr<fe::graph::Tensor_attributes>, // saved_mean
     std::shared_ptr<fe::graph::Tensor_attributes>, // saved_inv_var
-    std::shared_ptr<fe::graph::Tensor_attributes>, // next_running_mean (optional)
-    std::shared_ptr<fe::graph::Tensor_attributes>  // next_running_var (optional)
+    std::shared_ptr<fe::graph::Tensor_attributes>, // next_running_mean
+                                                   // (optional)
+    std::shared_ptr<fe::graph::Tensor_attributes> // next_running_var (optional)
     >;
 
 using graph_and_tensors_backward = std::tuple<
@@ -168,17 +170,17 @@ using graph_and_tensors_backward = std::tuple<
     std::shared_ptr<fe::graph::Tensor_attributes>, // inv_variance
     std::shared_ptr<fe::graph::Tensor_attributes>, // DX
     std::shared_ptr<fe::graph::Tensor_attributes>, // dscale
-    std::shared_ptr<fe::graph::Tensor_attributes>  // dbias
+    std::shared_ptr<fe::graph::Tensor_attributes> // dbias
     >;
 
 struct BatchNormParams {
   c10::DeviceIndex device_id;
   fe::DataType_t dataType;
-  int64_t N;  // batch size
-  int64_t C;  // channels
-  int64_t H;  // height
-  int64_t W;  // width
-  int64_t D;  // depth (for 3D)
+  int64_t N; // batch size
+  int64_t C; // channels
+  int64_t H; // height
+  int64_t W; // width
+  int64_t D; // depth (for 3D)
   bool training;
   bool channels_last;
   at::MemoryFormat memory_format;
@@ -194,13 +196,17 @@ void setBatchNormParams(
   params.dataType = get_fe_dtype(X);
   params.N = X.size(0);
   params.C = X.size(1);
-  if (X.dim() >= 3) params.H = X.size(2);
-  if (X.dim() >= 4) params.W = X.size(3);
-  if (X.dim() >= 5) params.D = X.size(4);
+  if (X.dim() >= 3)
+    params.H = X.size(2);
+  if (X.dim() >= 4)
+    params.W = X.size(3);
+  if (X.dim() >= 5)
+    params.D = X.size(4);
   params.training = training;
   params.memory_format = memory_format;
-  params.channels_last = (memory_format == at::MemoryFormat::ChannelsLast ||
-                         memory_format == at::MemoryFormat::ChannelsLast3d);
+  params.channels_last =
+      (memory_format == at::MemoryFormat::ChannelsLast ||
+       memory_format == at::MemoryFormat::ChannelsLast3d);
 }
 
 struct BatchNormCacheKeyWrapper : ParamsWrapper<BatchNormParams> {
@@ -257,7 +263,6 @@ void raw_cudnn_batchnorm_forward_out_v8(
     Tensor* running_var_new,
     Tensor* /* reserve space - not used in frontend API */,
     at::MemoryFormat memory_format) {
-  
   auto key = BatchNormCacheKeyWrapper(X, training, memory_format);
   auto graph_and_tensors_forward_ptr = batchnorm_forward_graph_cache.find(key);
   auto batchnorm_graph = std::make_shared<fe::graph::Graph>();
@@ -266,17 +271,26 @@ void raw_cudnn_batchnorm_forward_out_v8(
       variant_pack;
 
   if (graph_and_tensors_forward_ptr) {
-    auto [graph, X_fe, scale_fe, bias_fe, running_mean_fe, running_var_fe, 
-          Y_fe, saved_mean_fe, saved_inv_var_fe, next_running_mean_fe, next_running_var_fe] =
-        *graph_and_tensors_forward_ptr;
-    
+    auto
+        [graph,
+         X_fe,
+         scale_fe,
+         bias_fe,
+         running_mean_fe,
+         running_var_fe,
+         Y_fe,
+         saved_mean_fe,
+         saved_inv_var_fe,
+         next_running_mean_fe,
+         next_running_var_fe] = *graph_and_tensors_forward_ptr;
+
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
         variant_pack_ = {
             {X_fe, X.data_ptr()},
             {scale_fe, weight.data_ptr()},
             {bias_fe, bias.data_ptr()},
             {Y_fe, Y->data_ptr()}};
-    
+
     if (training) {
       variant_pack_[saved_mean_fe] = save_mean->data_ptr();
       variant_pack_[saved_inv_var_fe] = save_inv_var->data_ptr();
@@ -293,7 +307,7 @@ void raw_cudnn_batchnorm_forward_out_v8(
         variant_pack_[running_var_fe] = running_var_opt.value().data_ptr();
       }
     }
-    
+
     variant_pack = std::move(variant_pack_);
     batchnorm_graph = std::move(graph);
   } else {
@@ -304,7 +318,7 @@ void raw_cudnn_batchnorm_forward_out_v8(
     // Convert tensors to 4D format as required by cuDNN
     std::vector<int64_t> x_dim(X.sizes().begin(), X.sizes().end());
     std::vector<int64_t> x_stride(X.strides().begin(), X.strides().end());
-    
+
     // Pad dimensions to 4D if necessary
     while (x_dim.size() < 4) {
       x_dim.push_back(1);
@@ -312,10 +326,8 @@ void raw_cudnn_batchnorm_forward_out_v8(
     }
 
     auto X_fe = batchnorm_graph->tensor(
-        fe::graph::Tensor_attributes()
-            .set_name("X")
-            .set_dim(x_dim)
-            .set_stride(x_stride));
+        fe::graph::Tensor_attributes().set_name("X").set_dim(x_dim).set_stride(
+            x_stride));
 
     auto scale_fe = batchnorm_graph->tensor(
         fe::graph::Tensor_attributes()
@@ -334,12 +346,13 @@ void raw_cudnn_batchnorm_forward_out_v8(
     auto epsilon_fe = batchnorm_graph->tensor(static_cast<float>(epsilon));
     auto momentum_fe = batchnorm_graph->tensor(static_cast<float>(momentum));
 
-    std::shared_ptr<fe::graph::Tensor_attributes> Y_fe, saved_mean_fe, saved_inv_var_fe,
-        next_running_mean_fe, next_running_var_fe, running_mean_fe, running_var_fe;
+    std::shared_ptr<fe::graph::Tensor_attributes> Y_fe, saved_mean_fe,
+        saved_inv_var_fe, next_running_mean_fe, next_running_var_fe,
+        running_mean_fe, running_var_fe;
 
     if (training) {
-      auto batchnorm_options = fe::graph::Batchnorm_attributes()
-          .set_epsilon(epsilon_fe);
+      auto batchnorm_options =
+          fe::graph::Batchnorm_attributes().set_epsilon(epsilon_fe);
 
       if (running_mean_opt.has_value() && running_var_opt.has_value()) {
         running_mean_fe = batchnorm_graph->tensor(
@@ -356,11 +369,13 @@ void raw_cudnn_batchnorm_forward_out_v8(
                 .set_stride({X.size(1), 1, X.size(1), X.size(1)})
                 .set_data_type(get_fe_dtype(running_var_opt.value())));
 
-        batchnorm_options.set_previous_running_stats(running_mean_fe, running_var_fe, momentum_fe);
+        batchnorm_options.set_previous_running_stats(
+            running_mean_fe, running_var_fe, momentum_fe);
       }
 
       auto [Y_temp, mean_temp, inv_var_temp, next_mean_temp, next_var_temp] =
-          batchnorm_graph->batchnorm(X_fe, scale_fe, bias_fe, batchnorm_options);
+          batchnorm_graph->batchnorm(
+              X_fe, scale_fe, bias_fe, batchnorm_options);
 
       Y_fe = Y_temp;
       saved_mean_fe = mean_temp;
@@ -370,16 +385,20 @@ void raw_cudnn_batchnorm_forward_out_v8(
 
       Y_fe->set_output(true);
       saved_mean_fe->set_output(true).set_data_type(get_fe_dtype(*save_mean));
-      saved_inv_var_fe->set_output(true).set_data_type(get_fe_dtype(*save_inv_var));
+      saved_inv_var_fe->set_output(true).set_data_type(
+          get_fe_dtype(*save_inv_var));
 
       if (running_mean_opt.has_value() && running_var_opt.has_value()) {
-        next_running_mean_fe->set_output(true).set_data_type(get_fe_dtype(*running_mean_new));
-        next_running_var_fe->set_output(true).set_data_type(get_fe_dtype(*running_var_new));
+        next_running_mean_fe->set_output(true).set_data_type(
+            get_fe_dtype(*running_mean_new));
+        next_running_var_fe->set_output(true).set_data_type(
+            get_fe_dtype(*running_var_new));
       }
     } else {
       // Inference mode
-      TORCH_CHECK(running_mean_opt.has_value() && running_var_opt.has_value(),
-                  "running_mean and running_var must be provided in inference mode");
+      TORCH_CHECK(
+          running_mean_opt.has_value() && running_var_opt.has_value(),
+          "running_mean and running_var must be provided in inference mode");
 
       running_mean_fe = batchnorm_graph->tensor(
           fe::graph::Tensor_attributes()
@@ -395,10 +414,16 @@ void raw_cudnn_batchnorm_forward_out_v8(
               .set_stride({X.size(1), 1, X.size(1), X.size(1)})
               .set_data_type(get_fe_dtype(running_var_opt.value())));
 
-      auto batchnorm_inference_options = fe::graph::Batchnorm_inference_attributes();
+      auto batchnorm_inference_options =
+          fe::graph::Batchnorm_inference_attributes();
 
       Y_fe = batchnorm_graph->batchnorm_inference(
-          X_fe, running_mean_fe, running_var_fe, scale_fe, bias_fe, batchnorm_inference_options);
+          X_fe,
+          running_mean_fe,
+          running_var_fe,
+          scale_fe,
+          bias_fe,
+          batchnorm_inference_options);
       Y_fe->set_output(true);
     }
 
@@ -477,18 +502,26 @@ void raw_cudnn_batchnorm_backward_out_v8(
     Tensor* dweight,
     Tensor* dbias,
     at::MemoryFormat memory_format) {
-  
   auto key = BatchNormCacheKeyWrapper(X, training, memory_format);
-  auto graph_and_tensors_backward_ptr = batchnorm_backward_graph_cache.find(key);
+  auto graph_and_tensors_backward_ptr =
+      batchnorm_backward_graph_cache.find(key);
   auto batchnorm_graph = std::make_shared<fe::graph::Graph>();
   graph_and_tensors_backward graph_and_tensors_backward_values;
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
       variant_pack;
 
   if (graph_and_tensors_backward_ptr) {
-    auto [graph, X_fe, DY_fe, scale_fe, mean_fe, inv_variance_fe, DX_fe, dscale_fe, dbias_fe] =
-        *graph_and_tensors_backward_ptr;
-    
+    auto
+        [graph,
+         X_fe,
+         DY_fe,
+         scale_fe,
+         mean_fe,
+         inv_variance_fe,
+         DX_fe,
+         dscale_fe,
+         dbias_fe] = *graph_and_tensors_backward_ptr;
+
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
         variant_pack_ = {
             {X_fe, X.data_ptr()},
@@ -499,7 +532,7 @@ void raw_cudnn_batchnorm_backward_out_v8(
             {DX_fe, dX->data_ptr()},
             {dscale_fe, dweight->data_ptr()},
             {dbias_fe, dbias->data_ptr()}};
-    
+
     variant_pack = std::move(variant_pack_);
     batchnorm_graph = std::move(graph);
   } else {
@@ -512,7 +545,7 @@ void raw_cudnn_batchnorm_backward_out_v8(
     std::vector<int64_t> x_stride(X.strides().begin(), X.strides().end());
     std::vector<int64_t> dy_dim(dY.sizes().begin(), dY.sizes().end());
     std::vector<int64_t> dy_stride(dY.strides().begin(), dY.strides().end());
-    
+
     // Pad dimensions to 4D if necessary
     while (x_dim.size() < 4) {
       x_dim.push_back(1);
@@ -524,16 +557,13 @@ void raw_cudnn_batchnorm_backward_out_v8(
     }
 
     auto X_fe = batchnorm_graph->tensor(
-        fe::graph::Tensor_attributes()
-            .set_name("X")
-            .set_dim(x_dim)
-            .set_stride(x_stride));
+        fe::graph::Tensor_attributes().set_name("X").set_dim(x_dim).set_stride(
+            x_stride));
 
-    auto DY_fe = batchnorm_graph->tensor(
-        fe::graph::Tensor_attributes()
-            .set_name("DY")
-            .set_dim(dy_dim)
-            .set_stride(dy_stride));
+    auto DY_fe = batchnorm_graph->tensor(fe::graph::Tensor_attributes()
+                                             .set_name("DY")
+                                             .set_dim(dy_dim)
+                                             .set_stride(dy_stride));
 
     auto scale_fe = batchnorm_graph->tensor(
         fe::graph::Tensor_attributes()
@@ -556,8 +586,9 @@ void raw_cudnn_batchnorm_backward_out_v8(
             .set_stride({X.size(1), 1, X.size(1), X.size(1)})
             .set_data_type(get_fe_dtype(saved_inv_var)));
 
-    auto batchnorm_backward_options = fe::graph::Batchnorm_backward_attributes()
-        .set_saved_mean_and_inv_variance(mean_fe, inv_variance_fe);
+    auto batchnorm_backward_options =
+        fe::graph::Batchnorm_backward_attributes()
+            .set_saved_mean_and_inv_variance(mean_fe, inv_variance_fe);
 
     auto [DX_fe, dscale_fe, dbias_fe] = batchnorm_graph->batchnorm_backward(
         DY_fe, X_fe, scale_fe, batchnorm_backward_options);
@@ -683,8 +714,10 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out_v8(
   // Frontend API doesn't use reserve space
   reserve = at::empty({0}, input->options().dtype(kByte));
 
-  Tensor running_mean_new = running_mean_t.defined() ? at::empty_like(running_mean_t) : Tensor();
-  Tensor running_var_new = running_var_t.defined() ? at::empty_like(running_var_t) : Tensor();
+  Tensor running_mean_new =
+      running_mean_t.defined() ? at::empty_like(running_mean_t) : Tensor();
+  Tensor running_var_new =
+      running_var_t.defined() ? at::empty_like(running_var_t) : Tensor();
 
   raw_cudnn_batchnorm_forward_out_v8(
       *input,
@@ -728,14 +761,32 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
     Tensor& reserve) {
   if (at::native::cudnnv8_enabled_check_debug()) {
     return cudnn_batch_norm_out_v8(
-        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
-        training, exponential_average_factor, epsilon,
-        output_t, save_mean, save_var, reserve);
+        input_t,
+        weight_t,
+        bias_t_opt,
+        running_mean_t_opt,
+        running_var_t_opt,
+        training,
+        exponential_average_factor,
+        epsilon,
+        output_t,
+        save_mean,
+        save_var,
+        reserve);
   } else {
     return cudnn_batch_norm_out_v7(
-        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
-        training, exponential_average_factor, epsilon,
-        output_t, save_mean, save_var, reserve);
+        input_t,
+        weight_t,
+        bias_t_opt,
+        running_mean_t_opt,
+        running_var_t_opt,
+        training,
+        exponential_average_factor,
+        epsilon,
+        output_t,
+        save_mean,
+        save_var,
+        reserve);
   }
 }
 
@@ -790,12 +841,24 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     double epsilon) {
   if (at::native::cudnnv8_enabled_check_debug()) {
     return cudnn_batch_norm_v8(
-        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
-        training, exponential_average_factor, epsilon);
+        input_t,
+        weight_t,
+        bias_t_opt,
+        running_mean_t_opt,
+        running_var_t_opt,
+        training,
+        exponential_average_factor,
+        epsilon);
   } else {
     return cudnn_batch_norm_v7(
-        input_t, weight_t, bias_t_opt, running_mean_t_opt, running_var_t_opt,
-        training, exponential_average_factor, epsilon);
+        input_t,
+        weight_t,
+        bias_t_opt,
+        running_mean_t_opt,
+        running_var_t_opt,
+        training,
+        exponential_average_factor,
+        epsilon);
   }
 }
 
@@ -875,12 +938,26 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& reserveSpace) {
   if (at::native::cudnnv8_enabled_check_debug()) {
     return cudnn_batch_norm_backward_v8(
-        input_t, grad_output_t, weight_t, running_mean_opt, running_var_opt,
-        save_mean_t_opt, save_var_t_opt, epsilon, reserveSpace);
+        input_t,
+        grad_output_t,
+        weight_t,
+        running_mean_opt,
+        running_var_opt,
+        save_mean_t_opt,
+        save_var_t_opt,
+        epsilon,
+        reserveSpace);
   } else {
     return cudnn_batch_norm_backward_v7(
-        input_t, grad_output_t, weight_t, running_mean_opt, running_var_opt,
-        save_mean_t_opt, save_var_t_opt, epsilon, reserveSpace);
+        input_t,
+        grad_output_t,
+        weight_t,
+        running_mean_opt,
+        running_var_opt,
+        save_mean_t_opt,
+        save_var_t_opt,
+        epsilon,
+        reserveSpace);
   }
 }
 
