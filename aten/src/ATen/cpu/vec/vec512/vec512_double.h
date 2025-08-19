@@ -55,10 +55,10 @@ class Vectorized<double> {
   operator __m512d() const {
     return values;
   }
-  template <int64_t mask>
   static Vectorized<double> blend(
       const Vectorized<double>& a,
-      const Vectorized<double>& b) {
+      const Vectorized<double>& b,
+      int64_t mask) {
     return _mm512_mask_blend_pd(mask, a.values, b.values);
   }
   static Vectorized<double> blendv(

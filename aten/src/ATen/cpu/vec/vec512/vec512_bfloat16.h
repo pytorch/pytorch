@@ -292,8 +292,7 @@ class Vectorized16 {
       _mm512_mask_storeu_epi16(ptr, mask, values);
     }
   }
-  template <int64_t mask>
-  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
+  static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b, int64_t mask) {
     return _mm512_mask_blend_epi16(mask, a.values, b.values);
   }
   static Vectorized<T> blendv(

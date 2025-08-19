@@ -89,10 +89,10 @@ class Vectorized<c10::complex<float>> {
   operator __m512() const {
     return values;
   }
-  template <int64_t mask>
   static Vectorized<c10::complex<float>> blend(
       const Vectorized<c10::complex<float>>& a,
-      const Vectorized<c10::complex<float>>& b) {
+      const Vectorized<c10::complex<float>>& b,
+      int64_t mask) {
     // convert c10::complex<V> index mask to V index mask: xy -> xxyy
     static_assert(mask > -1 && mask < 256, "Unexpected mask value");
     // The compiler would hopefully convert this switch condition

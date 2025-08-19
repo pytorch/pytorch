@@ -192,7 +192,8 @@ class VecSVE256(VecISA):
 @dataclasses.dataclass
 class VecSVE(VecISA):
     # this function can be repurposed for SVE with variable vec length
-    _bit_width = torch.backends.cpu.get_sve_len()
+    # _bit_width = torch.backends.cpu.get_sve_len() # disable for now as it is not working
+    _bit_width = 128
     _macro = [
         "HAVE_SVE_CPU_DEFINITION",
         "CPU_CAPABILITY_SVE",
