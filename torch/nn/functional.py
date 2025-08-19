@@ -3456,6 +3456,7 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+
     return torch._C._nn.cross_entropy_loss(
         input,
         target,
@@ -3509,13 +3510,14 @@ def linear_cross_entropy(
             reduction=reduction,
         )
 
-    def choose_chunking() -> str:
-        return CrossEntropyChunkingStrategy.none
-
-    if chunking_strategy is None:
-        chunking_strategy = choose_chunking().value
-
     if False:
+        # TODO: How to handle getting `Proxy`s instead of strings?
+        def choose_chunking() -> str:
+            return CrossEntropyChunkingStrategy.none
+
+        if chunking_strategy is None:
+            chunking_strategy = choose_chunking().value
+
         torch._check_with(
             AssertionError,
             hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
@@ -3532,8 +3534,8 @@ def linear_cross_entropy(
         )
 
     return cross_entropy(
-        target,
         linear(input=input, weight=linear_weight, bias=bias),
+        target,
         ignore_index=ignore_index,
         label_smoothing=label_smoothing,
         reduce=reduce,

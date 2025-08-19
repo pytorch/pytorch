@@ -6741,16 +6741,15 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
 
     for sample in sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
         input, target = sample.input, *sample.args
-        if len(input.shape) > 2:
-            continue  # TODO: higher dimensions
+        if len(input.shape) == 2:  # TODO: fix higher dimensions
+            _rows, columns = input.shape
+            linear_weight = make_arg((columns, columns))
+            kw = dict(sample.kwargs, chunking_strategy=None)
+            if (weight := kw.pop("weight", None)) is not None:
+                kw["cross_entropy_weight"] = weight
 
-        linear_weight = make_arg(input.shape)
-        kw = dict(sample.kwargs, chunking_strategy=None)
-        if (weight := kw.pop("weight", None)) is not None:
-            kw["cross_entropy_weight"] = weight
-
-        yield SampleInput(input, target, linear_weight, **kw)
-        yield SampleInput(input, target, linear_weight, bias=make_arg(input.shape), **kw)
+            yield SampleInput(input, target, linear_weight, **kw)
+            yield SampleInput(input, target, linear_weight, bias=make_arg(input.shape), **kw)
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -14761,28 +14760,26 @@ op_db: list[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=(
-            DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="cpu",
-            ),
-        ),
+        # decorators=(
+        #     DecorateInfo(
+        #         toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
+        #         "TestJit",
+        #         "test_variant_consistency_jit",
+        #         device_type="cpu",
+        #     ),
+        # ),
         skips=(
-            # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 1536
-            # test_ops.TestJitCUDA.test_variant_consistency_jit_nn_functional_cross_entropy_cuda_float32 leaked
-            # 1536 bytes CUDA memory on device 0
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            #
+            # skips taken from nn.functional.cross_entropy:
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
-
-        )
+            DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet")),
+        ),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
