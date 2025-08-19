@@ -246,6 +246,49 @@ class TestDynamoTimed(TestCase):
         utils.reset_frame_count()
         torch._logging._internal.structured_logging_overhead.clear()
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_stack_trace(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        stack_trace_list = []
+        for e in compilation_events:
+            stack_trace_list.append(e.stack_trace)
+
+        self.assertGreater(len(stack_trace_list), 0)
+        result = "\n".join(
+            item
+            for sublist in stack_trace_list
+            if sublist
+            for item in (sublist if isinstance(sublist, list) else [sublist])
+        )
+        self.assertIn(
+            "test_stack_trace",
+            result,
+            "Log file does not contain the expected string: 'test_stack_trace'",
+        )
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_graph_node_shapes(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        self.assertEqual(
+            compilation_events[0].graph_node_shapes,
+            "{'l_self_modules_linear_parameters_weight_': [1, 3], "
+            "'l_self_modules_linear_parameters_bias_': [1], "
+            "'l_x_': [3], 'linear': [1]}",
+        )
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -396,6 +439,8 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
+            e.stack_trace = None
+            e.graph_node_shapes = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -442,6 +487,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
+ 'graph_node_shapes': None,
  'graph_op_count': 1,
  'guard_count': 9,
  'has_guarded_code': True,
@@ -454,6 +500,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
  'is_runtime': False,
  'joint_graph_pass_time_us': 0,
@@ -479,6 +526,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': 0,
  'specialize_float': False,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
@@ -523,6 +571,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
+ 'graph_node_shapes': None,
  'graph_op_count': 1,
  'guard_count': 9,
  'has_guarded_code': True,
@@ -535,6 +584,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
  'is_runtime': False,
  'joint_graph_pass_time_us': 0,
@@ -560,6 +610,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': 0,
  'specialize_float': False,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
@@ -615,6 +666,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
+ 'graph_node_shapes': None,
  'graph_op_count': None,
  'guard_count': None,
  'has_guarded_code': None,
@@ -627,6 +679,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,
  'is_runtime': False,
  'joint_graph_pass_time_us': None,
@@ -652,6 +705,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
@@ -696,6 +750,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
+ 'graph_node_shapes': None,
  'graph_op_count': None,
  'guard_count': None,
  'has_guarded_code': None,
@@ -708,6 +763,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,
  'is_runtime': False,
  'joint_graph_pass_time_us': None,
@@ -733,6 +789,7 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
