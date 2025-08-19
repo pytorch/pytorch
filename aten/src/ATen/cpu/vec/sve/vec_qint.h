@@ -114,10 +114,10 @@ struct VectorizedQuantizedConverter {
       }
       rv[i] = Vectorized<float>::loadu(tmp_vals);
 
-      delete[] tmp_scale;
-      delete[] tmp_zero_point;
       delete[] tmp_vals;
     }
+    delete[] tmp_scale;
+    delete[] tmp_zero_point;
     return rv;
   }
 
@@ -138,10 +138,10 @@ struct VectorizedQuantizedConverter {
             T(vals[Vectorized<float>::size() * i + j]));
       }
       rv[i] = Vectorized<float>::loadu(tmp_vals);
-      delete[] tmp_scale;
-      delete[] tmp_zero_point;
       delete[] tmp_vals;
     }
+    delete[] tmp_scale;
+    delete[] tmp_zero_point;
     return rv;
   }
 
