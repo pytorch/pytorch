@@ -565,6 +565,7 @@ class TestProvenanceTracingStackTraces(TestCase):
                 "y = torch.addmm(c, d, b)",
             ],
             "extern_kernels.mm": [
+                "x = self.fc1(x)",
                 "y = torch.addmm(c, d, b)",
             ],
         }
@@ -578,9 +579,6 @@ class TestProvenanceTracingStackTraces(TestCase):
                 self.assertEqual(set(data.keys()), set(expected.keys()))
                 for key, expected_lines in expected.items():
                     actual_lines = [self.extract_code_line(s) for s in data[key]]
-                    print(key)
-                    print(actual_lines)
-                    print(expected_lines)
                     self.assertEqual(
                         sorted(actual_lines),
                         sorted(expected_lines),
