@@ -189,6 +189,8 @@ Operators that accept a `generator` kwarg will utilize the user-passed generator
 
 When using DTensor together with Pipeline Parallelism, ranks for each pipeline stage should use a distinct seed, and ranks within a pipeline stage should use the same seed.
 
+DTensor's RNG infra is based on the philox based RNG algorithm, and supports any philox based backend (cuda, and other cuda-like devices), but unfortunately does not yet support the CPU backend.
+
 ## Debugging
 
 ```{eval-rst}
