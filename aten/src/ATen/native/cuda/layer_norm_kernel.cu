@@ -1151,9 +1151,10 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-
   if (use_cudnn_layernorm(gamma.numel(), beta.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
     at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
+#endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -1181,28 +1182,30 @@ inline bool use_cudnn_rmsnorm(bool gamma, at::ScalarType dtype) {
 }
 
 void RmsNormKernelImpl(
-  const Tensor& X,
-  const Tensor& gamma,
-  int64_t M,
-  int64_t N,
-  double eps,
-  Tensor* Y,
-  Tensor* rstd) {
-if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
-  at::native::raw_cudnn_rmsnorm_forward_out(X, gamma, eps, rstd, Y, M, N);
-} else {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormKernelImpl",
-      [&]() {
-        using acc_t = acc_type<scalar_t, true>;
-        // rms_norm = true
-        LayerNormKernelImplInternal<scalar_t, acc_t, true>(
-          // pass in at::Tensor() for gamma and nullptr for mean, it won't be accessed with rms_norm = True
-            X, gamma, at::Tensor(), M, N, static_cast<acc_t>(eps), Y, nullptr, rstd);
-      });
+    const Tensor& X,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y,
+    Tensor* rstd) {
+  if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_rmsnorm_forward_out(X, gamma, eps, rstd, Y, M, N);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormKernelImpl",
+        [&]() {
+          using acc_t = acc_type<scalar_t, true>;
+          // rms_norm = true
+          LayerNormKernelImplInternal<scalar_t, acc_t, true>(
+            // pass in at::Tensor() for gamma and nullptr for mean, it won't be accessed with rms_norm = True
+              X, gamma, at::Tensor(), M, N, static_cast<acc_t>(eps), Y, nullptr, rstd);
+        });
   }
 }
 
