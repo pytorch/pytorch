@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -208,6 +209,27 @@ if not IS_WINDOWS:
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
 
+        def test_my_amax(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_amax(t)
+            self.assertEqual(out, torch.amax(t, 0))
+
+        def test_my_amax_vec(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, 5, device=device)
+            out = libtorch_agnostic.ops.my_amax_vec(t)
+            self.assertEqual(out, torch.amax(t, (0, 1)))
+
+        def test_my_is_cpu(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_is_cpu(t)
+            self.assertEqual(out, t.is_cpu)
+
         def test_fill_infinity(self, device):
             import libtorch_agnostic
 
@@ -251,6 +273,54 @@ if not IS_WINDOWS:
             out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
+
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_device_guard(self, device):
+            import libtorch_agnostic
+
+            device_index = 1
+            out = libtorch_agnostic.ops.test_device_guard(device_index)
+            self.assertEqual(out, device_index)
+
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_device_guard_set_index(self, device):
+            import libtorch_agnostic
+
+            # This test creates a DeviceGuard with index 1, then sets it to index 0
+            # and returns the current device (should be 0)
+            out = libtorch_agnostic.ops.test_device_guard_set_index()
+            self.assertEqual(out, 0)
+
+        @onlyCUDA
+        def test_stream(self, device):
+            import libtorch_agnostic
+
+            stream = torch.cuda.Stream()
+            device = torch.cuda.current_device()
+
+            with stream:
+                expected_stream_id = torch.cuda.current_stream(0).stream_id
+                stream_id = libtorch_agnostic.ops.test_stream(device)
+
+            self.assertEqual(stream_id, expected_stream_id)
+
+        @onlyCUDA
+        @deviceCountAtLeast(2)
+        def test_get_current_device_index(self, device):
+            import libtorch_agnostic
+
+            prev_device = torch.cuda.current_device()
+
+            try:
+                expected_device = 1
+                torch.cuda.set_device(expected_device)
+
+                current_device = libtorch_agnostic.ops.test_get_current_device_index()
+                self.assertEqual(current_device, expected_device)
+            finally:
+                torch.cuda.set_device(prev_device)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
