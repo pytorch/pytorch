@@ -191,6 +191,14 @@ class ProfilerTree:
                 name,
             )
 
+        # HACK: this patches around the fact that PyBind11 improperly sets the
+        # __qualname__ attribute on functions and methods; see
+        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
+        # that issue is fixed.
+        name = "PyCapsule".join(
+            re.split(r"pybind11_detail_function_record_v1[^ ]+", name, maxsplit=1)
+        )
+
         return re.sub("object at 0x[0-9a-fA-F]+>", "object at 0xXXXXXXXXXXXX>", name)
 
     @classmethod

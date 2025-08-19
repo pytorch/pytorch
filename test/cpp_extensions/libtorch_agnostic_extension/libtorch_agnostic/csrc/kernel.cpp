@@ -371,10 +371,31 @@ void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs
   stack[0] = from(res);
 }
 
+Tensor my_amax(Tensor t) {
+  return amax(t, 0, false);
+}
+
+void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+Tensor my_amax_vec(Tensor t) {
+  std::vector<int64_t> v = {0,1};
+  return amax(t, v, false);
+}
+
+void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax_vec(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
+  m.def("my_amax(Tensor a) -> Tensor");
+  m.def("my_amax_vec(Tensor a) -> Tensor");
   m.def("my_is_cpu(Tensor t) -> bool");
-
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
@@ -414,6 +435,8 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
+  m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 // Test functions for torch::stable::accelerator APIs
