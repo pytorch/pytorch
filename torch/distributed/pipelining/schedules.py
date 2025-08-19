@@ -33,7 +33,6 @@ __all__ = [
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
     "ScheduleZBVZeroBubble",
-    "ScheduleDualPipeV",
 ]
 
 logger = logging.getLogger(__name__)
@@ -480,7 +479,12 @@ def _batch_p2p(
     if len(p2p_ops) == 0:
         return []
     desc_str = f"{desc}, " if desc else ""
-    logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
+    logger.debug(
+        "batch_p2p %s%d ops: %s",
+        desc_str,
+        len(p2p_ops),
+        [f"{op.op.__name__}({op.peer})" for op in p2p_ops],
+    )
     return dist.batch_isend_irecv(p2p_ops)
 
 
@@ -709,15 +713,25 @@ class ScheduleGPipe(PipelineScheduleSingle):
         Args:
             microbatches: list of microbatch args.
         """
+        logger.debug(
+            "GPipe schedule: Starting step with %d microbatches", self._n_microbatches
+        )
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stage_initialized:
+            logger.debug(
+                "GPipe schedule: Initializing stage %d", self._stage.stage_index
+            )
             self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Delay send waits
         fwd_sends_to_wait: list[list[dist.Work]] = []
 
         # Run microbatches
+        logger.debug(
+            "GPipe schedule: Starting forward phase for %d microbatches",
+            self._n_microbatches,
+        )
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
                 ops = self._stage.get_fwd_recv_ops(i)
@@ -743,6 +757,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
         # Run backward
         # Delay send waits
+        logger.debug(
+            "GPipe schedule: Starting backward phase for %d microbatches",
+            self._n_microbatches,
+        )
         bwd_sends_to_wait: list[list[dist.Work]] = []
         for i in range(self._n_microbatches):
             with record_function(f"Backward {i}"):
@@ -828,9 +846,15 @@ class Schedule1F1B(PipelineScheduleSingle):
         Args:
             microbatches: list of microbatch args.
         """
+        logger.debug(
+            "1F1B schedule: Starting step with %d microbatches", self._n_microbatches
+        )
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stage_initialized:
+            logger.debug(
+                "1F1B schedule: Initializing stage %d", self._stage.stage_index
+            )
             self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
@@ -839,15 +863,29 @@ class Schedule1F1B(PipelineScheduleSingle):
             self._n_microbatches,
             self._num_stages - self._stage.stage_index,
         )
+        logger.debug(
+            "1F1B schedule: Stage %d will have %d warmup chunks",
+            self._stage.stage_index,
+            warmup_chunks,
+        )
 
         # Chunk counters
         fwd_mb_index = 0
         bwd_mb_index = 0
 
         # Warmup phase
+        logger.debug(
+            "1F1B schedule: Starting warmup phase with %d chunks", warmup_chunks
+        )
         send_work: list[dist.Work] = []
         fwd_sends = []
-        for _ in range(warmup_chunks):
+        for warmup_idx in range(warmup_chunks):
+            logger.debug(
+                "1F1B schedule: Warmup step %d/%d, processing microbatch %d",
+                warmup_idx + 1,
+                warmup_chunks,
+                fwd_mb_index,
+            )
             # Receive activations
             fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
             _wait_batch_p2p(_batch_p2p(fwd_recvs, desc="fwd_recv"))
@@ -867,7 +905,16 @@ class Schedule1F1B(PipelineScheduleSingle):
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             if fwd_mb_index != warmup_chunks - 1:
                 # Safe to fire
+                logger.debug(
+                    "1F1B schedule: Warmup firing forward send for microbatch %d",
+                    fwd_mb_index,
+                )
                 send_work = _batch_p2p(fwd_sends, desc="fwd_send")
+            else:
+                logger.debug(
+                    "1F1B schedule: Warmup deferring last forward send for microbatch %d to 1B1F phase",
+                    fwd_mb_index,
+                )
             # otherwise:
             #   The last forward send is left for fuse with first 1B in 1B1F below
 
@@ -878,7 +925,20 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
 
         # 1B1F phase
+        logger.debug(
+            "1F1B schedule: Starting 1B1F phase, fwd_mb_index=%d, bwd_mb_index=%d",
+            fwd_mb_index,
+            bwd_mb_index,
+        )
+        step_count = 0
         while True:  # Don't worry, we have a break inside
+            step_count += 1
+            logger.debug(
+                "1F1B schedule: 1B1F step %d - backward microbatch %d, forward microbatch %s",
+                step_count,
+                bwd_mb_index,
+                str(fwd_mb_index) if fwd_mb_index < self._n_microbatches else "done",
+            )
             # We actually do 1B first as the `1B1F` name indicates, so prepare its recv ops
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
@@ -899,6 +959,10 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             if fwd_mb_index == self._n_microbatches:
                 # We are done with 1B1F, so break with some left-over bwd_sends
+                logger.debug(
+                    "1F1B schedule: Completed 1B1F phase after %d steps, all forwards done",
+                    step_count,
+                )
                 break
 
             # We prepare 1F of the `1B1F`
@@ -923,7 +987,20 @@ class Schedule1F1B(PipelineScheduleSingle):
         send_work = _batch_p2p(bwd_sends, desc="bwd_send")
 
         # Cooldown
+        remaining_backwards = self._n_microbatches - bwd_mb_index
+        logger.debug(
+            "1F1B schedule: Starting cooldown phase with %d remaining backwards",
+            remaining_backwards,
+        )
+        cooldown_step = 0
         while bwd_mb_index < self._n_microbatches:
+            cooldown_step += 1
+            logger.debug(
+                "1F1B schedule: Cooldown step %d/%d - backward microbatch %d",
+                cooldown_step,
+                remaining_backwards,
+                bwd_mb_index,
+            )
             # prepare bwd recv ops
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
             _wait_batch_p2p(_batch_p2p(bwd_recvs, desc="bwd_recv"))
@@ -944,14 +1021,20 @@ class Schedule1F1B(PipelineScheduleSingle):
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
-        self._stage.scale_grads(
-            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
+        grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+        logger.debug(
+            "1F1B schedule: Scaling gradients with factor %d (scale_grads=%s)",
+            grad_scale_factor,
+            self.scale_grads,
         )
+        self._stage.scale_grads(grad_scale_factor)
 
         # Wait for the last backward send to finish
+        logger.debug("1F1B schedule: Waiting for final backward sends to complete")
         _wait_batch_p2p(send_work)
 
         # Return losses if there is a container passed in
+        logger.debug("1F1B schedule: Completed step, updating losses")
         self._update_losses(self._stage, losses)
 
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
@@ -1567,9 +1650,19 @@ class PipelineScheduleMulti(_PipelineSchedule):
         TODO: Does not use sorted_batch_isend_irecv(). As a result, this schedule does
         not support models with skip connections.
         """
+        logger.debug(
+            "Multi-stage schedule: Starting step with %d microbatches on rank %d",
+            self._n_microbatches,
+            self.rank,
+        )
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stages_initialized:
+            logger.debug(
+                "Multi-stage schedule: Initializing %d stages on rank %d",
+                len(self._stages),
+                self.rank,
+            )
             self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
         # Based on the plan in Step 1 created in __init__:
@@ -1590,6 +1683,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 all_next_ranks.add(self.stage_index_to_group_rank[stage_index + 1])
         # count either full_backward or backward_weight together, to determine when to sync DP grads
         backward_counter: Counter[int] = Counter()
+        logger.debug(
+            "Multi-stage schedule: Executing %d time steps on rank %d",
+            len(self.pipeline_order[self.rank]),
+            self.rank,
+        )
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
             try:
                 ops: list[dist.P2POp] = []
@@ -1597,6 +1695,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
                     stage_index = action.stage_index
+                    logger.debug(
+                        "Multi-stage schedule: Time step %d, executing %s on stage %d, microbatch %d",
+                        time_step,
+                        computation_type,
+                        stage_index,
+                        mb_index,
+                    )
                     assert mb_index is not None, (
                         "All currently supported action types require valid microbatch_index"
                     )

@@ -18,6 +18,7 @@ from torch.utils._pytree import tree_map_only
 from ._backward import stage_backward, stage_backward_input, stage_backward_weight
 from ._debug import map_debug_info
 from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
+from .pipeline_stage_coordinator import get_pipeline_stage_coordinator
 
 
 __all__ = [
@@ -66,8 +67,22 @@ class _RootArgPlaceholder:
     Placeholder for model-level inputs.
     """
 
-    def __init__(self, tensor):
-        self.meta = tensor.to("meta")
+    def __init__(self, create_metadata_fn):
+        self.create_metadata_fn = create_metadata_fn
+
+    def __call__(self, tensor):
+        """Create a placeholder instance for a specific tensor."""
+        placeholder = _RootArgPlaceholderInstance(self.create_metadata_fn(tensor))
+        return placeholder
+
+
+class _RootArgPlaceholderInstance:
+    """
+    Instance of a root argument placeholder for a specific tensor.
+    """
+
+    def __init__(self, meta):
+        self.meta = meta
 
 
 class _RecvInfo:
@@ -93,7 +108,7 @@ class _RecvInfo:
 
 
 # An input can be either a received activation or a model input
-InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
+InputInfo = Union[_RecvInfo, _RootArgPlaceholderInstance]
 
 
 def _make_tensor_from_meta(
@@ -155,6 +170,20 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        # Initialize device-specific pipeline stage coordinator
+        self.stage_coordinator = get_pipeline_stage_coordinator(self.device, self.group)
+        logger.debug(
+            "%s Initialized pipeline stage coordinator %s for device %s",
+            f"[Stage {self.stage_index}]",
+            self.stage_coordinator.__class__.__name__,
+            self.device,
+        )
+
+        # Create root argument placeholder factory
+        self._root_arg_placeholder_factory = _RootArgPlaceholder(
+            self.stage_coordinator.create_stage_tensor_metadata
+        )
 
         self.dw_builder = dw_builder
 
@@ -416,6 +445,12 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
+        logger.debug(
+            "%s Getting forward recv ops for chunk %d from %d sources",
+            self.log_prefix,
+            fwd_chunk_id,
+            len([info for info in recv_infos if isinstance(info, _RecvInfo)]),
+        )
         return self._get_recv_ops(recv_infos)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
@@ -427,6 +462,12 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
+        logger.debug(
+            "%s Getting backward recv ops for chunk %d from %d sources",
+            self.log_prefix,
+            bwd_chunk_id,
+            len(recv_infos),
+        )
         return self._get_recv_ops(recv_infos)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
@@ -436,6 +477,16 @@ class _PipelineStageBase(ABC):
         output_tuple, _ = self.fwd_cache[fwd_chunk_id]
 
         ops: list[dist.P2POp] = []
+        total_sends = sum(
+            len([dst for dst in dst_stages if dst is not None])
+            for dst_stages in self.act_send_info.values()
+        )
+        logger.debug(
+            "%s Getting forward send ops for chunk %d to %d destinations",
+            self.log_prefix,
+            fwd_chunk_id,
+            total_sends,
+        )
 
         for idx, out in enumerate(output_tuple):
             dst_stages = self.act_send_info[idx]
@@ -476,6 +527,19 @@ class _PipelineStageBase(ABC):
 
         ops: list[dist.P2POp] = []
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
+        total_sends = len(
+            [
+                g
+                for g, s in zip(grads_input, self.grad_send_info)
+                if isinstance(g, torch.Tensor) and s is not None
+            ]
+        )
+        logger.debug(
+            "%s Getting backward send ops for chunk %d to %d destinations",
+            self.log_prefix,
+            bwd_chunk_id,
+            total_sends,
+        )
         for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
@@ -686,6 +750,12 @@ class _PipelineStageBase(ABC):
           through activation transmission.
         - `kwargs` can be passed to all stages via respective `step` calls.
         """
+        logger.debug(
+            "%s Forward pass for chunk %d with %d args",
+            self.log_prefix,
+            fwd_chunk_id,
+            len(args) if args else 0,
+        )
 
         if self.is_first:
             # First stage doesn't need to receive anything
@@ -760,6 +830,13 @@ class _PipelineStageBase(ABC):
         last_backward is controlled by the schedule and signals synchronization of gradients across DP groups
         after the last backward.
         """
+        logger.debug(
+            "%s Backward pass for chunk %d, full_backward=%s, last_backward=%s",
+            self.log_prefix,
+            bwd_chunk_id,
+            full_backward,
+            last_backward,
+        )
         # skip backward computation if backward is not enabled
         if not self.has_backward:
             return
@@ -917,7 +994,7 @@ class _PipelineStageBase(ABC):
         # (a) the user passed an extra arg or missed an arg
         # (b) the user did not pass a kwarg, which has a default value baked into expected_args
         expected_tensors_meta = [
-            e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
+            e.meta if isinstance(e, _RootArgPlaceholderInstance) else e.buffer
             for e in expected_args
         ]
         validate_tensors_metadata(
@@ -1106,7 +1183,7 @@ class _PipelineStage(_PipelineStageBase):
             if arg_node.op == "placeholder":
                 # This is a root level placeholder, thus an input argument to the entire model.
                 # We are likely at stage 0, hence no need to create a receive buffer.
-                return _RootArgPlaceholder(example_value)
+                return self._root_arg_placeholder_factory(example_value)
 
             # Figure out the source stage of this input
             while arg_node.target is operator.getitem:
@@ -1126,7 +1203,9 @@ class _PipelineStage(_PipelineStageBase):
                 example_value.shape,
                 example_value.dtype,
             )
-            buffer = _make_tensor_from_meta(example_value, self.device)
+            buffer = self.stage_coordinator.create_stage_communication_buffer(
+                example_value, self.device
+            )
             # In case there is backward pass, set requires_grad for receive buffers
             # before first forward
             if self.has_backward:
@@ -1256,7 +1335,9 @@ class _PipelineStage(_PipelineStageBase):
             grad_recv_info[out_idx] = _RecvInfo(
                 f"{grad_src}",  # noqa: G004
                 grad_src,
-                _make_tensor_from_meta(example_value, self.device),
+                self.stage_coordinator.create_stage_communication_buffer(
+                    example_value, self.device
+                ),
             )
 
         # Convert to tuple for convenience in get_ops and retrieve tensor
@@ -1394,6 +1475,13 @@ class PipelineStage(_PipelineStageBase):
             kwargs = {}
         assert args is not None, "Args may be an empty tuple but not None"
 
+        logger.debug(
+            "Shape inference: stage %s using pipeline stage coordinator %s for device %s",
+            self.stage_index,
+            self.stage_coordinator.__class__.__name__,
+            self.device,
+        )
+
         # We skip recv communication if we're the first stage, but also if the previous stage is on the same rank
         # and can pass its output shapes in as args instead of using send/recv.
         if (
@@ -1402,52 +1490,81 @@ class PipelineStage(_PipelineStageBase):
             or self.stage_index_to_group_rank[self.stage_index - 1] == self.group_rank
         ):
             logger.debug(
-                "Shape inference: stage %s skipping recv, because shape info passed in via `args`",
+                "Shape inference: stage %s skipping recv, because shape info passed in via `args` (is_first=%s, prev_stage_same_rank=%s)",
                 self.stage_index,
+                self.is_first,
+                not self.is_first
+                and self.stage_index_to_group_rank[self.stage_index - 1]
+                == self.group_rank,
             )
-            args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
+            # Convert input tensors to metadata using self.stage_coordinator
+            input_metadata = []
+            for i, arg in enumerate(args):
+                if isinstance(arg, torch.Tensor):
+                    logger.debug(
+                        "Shape inference: stage %s converting arg %d to metadata - shape %s, dtype %s",
+                        self.stage_index,
+                        i,
+                        arg.shape,
+                        arg.dtype,
+                    )
+                    metadata = self.stage_coordinator.create_stage_tensor_metadata(arg)
+                    input_metadata.append(metadata)
+                else:
+                    logger.debug(
+                        "Shape inference: stage %s keeping non-tensor arg %d as-is: %s",
+                        self.stage_index,
+                        i,
+                        type(arg),
+                    )
+                    input_metadata.append(arg)
+            args = tuple(input_metadata)
         else:
             assert len(args) == 0, (
                 "Can't supply input args for shape inference on non-first stage"
             )
             objects = [None]
+            prev_stage_rank = self.stage_index_to_group_rank[self.stage_index - 1]
             logger.debug(
-                "Shape inference: stage %s receiving from stage %s",
+                "Shape inference: stage %s receiving metadata from stage %s (rank %s)",
                 self.stage_index,
                 self.stage_index - 1,
+                prev_stage_rank,
             )
             dist.recv_object_list(
                 objects,
                 src=dist.get_global_rank(
-                    self.group or dist.distributed_c10d._get_default_group(),
-                    self.stage_index_to_group_rank[self.stage_index - 1],
+                    self.stage_coordinator._group
+                    or dist.distributed_c10d._get_default_group(),
+                    prev_stage_rank,
                 ),
-                group=self.group,
-                device=self.device,
+                group=self.stage_coordinator._group,
+                device=self.stage_coordinator._device,
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
+            logger.debug(
+                "Shape inference: stage %s received %d metadata objects from previous stage",
+                self.stage_index,
+                len(recv_args),
+            )
             args = recv_args
 
         # cache input shapes for use during recv buffer allocation
         self.inputs_meta = args
-        args = tree_map_only(
-            torch.Tensor, lambda x: torch.zeros_like(x, device=self.device), args
+        logger.debug(
+            "Shape inference: stage %s cached %d input metadata objects",
+            self.stage_index,
+            len(self.inputs_meta),
         )
-
-        # set attributes needed for forward
-        with torch.no_grad():
-            outputs = self.submod(*args, **kwargs)
-
-        # if single tensor, convert so it is always a list
-        if isinstance(outputs, torch.Tensor):
-            outputs = [outputs]
-
-        # communicate meta outputs not real outputs for two reasons
-        # 1 - its faster (esp. since obj coll pickles tensor data!)
-        # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
-        outputs_meta = tuple(
-            tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        # Use pipeline stage coordinator for forward output metadata inference
+        logger.debug(
+            "Shape inference: stage %s running forward inference with pipeline stage coordinator %s",
+            self.stage_index,
+            self.stage_coordinator.__class__.__name__,
+        )
+        outputs_meta = self.stage_coordinator.infer_pipeline_stage_outputs(
+            self.submod, args, kwargs
         )
         logger.debug(
             "Shape inference: stage %s inputs %s, outputs %s",
@@ -1470,28 +1587,45 @@ class PipelineStage(_PipelineStageBase):
             # Case (2) above: pass shape info via return value and caller passes it as args to next stage's
             # _shape_inference call
             logger.debug(
-                "Shape inference: stage %s skipping send to next stage",
+                "Shape inference: stage %s skipping send to next stage (is_last=%s, next_stage_same_rank=%s)",
                 self.stage_index,
+                self.is_last,
+                not self.is_last
+                and self.stage_index_to_group_rank[self.stage_index + 1]
+                == self.group_rank,
             )
 
         else:
             # Case (1): send shapes via send operation, and ensure not to return it to the caller
+            next_stage_rank = self.stage_index_to_group_rank[self.stage_index + 1]
             logger.debug(
-                "Shape inference: stage %s sending to stage %s",
+                "Shape inference: stage %s sending %d metadata objects to stage %s (rank %s)",
                 self.stage_index,
+                len(outputs_meta),
                 self.stage_index + 1,
+                next_stage_rank,
             )
             dist.send_object_list(
                 [outputs_meta],
                 dst=dist.get_global_rank(
-                    self.group or dist.distributed_c10d._get_default_group(),
+                    self.stage_coordinator._group
+                    or dist.distributed_c10d._get_default_group(),
                     self.stage_index_to_group_rank[self.stage_index + 1],
                 ),
-                group=self.group,
-                device=self.device,
+                group=self.stage_coordinator._group,
+                device=self.stage_coordinator._device,
+            )
+            logger.debug(
+                "Shape inference: stage %s completed send to next stage",
+                self.stage_index,
             )
             outputs_meta = tuple()
 
+        logger.debug(
+            "Shape inference: stage %s returning %d output metadata objects",
+            self.stage_index,
+            len(outputs_meta),
+        )
         return outputs_meta
 
     def _prepare_forward_infra(
@@ -1508,17 +1642,32 @@ class PipelineStage(_PipelineStageBase):
             outputs = self._shape_inference(args, kwargs)
 
         assert self.inputs_meta is not None
+
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
+        logger.debug(
+            "%s Preparing forward infrastructure for %d microbatches",
+            self.log_prefix,
+            num_microbatches,
+        )
         for chunk_id in range(num_microbatches):
             if not self.is_first:
+                logger.debug(
+                    "%s Setting up recv buffers for chunk %d from stage %d",
+                    self.log_prefix,
+                    chunk_id,
+                    self.stage_index - 1,
+                )
                 # We assume that we always receive from stage - 1
+                # Use self.stage_coordinator to create appropriate buffers for this device
                 recv_infos = tuple(
                     [
                         _RecvInfo(
                             f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
                             self.stage_index - 1,
-                            _make_tensor_from_meta(inp, self.device),
+                            self.stage_coordinator.create_stage_communication_buffer(
+                                inp, self.device
+                            ),
                         )
                         for inp in self.inputs_meta
                     ]
@@ -1531,7 +1680,7 @@ class PipelineStage(_PipelineStageBase):
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs_meta]
+                    [self._root_arg_placeholder_factory(i) for i in self.inputs_meta]
                 )
 
         # Send info during forward for each activation
@@ -1555,12 +1704,13 @@ class PipelineStage(_PipelineStageBase):
         if not self.is_last:
             # Receiving gradients from multiple sources is not supported
             # hence we only take the first destination
+            # Use self.stage_coordinator to create appropriate gradient buffers for this device
             grad_recv_info = tuple(
                 [
                     _RecvInfo(
                         f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
                         dst_list[0],
-                        _make_tensor_from_meta(
+                        self.stage_coordinator.create_stage_communication_buffer(
                             self.get_outputs_meta()[idx], self.device
                         ),
                     )
