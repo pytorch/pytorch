@@ -320,12 +320,12 @@ class ShardingPropagator:
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and tracing does not need to be as fast as eagermode DTensor usages.
-        try:
+        if _are_we_tracing():
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        else:
             output_sharding = cast(
                 OutputSharding, self.propagate_op_sharding(op_info.schema)
             )
-        except TypeError:
-            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
