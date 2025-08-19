@@ -184,4 +184,7 @@ TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
 
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device);
+
 } // namespace c10d::symmetric_memory
