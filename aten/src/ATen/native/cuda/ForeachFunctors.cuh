@@ -723,6 +723,9 @@ struct TernaryOpScalarListFunctor {
 template <typename T>
 struct power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {
+    if (b == static_cast<T>(3)) {
+      return a * a * a;
+    }
     return at::native::pow_(a, b);
   }
 };
