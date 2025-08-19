@@ -401,11 +401,9 @@ class AsyncCompile:
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
-            # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
-                future.reload_kernel_from_src = reload_kernel_in_parent
             if is_parallel:
                 return future
             else:
@@ -459,7 +457,7 @@ class AsyncCompile:
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    source_code=source_code,
                 )
                 info = kernel.autotune_cache_info or {}
                 info["compile_time_us"] = elapsed_us
@@ -488,7 +486,7 @@ class AsyncCompile:
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
                         warm_cache_only=False,
-                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                        source_code=source_code,
                     )
                     elapsed_us = (time_ns() - start_ns) // 1000
                     get_metrics_context().add_top_n(
@@ -568,6 +566,45 @@ class AsyncCompile:
                 meta, source_code, submit_fn=self.submit
             )
             return LambdaFuture(get_result)
+
+    def cutedsl(self, kernel_name: str, source_code: str):
+        """
+        Compile CuteDSL (CUTLASS Python DSL) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the CuteDSL kernel, as a string
+
+        Note:
+            CuteDSL currently requires source files to do its compilation, there we
+            use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            CuteDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
 
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
