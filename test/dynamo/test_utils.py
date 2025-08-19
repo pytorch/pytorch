@@ -289,6 +289,31 @@ class TestDynamoTimed(TestCase):
             "'l_x_': [3], 'linear': [1]}",
         )
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_log_dynamo_start(self):
+        import torch._dynamo.convert_frame as convert_frame
+
+        self.warmup()
+        self.run_forward_backward()
+        # Dummy code object
+        def sample_func():
+            pass
+
+        code = sample_func.__code__
+        with mock.patch("torch._logging.trace_structured") as mock_trace:
+            stack_strings = convert_frame.log_dynamo_start(code)
+            print("Stack strings:")
+            print(stack_strings)
+            last_entry = stack_strings[-1]
+            # Check if the last entry is a valid stack trace i.e for the sample_func
+            self.assertIn(f"Line: {code.co_firstlineno}", last_entry, "")
+            self.assertIn(f"Name: {code.co_name}", last_entry, "")
+            self.assertIn(f"Filename: {code.co_filename}", last_entry, "")
+            
+            # Since the remaining logs are env specific, we just check if they are present instead of checking the exact string
+            self.assertGreater(len(stack_strings), 1)
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
