@@ -54,6 +54,9 @@ void bind_ordered_dict(py::module module, const char* dict_name) {
       .def("__getitem__", [](const ODict& dict, const std::string& key) {
         return dict[key];
       })
+      .def("__getitem__", [](const ODict& dict, size_t index) {
+        return dict[index];
+      })
       .def("__setitem__", [](ODict& dict, const std::string& key, const T& val) {
         dict[key] = val;
       })
