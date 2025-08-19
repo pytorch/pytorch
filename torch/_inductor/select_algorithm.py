@@ -1107,7 +1107,8 @@ class TritonTemplateKernel(TritonKernel):
     def _register_extra_template_env_fns(self, *fns: Callable[..., Any]):
         """
         Register some extra functions to expose when performing the initial
-        template render.
+        template render, so that they're in scope to by used by jinja
+        expressions.
 
         These can be used to, for example, implement extra replacement hooks,
         if the given function:
@@ -1115,7 +1116,8 @@ class TritonTemplateKernel(TritonKernel):
         * Returns the name of their hook, which should also be the string to
           replace via the hook function. The convention is to use the format
           <HOOK_NAME>.
-        * Assigns the corresponding entry in ``self.render_hooks`` to a hook function.
+        * Assigns the corresponding entry in ``self.render_hooks`` to a hook
+          function.
         """
         self.extra_template_env_fns.extend(fns)
 
