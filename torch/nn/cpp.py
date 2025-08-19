@@ -2,7 +2,7 @@
 """Functionality for Python <-> C++ frontend inter-op."""
 
 from collections.abc import Iterator, MutableMapping
-from typing import Any
+from typing import Any, Union
 
 from torch import nn
 
@@ -48,7 +48,7 @@ class OrderedDictWrapper(MutableMapping):
             return False
         return self.cpp_dict.__contains__(key)
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: Union[int, str]) -> Any:
         return self.cpp_dict.__getitem__(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
@@ -98,3 +98,6 @@ class ModuleWrapper(nn.Module):
 
     def __repr__(self):
         return self.cpp_module.__repr__()
+
+
+__all__ = ("OrderedDictWrapper", "ModuleWrapper")
