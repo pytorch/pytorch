@@ -2238,7 +2238,7 @@ Call this whenever a new thread is created in order to propagate values from
       .def("expired", &WeakTensorRef::expired);
 
   py::native_enum<at::native::ConvBackend>(
-      py_module, "_ConvBackend", "enum.Enum")
+      py_module, "_ConvBackend", "enum.IntEnum")
       .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
       .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
       .value("Cudnn", at::native::ConvBackend::Cudnn)

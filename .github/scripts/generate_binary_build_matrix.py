@@ -314,8 +314,8 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13t on cpu-s390x
             if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
                 continue
-            # TODO: Enable python 3.14 on non linux OSes
-            if os not in ["linux", "linux-aarch64", "macos-arm64"] and (
+            # TODO: Enable python 3.14 for rest
+            if os not in ["linux", "linux-aarch64", "macos-arm64", "windows"] and (
                 python_version == "3.14" or python_version == "3.14t"
             ):
                 continue
