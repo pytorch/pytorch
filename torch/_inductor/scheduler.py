@@ -2045,6 +2045,11 @@ class NodeUser:
 
 _post_grad_graph_counter = itertools.count()
 
+# comm_cache, comp_cache = (
+#     estimator.CommPerfCache(),
+#     estimator.CompPerfCache(),
+# )
+
 
 class Scheduler:
     """
@@ -2158,6 +2163,15 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
+
+        runtime_estimations = None
+
+        if config.estimate_runtime_benchmark:
+            from .estimator import estimate_runtime
+
+            verbose = True
+            runtime_estimations = estimate_runtime(self, self.nodes, verbose)
+
         if config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
@@ -2182,7 +2196,9 @@ class Scheduler:
                     ]
                 ),
             )
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+            self.nodes = comms.reorder_compute_and_comm_for_overlap(
+                self.nodes, runtime_estimations
+            )
         self.process_grouped_nodes()
 
         if (

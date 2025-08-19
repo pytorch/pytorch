@@ -90,7 +90,7 @@ def reorder_compute_for_overlap(
 
 
 def reorder_communication_preserving_peak_memory(
-    snodes: list[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode], runtime_estimations
 ) -> list[BaseSchedulerNode]:
     """
     Reorders communication ops relative to computation ops to improve communication-compute overlapping and hide comm
@@ -155,10 +155,9 @@ def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
     ):
         return True
 
-    if (
-        python_kernel_name := getattr(node, "python_kernel_name", None)
-    ) and "extern_kernels" in python_kernel_name:
-        return True
+    if python_kernel_name := getattr(node, "python_kernel_name", None):
+        if "extern_kernels" in python_kernel_name and "mm" in python_kernel_name:
+            return True
     return False
 
 
@@ -236,8 +235,22 @@ def _initialize_double_linked_list(
     return _prev, _next, _head
 
 
+def is_corresponding_collective_wait(collective_snode, wait_snode):
+    collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
+    unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
+    return unmet_deps & collective_outs
+
+
+def _op_runtime_estimate_mult(snode):
+    if contains_collective(snode):
+        return 0.5
+    elif is_gemm_like(snode):
+        return 2.0
+    return 1.0
+
+
 def _reorder_communication_preserving_peak_memory_internal(
-    snodes: list[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode], runtime_estimations=None
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
     """
     Internal testing helper that also returns debug info.
@@ -266,8 +279,15 @@ def _reorder_communication_preserving_peak_memory_internal(
         buf_to_snode_last_use,
         name_to_freeable_input_buf,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
+
+    def _op_runtime_estimate(snode):
+        if runtime_estimations:
+            est = runtime_estimations[snode]
+            return est["COMM"] + est["COMP"]
+        return estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+
     runtimes: dict[BaseSchedulerNode, float] = {
-        snode: estimate_op_runtime(snode) for snode in snodes
+        snode: _op_runtime_estimate(snode) for snode in snodes
     }
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
@@ -276,14 +296,18 @@ def _reorder_communication_preserving_peak_memory_internal(
         collective_snode: BaseSchedulerNode, remaining_snodes: list[BaseSchedulerNode]
     ) -> float:
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
-        comm_time = estimate_op_runtime(collective_snode)
+        comm_time = runtimes[collective_snode]
         compute_time = 0.0
+        collective_outs = OrderedSet(
+            o.get_name() for o in collective_snode.get_outputs()
+        )
         for snode in remaining_snodes:
             if contains_collective(snode):
                 continue
-            if contains_wait(snode):
-                # TODO - if the wait is for a collective that started before this collective or on another stream,
-                # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
+
+            if contains_wait(snode) and is_corresponding_collective_wait(
+                collective_snode, snode
+            ):
                 break
 
             def accumulate_time(_snode: BaseSchedulerNode) -> None:
@@ -441,11 +465,16 @@ def _reorder_communication_preserving_peak_memory_internal(
     iterative_recompute_error = False
     # TODO(ivankobzarev): Replace this heuristic with reliable runtime estimations.
     num_swapped_gemm_like_limit = config.reorder_iterative_swapped_gemm_like_limit
+    rank = torch.distributed.get_rank()
 
     while _next[curr] is not None:
+        # Save next before manipulations
+        _next_curr = _next[curr]  # type: ignore[assignment]
+        # print(f"XXX[{rank}] curr:{curr.get_name()} _next[curr]:{_next[curr].get_name()}")
         if iterative_recompute_error:
             break
         if contains_collective(curr):
+            # print(f"XXX[{rank}] contains_collective!")
             if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
             ):
@@ -464,7 +493,15 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             num_swapped_gemm_like = 0
             while candidate is not None:
-                if contains_collective(candidate):
+                # print(f"XXX[{rank}] candidate:{candidate.get_name()}")
+                if info.final_exposed <= 0:
+                    info.limiting_factor = "unexposed"
+                    break
+
+                if (
+                    not config.reorder_iterative_unsafe_collectives_reorder
+                    and contains_collective(candidate)
+                ):
                     info.limiting_factor = "collective ordering"
                     break
 
@@ -619,7 +656,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     if iterative_recompute_error:
                         break
                 candidate = _prev[group_head]
-        curr = _next[curr]  # type: ignore[assignment]
+        curr = _next_curr
 
     node_stats = stats
     improvement = {snode: node_stats[snode].improvement for snode in node_stats}
@@ -873,10 +910,16 @@ class SinkWaitInfo:
     moves: int = 0
     moves_info: str = ""
     limiting_factor: str = "None"
+    initial_exposed: float = -1
+    final_exposed: float = -1
+
+    @property
+    def improvement(self):
+        return self.initial_exposed - self.final_exposed
 
 
 def _sink_waits_iterative_internal(
-    snodes: list[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode], runtime_estimations=None
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
@@ -1007,6 +1050,39 @@ def _sink_waits_iterative_internal(
                 post_alloc - snodes_allocfree[n].size_free,
             )
 
+    def _op_runtime_estimate(snode):
+        if runtime_estimations:
+            est = runtime_estimations[snode]
+            return est["COMM"] + est["COMP"]
+        return estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+
+    runtimes: dict[BaseSchedulerNode, float] = {
+        snode: _op_runtime_estimate(snode) for snode in snodes
+    }
+
+    def exposed_communication_time(snodes_to_wait):
+        wait_snode = snodes_to_wait[-1]
+        assert len(snodes_to_wait) > 1
+        idx = len(snodes_to_wait) - 2
+        comm_time = 0.0
+        compute_time = 0.0
+        for i in range(idx, -1, -1):
+            c = snodes_to_wait[i]
+            if contains_collective(c):
+                if is_corresponding_collective_wait(c, wait_snode):
+                    comm_time = runtimes[c]
+                    break
+                else:
+                    continue
+
+            def accumulate_time(_snode: BaseSchedulerNode) -> None:
+                nonlocal compute_time
+                compute_time += runtimes[_snode]
+
+            _temp_group_visit_leaves(c, accumulate_time)
+
+        return max(0, comm_time - compute_time)
+
     curr = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
@@ -1018,6 +1094,7 @@ def _sink_waits_iterative_internal(
     iterative_recompute_error = False
     num_swapped_gemm_like_limit = config.sink_waits_iterative_swapped_gemm_like_limit
     while _prev[curr] is not None:
+        _prev_curr = _prev[curr]  # type: ignore[assignment]
         if iterative_recompute_error:
             break
         if (
@@ -1029,6 +1106,9 @@ def _sink_waits_iterative_internal(
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
             info = stats[curr] = SinkWaitInfo()
+            info.initial_exposed = info.final_exposed = exposed_communication_time(
+                _group_nodes(_head, curr)
+            )
             candidate = _next[curr]
             wait_snode = curr
             group_head = curr
@@ -1049,7 +1129,8 @@ def _sink_waits_iterative_internal(
 
             num_swapped_gemm_like = 0
             while candidate is not None:
-                if iterative_recompute_error:
+                if info.final_exposed <= 0:
+                    info.limiting_factor = "unexposed"
                     break
                 gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
                 group = GroupedSchedulerNode(
@@ -1106,7 +1187,10 @@ def _sink_waits_iterative_internal(
                         candidate = _next[candidate]
                         continue
                     elif data_dep is None:
-                        if both_contain_comms:
+                        if (
+                            not config.sink_waits_iterative_unsafe_collectives_reorder
+                            and both_contain_comms
+                        ):
                             info.limiting_factor = (
                                 f"collective ordering {_group_names(gns)}"
                                 f"\n with candidate:{candidate.get_name()}"
@@ -1218,6 +1302,10 @@ def _sink_waits_iterative_internal(
 
                 _perform_double_linked_list_swap(candidate, group_head, group_tail)
 
+                info.final_exposed = exposed_communication_time(
+                    _group_nodes(_head, curr)
+                )
+
                 _update_memory_tracking_after_swap(
                     candidate,
                     gns,
@@ -1246,24 +1334,30 @@ def _sink_waits_iterative_internal(
                         break
 
                 candidate = _next[group_tail]
-        curr = _prev[curr]  # type: ignore[assignment]
+        curr = _prev_curr
 
     headers = [
         "Wait node",
+        "initial exposed",
+        "final exposed",
+        "improvement",
+        "limiting factor",
         "grouped",
         "grouped_info",
         "moves",
         "moves_info",
-        "limiting factor",
     ]
     rows = [
         [
             node_summary(snode),
+            info.initial_exposed,
+            info.final_exposed,
+            info.improvement,
+            info.limiting_factor,
             info.grouped,
             info.grouped_info,
             info.moves,
             info.moves_info,
-            info.limiting_factor,
         ]
         for snode, info in stats.items()
     ]
@@ -1299,9 +1393,9 @@ def _sink_waits_iterative_internal(
 
 
 def sink_waits_iterative(
-    snodes: list[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode], runtime_estimations=None
 ) -> list[BaseSchedulerNode]:
-    return _sink_waits_iterative_internal(snodes)[0]
+    return _sink_waits_iterative_internal(snodes, runtime_estimations)[0]
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
@@ -1387,6 +1481,7 @@ def visualize_overlap(order):
 
 def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
+    runtime_estimations: Optional[dict[str, float]] = None,
 ) -> list[BaseSchedulerNode]:
     order = snodes
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
@@ -1409,7 +1504,7 @@ def reorder_compute_and_comm_for_overlap(
             except Exception as e:
                 overlap_log.debug("", exc_info=e)
         t0 = time.time()
-        order = p(order)  # type: ignore[operator]
+        order = p(order, runtime_estimations)  # type: ignore[operator]
         t = time.time() - t0
         if torch.distributed.get_rank() == 0:
             overlap_log.debug(
