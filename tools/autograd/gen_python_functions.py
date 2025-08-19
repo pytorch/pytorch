@@ -97,7 +97,6 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
-    "sym_is_contiguous",
     "sym_size",
     "sym_stride",
     "sym_storage_offset",
