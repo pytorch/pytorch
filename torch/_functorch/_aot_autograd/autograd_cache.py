@@ -302,6 +302,42 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
     a safe and stable cache key for AOTAutograd.
     """
 
+    def get_triton_source_codes_from_gm(
+        self,
+        gm: torch.fx.GraphModule,
+    ):
+        triton_kernels = []
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverloadPacket):
+                    attrs = node.target._dir
+                    for attr in attrs:
+                        if custom_op := getattr(node.target, attr, None):
+                            kernels = torch._library.triton.get_triton_kernels_for_op(
+                                custom_op._name
+                            )
+                            triton_kernels.extend(kernels)
+                elif isinstance(node.target, torch._ops.OpOverload):
+                    kernels = torch._library.triton.get_triton_kernels_for_op(
+                        node.target._name
+                    )
+                    triton_kernels.extend(kernels)
+
+        triton_kernel_source_codes = []
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        for kernel in triton_kernels:
+            source_codes = user_defined_triton_kernel_transitive_closure_source_code(
+                kernel
+            )
+            triton_kernel_source_codes.append(source_codes)
+
+        return triton_kernel_source_codes
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -319,6 +355,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
+        self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
@@ -497,6 +534,32 @@ class CompiledFxGraphLoadable(InductorOutput[CompiledFxGraph]):
     """
 
     result: CompiledFxGraph
+
+    def recheck_autotune_results(self) -> None:
+        """
+        Run during PrecompileContext.serialize(). We recheck the autotune cache
+        again before saving results, to see if autotuning has completed for our generated
+        triton kernels. If so, it edits the statically compiled triton kernel so that only
+        the best config is preserved.
+        """
+        triton_bundle = self.result._triton_bundle
+        if triton_bundle is None:
+            return
+        static_autotuners = triton_bundle.static_autotuners
+        for autotuner in static_autotuners:
+            from torch._inductor.codecache import _load_triton_kernel_from_source
+
+            reload_kernel_from_src = functools.partial(
+                _load_triton_kernel_from_source,
+                autotuner.kernel_name,
+                autotuner.source_code,
+            )
+            autotuner.kernel.recheck_autotune_cache(
+                reload_kernel_from_src,
+            )
+            # Clear any extra state created by this check
+            autotuner.kernel.prepare_for_pickle()
+            autotuner.kernel.prepare_for_caching()
 
     def pre_save(self) -> None:
         disk_compiled_graph = copy(self.result)
@@ -960,6 +1023,18 @@ class BundledAOTAutogradCacheEntry(
     AOTAutogradCacheEntry where we save the entire CompiledFxGraph instead
     of relying on cache keys from FxGraphCache
     """
+
+    @staticmethod
+    def update_autotune_results(
+        entry: BundledAOTAutogradCacheEntry,
+    ) -> BundledAOTAutogradCacheEntry:
+        """
+        Update the autotune results in the cache entry.
+        """
+        entry.compiled_fw.recheck_autotune_results()
+        if entry.compiled_bw is not None:
+            entry.compiled_bw.recheck_autotune_results()
+        return entry
 
 
 @contextlib.contextmanager

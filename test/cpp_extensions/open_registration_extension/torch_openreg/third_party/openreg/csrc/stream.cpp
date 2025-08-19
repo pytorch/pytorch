@@ -184,7 +184,7 @@ orError_t orStreamCreateWithPriority(
 
   int min_p, max_p;
   orDeviceGetStreamPriorityRange(&min_p, &max_p);
-  if (priority > min_p || priority < max_p) {
+  if (priority < min_p || priority > max_p) {
     return orErrorUnknown;
   }
 
