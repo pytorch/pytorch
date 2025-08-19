@@ -94,6 +94,20 @@ def has_triton_tma_device() -> bool:
     return False
 
 
+@functools.cache
+def has_blackwell_tma_device() -> bool:
+    import torch
+
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (10, 0)
+        and not torch.version.hip
+    ):
+        return has_triton_tma_device() and has_triton_tensor_descriptor_host_tma()
+
+    return False
+
+
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
