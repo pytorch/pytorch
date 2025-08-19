@@ -2579,7 +2579,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
+        if config.triton.enable_pdl:
+            load_buffer.writeline("tl.extra.cuda.gdc_wait()")
         result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
+        # if config.triton.enable_pdl:
+        #     load_buffer.writeline("tl.extra.cuda.gdc_launch_dependents()")
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
@@ -4014,6 +4018,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
+
+        # print(f"{config.triton.enable_pdl=}")
+        if config.triton.enable_pdl:
+            triton_meta["launch_pdl"] = True
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
