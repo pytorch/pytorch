@@ -208,7 +208,8 @@ pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" re
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 
-# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
+# For USE_DISTRIBUTED=1 on macOS, this enables gloo, which needs libuv, which
+# is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
 export USE_MKLDNN=OFF

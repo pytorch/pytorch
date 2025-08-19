@@ -697,7 +697,6 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
 
-
   // XXX consider using as string stream?
   return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
 }
