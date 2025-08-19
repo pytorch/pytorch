@@ -72,11 +72,11 @@ size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
     const int64_t bl,
-    at::ScalarType scale_dtype)
+    at::ScalarType weight_dtype)
 {
   size_t packed_size = n * k;
   if (bl == k) {
-    if (scale_dtype == at::kBFloat16) {
+    if (weight_dtype == at::kBFloat16) {
       auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
           kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
       const auto& ukernel = kernel_packet.ukernel;

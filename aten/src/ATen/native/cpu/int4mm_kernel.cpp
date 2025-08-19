@@ -936,7 +936,7 @@ void dyn_quant_pack_4bit_weight_kernel(
 #if AT_KLEIDIAI_ENABLED()
   if (can_use_kleidiai(scales_zeros, K, block_size)) {
     const int64_t weight_packed_size =
-        kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
+        kleidiai::kai_pack_rhs_int4_size(N, K, block_size, weights.scalar_type());
     packed_weights.resize_({weight_packed_size});
     kleidiai::kai_pack_int4_rhs(
         packed_weights, weights, scales_zeros, bias, N, K, block_size);
