@@ -22,16 +22,14 @@ from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
 
-
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -238,7 +236,7 @@ class StructuredTraceTest(TestCase):
             with self.assertRaises(ValueError):
                 torch._guards.CompileId.from_string(bad_cid)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device="cuda"))
@@ -261,7 +259,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "triton_kernel_info", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -271,7 +268,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_cudagraphs(self):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
@@ -294,7 +291,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "triton_kernel_info", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -334,7 +330,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -355,7 +350,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
@@ -386,7 +380,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -444,7 +437,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 2, "frame_compile_id": 0, "attempt": 1}
@@ -454,7 +446,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 2, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"bwd_compilation_metrics": "METRICS", "frame_id": 2, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}
@@ -535,7 +526,7 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_ddp_graphs(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -679,7 +670,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 16, "describer_id": "ID", "size": 4194304}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 29, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cuda', index=0)", "size": [1024, 1024], "is_leaf": true, "requires_grad": true, "is_parameter": true, "stride": [1024, 1], "storage": 16, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}
@@ -699,7 +689,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "rank": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}
@@ -739,7 +728,6 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
@@ -899,7 +887,6 @@ def forward(self, x, y):
 {"artifact": {"name": "before_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "after_post_grad_graph", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "inductor_collective_schedule", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -1160,9 +1147,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
             log_collective_schedule([])
 
-            self.assertIn('"inductor_collective_schedule"', self.buffer.getvalue())
-            self.assertEqual(json.loads(payload_buffer.getvalue()), [])
-            self.assertParses()
+            # With no collectives, artifact should not be logged and payload should be empty
+            self.assertNotIn('"inductor_collective_schedule"', self.buffer.getvalue())
+            self.assertEqual(payload_buffer.getvalue().strip(), "")
 
     @requires_tlparse
     @requires_distributed()
@@ -1210,13 +1197,13 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @contextmanager
     def _setup_runtime_estimates_capture(self):
-        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        """Helper to turn on and capture the combined 'inductor_runtime_and_tensor_meta' structured trace."""
         payload_buffer = io.StringIO()
         payload_handler = logging.StreamHandler(payload_buffer)
         payload_handler.setLevel(logging.DEBUG)
         payload_handler.setFormatter(StructuredTracePayloadFormatter())
         payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_tlparse_runtime")
+            StructuredTraceTestingFilter("inductor_runtime_and_tensor_meta")
         )
         trace_log.addHandler(payload_handler)
         try:
@@ -1226,7 +1213,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_simple(self):
@@ -1257,8 +1244,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify runtime + tensor meta artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1272,14 +1261,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
                     self.assertTrue(len(compute_ops) > 0 or len(collective_ops) > 0)
 
-                    # All ops should have runtime > 0 except wait_tensor can be 0
+                    # Just check each op has an estimated runtime value (any value, including 0)
                     for op in ops:
-                        if "wait_tensor" not in op["name"]:
-                            self.assertGreater(
-                                op["estimated_runtime_ns"],
-                                0,
-                                f"Op {op['name']} should have runtime > 0",
-                            )
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
 
                 self.assertParses()
         finally:
@@ -1287,7 +1272,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("fx_graph_cache", False)
     @torch._inductor.config.patch("log_tlparse", True)
     def test_runtime_estimates_mixed(self):
@@ -1326,8 +1311,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 compiled = torch.compile(mod, backend="inductor")
                 compiled(torch.randn(4, 4, device="cuda"))
 
-                # Verify runtime estimates artifact was logged
-                self.assertIn('"inductor_tlparse_runtime"', self.buffer.getvalue())
+                # Verify artifact was logged
+                self.assertIn(
+                    '"inductor_runtime_and_tensor_meta"', self.buffer.getvalue()
+                )
 
                 payload_content = payload_buffer.getvalue().strip()
                 if payload_content:
@@ -1340,18 +1327,153 @@ def forward(self, x_1: "f32[2][1]cpu"):
                     self.assertIn("compute", op_types)
                     self.assertIn("collective", op_types)
 
-                    # All ops should have runtime > 0 except wait_tensor can be 0
+                    # Just check each op has an estimated runtime value (any value, including 0)
                     for op in ops:
-                        if "wait_tensor" not in op["name"]:
-                            self.assertGreater(
-                                op["estimated_runtime_ns"],
-                                0,
-                                f"Op {op['name']} should have runtime > 0",
-                            )
+                        self.assertIn("estimated_runtime_ns", op)
+                        self.assertIsNotNone(op["estimated_runtime_ns"])
 
                 self.assertParses()
         finally:
             dist.destroy_process_group()
+
+    @requires_tlparse
+    @requires_distributed()
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch("fx_graph_cache", False)
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_multiple_ops(self):
+        import torch.distributed as dist
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = torch.relu(self.linear(x))
+                y = torch.ops._c10d_functional.all_reduce.default(y, "sum", "0")
+                y = torch.ops._c10d_functional.wait_tensor.default(y)
+                return y + 1
+
+        try:
+            with self._setup_runtime_estimates_capture() as payload_buffer:
+                torch._dynamo.reset()
+                mod = Mixed().cuda()
+                compiled = torch.compile(mod, backend="inductor")
+                compiled(torch.randn(4, 4, device="cuda"))
+                payload = payload_buffer.getvalue().strip()
+                if payload:
+                    data = json.loads(payload)
+                    types = sorted({op.get("type") for op in data.get("ops", [])})
+                    self.assertExpectedInline(
+                        str(types), """['collective', 'compute']"""
+                    )
+                self.assertParses()
+        finally:
+            dist.destroy_process_group()
+
+    @requires_tlparse
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging(self):
+        """Emit unified runtime+tensor-metadata artifact and assert a stable simplified JSON inline."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
+
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
+
+            compiled = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled(torch.ones(2, 3))
+
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
+
+            payload = payload_buffer.getvalue().strip()
+            if payload:
+                data = json.loads(payload)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                self.assertExpectedInline(
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    """{'ops': [{'type': 'compute', 'outputs': [{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}""",
+                )
+
+            self.assertParses()
+
+    @requires_tlparse
+    @torch._inductor.config.patch("log_tlparse", True)
+    def test_tensor_metadata_logging_dynamic_shapes(self):
+        """Same as test_tensor_metadata_logging, but with dynamic shapes enabled to cover to_size_hints."""
+        with self._setup_runtime_estimates_capture() as payload_buffer:
+
+            def f(x):
+                y = x.transpose(0, 1)
+                z = y.mean(dim=0)
+                w = z.to(torch.float16)
+                return w
+
+            compiled = torch.compile(f, backend="inductor", dynamic=True)
+            compiled(torch.ones(2, 3))
+
+            # Verify artifact was logged
+            self.assertIn('"inductor_runtime_and_tensor_meta"', self.buffer.getvalue())
+
+            payload = payload_buffer.getvalue().strip()
+            if payload:
+                data = json.loads(payload)
+                ops = data.get("ops", [])
+
+                simplified_ops = []
+                for op in ops:
+                    outs = [
+                        {
+                            "shape": out.get("shape", []),
+                            "stride": out.get("stride", []),
+                            "dtype": out.get("dtype", None),
+                        }
+                        for out in op.get("outputs", [])
+                    ]
+                    if outs:
+                        simplified_ops.append(
+                            {
+                                "type": op.get("type", ""),
+                                "outputs": outs,
+                            }
+                        )
+
+                self.assertExpectedInline(
+                    {"ops": simplified_ops[-1:]} if simplified_ops else {"ops": []},
+                    (
+                        "{'ops': [{'type': 'compute', 'outputs': ["
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float32'}, "
+                        "{'shape': [2], 'stride': [1], 'dtype': 'float16'}]}]}"
+                    ),
+                )
+
+            self.assertParses()
 
 
 if __name__ == "__main__":

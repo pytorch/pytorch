@@ -401,7 +401,6 @@ def gen_static_dispatch_backend_call(
     if backend_index is None:
         # Check if this is a symint function and if the function only has method variants
         if sig.symint and f.func.has_symint():
-            # Check if the function has standalone function variants
             has_function_variant = Variant.function in f.variants
 
             if not has_function_variant:

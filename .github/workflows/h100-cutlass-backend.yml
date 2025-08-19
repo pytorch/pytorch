@@ -4,9 +4,12 @@ on:
   pull_request:
     paths:
       - .github/workflows/h100-cutlass-backend.yml
+      - torch/_inductor/codegen/cuda/**
+      - test/inductor/test_cutlass_backend.py
+      - test/inductor/test_cutlass_evt.py
   workflow_dispatch:
   schedule:
-    - cron: 22 9 * * *  # every 24 hours about 2:22am PDT
+    - cron: 22 9,21 * * *  # every 12 hours
   push:
     tags:
       - ciflow/h100-cutlass-backend/*
