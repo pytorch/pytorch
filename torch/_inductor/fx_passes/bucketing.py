@@ -1,6 +1,5 @@
 import collections
 import logging
-from collections import defaultdict
 from typing import Any, Callable, Optional
 
 import torch
@@ -138,21 +137,33 @@ def greedy_bucket_collective_by_mb(
 
     g = gm.graph
 
-    nodes_groups: dict[Any, list[torch.fx.Node]] = defaultdict(list)
-
     # TODO: pearce kelly algorithm for detecting cycles
     node_descendents = collect_node_descendants(gm.graph)
+
+    nodes_groups: list[list[torch.fx.Node]] = []
+    cur_group: list[torch.fx.Node] = []
+    cur_group_key = None
 
     for node in g.nodes:
         if is_wait_tensor(node) and filter_node(node.args[0]):
             if (filter_wait_node is None) or filter_wait_node(node):
                 coll_node = node.args[0]
                 group_key = node_group_key(coll_node)
-                nodes_groups[group_key].append(coll_node)
+
+                if group_key == cur_group_key:
+                    cur_group.append(coll_node)
+                else:
+                    if len(cur_group) > 1:
+                        nodes_groups.append(cur_group)
+                    cur_group = [coll_node]
+                    cur_group_key = group_key
+
+    if len(cur_group) > 1:
+        nodes_groups.append(cur_group)
 
     buckets: list[list[torch.fx.Node]] = []
 
-    for nodes in nodes_groups.values():
+    for nodes in nodes_groups:
         cur_bucket: list[torch.fx.Node] = []
         cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
@@ -197,7 +208,7 @@ def bucket_all_gather_by_mb(
 
     Args:
         gm (torch.fx.GraphModule): GraphModule where to bucket all_gathers.
-        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+        bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets at the start,
             as first all_gather is usually exposed.  Interface of bucket_cap_mb_by_bucket_idx
@@ -235,14 +246,14 @@ def bucket_reduce_scatter_by_mb(
 
     Args:
         gm (torch.fx.GraphModule): GraphModule where to bucket reduce_scatters.
-        bucket_cap_mb_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
+        bucket_cap_mb_by_bucket_idx (Callable[[int], float]): Callable to specify cap of the bucket
             in megabytes by bucket idx.  The idea of `bucket_cap_mb_by_bucket_idx` is to allow
             to specify different sizes of the buckets.
         filter_wait_node (Optional[Callable[[torch.fx.Node], bool]]): If specified,
             only reduce_scatter nodes with wait_node that satisfy `filter_wait_node` will be bucketed.
 
     Returns:
-        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
+        list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of reduce_scatter nodes.
     """
 
     def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:

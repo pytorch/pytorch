@@ -765,7 +765,19 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     def __init__(self) -> None:
         super().__init__()
 
-        self.b200_default_flex_config = {
+        self.sm_120_default_flex_config = {
+            (torch.float32, 64): FlexConfig(128, 32, 2, 4),
+            (torch.float32, 128): FlexConfig(128, 32, 2, 4),
+            (torch.float32, 256): FlexConfig(64, 16, 2, 4),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.bfloat16, 256): FlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): FlexConfig(128, 64, 2, 4),
+            (torch.float16, 128): FlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): FlexConfig(32, 64, 2, 4),
+        }
+
+        self.sm_100_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 3, 4),
             (torch.float32, 128): FlexConfig(32, 64, 3, 4),
             (torch.float32, 256): FlexConfig(32, 32, 3, 4),
@@ -773,7 +785,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             (torch.bfloat16, 128): FlexConfig(128, 64, 2, 8),
             (torch.bfloat16, 256): FlexConfig(64, 32, 3, 4),
             (torch.float16, 64): FlexConfig(128, 128, 3, 4),
-            (torch.float16, 128): FlexConfig(128, 128, 3, 8),
+            (torch.float16, 128): FlexConfig(128, 64, 3, 8),
             (torch.float16, 256): FlexConfig(64, 32, 3, 4),
         }
 
@@ -815,11 +827,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(128, 64, 3, 4)
-            if capability >= (10, 0):
-                default_config = self.b200_default_flex_config.get(
+            if capability >= (12, 0):
+                default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
-            elif capability >= (9, 0):
+            elif capability >= (10, 0):
+                default_config = self.sm_100_default_flex_config.get(
+                    (dtype, head_dim), default_config
+                )
+            elif capability == (9, 0):
                 default_config = self.h100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -850,13 +866,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
         if dtype == torch.float32:
             default_config = FlexConfig(16, 16, 1, 4)
-        elif head_dim <= 256 and capability >= (9, 0):  # H100
+        elif head_dim <= 256 and capability == (9, 0):  # H100
             if head_dim == 64:
                 default_config = FlexConfig(64, 64, 3, 4)
             elif head_dim == 128:
                 default_config = FlexConfig(64, 128, 3, 8)
             else:
                 default_config = FlexConfig(64, 64, 2, 4)
+        elif head_dim <= 256 and capability >= (10, 0):  # B100
+            if head_dim == 64 or head_dim == 128:
+                default_config = FlexConfig(32, 32, 2, 4)
+            else:
+                default_config = FlexConfig(32, 32, 1, 4)
         elif capability >= (8, 0):  # A100
             if head_dim == 64:
                 default_config = FlexConfig(32, 128, 3, 4)
@@ -888,7 +909,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
-        if capability >= (9, 0):  # sm_90+
+        if capability in [(9, 0), (10, 0), (10, 3)]:  # sm_90, sm_100, sm_103
             if head_dim > 128 and dtype == torch.float32:
                 default_config = FlexDecodeConfig(64, 1, 2)
             else:
@@ -1295,6 +1316,19 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             )
             yield template_kwargs
 
+    @staticmethod
+    def _get_input_precision(
+        m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
+    ) -> str:
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+        result = "tf32" if allow_tf32 else "ieee"
+
+        # wrap in quotes, because the string will be dropped into the templates
+        return f'"{result}"'
+
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
@@ -1314,16 +1348,10 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
-        # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            ALLOW_TF32=allow_tf32,
+            FLOAT32_PRECISION=MMTemplateConfigMixin._get_input_precision(m, n, k),
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(layout.dtype),
             num_stages=triton_config.num_stages,

@@ -253,6 +253,9 @@ class WorkspaceArg(CodegenSymbol):
     def get_name(self) -> str:
         return self.outer_name
 
+    def get_is_pinned(self) -> bool:
+        return False
+
     def get_inputs_that_alias_output(self) -> list[str]:
         return []
 
@@ -359,8 +362,8 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(
-        self, idx: int, workspace: TritonScratchWorkspace
+    def cpp_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
     ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
@@ -458,15 +461,18 @@ def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
 
 
 def get_wrapper_codegen_for_device(
-    device: str, cpp_wrapper: bool = False
+    device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
 ) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
-        return (
-            wrapper_codegen_obj.cpp_wrapper_codegen
-            if cpp_wrapper
-            else wrapper_codegen_obj.wrapper_codegen
-        )
+        if fx_wrapper:
+            from .wrapper_fxir import WrapperFxCodegen
+
+            return WrapperFxCodegen
+        elif cpp_wrapper:
+            return wrapper_codegen_obj.cpp_wrapper_codegen
+        else:
+            return wrapper_codegen_obj.wrapper_codegen
     return None
 
 

@@ -144,6 +144,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 
@@ -2552,7 +2553,7 @@ def _get_cpp_prefix_header(device: str) -> Optional[str]:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":")[0]
+    base_device = device.split(":", maxsplit=1)[0]
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
@@ -3622,9 +3623,12 @@ def _cuda_lib_options() -> list[str]:
             if "torch/lib" in path:
                 # don't want to depend on pytorch
                 continue
+            extra_ldflags.append(f"-L{path}")
             # -rpath ensures the DLL can find its dependencies when loaded, even
             # if the library path is non-standard.
-            extra_ldflags.extend([f"-L{path}", "-Xlinker", f"-rpath={path}"])
+            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
+            if os.path.basename(path) != "stubs":
+                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
@@ -3733,7 +3737,10 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
 
 
@@ -4206,24 +4213,28 @@ class StaticAutotunerFuture(CodeCacheFuture):
     A statically launchable CachingAutotuner, loaded from TritonBundler
     """
 
-    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+    def __init__(
+        self, static_autotuner: CachingAutotuner, kernel_name: str, source_code: str
+    ) -> None:
         # Pickled version of CachingAutotuner
         self.static_autotuner = static_autotuner
-        # This needs to be set in AsyncCompile.triton, in case
-        # we need to reload the CachingAutotuner from its source code
-        # We don't store the source code on the CachingAutotuner itself
-        # since it can be very large.
-        self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
+        self.kernel_name = kernel_name
+        # The python source code of the kernel is relatively small and stored by StaticallyLaunchedAutotuner.
+        # We do not store the compiled cuda code here as it's very large,
+        # it's stored via the regular TritonBundler
+        self.source_code = source_code
 
     def result(self) -> CachingAutotuner:
-        assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            reload_kernel_from_src = functools.partial(
+                _load_triton_kernel_from_source, self.kernel_name, self.source_code
+            )
             self.static_autotuner.recheck_autotune_cache(
-                reload_kernel_from_src=self.reload_kernel_from_src
+                reload_kernel_from_src=reload_kernel_from_src
             )
             self.static_autotuner.precompile(  # type: ignore[union-attr]
                 warm_cache_only=False,
-                reload_kernel=self.reload_kernel_from_src,
-                static_triton_bundle_key=None,  # no need to save again
+                reload_kernel=reload_kernel_from_src,
+                source_code=None,  # no need to save again
             )
             return self.static_autotuner

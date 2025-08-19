@@ -63,11 +63,12 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11"
-librosa==0.10.2 ; python_version == "3.12"
+librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x"
+librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
+#librosa depends on numba; disable it for s390x while numba is disabled too
 
 #mkl #this breaks linux-bionic-rocm4.5-py3.7
 #Description: Intel oneAPI Math Kernel Library
@@ -110,14 +111,12 @@ ninja==1.11.1.3
 #Pinned versions: 1.11.1.3
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.49.0 ; python_version < "3.9"
-numba==0.55.2 ; python_version == "3.9"
-numba==0.55.2 ; python_version == "3.10"
-numba==0.60.0 ; python_version == "3.12"
+numba==0.60.0 ; python_version <= "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.54.1, 0.49.0, <=0.49.1
 #test that import: test_numba_integration.py
 #For numba issue see https://github.com/pytorch/pytorch/issues/51511
+#Need release > 0.61.2 for s390x due to https://github.com/numba/numba/pull/10073
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
@@ -131,8 +130,7 @@ numba==0.60.0 ; python_version == "3.12"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==1.26.2; python_version < "3.13"
 numpy==2.1.2; python_version >= "3.13"
 
 pandas==2.0.3; python_version < "3.13"
@@ -307,7 +305,7 @@ pytest-cpp==2.3.0
 #Pinned versions: 2.3.0
 #test that import:
 
-z3-solver==4.15.1.0
+z3-solver==4.15.1.0 ; platform_machine != "s390x"
 #Description: The Z3 Theorem Prover Project
 #Pinned versions:
 #test that import:

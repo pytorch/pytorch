@@ -12,6 +12,9 @@ from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
 class TestUtils(TestCase):
     def test_nan(self):
         a = torch.Tensor([float("nan")])
@@ -243,6 +246,49 @@ class TestDynamoTimed(TestCase):
         utils.reset_frame_count()
         torch._logging._internal.structured_logging_overhead.clear()
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_stack_trace(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        stack_trace_list = []
+        for e in compilation_events:
+            stack_trace_list.append(e.stack_trace)
+
+        self.assertGreater(len(stack_trace_list), 0)
+        result = "\n".join(
+            item
+            for sublist in stack_trace_list
+            if sublist
+            for item in (sublist if isinstance(sublist, list) else [sublist])
+        )
+        self.assertIn(
+            "test_stack_trace",
+            result,
+            "Log file does not contain the expected string: 'test_stack_trace'",
+        )
+
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_graph_node_shapes(self):
+        self.warmup()
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        self.assertEqual(
+            compilation_events[0].graph_node_shapes,
+            "{'l_self_modules_linear_parameters_weight_': [1, 3], "
+            "'l_self_modules_linear_parameters_bias_': [1], "
+            "'l_x_': [3], 'linear': [1]}",
+        )
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -300,6 +346,37 @@ class TestDynamoTimed(TestCase):
  'additional_fake_tensor_prop': [0.0, 0.0],
  'aot_collect_metadata': [0.0],
  'aot_trace_joint_graph': [0.0],
+ 'backward._backward_impl': [0.0],
+ 'build_guards': [0.0],
+ 'bytecode_tracing': [0.0],
+ 'compile_attempt_0': [0.0],
+ 'compile_file': [0.0, 0.0],
+ 'compile_fx.<locals>.bw_compiler': [0.0],
+ 'compile_fx.<locals>.fw_compiler_base': [0.0],
+ 'compile_fx_inner': [0.0, 0.0],
+ 'create_aot_dispatcher_function': [0.0],
+ 'fx_codegen_and_compile': [0.0, 0.0],
+ 'gc': [0.0],
+ 'min_cut_rematerialization_partition': [0.0]}"""
+            if _IS_WINDOWS
+            else """\
+{'GraphLowering.codegen': [0.0, 0.0],
+ 'GraphLowering.compile_to_fn': [0.0, 0.0],
+ 'GraphLowering.compile_to_module': [0.0, 0.0],
+ 'GraphLowering.run': [0.0, 0.0],
+ 'OutputGraph.call_user_compiler': [0.0],
+ 'PyCodeCache.load_by_key_path': [0.0, 0.0],
+ 'PythonWrapperCodegen.generate': [0.0, 0.0],
+ 'Scheduler.__init__': [0.0, 0.0],
+ 'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.fused_nodes': [0.0, 0.0],
+ '_compile.compile_inner': [0.0],
+ '_recursive_joint_graph_passes': [0.0],
+ '_recursive_post_grad_passes': [0.0, 0.0],
+ '_recursive_pre_grad_passes': [0.0],
+ 'additional_fake_tensor_prop': [0.0, 0.0],
+ 'aot_collect_metadata': [0.0],
+ 'aot_trace_joint_graph': [0.0],
  'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
  'build_guards': [0.0],
@@ -321,6 +398,18 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(time_spent),
             """\
+{'_recursive_joint_graph_passes': 0.0,
+ '_recursive_post_grad_passes': 0.0,
+ '_recursive_pre_grad_passes': 0.0,
+ 'backend_compile': 0.0,
+ 'code_gen': 0.0,
+ 'entire_backward_compile': 0.0,
+ 'entire_frame_compile': 0.0,
+ 'gc': 0.0,
+ 'inductor_compile': 0.0,
+ 'total_wall_time': 0.0}"""
+            if _IS_WINDOWS
+            else """\
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
@@ -350,6 +439,8 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
+            e.stack_trace = None
+            e.graph_node_shapes = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -396,6 +487,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
+ 'graph_node_shapes': None,
  'graph_op_count': 1,
  'guard_count': 9,
  'has_guarded_code': True,
@@ -408,6 +500,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
  'is_runtime': False,
  'joint_graph_pass_time_us': 0,
@@ -433,6 +526,91 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': 0,
  'specialize_float': False,
+ 'stack_trace': None,
+ 'start_time': 0.0001,
+ 'start_time_us': 100,
+ 'structured_logging_overhead_s': 0.0,
+ 'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
+ 'triton_compile_time_us': None,
+ 'triton_kernel_compile_times_us': None,
+ 'triton_version': None}"""
+            if _IS_WINDOWS
+            else """\
+{'accumulated_cache_size': 0,
+ 'aot_autograd_cumulative_compile_time_us': 0,
+ 'backend_compile_time_s': 0.0,
+ 'backward_cumulative_compile_time_us': None,
+ 'cache_size': 0,
+ 'co_filename': None,
+ 'co_firstlineno': None,
+ 'co_name': 'forward',
+ 'code_gen_time_s': 0.0,
+ 'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
+ 'compliant_custom_ops': set(),
+ 'config_inline_inbuilt_nn_modules': False,
+ 'config_suppress_errors': False,
+ 'cuda_version': None,
+ 'cudagraph_skip_reason': None,
+ 'distributed_ephemeral_timeout_us': None,
+ 'duration_us': 0,
+ 'dynamo_compile_time_before_restart_us': 0,
+ 'dynamo_config': None,
+ 'dynamo_cumulative_compile_time_us': 0,
+ 'dynamo_time_before_restart_s': 0.0,
+ 'end_time_us': 100,
+ 'entire_frame_compile_time_s': 0.0,
+ 'fail_reason': None,
+ 'fail_type': None,
+ 'fail_user_frame_filename': None,
+ 'fail_user_frame_lineno': None,
+ 'frame_key': '1',
+ 'gc_time_us': 0,
+ 'graph_input_count': 1,
+ 'graph_node_count': 3,
+ 'graph_node_shapes': None,
+ 'graph_op_count': 1,
+ 'guard_count': 9,
+ 'has_guarded_code': True,
+ 'inductor_code_gen_cumulative_compile_time_us': 0,
+ 'inductor_compile_time_s': 0.0,
+ 'inductor_config': None,
+ 'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
+ 'is_forward': True,
+ 'is_runtime': False,
+ 'joint_graph_pass_time_us': 0,
+ 'log_format_version': 3,
+ 'non_compliant_ops': set(),
+ 'num_graph_breaks': 0,
+ 'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
+ 'post_grad_pass_time_us': 0,
+ 'pre_grad_pass_time_us': 0,
+ 'python_version': None,
+ 'recompile_reason': None,
+ 'recompile_user_contexts': None,
+ 'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
+ 'remote_fx_graph_cache_get_time_ms': None,
+ 'remote_fx_graph_cache_get_time_us': None,
+ 'remote_fx_graph_cache_put_time_ms': None,
+ 'remote_fx_graph_cache_put_time_us': None,
+ 'restart_reasons': set(),
+ 'runtime_cudagraphify_time_us': None,
+ 'runtime_triton_autotune_time_us': None,
+ 'shape_env_guard_count': 0,
+ 'specialize_float': False,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
@@ -488,6 +666,7 @@ class TestDynamoTimed(TestCase):
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
+ 'graph_node_shapes': None,
  'graph_op_count': None,
  'guard_count': None,
  'has_guarded_code': None,
@@ -500,6 +679,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,
  'is_runtime': False,
  'joint_graph_pass_time_us': None,
@@ -525,6 +705,91 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
+ 'stack_trace': None,
+ 'start_time': 0.0001,
+ 'start_time_us': 100,
+ 'structured_logging_overhead_s': 0.0,
+ 'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
+ 'triton_compile_time_us': None,
+ 'triton_kernel_compile_times_us': None,
+ 'triton_version': None}"""
+            if _IS_WINDOWS
+            else """\
+{'accumulated_cache_size': None,
+ 'aot_autograd_cumulative_compile_time_us': None,
+ 'backend_compile_time_s': None,
+ 'backward_cumulative_compile_time_us': 0,
+ 'cache_size': None,
+ 'co_filename': None,
+ 'co_firstlineno': None,
+ 'co_name': None,
+ 'code_gen_time_s': 0.0,
+ 'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
+ 'compliant_custom_ops': None,
+ 'config_inline_inbuilt_nn_modules': False,
+ 'config_suppress_errors': False,
+ 'cuda_version': None,
+ 'cudagraph_skip_reason': None,
+ 'distributed_ephemeral_timeout_us': None,
+ 'duration_us': 0,
+ 'dynamo_compile_time_before_restart_us': None,
+ 'dynamo_config': None,
+ 'dynamo_cumulative_compile_time_us': None,
+ 'dynamo_time_before_restart_s': None,
+ 'end_time_us': 100,
+ 'entire_frame_compile_time_s': None,
+ 'fail_reason': None,
+ 'fail_type': None,
+ 'fail_user_frame_filename': None,
+ 'fail_user_frame_lineno': None,
+ 'frame_key': None,
+ 'gc_time_us': None,
+ 'graph_input_count': None,
+ 'graph_node_count': None,
+ 'graph_node_shapes': None,
+ 'graph_op_count': None,
+ 'guard_count': None,
+ 'has_guarded_code': None,
+ 'inductor_code_gen_cumulative_compile_time_us': 0,
+ 'inductor_compile_time_s': 0.0,
+ 'inductor_config': None,
+ 'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
+ 'inline_inbuilt_nn_modules_candidate': False,
+ 'is_forward': False,
+ 'is_runtime': False,
+ 'joint_graph_pass_time_us': None,
+ 'log_format_version': 3,
+ 'non_compliant_ops': None,
+ 'num_graph_breaks': 0,
+ 'num_triton_bundles': None,
+ 'pgo_get_remote_code_state_time_us': None,
+ 'pgo_put_remote_code_state_time_us': None,
+ 'post_grad_pass_time_us': 0,
+ 'pre_grad_pass_time_us': None,
+ 'python_version': None,
+ 'recompile_reason': None,
+ 'recompile_user_contexts': None,
+ 'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
+ 'remote_fx_graph_cache_get_time_ms': None,
+ 'remote_fx_graph_cache_get_time_us': None,
+ 'remote_fx_graph_cache_put_time_ms': None,
+ 'remote_fx_graph_cache_put_time_us': None,
+ 'restart_reasons': None,
+ 'runtime_cudagraphify_time_us': None,
+ 'runtime_triton_autotune_time_us': None,
+ 'shape_env_guard_count': None,
+ 'specialize_float': None,
+ 'stack_trace': None,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
