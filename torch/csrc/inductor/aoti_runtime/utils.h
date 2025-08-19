@@ -42,10 +42,79 @@ using DeleterFnPtr = void (*)(void*);
 
 inline void noop_deleter(void*) {}
 
+inline void delete_record_function_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_record_function_end(
+      reinterpret_cast<AtenRecordFunctionHandle>(ptr)));
+}
+
 inline void delete_tensor_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
 }
+
+class RAIIAtenRecordFunctionHandle {
+ public:
+  RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIAtenRecordFunctionHandle(const RAIIAtenRecordFunctionHandle& other) =
+      delete;
+  RAIIAtenRecordFunctionHandle& operator=(
+      const RAIIAtenRecordFunctionHandle& other) = delete;
+
+  // Initiate an RAII RecordFunction without Inputs
+  RAIIAtenRecordFunctionHandle(const char* name, IValueMapHandle kwargs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(name, kwargs, nullptr, 0, &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Initiate an RAII RecordFunction with Inputs
+  RAIIAtenRecordFunctionHandle(
+      const char* name,
+      IValueMapHandle kwargs,
+      std::vector<C10IValueHandle> inputs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(
+        name, kwargs, inputs.data(), inputs.size(), &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Steal the ownership from another RAIIAtenRecordFunctionHandle using
+  // std::move
+  RAIIAtenRecordFunctionHandle(RAIIAtenRecordFunctionHandle&& other) = default;
+  RAIIAtenRecordFunctionHandle& operator=(
+      RAIIAtenRecordFunctionHandle&& other) = default;
+
+  // Steal the ownership from raw AtenRecordFunctionHandle
+  RAIIAtenRecordFunctionHandle(AtenRecordFunctionHandle handle)
+      : handle_(handle, delete_record_function_object) {}
+
+  ~RAIIAtenRecordFunctionHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw AtenRecordFunctionHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator AtenRecordFunctionHandle() const {
+    return handle_.get();
+  }
+
+  AtenRecordFunctionHandle release() {
+    return handle_.release();
+  }
+
+  AtenRecordFunctionHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<AtenRecordFunctionOpaque, DeleterFnPtr> handle_;
+};
 
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {

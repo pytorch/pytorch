@@ -552,7 +552,7 @@ class AOTInductorTestsTemplate:
 
         triton.set_allocator(
             lambda size, align, stream: torch.empty(
-                size, dtype=torch.int8, device="cuda"
+                size, dtype=torch.int8, device=GPU_TYPE
             )
         )
 
@@ -5031,13 +5031,13 @@ class AOTInductorTestsTemplate:
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
-            shim_fn_codes = (
-                f'RECORD_FUNCTION("{kernel_calls}", c10::ArrayRef<c10::IValue>());'
-            )
+            shim_fn_codes = f'RAIIAtenRecordFunctionHandle .*\\("{kernel_calls}"'
             if enable_kernel_profile:
-                FileCheck().check(shim_fn_codes).run(code)
+                FileCheck().check_regex(shim_fn_codes).run(code)
             else:
-                FileCheck().check_not(shim_fn_codes).run(code)
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+            self.check_model(Model(N, K, self.device), example_inputs)
 
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
@@ -5235,9 +5235,9 @@ class AOTInductorTestsTemplate:
                 return z
 
         example_inputs = (
-            torch.randn(10, 20, device="cuda"),
-            torch.randn(20, 30, device="cuda"),
-            torch.randn(10, 30, device="cuda"),
+            torch.randn(10, 20, device=GPU_TYPE),
+            torch.randn(20, 30, device=GPU_TYPE),
+            torch.randn(10, 30, device=GPU_TYPE),
         )
         model = Model()
         kernel_calls = [
@@ -6636,6 +6636,70 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_sym_expr_indexing(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(
+                self,
+                episode_builder_position_encoding_observations_weight,
+                add_15,
+                add_16,
+                add_17,
+                add_18,
+                add_13,
+            ):
+                arange_1 = torch.ops.aten.arange.start(
+                    180,
+                    181,
+                    device=torch.device(type="cuda", index=0),
+                    pin_memory=False,
+                )
+                add_14 = torch.ops.aten.add.Tensor(arange_1, 198)
+                arange_1 = None
+                stack_1 = torch.ops.aten.stack.default(
+                    [add_13, add_14, add_15, add_16, add_17, add_18]
+                )
+                add_13 = add_14 = add_15 = add_16 = add_17 = add_18 = None
+                select_13 = torch.ops.aten.select.int(stack_1, 0, 0)
+                stack_1 = None
+                embedding_11 = torch.ops.aten.embedding.default(
+                    episode_builder_position_encoding_observations_weight, select_13
+                )
+                episode_builder_position_encoding_observations_weight = select_13 = None
+                return (embedding_11,)
+
+        # Embedding weight: vocab_size x emb_dim
+        episode_builder_position_encoding_observations_weight = torch.randn(
+            100, 16, device=self.device
+        )
+
+        # These six must all be 1-D (shape [1]) and same dtype; use Long for embedding indices
+        add_13 = torch.tensor(
+            [7], dtype=torch.long, device=self.device
+        )  # this one is used as the index
+        add_15 = torch.tensor([5], dtype=torch.long, device=self.device)
+        add_16 = torch.tensor([6], dtype=torch.long, device=self.device)
+        add_17 = torch.tensor([7], dtype=torch.long, device=self.device)
+        add_18 = torch.tensor([8], dtype=torch.long, device=self.device)
+
+        # Instantiate and run
+        m = Repro().to(self.device)
+
+        example_inputs = (
+            episode_builder_position_encoding_observations_weight,
+            add_15,
+            add_16,
+            add_17,
+            add_18,
+            add_13,
+        )
+        self.check_model(m, example_inputs)
+
     def test_with_cudagraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -6707,6 +6771,49 @@ class AOTInductorTestsTemplate:
 
         # compare against eager
         self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
+
+    def test_custom_op_in_subgraph(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo_add1",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo_add1", "CompositeExplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo_add1", lib=lib)
+            def foo_add1_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            torch.library.define(
+                "mylib::foo_add2",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo_add2", "CompositeExplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo_add2", lib=lib)
+            def foo_add2_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 2
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.cond(
+                        x.shape[0] < 5,
+                        torch.ops.mylib.foo_add1,
+                        torch.ops.mylib.foo_add2,
+                        (x,),
+                    )
+
+            list_example_inputs = [
+                (torch.ones(6, device=self.device),),
+                (torch.ones(3, device=self.device),),
+            ]
+            self.check_model_with_multiple_inputs(
+                M(), list_example_inputs, dynamic_shapes=({0: Dim.DYNAMIC},)
+            )
 
     def test_clamp_decomposition(self):
         class Model1(torch.nn.Module):
@@ -6784,6 +6891,36 @@ class AOTInductorTestsTemplate:
 
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
+
+    def test_copy_non_blocking_is_pinned(self):
+        if self.device == "cpu" or self.device == "mps":
+            raise unittest.SkipTest("only matters for device-to-cpu copy")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b):
+                a_cpu = a.to(device="cpu", non_blocking=True)
+                b_cpu = b.to(device="cpu", non_blocking=True)
+                a_to_cpu_event = torch.Event()
+                a_to_cpu_event.record()
+                a_to_cpu_event.synchronize()
+                return torch.cat([a_cpu, b_cpu])
+
+        model = Model()
+        a = torch.randn(2, 2, device=self.device)
+        b = torch.randn(2, 2, device=self.device)
+        example_inputs = (a, b)
+        outputs = model(*example_inputs)
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile, model, example_inputs
+        )
+        FileCheck().check("pinned").run(code)
+        model_aoti = torch._inductor.aoti_load_package(package_path)
+        outputs_aoti = model_aoti(*example_inputs)
+
+        self.assertEqual(outputs, outputs_aoti)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
