@@ -1362,6 +1362,7 @@ class CompilationMetrics:
     # the number of distinct type of params.
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
+    inline_inbuilt_nn_modules_candidate: Optional[bool] = False
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -4835,3 +4836,22 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+class CreateNestedFnCache:
+    cache: dict[str, types.FunctionType] = {}
+
+    @classmethod
+    def get(cls, key: str) -> Optional[types.FunctionType]:
+        return cls.cache.get(key, None)
+
+    @classmethod
+    def set(cls, key: str, value: types.FunctionType) -> None:
+        cls.cache[key] = value
+
+    @classmethod
+    def clear(cls: type[CreateNestedFnCache]) -> None:
+        cls.cache.clear()
+
+
+create_nested_fn_cache: CreateNestedFnCache = CreateNestedFnCache()
