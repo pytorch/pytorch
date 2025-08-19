@@ -3311,12 +3311,8 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 def meta_complex(real, imag):
     assert real.dtype.is_floating_point
     assert imag.dtype.is_floating_point
-    result = elementwise_meta(
-        real.to(corresponding_complex_dtype(real.dtype)),
-        imag.to(corresponding_complex_dtype(imag.dtype)),
-        type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )
-    return result
+    out_shape = _broadcast_shapes(real.shape, imag.shape)
+    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
