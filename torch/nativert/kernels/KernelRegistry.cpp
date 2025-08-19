@@ -1139,7 +1139,7 @@ REGISTER_CPU_KERNEL(
     {
       const auto& in_0 = KernelInput(0).toTensor();
       const auto& weight = KernelInput(1).toTensor();
-      const auto& bias = KernelInput(2).toTensor();
+      auto bias = KernelInput(2).toOptional<at::Tensor>();
 
       if (auto& out_0 = KernelOutput(0); out_0.isNone()) {
         out_0 = create_empty_from(in_0, at::kFloat);
@@ -1148,7 +1148,8 @@ REGISTER_CPU_KERNEL(
       auto& out_0 = KernelOutput(0).toTensor();
       fastResizeToZero(out_0);
 
-      at::native::fbgemm_linear_fp16_weight(in_0, weight, bias, out_0);
+      at::native::fbgemm_linear_fp16_weight(
+          in_0, weight, bias.value_or(at::Tensor()), out_0);
     })
 
 REGISTER_CPU_KERNEL(
