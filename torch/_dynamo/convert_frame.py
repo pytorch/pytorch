@@ -248,7 +248,7 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
         lambda: {"stack": stack},
     )
 
-    # Capture stack separatly without using from_traceback to get the actual filenames
+    # Capture stack separately without using from_traceback to get the actual filenames
     frames_raw = captured_tb.summary()
     stack_strings = [
         f"Line: {frame.lineno}, Name: {frame.name}, Filename: {frame.filename}"
