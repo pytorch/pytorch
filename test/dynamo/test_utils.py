@@ -309,7 +309,7 @@ class TestDynamoTimed(TestCase):
         self.assertIn(f"Name: {code.co_name}", last_entry, "Log does not contain a Name")
         self.assertIn(
             "test_utils.py",
-            code.co_filename,
+            last_entry,
             "Log file does not contain the expected Filename: 'test_utils.py'",
         )
 
