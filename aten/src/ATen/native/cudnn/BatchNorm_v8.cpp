@@ -658,7 +658,9 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
   if (at::native::cudnnv8_enabled_check_debug()) {
+#ifndef USE_ROCM
     return _get_cudnn_batch_norm_reserve_space_size_v8(input_t, training);
+#endif
   } else {
     return _get_cudnn_batch_norm_reserve_space_size_v7(input_t, training);
   }
@@ -760,6 +762,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
     Tensor& save_var,
     Tensor& reserve) {
   if (at::native::cudnnv8_enabled_check_debug()) {
+#ifndef USE_ROCM
     return cudnn_batch_norm_out_v8(
         input_t,
         weight_t,
@@ -773,6 +776,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
         save_mean,
         save_var,
         reserve);
+#endif
   } else {
     return cudnn_batch_norm_out_v7(
         input_t,
@@ -840,6 +844,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     double exponential_average_factor,
     double epsilon) {
   if (at::native::cudnnv8_enabled_check_debug()) {
+#ifndef USE_ROCM
     return cudnn_batch_norm_v8(
         input_t,
         weight_t,
@@ -849,6 +854,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         training,
         exponential_average_factor,
         epsilon);
+#endif
   } else {
     return cudnn_batch_norm_v7(
         input_t,
@@ -937,6 +943,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     double epsilon,
     const Tensor& reserveSpace) {
   if (at::native::cudnnv8_enabled_check_debug()) {
+#ifndef USE_ROCM
     return cudnn_batch_norm_backward_v8(
         input_t,
         grad_output_t,
@@ -947,6 +954,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
         save_var_t_opt,
         epsilon,
         reserveSpace);
+#endif
   } else {
     return cudnn_batch_norm_backward_v7(
         input_t,
