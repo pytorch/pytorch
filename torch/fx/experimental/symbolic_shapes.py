@@ -4496,6 +4496,7 @@ class ShapeEnv:
         ex_storage_offset: IntLikeType,
         is_dim_dynamic: Sequence[bool],
         source: Source,
+        hint_overrides: dict[int, int],
         *,
         symbolic_context: Optional[SymbolicContext] = None,
     ) -> tuple[
@@ -4575,7 +4576,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint,
+                hint=hint if i not in hint_overrides else hint_overrides[i],
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
