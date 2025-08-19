@@ -1219,9 +1219,6 @@ class DeviceCachingAllocator {
   // mapping from block to a stream_set, containing streams on which the block
   // was used while cudagraph capturing
   std::unordered_map<Block*, stream_set> block_to_cudagraph_stream_uses;
-  // A set of streams that may be used during cudagraph capturing.
-  // We passively prune stale entries when we call cudaStreamGetCaptureInfo.
-  ska::flat_hash_set<cudaStream_t> capturing_streams;
 
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
@@ -1338,12 +1335,12 @@ class DeviceCachingAllocator {
       //    effect on memory use during capture should be small.
       process_events(context);
     } else {
-      if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
+      if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
 #ifndef USE_ROCM
-        capture_safe_free_blocks(context);
+        // We check if there is some block that is safe to free on this stream
+        free_safe_blocks_in_capture(context, stream);
 #else
-        TORCH_INTERNAL_ASSERT(
-            false, "Capture safe free blocks not supported on ROCm");
+        TORCH_CHECK(false, "Capture safe free blocks not supported on ROCm");
 #endif // USE_ROCM
       }
     }
@@ -1637,96 +1634,92 @@ class DeviceCachingAllocator {
   }
 
 #ifndef USE_ROCM
-  // Insert a "free marker" (an empty node) into the CUDA graph during capture.
-  // A free marker is a no-op node (cudaGraphAddEmptyNode) placed after the last
-  // captured use of a block on a given stream. This marks the "last use" of the
-  // block in the capture DAG for that stream. Later, we use these markers to
-  // determine when it is safe to reclaim the block.
-  cudaGraphNode_t insert_empty_node_as_free_marker(cudaStream_t stream) {
-    cudaStreamCaptureStatus status{};
-    cudaGraph_t currently_capturing_graph{};
-    const cudaGraphNode_t* dependencies{};
-    size_t num_dependencies = 0;
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-        stream,
-        &status,
-        nullptr,
-        &currently_capturing_graph,
-        &dependencies,
-        &num_dependencies));
+  // Insert "free marker" (empty nodes) into the CUDA graph for all streams that
+  // have used the block, including the allocation stream. These nodes mark the
+  // last use of the block in the capture graph. Returns a vector of the
+  // inserted nodes, or an empty vector if any stream is not capturing.
+  std::vector<cudaGraphNode_t> insert_free_marker(Block* block) {
+    std::vector<cudaGraphNode_t> empty_nodes;
 
-    TORCH_INTERNAL_ASSERT(
-        status != cudaStreamCaptureStatusInvalidated,
-        "Invalid stream capture status");
-
-    // If the stream is not currently capturing, there is no graph to insert
-    // into.
-    if (status == cudaStreamCaptureStatusNone) {
-      return nullptr;
-    }
-
-    cudaGraphNode_t new_node{};
-    C10_CUDA_CHECK(cudaGraphAddEmptyNode(
-        &new_node, currently_capturing_graph, dependencies, num_dependencies));
-
-    C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
-        stream, &new_node, 1, cudaStreamSetCaptureDependencies));
-
-    return new_node;
-  }
-
-  // Returns the current set of "terminal" nodes in the CUDA graph.
-  // These represent the current endpoints of all active streams, and may
-  // include additional nodes if the graph branches. Any new work captured will
-  // be attached after one or more of these terminals.
-  std::vector<cudaGraphNode_t> get_terminals() {
-    ska::flat_hash_set<cudaGraphNode_t> terminals;
-
-    std::vector<cudaStream_t> streams_to_remove;
-    for (const auto& stream : capturing_streams) {
+    auto try_add_empty_node = [&](cudaStream_t stream) -> bool {
       cudaStreamCaptureStatus status{};
       cudaGraph_t graph{};
-      const cudaGraphNode_t* dependencies = nullptr;
-      size_t num_dependencies = 0;
-
+      const cudaGraphNode_t* deps = nullptr;
+      size_t num_deps = 0;
       C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-          stream,
-          &status,
-          /*id=*/nullptr,
-          &graph,
-          &dependencies,
-          &num_dependencies));
+          stream, &status, nullptr, &graph, &deps, &num_deps));
 
       TORCH_INTERNAL_ASSERT(
           status != cudaStreamCaptureStatusInvalidated,
           "Invalid stream capture status");
 
-      if (status == cudaStreamCaptureStatusActive) {
-        for (size_t i = 0; i < num_dependencies; i++) {
-          auto node = dependencies[i];
-          if (node != nullptr) {
-            terminals.insert(node);
-          }
-        }
-      } else if (status == cudaStreamCaptureStatusNone) {
-        streams_to_remove.push_back(stream);
+      if (status == cudaStreamCaptureStatusNone) {
+        return false;
+      }
+
+      cudaGraphNode_t node{};
+      C10_CUDA_CHECK(cudaGraphAddEmptyNode(&node, graph, deps, num_deps));
+      C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+          stream, &node, 1, cudaStreamSetCaptureDependencies));
+      empty_nodes.push_back(node);
+      return true;
+    };
+
+    // Try to add for allocation stream
+    if (!try_add_empty_node(block->stream)) {
+      return {};
+    }
+    // Try to add for all used streams
+    for (const auto& s : block->stream_uses) {
+      if (!try_add_empty_node(s.stream())) {
+        return {};
+      }
+    }
+    return empty_nodes;
+  }
+
+  // Returns the current set of "terminal" nodes in the CUDA graph for a given
+  // stream. These represent the current endpoints of the stream, and may
+  // include additional nodes if the graph branches. Any new work captured will
+  // be attached after one or more of these terminals.
+  std::vector<cudaGraphNode_t> get_terminals(cudaStream_t stream) {
+    std::vector<cudaGraphNode_t> result;
+
+    cudaStreamCaptureStatus status{};
+    cudaGraph_t graph{};
+    const cudaGraphNode_t* dependencies = nullptr;
+    size_t num_dependencies = 0;
+
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+        stream,
+        &status,
+        /*id=*/nullptr,
+        &graph,
+        &dependencies,
+        &num_dependencies));
+
+    TORCH_INTERNAL_ASSERT(
+        status == cudaStreamCaptureStatusActive,
+        "Invalid stream capture status");
+
+    for (size_t i = 0; i < num_dependencies; i++) {
+      auto node = dependencies[i];
+      if (node != nullptr) {
+        result.push_back(node);
       }
     }
 
-    for (auto stream : streams_to_remove) {
-      capturing_streams.erase(stream);
-    }
-
-    return std::vector<cudaGraphNode_t>(terminals.begin(), terminals.end());
+    return result;
   }
 
-  // Returns the set of "freeable" empty nodes (free markers) in the current
-  // CUDA graph capture. An empty node is considered freeable if it is a
-  // predecessor of every terminal node in the capture graph.
+  // Returns the set of "freeable" free markers (empty nodes) in the current
+  // CUDA graph capture. A free marker is considered freeable if it is a
+  // predecessor of every terminal node in stream.
   // This ensures that all future captured work will occur after the free
-  // marker, making it safe to reclaim the associated memory block.
-  ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes() {
-    auto terminals = get_terminals();
+  // marker, making it safe to reuse on the stream.
+  ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes(
+      cudaStream_t stream) {
+    auto terminals = get_terminals(stream);
     if (terminals.empty()) {
       // No terminal nodes found; nothing to free.
       return {};
@@ -1790,9 +1783,8 @@ class DeviceCachingAllocator {
     return freeable_empty_nodes;
   }
 
-  // A block is reclaimable during capture iff EVERY free-marker we inserted for
-  // that block is a predecessor of EVERY current terminal in the capturing
-  // graph.
+  // A block is freeable during capture iff every free-marker is a predecessor
+  // of every terminal.
   //
   // Any newly captured op will attach after some terminal. If all terminals are
   // after all free-markers, then all future work is ordered after the block's
@@ -1802,9 +1794,10 @@ class DeviceCachingAllocator {
   //
   // This function iterates over all deferred blocks, checks if their empty
   // nodes are freeable, and frees the block if so.
-  void capture_safe_free_blocks(
-      const std::shared_ptr<GatheredContext>& context) {
-    auto freeable_empty_nodes = get_freeable_empty_nodes();
+  void free_safe_blocks_in_capture(
+      const std::shared_ptr<GatheredContext>& context,
+      cudaStream_t stream) {
+    auto freeable_empty_nodes = get_freeable_empty_nodes(stream);
 
     // If there are no freeable empty nodes (e.g., not currently capturing),
     // nothing to do.
@@ -1815,9 +1808,9 @@ class DeviceCachingAllocator {
     std::vector<Block*> blocks_to_erase;
 
     for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
-      // If no empty nodes were inserted for this block, always defer free until
-      // after capture.
-      if (inserted_empty_nodes.empty()) {
+      // If no empty nodes were inserted for this block, or the block is not
+      // allocated on the given stream, always defer free until after capture.
+      if (inserted_empty_nodes.empty() || block->stream != stream) {
         continue;
       }
 
@@ -1889,44 +1882,15 @@ class DeviceCachingAllocator {
     // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
-        if (CUDAAllocatorConfig::reclaim_memory_in_graph_capture()) {
+        if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
 #ifndef USE_ROCM
-          std::vector<cudaGraphNode_t> empty_nodes;
-          bool has_non_capture_stream = false;
-
-          // Inserts an empty node as a free marker for the given stream.
-          auto add_empty_node = [&](cudaStream_t stream) {
-            auto empty_node = insert_empty_node_as_free_marker(stream);
-            if (empty_node == nullptr) {
-              has_non_capture_stream = true;
-              return;
-            }
-            empty_nodes.push_back(empty_node);
-          };
-
-          // Insert an empty node for the allocation stream.
-          add_empty_node(block->stream);
-          // Insert empty nodes for all streams that have used this block.
-          for (auto& stream : block->stream_uses) {
-            add_empty_node(stream.stream());
-          }
-
-          if (has_non_capture_stream) {
-            // If any stream is not part of the current capture, defer the free
-            // until capture is finished.
-            deferred_blocks.emplace(block, std::vector<cudaGraphNode_t>{});
-          } else {
-            // All streams are part of the capture; associate the block with the
-            // inserted empty nodes.
-            deferred_blocks.emplace(block, std::move(empty_nodes));
-          }
+          deferred_blocks.emplace(block, insert_free_marker(block));
 #else
-          TORCH_INTERNAL_ASSERT(
-              false, "Capture safe free blocks not supported on ROCm");
+          TORCH_CHECK(false, "Capture safe free blocks not supported on ROCm");
 #endif // USE_ROCM
         } else {
-          // If reclaim_memory_in_graph_capture is not enabled, always defer the
-          // free until capture is finished.
+          // If graph_capture_record_stream_reuse is not enabled, always defer
+          // the free until capture is finished.
           deferred_blocks.emplace(block, std::vector<cudaGraphNode_t>{});
         }
       } else {
@@ -1999,7 +1963,6 @@ class DeviceCachingAllocator {
     block->stream_uses.insert(stream);
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
-      capturing_streams.insert(stream);
     }
   }
 
@@ -4001,8 +3964,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     md.pinned_use_host_register =
         CUDAAllocatorConfig::pinned_use_cuda_host_register();
     md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
-    md.reclaim_memory_in_graph_capture =
-        CUDAAllocatorConfig::reclaim_memory_in_graph_capture();
+    md.graph_capture_record_stream_reuse =
+        CUDAAllocatorConfig::graph_capture_record_stream_reuse();
     md.roundup_power2_divisions =
         CUDAAllocatorConfig::roundup_power2_divisions();
 

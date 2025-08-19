@@ -458,7 +458,8 @@ std::string _memory_snapshot_pickled() {
   IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
-  IValue reclaim_memory_in_graph_capture_s = "reclaim_memory_in_graph_capture";
+  IValue graph_capture_record_stream_reuse_s =
+      "graph_capture_record_stream_reuse";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -480,8 +481,8 @@ std::string _memory_snapshot_pickled() {
       pinned_use_host_register_s,
       snapshot.config_metadata.pinned_use_host_register);
   allocator_settings.insert(
-      reclaim_memory_in_graph_capture_s,
-      snapshot.config_metadata.reclaim_memory_in_graph_capture);
+      graph_capture_record_stream_reuse_s,
+      snapshot.config_metadata.graph_capture_record_stream_reuse);
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

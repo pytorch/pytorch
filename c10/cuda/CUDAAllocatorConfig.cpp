@@ -373,7 +373,7 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
     } else if (config_item_view == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(config, i);
       used_native_specific_option = true;
-    } else if (config_item_view == "reclaim_memory_in_graph_capture") {
+    } else if (config_item_view == "graph_capture_record_stream_reuse") {
       i = parseReclaimMemoryInGraphCapture(config, i);
       used_native_specific_option = true;
     } else {
@@ -413,7 +413,7 @@ size_t CUDAAllocatorConfig::parseReclaimMemoryInGraphCapture(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
-  m_reclaim_memory_in_graph_capture = tokenizer.toBool(++i);
+  m_graph_capture_record_stream_reuse = tokenizer.toBool(++i);
 
   return i;
 }

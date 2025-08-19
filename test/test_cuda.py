@@ -5613,12 +5613,13 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @skipIfRocm(msg="graph_capture_record_stream_reuse is not supported on ROCm")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_graph_capture_reclaim_2_streams(self):
         torch.cuda.memory._set_allocator_settings(
-            "reclaim_memory_in_graph_capture:True"
+            "graph_capture_record_stream_reuse:True"
         )
         torch.cuda.empty_cache()
         s1 = torch.cuda.Stream()
@@ -5640,26 +5641,86 @@ class TestMemPool(TestCase):
                 data1.record_stream(s2)
 
             data1.fill_(1.0)
-            del data1
-            gc.collect()
+            del data1; gc.collect()
 
             s1.wait_stream(s2)
 
-            # the graph would be joined after this rand kernel
+            # the graph would be joined after this rand kernel        
             unrelated.fill_(1.0)
+            # this new allocation should reuse data1 if the graph_capture_record_stream_reuse is enabled
             data2 = torch.rand(8, device="cuda")
             data2_ptr = data2.data_ptr()
 
+            g.capture_end()
+
+        torch.cuda.synchronize()
+        self.assertTrue(data1_ptr == data2_ptr)
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:False"
+        )
+
+    @skipIfRocm(msg="graph_capture_record_stream_reuse is not supported on ROCm")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_4_streams(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+
+        torch.cuda.empty_cache()
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+
+        s3 = torch.cuda.Stream()
+        s4 = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(s1):
+            g.capture_begin()
+            unrelated = torch.rand(8, device="cuda")
+
+            data1 = torch.ones(8, device="cuda")
+            data1_ptr = data1.data_ptr()
+
             s2.wait_stream(s1)
-
             with torch.cuda.stream(s2):
-                unrelated.fill_(1.0)
+                data1.fill_(2.0)
+                data1.record_stream(s2)
 
-            # data3 should reuse data1 if the capture-reclaim is enabled
-            data3 = torch.rand(8, device="cuda")
-            data3_ptr = data3.data_ptr()
+            s3.wait_stream(s1)
+            with torch.cuda.stream(s3):
+                data1.fill_(3.0)
+                data1.record_stream(s3)
+
+            s4.wait_stream(s1)
+            with torch.cuda.stream(s4):
+                data1.fill_(4.0)
+                data1.record_stream(s4)
+
+            data1.fill_(1.0)
+            del data1; gc.collect()
 
             s1.wait_stream(s2)
+            unrelated.fill_(1.0)
+
+            s3.wait_stream(s4)
+            with torch.cuda.stream(s3):
+                unrelated.fill_(3.0)
+                unrelated.record_stream(s3)
+                
+            unrelated.fill_(3.0)
+            data2 = torch.ones(8, device="cuda")
+            data2_ptr = data2.data_ptr()
+
+            s1.wait_stream(s3)
+
+            unrelated.fill_(4.0)
+            data3 = torch.ones(8, device="cuda")
+            data3_ptr = data3.data_ptr()
 
             g.capture_end()
 
@@ -5668,8 +5729,9 @@ class TestMemPool(TestCase):
         self.assertTrue(data1_ptr == data3_ptr)
 
         torch.cuda.memory._set_allocator_settings(
-            "reclaim_memory_in_graph_capture:False"
+            "graph_capture_record_stream_reuse:False"
         )
+
 
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
