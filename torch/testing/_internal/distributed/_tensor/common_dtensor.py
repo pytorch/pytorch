@@ -378,6 +378,7 @@ class DTensorTestBase(MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if backend is None:
+            print(f"backend: {self.backend}, device_type={self.device_type}")
             backend = self.backend
 
         if backend not in [
