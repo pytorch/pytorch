@@ -521,7 +521,7 @@ class Module:
         super().__setattr__("_modules", {})
 
         if self.call_super_init:
-            super().__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs) # type: ignore[misc]
 
     forward: Callable[..., Any] = _forward_unimplemented
 
