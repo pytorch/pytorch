@@ -2,8 +2,9 @@ from collections import OrderedDict
 from typing import Any
 
 import torch
+from torch.types import Device
 
-from ._utils import _device_t, _get_device_index
+from ._utils import _get_device_index
 
 
 __all__ = [
@@ -30,7 +31,7 @@ def empty_cache() -> None:
     torch._C._accelerator_emptyCache()
 
 
-def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
+def memory_stats(device_index: Device = None, /) -> OrderedDict[str, Any]:
     r"""Return a dictionary of accelerator device memory allocator statistics for a given device index.
 
     The return value of this function is a dictionary of statistics, each of
@@ -107,7 +108,7 @@ def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:
     return OrderedDict(flat_stats)
 
 
-def memory_allocated(device_index: _device_t = None, /) -> int:
+def memory_allocated(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory occupied by tensors
     in bytes for a given device index.
 
@@ -120,7 +121,7 @@ def memory_allocated(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device_index: _device_t = None, /) -> int:
+def max_memory_allocated(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory occupied by tensors
     in bytes for a given device index.
 
@@ -137,7 +138,7 @@ def max_memory_allocated(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device_index: _device_t = None, /) -> int:
+def memory_reserved(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` device memory managed by the caching allocator
     in bytes for a given device index.
 
@@ -150,7 +151,7 @@ def memory_reserved(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device_index: _device_t = None, /) -> int:
+def max_memory_reserved(device_index: Device = None, /) -> int:
     r"""Return the current :ref:`accelerator<accelerators>` maximum device memory managed by the caching allocator
     in bytes for a given device index.
 
@@ -167,7 +168,7 @@ def max_memory_reserved(device_index: _device_t = None, /) -> int:
     return memory_stats(device_index).get("reserved_bytes.all.peak", 0)
 
 
-def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
+def reset_accumulated_memory_stats(device_index: Device = None, /) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the current :ref:`accelerator<accelerators>`
     memory allocator for a given device index.
 
@@ -184,7 +185,7 @@ def reset_accumulated_memory_stats(device_index: _device_t = None, /) -> None:
     return torch._C._accelerator_resetAccumulatedStats(device_index)
 
 
-def reset_peak_memory_stats(device_index: _device_t = None, /) -> None:
+def reset_peak_memory_stats(device_index: Device = None, /) -> None:
     r"""Reset the "peak" stats tracked by the current :ref:`accelerator<accelerators>`
     memory allocator for a given device index.
 
