@@ -813,11 +813,12 @@ static inline Vectorized<T> binary_op_as_fp32(
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                           \
   inline void load_fp32_from_##name(                                        \
       const type* data, Vectorized<float>& out) {                           \
-    __at_align__ float values[Vectorized<float>::size()];                   \
+    __at_align__ float * values = new float[Vectorized<float>::size()];                   \
     for (const auto k : c10::irange(Vectorized<float>::size())) {           \
       values[k] = data[k];                                                  \
     }                                                                       \
     out = Vectorized<float>::loadu(values);                                 \
+    delete[] values; \
   }                                                                         \
                                                                             \
   inline void load_fp32_from_##name(                                        \

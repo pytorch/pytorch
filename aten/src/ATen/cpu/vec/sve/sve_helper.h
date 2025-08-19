@@ -34,9 +34,6 @@ typedef svfloat32_t vls_float32_t
 typedef svfloat64_t vls_float64_t
     __attribute__((arm_sve_vector_bits(VECTOR_WIDTH * 8)));
 
-#endif // defined(CPU_CAPABILITY_SVE256)
-
-#if defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)
 #define ptrue svptrue_b8()
 #define ZERO_S8 svdup_n_s8(0)
 #define ZERO_S16 svdup_n_s16(0)

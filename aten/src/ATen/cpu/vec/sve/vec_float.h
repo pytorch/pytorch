@@ -32,7 +32,7 @@ struct is_vec_specialized_for<float> : std::bool_constant<true> {};
 template <>
 class Vectorized<float> {
  private:
-    __at_align__ float values[8];
+    __at_align__ float values[2048 / sizeof(float)];
  public:
 
   using value_type = float;
@@ -49,7 +49,7 @@ class Vectorized<float> {
   }
   template<typename T,
            typename = std::enable_if_t<std::is_pointer_v<T>>>
-  inline Vectorized(const float * val) {
+  inline Vectorized(float * val) {
     svst1_f32(ptrue, values, svld1_f32(ptrue, val));
   }
   template<typename... Args,
@@ -90,12 +90,13 @@ class Vectorized<float> {
 
   static inline Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b, const uint64_t mask) {
     // Build an array of flags: each element is 1 if the corresponding bit in 'mask' is set, 0 otherwise.
-    __at_align__ int32_t flag_arr[size()];
+    __at_align__ int32_t * flag_arr = new int32_t[size()];
     for (int i = 0; i < size(); i++) {
       flag_arr[i] = (mask & (1ULL << i)) ? 1 : 0;
     }
     // Load the flag array into an SVE int32 vector.
     svint32_t int_mask = svld1_s32(ptrue, flag_arr);
+    delete[] flag_arr;
     // Compare each lane of int_mask to 0; returns an svbool_t predicate where true indicates a nonzero flag.
     svbool_t blend_mask = svcmpne_n_s32(ptrue, int_mask, 0);
     // Use svsel to select elements from b where the predicate is true, else from a.
@@ -113,11 +114,13 @@ class Vectorized<float> {
   static inline Vectorized<float> arange(
       float base = 0.f,
       step_t step = static_cast<step_t>(1)) {
-    __at_align__ float buffer[size()];
+    __at_align__ float * buffer = new float[size()];
     for (int64_t i = 0; i < size(); i++) {
       buffer[i] = base + i * step;
     }
-    return Vectorized<float>::from_ptr(buffer);
+    auto tmp = Vectorized<float>::from_ptr(buffer);
+    delete[] buffer;
+    return tmp;
   }
   static inline Vectorized<float> set(
       const Vectorized<float>& a,
@@ -216,7 +219,7 @@ class Vectorized<float> {
   inline int64_t zero_mask() const {
     // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     int64_t mask = 0;
-    __at_align__ int32_t mask_array[size()];
+    __at_align__ int32_t * mask_array = new int32_t[size()];
 
     svbool_t svbool_mask = svcmpeq_f32(ptrue, *this, ZERO_F32);
     svst1_s32(ptrue, mask_array, svsel_s32(svbool_mask,
@@ -225,7 +228,7 @@ class Vectorized<float> {
     for (int64_t j = 0; j < size(); ++j) {
       if (mask_array[j]) mask |= (1ull << j);
     }
-
+    delete[] mask_array;
     return mask;
   }
   inline Vectorized<float> isnan() const {

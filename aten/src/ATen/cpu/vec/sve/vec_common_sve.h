@@ -214,6 +214,7 @@ std::pair<Vectorized<float>, Vectorized<float>> inline deinterleave2<float>(
 template <>
 std::pair<
     Vectorized<c10::BFloat16>,
+    Vectorized<c10::BFloat16>> inline deinterleave2<c10::
                                                         BFloat16>(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {

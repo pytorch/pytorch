@@ -89,7 +89,8 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 16
 #define int_vector __m256i
-#else // CPU_CAPABILITY_SVE
+#else // CPU_CAPABILITY_SVE256 || CPU_CAPABILITY_SVE
+#if defined(CPU_CAPABILITY_SVE256)
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
@@ -99,7 +100,18 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 32
 #define int_vector __m256i
-#endif // CPU_CAPABILITY_SVE
+#else // CPU_CAPABILITY_SVE
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
+#define int_vector __m256i
+#endif // CPU_CAPABILITY_SVE256
+#endif // CPU_CAPABILITY_SVE256 || CPU_CAPABILITY_SVE
 #endif // CPU_CAPABILITY_AVX512
 
 namespace at::vec {

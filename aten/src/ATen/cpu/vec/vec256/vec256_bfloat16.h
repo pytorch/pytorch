@@ -269,12 +269,13 @@ LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
 #else // defined(CPU_CAPABILITY_AVX2)
 
 #if !(                                                                      \
-    defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
-    !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE))
+    defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__))
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
 #endif
 
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE)
 LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+#endif
 #endif // defined(CPU_CAPABILITY_AVX2)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
