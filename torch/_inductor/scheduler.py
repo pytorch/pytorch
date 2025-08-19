@@ -2158,6 +2158,13 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
+
+        if config.estimate_runtime_benchmark:
+            from .estimator import estimate_runtime
+
+            verbose = True
+            estimate_runtime(self, self.nodes, verbose)
+
         if config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
