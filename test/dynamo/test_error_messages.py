@@ -520,15 +520,24 @@ Attempted to call function marked as skipped
 
         first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
 
+        if torch._C._PYBIND11_VERSION and torch._C._PYBIND11_VERSION >= 0x03000000:
+            # HACK: this patches around the fact that PyBind11 improperly sets the
+            # __qualname__ attribute on functions and methods; see
+            # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
+            # that issue is fixed.
+            PYBIND11_PYCAPSULE_NAME = f"pybind11_detail_function_record_v1_{torch._C._PYBIND11_COMPILER_TYPE}{torch._C._PYBIND11_BUILD_ABI}"
+        else:
+            PYBIND11_PYCAPSULE_NAME = "PyCapsule"
+
         self.assertExpectedInline(
             first_graph_break,
-            """\
+            f"""\
 Attempted to call function marked as skipped
-  Explanation: Dynamo does not know how to trace the builtin `mylib.PyCapsule.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+  Explanation: Dynamo does not know how to trace the builtin `mylib.{PYBIND11_PYCAPSULE_NAME}.foobar.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
   Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
   Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
-  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
+  Developer debug context: module: mylib, qualname: {PYBIND11_PYCAPSULE_NAME}.foobar, skip reason: <missing reason>
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
