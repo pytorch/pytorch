@@ -85,7 +85,7 @@ LOOP_BODY_2D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
 """
 
 """
@@ -214,7 +214,7 @@ LOOP_BODY_3D = """
         )
         mask_w = (idx_x_c[:, None] < GROUP_IN_C) & (idx_y_c[None, :] < GROUP_OUT_C)
         matrix_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
-        acc += tl.dot(matrix_x, matrix_w, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(matrix_x, matrix_w, input_precision=FLOAT32_PRECISION)
 """
 
 conv3d_template = TritonTemplate(
@@ -388,6 +388,11 @@ def channels_last_order(rank):
     order = list(reversed(range(rank)))
     order.insert(1, order.pop(-1))
     return order
+
+
+def _get_float32_precision():
+    result = "tf32" if torch.backends.cuda.matmul.allow_tf32 else "ieee"
+    return f'"{result}"'
 
 
 def convert_1x1_conv_to_mm(x, weight, bias):
@@ -611,7 +616,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    FLOAT32_PRECISION=_get_float32_precision(),
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -634,7 +639,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    FLOAT32_PRECISION=_get_float32_precision(),
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
