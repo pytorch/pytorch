@@ -523,6 +523,52 @@ void avg_pool_3d_input_iter(
   *output = value_sum / static_cast<T>(divisor);
 }
 
+// Iterates through all the input elements that this kernel needs to
+// apply max to. Specialized for 2 pooling dimensions.
+template <typename T>
+void avg_pool_2d_input_iter(
+    constant T* input,
+    device T* output,
+    constant int32_t* input_sizes,
+    constant int32_t* input_strides,
+    thread int32_t (&pooling_dim_indices)[3],
+    constant int32_t* kernel_size,
+    constant int32_t* stride,
+    constant int32_t* padding,
+    bool count_include_pad,
+    bool has_divisor_override,
+    int32_t divisor_override) {
+  auto bounds0 = get_avg_pool_input_iter_bounds<0>(
+      input_sizes,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      count_include_pad);
+  auto bounds1 = get_avg_pool_input_iter_bounds<1>(
+      input_sizes,
+      pooling_dim_indices,
+      kernel_size,
+      stride,
+      padding,
+      count_include_pad);
+
+  T value_sum = 0;
+  auto divisor = has_divisor_override ? divisor_override
+                                      : (bounds0.count) * (bounds1.count);
+
+  for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
+    auto offset0 = input_strides[0] * i0;
+
+    for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
+      auto offset1 = input_strides[1] * i1;
+      auto input_value = input[offset0 + offset1];
+      value_sum += input_value;
+    }
+  }
+  *output = value_sum / static_cast<T>(divisor);
+}
+
 template <typename T>
 void avg_pool_backward_3d_input_iter(
     device AtomicType_t<T>* grad_input,
@@ -619,18 +665,33 @@ kernel void avg_pool(
   input_sizes += leading_dims;
   input_strides += leading_dims;
 
-  avg_pool_3d_input_iter<T>(
-      input,
-      output,
-      input_sizes,
-      input_strides,
-      pooling_dim_indices,
-      kernel_size,
-      stride,
-      padding,
-      params.count_include_pad,
-      params.has_divisor_override,
-      params.divisor_override);
+  if (pooling_dims == 3) {
+    avg_pool_3d_input_iter<T>(
+        input,
+        output,
+        input_sizes,
+        input_strides,
+        pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        params.count_include_pad,
+        params.has_divisor_override,
+        params.divisor_override);
+  } else if (pooling_dims == 2) {
+    avg_pool_2d_input_iter<T>(
+        input,
+        output,
+        input_sizes,
+        input_strides,
+        pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        params.count_include_pad,
+        params.has_divisor_override,
+        params.divisor_override);
+  }
 }
 
 template <typename T>
