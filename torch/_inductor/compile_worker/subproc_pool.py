@@ -27,7 +27,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
-from torch._inductor.utils import get_ld_library_path
+from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 
 
 log = logging.getLogger(__name__)
@@ -145,27 +145,32 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
-        local = False
+        log_path = None
+        self.log_file = None
+
         if config.worker_suppress_logging:
+            log_path = os.devnull
             log.info("Suppressing compile worker output due to config")
-            local = True
+        else:
+            log_path = config.torchinductor_worker_logpath
+            if not log_path:
+                log_path = config.get_worker_log_path()
+
+        if log_path:
+            self.log_file = open(log_path, "w")
 
         self.process = subprocess.Popen(
             cmd,
             env={
-                **os.environ,
-                # We need to set the PYTHONPATH so the subprocess can find torch.
-                "PYTHONPATH": os.environ.get(
-                    "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
-                ),
+                **python_subprocess_env(),
                 # Safeguard against creating a SubprocPool in the subprocess.
                 "TORCH_WARM_POOL": "0",
                 # Some internal usages need a modified LD_LIBRARY_PATH.
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
-            stdout=subprocess.DEVNULL if local else None,
-            stderr=subprocess.DEVNULL if local else None,
+            stdout=self.log_file,
+            stderr=self.log_file,
         )
         self.write_lock = threading.Lock()
         self.read_thread = threading.Thread(
@@ -262,6 +267,8 @@ class SubprocPool:
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
+            if self.log_file:
+                self.log_file.close()
         except OSError as e:
             log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
