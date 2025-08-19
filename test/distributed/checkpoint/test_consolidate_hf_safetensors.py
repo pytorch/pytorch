@@ -9,7 +9,9 @@ import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     _calculate_max_contiguous_elements,
+    _write_sub_tensor_to_file_optimized,
     consolidate_safetensors_files,
+    consolidate_safetensors_files_on_every_rank,
 )
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
 from torch.distributed.device_mesh import init_device_mesh
@@ -87,7 +89,11 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
         if self.rank == 0:
-            consolidate_safetensors_files(checkpoint_dir, output_dir)
+            consolidate_safetensors_files(
+                checkpoint_dir,
+                output_dir,
+                fqn_to_index_mapping={"dtensor": 1, "dtensor_col": 1},
+            )
 
             file_path = os.path.join(output_dir, "model-00001-of-00001.safetensors")
             loaded_dict = safetensors.torch.load_file(file_path)
@@ -223,6 +229,105 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         self.assertEqual(
             result, 3
         )  # Only 3 elements (width of sub-tensor) can be written contiguously
+
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(2)
+    def test_consolidate_with_two_ranks(self):
+        if importlib.util.find_spec("safetensors") is None:
+            print("safetensors not installed")
+            return
+        import safetensors
+
+        checkpoint_dir = self.temp_dir
+        output_dir = os.path.join(checkpoint_dir, "consolidated")
+        os.makedirs(output_dir, exist_ok=True)
+
+        self._create_d_tensors()
+
+        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+
+        fqn_to_index_mapping = {"dtensor": 1, "dtensor_col": 2}
+        consolidate_safetensors_files_on_every_rank(
+            checkpoint_dir, output_dir, fqn_to_index_mapping=fqn_to_index_mapping
+        )
+
+        file1_path = os.path.join(output_dir, "model-00001-of-00002.safetensors")
+        file2_path = os.path.join(output_dir, "model-00002-of-00002.safetensors")
+
+        loaded_dict = safetensors.torch.load_file(file1_path)
+        self.assertEqual(loaded_dict.keys(), {"dtensor"})
+        self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
+
+        loaded_dict_col = safetensors.torch.load_file(file2_path)
+        self.assertEqual(loaded_dict_col.keys(), {"dtensor_col"})
+        self.assertTrue(torch.equal(loaded_dict_col["dtensor_col"], global_tensor))
+
+        dist.barrier()
+
+    def test_write_sub_tensor_to_file_optimized(self) -> None:
+        """Test the _write_sub_tensor_to_file_optimized function with various scenarios."""
+
+        # Test case 1: Simple 2D tensor, row-wise sharding
+        full_tensor_shape = [4, 6]
+        sub_tensor_shape = [2, 6]
+        sub_tensor_offsets = [1, 0]
+        element_size = 4  # float32
+
+        # Create test data
+        sub_tensor_data = torch.arange(12, dtype=torch.float32)
+        sub_tensor_bytes = sub_tensor_data.numpy().tobytes()
+
+        # Create full tensor buffer
+        full_tensor_buffer = bytearray(4 * 6 * element_size)
+        full_tensor_mv = memoryview(full_tensor_buffer)
+
+        # Call the function
+        _write_sub_tensor_to_file_optimized(
+            full_tensor_mv,
+            sub_tensor_bytes,
+            element_size,
+            full_tensor_shape,
+            sub_tensor_offsets,
+            sub_tensor_shape,
+        )
+
+        # Verify the result
+        result_tensor = torch.frombuffer(full_tensor_buffer, dtype=torch.float32).view(
+            4, 6
+        )
+        expected_tensor = torch.zeros(4, 6, dtype=torch.float32)
+        expected_tensor[1:3, :] = sub_tensor_data.view(2, 6)
+
+        self.assertTrue(torch.equal(result_tensor, expected_tensor))
+
+        # Test case 2: Column-wise sharding
+        full_tensor_shape = [3, 8]
+        sub_tensor_shape = [3, 2]
+        sub_tensor_offsets = [0, 3]
+
+        sub_tensor_data = torch.arange(6, dtype=torch.float32)
+        sub_tensor_bytes = sub_tensor_data.numpy().tobytes()
+
+        full_tensor_buffer = bytearray(3 * 8 * element_size)
+        full_tensor_mv = memoryview(full_tensor_buffer)
+
+        _write_sub_tensor_to_file_optimized(
+            full_tensor_mv,
+            sub_tensor_bytes,
+            element_size,
+            full_tensor_shape,
+            sub_tensor_offsets,
+            sub_tensor_shape,
+        )
+
+        result_tensor = torch.frombuffer(full_tensor_buffer, dtype=torch.float32).view(
+            3, 8
+        )
+        expected_tensor = torch.zeros(3, 8, dtype=torch.float32)
+        expected_tensor[:, 3:5] = sub_tensor_data.view(3, 2)
+
+        self.assertTrue(torch.equal(result_tensor, expected_tensor))
 
 
 if __name__ == "__main__":
