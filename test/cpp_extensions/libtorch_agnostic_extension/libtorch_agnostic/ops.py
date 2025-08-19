@@ -51,6 +51,19 @@ def my_abs(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_abs.default(t)
 
 
+def my_is_cpu(t) -> bool:
+    """
+    Returns is_cpu on the input tensor.
+
+    Args:
+        t: any Tensor
+
+    Returns:
+        a bool
+    """
+    return torch.ops.libtorch_agnostic.my_is_cpu.default(t)
+
+
 def my_ones_like(tensor, device) -> Tensor:
     """
     Returns a new Tensor like the input tensor, but with all ones
@@ -152,6 +165,30 @@ def my_zero_(t) -> Tensor:
     Returns: my_zero_(t)
     """
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
+
+
+def my_amax(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax.default(t)
+
+
+def my_amax_vec(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
 
 
 def fill_infinity(t) -> Tensor:
