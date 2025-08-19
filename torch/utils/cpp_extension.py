@@ -282,6 +282,17 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
+def _get_icpx_version():
+    icpx = 'icx' if IS_WINDOWS else 'icpx'
+    compiler_info = subprocess.check_output([icpx, '--version'])
+    match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
+    version = ['0', '0', '0'] if match is None else list(match.groups())
+    version = list(map(int, version))
+    assert len(version) == 3, "Failed to parse DPC++ compiler version"
+    # Aligning version format with what torch.version.xpu() returns
+    return f"{version[0]}{version[1]:02}{version[2]:02}"
+
+
 def _get_sycl_arch_list():
     if 'TORCH_XPU_ARCH_LIST' in os.environ:
         return os.environ.get('TORCH_XPU_ARCH_LIST')
@@ -541,6 +552,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
+
 
 # Specify Visual Studio C runtime library for hipcc
 def _set_hipcc_runtime_lib(is_standalone, debug):
@@ -846,7 +858,11 @@ class BuildExtension(build_ext):
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
                 # escaping quoted arguments to pass them thru SYCL compiler
-                host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
+                icpx_version = _get_icpx_version()
+                if int(icpx_version) >= 20250200:
+                    host_cflags = [item.replace('"', '\\"') for item in host_cflags]
+                else:
+                    host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
                 host_cflags = ' '.join(host_cflags)
                 # Note the order: shlex.quote sycl_flags first, _wrap_sycl_host_flags
                 # second. Reason is that sycl host flags are quoted, space containing
@@ -2730,7 +2746,9 @@ def _write_ninja_file_to_build_library(path,
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
-        host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
+        icpx_version = _get_icpx_version()
+        if int(icpx_version) < 20250200:
+            host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
