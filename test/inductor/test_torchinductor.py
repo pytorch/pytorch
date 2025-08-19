@@ -7457,6 +7457,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
         )
 
+    def test_constant_pad_2d_strides_nonpositive(self):
+        def fn(a):
+            return torch.constant_pad_nd(a, [0, 0, 0, -2, 0, 0])
+
+        self.common(
+            fn, (torch.empty_strided((2, 4, 5), (20, 1, 4), dtype=torch.float32),)
+        )
+
     @skip_if_gpu_halide  # misaligned address
     def test_constant_pad_3d(self):
         def fn(a):
