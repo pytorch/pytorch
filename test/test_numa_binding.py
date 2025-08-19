@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing.spawn as spawn
 import os
 import subprocess
@@ -13,6 +14,7 @@ from unittest import skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
+from torch._utils_internal import signpost_event
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, start_processes
 from torch.numa.binding import (
     _get_ranges_str_from_ints,
@@ -68,6 +70,7 @@ class NumaBindingTest(TestCase):
             patch("shutil.which", return_value="/usr/bin/numactl"),
             patch("torch.numa.binding.run"),
             patch("torch.numa.binding.mkstemp", self._mock_mkstemp),
+            patch("torch.numa.binding.signpost_event", self._mock_signpost_event),
         ]
 
         for context_manager in self._context_managers_to_apply_to_all_tests:
@@ -85,6 +88,11 @@ class NumaBindingTest(TestCase):
         for context_manager in self._context_managers_to_apply_to_all_tests:
             context_manager.__exit__(None, None, None)
         super().tearDown()
+
+    def _mock_signpost_event(self, *args, **kwargs) -> None:
+        # Please keep these parameters JSON serializable for logging purposes
+        json.dumps(kwargs["parameters"])
+        return signpost_event(*args, **kwargs)
 
     def _mock_mkstemp(self, *args, **kwargs):
         # Just keep track of temp files so we can delete them
@@ -456,15 +464,50 @@ class NumaBindingTest(TestCase):
         # Inner import to avoid crashing if not torch.distributed.is_available()
         from torch.distributed.launcher.api import LaunchConfig
 
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=2,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
         with patch(
             "torch.distributed.launcher.api.get_default_numa_options"
         ) as mock_get_default_numa_options:
             launch_config = LaunchConfig(
                 min_nodes=1,
                 max_nodes=1,
-                nproc_per_node=1,
+                nproc_per_node=2,
                 start_method="fork",
                 # Don't provide numa_options
+            )
+            # Verify get_default_numa_options was not called
+            mock_get_default_numa_options.assert_not_called()
+            # Verify numa_options is None when start_method is fork
+            self.assertIsNone(launch_config.numa_options)
+
+    def test_nproc_must_equal_cuda_device_count_to_use_default_numa_options(
+        self,
+    ) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.launcher.api import LaunchConfig
+
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=1,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
+        with patch(
+            "torch.distributed.launcher.api.get_default_numa_options"
+        ) as mock_get_default_numa_options:
+            launch_config = LaunchConfig(
+                min_nodes=1,
+                max_nodes=1,
+                nproc_per_node=2,
             )
             # Verify get_default_numa_options was not called
             mock_get_default_numa_options.assert_not_called()
