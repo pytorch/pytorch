@@ -498,7 +498,10 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            self.items.__delitem__(Hashable(args[0]))
+            item = Hashable(args[0])
+            if item not in self.items:
+                raise_observed_exception(KeyError, tx, args=args)
+            self.items.__delitem__(item)
             return ConstantVariable.create(None)
         elif name == "get":
             if len(args) not in (1, 2):

@@ -1157,6 +1157,8 @@ class UserMethodVariable(UserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name == "__self__":
             return self.obj
+        if name == "__name__":
+            return ConstantVariable.create(self.get_name())
         if name == "__func__":
             # We might have a better way to access the function object, this
             # information is stored in self.source_fn, use that to construct the

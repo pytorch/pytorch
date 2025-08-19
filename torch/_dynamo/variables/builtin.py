@@ -1494,6 +1494,17 @@ class BuiltinVariable(VariableTracker):
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
 
+        if isinstance(arg, UserDefinedObjectVariable):
+            # fallsback to __len__ if __bool__ is not defined
+            # if neither are defined, the object is always considered to be True
+            if arg.call_obj_hasattr(tx, "__bool__").value:  # type: ignore[attr-defined]
+                return arg.call_method(tx, "__bool__", [], {})
+            if arg.call_obj_hasattr(tx, "__len__").value:  # type: ignore[attr-defined]
+                return ConstantVariable.create(
+                    arg.call_method(tx, "__len__", [], {}).value > 0  # type: ignore[attr-defined]
+                )
+            return ConstantVariable.create(True)
+
         # TODO handle more cases and merge this with this with `generic_jump`.
 
     def call_str(self, tx: "InstructionTranslator", arg):
@@ -2820,7 +2831,8 @@ class BuiltinVariable(VariableTracker):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
-
+        if isinstance(a, UserDefinedObjectVariable):
+            return ConstantVariable(not a.call_method(tx, "__len__", [], {}).value)  # type: ignore[attr-defined]
         return None
 
     def call_contains(
