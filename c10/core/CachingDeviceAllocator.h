@@ -664,7 +664,7 @@ struct ExpandableSegment {
     // 2MB for small pool, 20MB for large pool
     segment_size_ = segment_size;
     peers_ = std::move(peers);
-    max_handles_ = numSegments(getReservedVirtualMemorySize());
+    max_handles_ = numSegments(getReservedVirtualMemorySize(device));
     TORCH_INTERNAL_ASSERT(
         !ptr_, "ExpandableSegment::init() has already been called");
     void* ptr = nullptr;
@@ -730,7 +730,7 @@ struct ExpandableSegment {
 
   // Returns the reserved virtual memory size for this segment, which may be
   // larger than the total size if the segment is expandable.
-  virtual size_t getReservedVirtualMemorySize() = 0;
+  virtual size_t getReservedVirtualMemorySize(c10::DeviceIndex device) = 0;
 
   // Create virtual memory address for this segment for the reserved size.
   virtual void createVirtualMemoryAddress(void** ptr) = 0;
@@ -870,7 +870,9 @@ template <
     typename StreamT,
     typename EventT,
     typename BlockT = DeviceBlock<StreamT>,
-    typename ExpandableSegmentT = ExpandableSegment<StreamT>>
+    typename ExpandableSegmentT = ExpandableSegment<StreamT>,
+    typename = std::enable_if_t<
+        std::is_base_of_v<ExpandableSegment<StreamT>, ExpandableSegmentT>>>
 struct CachingDeviceAllocatorImpl {
   using BlockPoolT = BlockPool<BlockT>;
   using PrivatePoolT = PrivatePool<BlockT>;
@@ -2013,8 +2015,9 @@ struct CachingDeviceAllocatorImpl {
     }
 
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
-    expandable_segments_.emplace_back(make_expandable_segment(
-        device, stream, segment_size, devices_with_peer_access_));
+    expandable_segments_.emplace_back(
+        make_expandable_segment<ExpandableSegmentT>(
+            device, stream, segment_size, devices_with_peer_access_));
 
     ExpandableSegmentT* es = expandable_segments_.back();
     BlockT* candidate = new BlockT(device, stream, es->size(), pool, es->ptr());
