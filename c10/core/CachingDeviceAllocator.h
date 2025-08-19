@@ -674,11 +674,23 @@ template <typename StreamT>
 struct ExpandableSegment {
   using HandleT = typename ExpandableSegmentTraits<StreamT>::HandleT;
 
+  struct VirtualMemoryAddressDeleter {
+    void operator()(void* ptr) const noexcept {
+      if (ptr) {
+        releaseVirtualMemoryAddress(ptr);
+      }
+    }
+  };
+
+  using PtrT = std::unique_ptr<void, VirtualMemoryAddressDeleter>;
+
   ExpandableSegment() = default;
   C10_DISABLE_COPY_AND_ASSIGN(ExpandableSegment);
   ExpandableSegment(ExpandableSegment&&) = delete;
   ExpandableSegment& operator=(ExpandableSegment&&) = delete;
 
+  // Initializes the segment with the specified device, stream, segment size...
+  // This function must be called only once per instance.
   virtual void init(
       c10::DeviceIndex device,
       std::optional<StreamT> stream,
@@ -690,7 +702,11 @@ struct ExpandableSegment {
     segment_size_ = segment_size;
     peers_ = std::move(peers);
     max_handles_ = numSegments(getReservedVirtualMemorySize());
-    createVirtualMemoryAddress(&ptr_);
+    TORCH_INTERNAL_ASSERT(
+        !ptr_, "ExpandableSegment::init() has already been called");
+    void* ptr = nullptr;
+    createVirtualMemoryAddress(&ptr);
+    ptr_.reset(ptr);
   }
 
   // Maps a virtual memory range to physical memory.
@@ -723,7 +739,7 @@ struct ExpandableSegment {
   // Returns the base pointer of the virtual memory segment.
   char* ptr() const {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<char*>(ptr_);
+    return reinterpret_cast<char*>(ptr_.get());
   }
 
   // Returns the total size of the virtual memory segment.
@@ -741,9 +757,6 @@ struct ExpandableSegment {
   virtual ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    if (ptr_) {
-      releaseVirtualMemoryAddress(ptr_);
-    }
   }
 
  private:
@@ -820,7 +833,7 @@ struct ExpandableSegment {
   c10::DeviceIndex device_{-1};
   std::optional<StreamT> stream_;
   // Virtual memory address used in reserveVirtualMemory.
-  void* ptr_{nullptr};
+  PtrT ptr_{nullptr};
   // Size of each segment in bytes.
   size_t segment_size_{0};
   // Maximum number of segments that can be allocated in this segment.
