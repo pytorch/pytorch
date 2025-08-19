@@ -305,9 +305,13 @@ class TestDynamoTimed(TestCase):
         stack_strings = convert_frame.log_dynamo_start(code)
         last_entry = stack_strings[-1]
         # Check if the last entry is a valid stack trace i.e for the sample_func
-        self.assertIn(f"Line: {code.co_firstlineno}", last_entry, "")
-        self.assertIn(f"Name: {code.co_name}", last_entry, "")
-        self.assertIn(f"Filename: {code.co_filename}", last_entry, "")
+        self.assertIn(f"Line: {code.co_firstlineno}", last_entry, "Log does not contain a Line no.")
+        self.assertIn(f"Name: {code.co_name}", last_entry, "Log does not contain a Name")
+        self.assertIn(
+            "test_utils.py",
+            code.co_filename,
+            "Log file does not contain the expected Filename: 'test_utils.py'",
+        )
 
         # Since the remaining logs are env specific, we just check if they are present instead of checking the exact string
         self.assertGreater(len(stack_strings), 1)
