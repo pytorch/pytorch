@@ -210,7 +210,6 @@ class SubstringSet:
 DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
     [
         "cuda",
-        "xpu",
     ]
 )
 
