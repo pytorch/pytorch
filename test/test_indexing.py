@@ -19,9 +19,14 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipXLA,
+)
+from torch.testing._internal.common_dtype import (
+    all_types_and,
+    all_types_and_complex_and,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -32,10 +37,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
     xfailIfTorchDynamo,
-)
-from torch.testing._internal.common_dtype import (
-    all_types_and,
-    all_types_and_complex_and,
 )
 
 
@@ -1792,49 +1793,71 @@ class TestIndexing(TestCase):
         self.assertRaises(IndexError, lambda: t[idx_min])
         self.assertRaises(IndexError, lambda: t[idx_max])
 
-    @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
+    @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @expectedFailureMPS  # Unimplemented for MPS device
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
         include_selfs = [True, False]
-        amin_init = float('inf') if dtype.is_floating_point else torch.iinfo(dtype).max
-        amax_init = -float('inf') if dtype.is_floating_point else torch.iinfo(dtype).min
-        reduction_init = {'prod': 1, 'mean': 0, 'amin': amin_init, 'amax': amax_init}
+        amin_init = float("inf") if dtype.is_floating_point else torch.iinfo(dtype).max
+        amax_init = -float("inf") if dtype.is_floating_point else torch.iinfo(dtype).min
+        reduction_init = {"prod": 1, "mean": 0, "amin": amin_init, "amax": amax_init}
 
-        for dest_noncontig, src_noncontig, index_noncontig in product([True, False], repeat=3):
+        for dest_noncontig, src_noncontig, index_noncontig in product(
+            [True, False], repeat=3
+        ):
             for idx_dtype, include_self in product(index_dtypes, include_selfs):
                 for dim in range(len(size)):
                     num_src = np.random.randint(10)
                     num_dest = size[dim]
-                    dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
-                    src_size = size[:dim] + (num_src,) + size[dim + 1:]
-                    src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
+                    dest = make_tensor(
+                        size, device=device, dtype=dtype, noncontiguous=dest_noncontig
+                    )
+                    src_size = size[:dim] + (num_src,) + size[dim + 1 :]
+                    src = make_tensor(
+                        src_size,
+                        device=device,
+                        dtype=dtype,
+                        noncontiguous=src_noncontig,
+                    )
                     idx = torch.testing.make_tensor(
-                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
+                        num_src,
+                        low=0,
+                        high=num_dest,
+                        dtype=idx_dtype,
+                        device=device,
+                        noncontiguous=index_noncontig,
                     )
                     expected = dest.clone()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
-                    if (not include_self):
+                    if not include_self:
                         expected.index_fill_(dim, idx.long(), reduction_init[reduce])
                     expected = expected.transpose(0, dim)
                     src = src.transpose(0, dim)
                     for i in range(num_src):
-                        if reduce == 'prod':
+                        if reduce == "prod":
                             expected[idx[i]] *= src[i]
-                        elif reduce == 'amin':
-                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
-                        elif reduce == 'amax':
-                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
+                        elif reduce == "amin":
+                            torch.minimum(
+                                expected[idx[i]], src[i], out=expected[idx[i]]
+                            )
+                        elif reduce == "amax":
+                            torch.maximum(
+                                expected[idx[i]], src[i], out=expected[idx[i]]
+                            )
                         else:
                             expected[idx[i]] += src[i]
-                    if reduce == 'mean':
-                        counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
+                    if reduce == "mean":
+                        counts = (
+                            torch.ones_like(expected)
+                            if include_self
+                            else torch.zeros_like(expected)
+                        )
                         counts.index_add_(0, idx, torch.ones_like(src))
                         counts.masked_fill_(counts == 0, 1)
-                        if (dtype.is_floating_point):
+                        if dtype.is_floating_point:
                             expected.div_(counts)
                         else:
                             expected.div_(counts, rounding_mode="floor")
@@ -1851,7 +1874,14 @@ class TestIndexing(TestCase):
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(
+                size_arg,
+                dtype=dtype,
+                device=device,
+                low=None,
+                high=None,
+                noncontiguous=not contig,
+            )
 
         def ref_index_copy(tgt, dim, idx, src):
             for i in range(idx.size(0)):
@@ -1865,7 +1895,9 @@ class TestIndexing(TestCase):
                 for dim in range(len(other_sizes)):
                     dest = make_arg(other_sizes, num_dest, dim, dest_contig)
                     src = make_arg(other_sizes, num_copy, dim, src_contig)
-                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[:num_copy]
+                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[
+                        :num_copy
+                    ]
                     if not index_contig:
                         idx = torch.repeat_interleave(idx, 2, dim=-1)
                         idx = idx[..., ::2]
@@ -1874,7 +1906,64 @@ class TestIndexing(TestCase):
                     ref_index_copy(dest2, dim, idx, src)
                     self.assertEqual(dest, dest2)
 
+    # onlyNativeDeviceTypes due to an XLA error:
+    # https://github.com/pytorch/pytorch/issues/53256
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160737
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_index_copy_scalars(self, device, dtype):
+        # Create the 8 possible combinations of scalar sizes for target / index / source
+        scalars = (
+            (
+                make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
+                make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
+                make_tensor(size_s, dtype=dtype, device=device, low=None, high=None),
+            )
+            for size_t, size_i, size_s in product([(), (1,)], repeat=3)
+        )
+        for target, idx, source in scalars:
+            target.index_copy_(0, idx, source)
+            self.assertEqual(target.item(), source.item())
 
+    # FIXME: move to test indexing
+    @onlyCPU
+    def test_errors_index_copy(self, device):
+        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
+        idx_dim = 8
+        tgt_dim = 5
+        batch_dim = 3
+
+        # Too large of an index
+        a = torch.randn(batch_dim, tgt_dim, device=device)
+        idx = torch.full((idx_dim,), tgt_dim, device=device)
+        c = torch.zeros(batch_dim, idx_dim, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (negative indices)
+        idx = torch.full((idx_dim,), -1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (very negative indices) - they should be unsupported even
+        # when support for negative indices is implemented for index_copy_
+        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+    def _prepare_data_for_index_copy_and_add_deterministic(
+        self, dim: int, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert dim >= 0 and dim < 3
+        a = [5, 4, 3]
+        a[dim] = 2000
+        x = torch.zeros(a, device=device)
+        b = a.copy()
+        elems = a[dim] * 20
+        b[dim] = elems
+        src = torch.rand(b, device=device)
+        index = torch.randint(a[dim], (elems,), device=device)
+        return (x, index, src)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
