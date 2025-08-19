@@ -3468,7 +3468,7 @@ def cross_entropy(
 
 
 # TODO: works for now but inconsistent with existing code base.
-class CrossEntropyChunkingStrategy(_Enum):
+class _CrossEntropyChunkingStrategy(_Enum):
     # Naive, unfused computation
     none = "none"
 
@@ -3510,32 +3510,33 @@ def linear_cross_entropy(
             reduction=reduction,
         )
 
+    def choose_chunking() -> str:
+        return _CrossEntropyChunkingStrategy.none
+
+    if chunking_strategy is None:
+        chunking_strategy = choose_chunking().value
+
     if False:
         # TODO: How to handle getting `Proxy`s instead of strings?
-        def choose_chunking() -> str:
-            return CrossEntropyChunkingStrategy.none
-
-        if chunking_strategy is None:
-            chunking_strategy = choose_chunking().value
-
         torch._check_with(
             AssertionError,
-            hasattr(CrossEntropyChunkingStrategy, chunking_strategy),
+            hasattr(_CrossEntropyChunkingStrategy, chunking_strategy),
             lambda: (
                 "Expected one of"
-                f" {', '.join(i.value for i in CrossEntropyChunkingStrategy)}"
+                f" {', '.join(i.value for i in _CrossEntropyChunkingStrategy)}"
                 f" but got {chunking_strategy=}"
             ),
         )
         torch._check_with(
             NotImplementedError,
-            chunking_strategy == CrossEntropyChunkingStrategy.none.value,
+            chunking_strategy == _CrossEntropyChunkingStrategy.none.value,
             lambda: f"{chunking_strategy=} is not yet implemented",
         )
 
     return cross_entropy(
         linear(input=input, weight=linear_weight, bias=bias),
         target,
+        chunking_strategy=chunking_strategy,
         ignore_index=ignore_index,
         label_smoothing=label_smoothing,
         reduce=reduce,

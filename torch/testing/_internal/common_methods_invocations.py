@@ -14760,14 +14760,6 @@ op_db: list[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # decorators=(
-        #     DecorateInfo(
-        #         toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
-        #         "TestJit",
-        #         "test_variant_consistency_jit",
-        #         device_type="cpu",
-        #     ),
-        # ),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             #
