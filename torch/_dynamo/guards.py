@@ -139,6 +139,7 @@ from .source import (
     GradSource,
     ListGetItemSource,
     LocalSource,
+    NamedTupleFieldsSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
@@ -202,7 +203,7 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
-    from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.output_graph import OutputGraph, OutputGraphGuardsState
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -727,6 +728,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___dataclass_fields": dataclass_fields,
+            "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -756,6 +758,13 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
             for fs in reversed(guard.user_stack):
                 if fs.filename not in uninteresting_files():
                     extra = f"  # {format_frame(fs, line=True)}"
+                    if len(extra) > 1024:
+                        # For fx graphs, the line can be very long in case of
+                        # torch.stack ops, where many inputs are set to None
+                        # after the operation.  This increases the size of the
+                        # guards log file.  In such cases, do not print the line
+                        # contents.
+                        extra = f"  # {format_frame(fs)}"
                     break
         elif guard.stack:
             summary = guard.stack.summary()
@@ -837,6 +846,16 @@ def raise_local_type_error(obj: Any) -> NoReturn:
         f"Type {type(obj)} for object {obj} cannot be saved "
         + "into torch.compile() package since it's defined in local scope. "
         + "Please define the class at global scope (top level of a module)."
+    )
+
+
+def should_optimize_getattr_on_nn_module(value: Any) -> bool:
+    # If inline_inbuilt_nn_modules flag is True, Dynamo has already traced
+    # through the __getattr__, and therefore it is always safe to optimize
+    # getattr on nn modules.
+    return isinstance(value, torch.nn.Module) and (
+        config.inline_inbuilt_nn_modules
+        or get_custom_getattr(value) is unpatched_nn_module_getattr
     )
 
 
@@ -942,7 +961,7 @@ class GuardBuilder(GuardBuilderBase):
         global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
-        serialization_mode: Optional[str] = None,
+        save_guards: bool = False,
         runtime_global_scope: Optional[dict[str, object]] = None,
     ) -> None:
         self.f_code = f_code
@@ -997,7 +1016,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
-        self.serialization_mode = serialization_mode
+        self.save_guards = save_guards
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
@@ -1425,11 +1444,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 assert base_source_name
                 out = self.getattr_on_nn_module(
                     source,
@@ -1667,6 +1682,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, NamedTupleFieldsSource):
+            assert base_guard_manager
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x._fields,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, CodeSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.code_manager(
@@ -1803,11 +1826,7 @@ class GuardBuilder(GuardBuilderBase):
 
             # if the base value is nn.Module, check if we can speedup the
             # guard by going through __dict__ attrs.
-            if (
-                isinstance(base_example_value, torch.nn.Module)
-                and get_custom_getattr(base_example_value)
-                is unpatched_nn_module_getattr
-            ):
+            if should_optimize_getattr_on_nn_module(base_example_value):
                 self.getattr_on_nn_module(
                     source,
                     base_manager,
@@ -1860,9 +1879,10 @@ class GuardBuilder(GuardBuilderBase):
         else:
             t = type(value)
 
-        if self.serialization_mode == "save":
-            if t.__qualname__ != t.__name__:
-                raise_local_type_error(value)
+        if t.__qualname__ != t.__name__:
+            # Type match guards must be local scope, this is
+            # raised in self.serialize_guards
+            guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
@@ -1873,10 +1893,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def DICT_VERSION(self, guard: Guard) -> None:
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "DICT_VERSION guard cannot be serialized."
-            )
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
@@ -1944,8 +1960,6 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
         return self.id_match_unchecked(guard, recompile_hint)
 
     def id_match_unchecked(
@@ -2210,10 +2224,6 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE(self, guard: Guard) -> None:
         # don't support this in serialization because it uses unsupported ID_MATCH
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "NN_MODULE guard cannot be serialized."
-            )
         self.ID_MATCH(guard, "[inline-inbuilt-nn-modules-candidate]")
         val = self.get(guard.name)
         if hasattr(val, "training"):
@@ -2235,19 +2245,11 @@ class GuardBuilder(GuardBuilderBase):
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "FUNCTION_MATCH guard cannot be serialized."
-            )
         return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "CLOSURE_MATCH guard cannot be serialized."
-            )
         val = self.get(guard.name)
         # Strictly only want user-defined functions
         if type(val) == types.FunctionType and hasattr(val, "__code__"):
@@ -2257,7 +2259,7 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard) -> None:
-        if self.serialization_mode == "save":
+        if self.save_guards:
             # Record which builtin variables are used for pruning later.
             if isinstance(guard.originating_source, DictGetItemSource):
                 self.check_fn_manager.used_builtin_vars.add(
@@ -2329,7 +2331,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
-        if self.serialization_mode == "save":
+        if self.save_guards:
             if name := get_local_source_name(source_b):
                 self.check_fn_manager.additional_used_local_vars.add(name)
             if name := get_global_source_name(source_b):
@@ -2369,10 +2371,6 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "WEAKREF_ALIVE guard cannot be serialized."
-            )
         code = [f"{self.arg_ref(guard)} is not None"]
 
         self._set_guard_export_info(guard, code)
@@ -2449,11 +2447,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
+        from torch._dynamo.output_graph import OutputGraph
+
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
         assert output_graph is not None
-        if self.serialization_mode == "load":
-            assert self.check_fn_manager.shape_code_parts is not None
+        if self.check_fn_manager.shape_code_parts is not None:
             shape_code_parts = self.check_fn_manager.shape_code_parts
             python_code_parts = shape_code_parts.python_code_parts
             verbose_code_parts = shape_code_parts.verbose_code_parts
@@ -2465,6 +2464,7 @@ class GuardBuilder(GuardBuilderBase):
             # shape variables to sources from tracked_fakes.  This must happen after
             # tensor checks.
             # NB: self.output_graph can be None in the debug_nops tests
+            assert isinstance(output_graph, OutputGraph)
             fs = output_graph.tracked_fakes
             input_contexts = [a.symbolic_context for a in fs]
 
@@ -2545,7 +2545,7 @@ class GuardBuilder(GuardBuilderBase):
             if not output_graph.export:
                 output_graph.shape_env.freeze()
 
-        if self.serialization_mode == "save":
+        if self.save_guards:
             # For SHAPE_ENV we want to skip serializing the entire ShapeEnv so instead
             # we directly serialize the generated code here.
             maybe_cpp_code_parts = locals().get("cpp_code_parts")
@@ -3057,7 +3057,7 @@ class ShapeCodeParts:
 
 @dataclasses.dataclass
 class GuardsState:
-    output_graph: OutputGraph
+    output_graph: OutputGraphGuardsState
     shape_code_parts: Optional[ShapeCodeParts]
 
 
@@ -3261,15 +3261,15 @@ class CheckFunctionManager:
     def __init__(
         self,
         f_code: types.CodeType,
-        output_graph: Optional[OutputGraph] = None,
+        output_graph: OutputGraphGuardsState,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
         guard_filter_fn: Optional[
             Callable[[list[GuardFilterEntry]], list[bool]]
         ] = None,
-        guards_serialization_mode: Optional[str] = None,
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
+        save_guards: bool = False,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3277,7 +3277,8 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.output_graph = output_graph
+        self.output_graph: Optional[OutputGraphGuardsState] = output_graph
+        assert self.output_graph is not None
 
         # Only used for serialization.
         self.shape_code_parts = shape_code_parts
@@ -3287,22 +3288,16 @@ class CheckFunctionManager:
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
-        self.guards_serialization_mode = guards_serialization_mode
         self.used_builtin_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
-        if runtime_global_scope:
-            assert self.guards_serialization_mode == "load"
         self.runtime_global_scope = runtime_global_scope
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
         # TODO Be more explicit about the behavior for the users.
-        if (
-            torch._dynamo.config.caching_precompile
-            and self.guards_serialization_mode != "load"
-        ):
+        if torch._dynamo.config.caching_precompile:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
             def guard_filter_fn(guards: list[GuardFilterEntry]) -> list[bool]:
@@ -3325,16 +3320,13 @@ class CheckFunctionManager:
                 return ret
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
-        assert output_graph is not None
-        builder, guard_manager = self.build_guards(
-            sorted_guards,
-            existing_diff_guard_sources,
-            f_code,
-            output_graph,
-            None if guard_filter_fn else self.guards_serialization_mode,
-        )
 
         if guard_filter_fn:
+            # If we're filtering guards, we need to build it an extra time first
+            # because filtering depends on the builder/guard_manager results
+            builder, guard_manager = self.build_guards(
+                sorted_guards, existing_diff_guard_sources, f_code, output_graph, False
+            )
 
             def make_guard_filter_entry(guard: Guard) -> GuardFilterEntry:
                 MISSING = object()
@@ -3354,14 +3346,11 @@ class CheckFunctionManager:
                         value = MISSING
                         has_value = False
                 is_global = get_global_source_name(guard.originating_source) is not None
-                guard_fn = guard.create_fn
-                if isinstance(guard_fn, functools.partial):
-                    guard_fn = guard.create_fn.func  # type: ignore[attr-defined]
                 return GuardFilterEntry(
                     name=name,
                     has_value=has_value,
                     value=value,
-                    guard_type=guard_fn.__name__,
+                    guard_type=guard.create_fn_name(),
                     derived_guard_types=(
                         tuple(guard.guard_types) if guard.guard_types else ()
                     ),
@@ -3377,14 +3366,15 @@ class CheckFunctionManager:
             sorted_guards = [
                 guard for i, guard in enumerate(sorted_guards) if filter_results[i]
             ]
-            # Redo the guards because filtering relies on the results from the last guard builder.
-            builder, guard_manager = self.build_guards(
-                sorted_guards,
-                existing_diff_guard_sources,
-                f_code,
-                output_graph,
-                self.guards_serialization_mode,
-            )
+
+        # Redo the guards because filtering relies on the results from the last guard builder.
+        builder, guard_manager = self.build_guards(
+            sorted_guards,
+            existing_diff_guard_sources,
+            f_code,
+            output_graph,
+            save_guards,
+        )
 
         self.guard_manager = guard_manager
         self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
@@ -3407,7 +3397,8 @@ class CheckFunctionManager:
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
-        if not output_graph.export and self.guards_serialization_mode != "load":
+
+        if not output_graph.skip_guards_check and not output_graph.export:
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,
@@ -3443,92 +3434,13 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: Optional[bytes] = None
-        assert self.output_graph is not None
-        builtins_dict_name = self.output_graph.name_of_builtins_dict_key_in_fglobals
-        if self.guards_serialization_mode == "save":
-            used_global_vars = set()
-            used_local_vars = set()
+        if save_guards:
+            from torch._dynamo.output_graph import OutputGraph
 
-            def prune_variable(source: Source) -> None:
-                if name := get_global_source_name(source):
-                    assert isinstance(name, str)
-                    # Leave out the builtins dict key, as we will special handle
-                    # it later because the guarded code rarely use the entire
-                    # builtin dict in the common case.
-                    if name not in (builtins_dict_name,):
-                        used_global_vars.add(name)
-                elif name := get_local_source_name(source):
-                    assert isinstance(name, str)
-                    used_local_vars.add(name)
-
-            output_graph_guards_state = self.output_graph.dump_guards_state()
-            # Only serialize the global variables that are actually used in guards.
-            for guard in sorted_guards:
-                if isinstance(guard.originating_source, ShapeEnvSource):
-                    assert self.shape_code_parts
-                    for source in self.shape_code_parts.shape_env_sources:
-                        prune_variable(source)
-                else:
-                    prune_variable(guard.originating_source)
-
-            for source in self.output_graph.guard_on_key_order:
-                prune_variable(source)
-
-            def normalize_create_fn(x: Any) -> Any:
-                if isinstance(x, functools.partial):
-
-                    def _ref(x: Any) -> Any:
-                        if isinstance(x, (TensorWeakRef, weakref.ref)):
-                            return x()
-                        return x
-
-                    new_args = tuple(_ref(a) for a in x.args)
-                    new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
-                    return functools.partial(x.func, *new_args, **new_keywords)
-
-                return x
-
-            global_scope_state = {
-                k: v
-                for k, v in output_graph_guards_state.global_scope.items()
-                if k in used_global_vars or k in self.additional_used_global_vars
-            }
-            global_scope_state[builtins_dict_name] = {
-                k: v
-                for k, v in output_graph_guards_state.global_scope[
-                    builtins_dict_name
-                ].items()  # type: ignore[attr-defined]
-                if k in self.used_builtin_vars
-            }
-            output_graph_guards_state = dataclasses.replace(
-                output_graph_guards_state,
-                local_scope={
-                    k: v
-                    for k, v in output_graph_guards_state.local_scope.items()
-                    if k in used_local_vars or k in self.additional_used_local_vars
-                },
-                global_scope=global_scope_state,
-                _guards=torch._guards.GuardsSet(
-                    {
-                        dataclasses.replace(
-                            guard,
-                            obj_weakref=None,
-                            guarded_class_weakref=None,
-                            create_fn=normalize_create_fn(guard.create_fn),
-                        )
-                        for guard in sorted_guards
-                    }
-                ),
-                input_source_to_sizes_strides=pytree.tree_map(
-                    convert_int_to_concrete_values,
-                    output_graph_guards_state.input_source_to_sizes_strides,
-                ),
+            assert isinstance(self.output_graph, OutputGraph)
+            self.guards_state = self.serialize_guards(
+                builder, sorted_guards, self.output_graph
             )
-            guards_state = GuardsState(
-                output_graph=output_graph_guards_state,  # type: ignore[arg-type]
-                shape_code_parts=self.shape_code_parts,
-            )
-            self.guards_state = pickle_guards_state(guards_state)
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(
@@ -3546,13 +3458,137 @@ class CheckFunctionManager:
         self._weakrefs.clear()
         self.output_graph = None
 
+    def serialize_guards(
+        self,
+        builder: GuardBuilder,
+        sorted_guards: list[Guard],
+        output_graph: OutputGraph,
+    ) -> bytes:
+        UNSUPPORTED_GUARD_TYPES = (
+            "DICT_VERSION",
+            "NN_MODULE",
+            "ID_MATCH",
+            "FUNCTION_MATCH",
+            "CLOSURE_MATCH",
+            "WEAKREF_ALIVE",
+        )
+        # We check whether our list of guards are serializable here
+        for guard in sorted_guards:
+            guard_type = guard.create_fn_name()
+            derived_guard_types = tuple(guard.guard_types) if guard.guard_types else ()
+            # BUILTIN_MATCH calls TYPE_MATCH sometimes, so we need to check both for
+            # a chance that the guard is unserializable
+            if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
+                if guard._unserializable:
+                    # Only call builder.get again if we know we're going to throw
+                    obj = builder.get(guard.name)
+                    raise_local_type_error(obj)
+            elif guard_type in UNSUPPORTED_GUARD_TYPES:
+                raise torch._dynamo.exc.PackageError(
+                    f"{guard_type} guard cannot be serialized."
+                )
+            elif failed := next(
+                (i for i in derived_guard_types if i in UNSUPPORTED_GUARD_TYPES), None
+            ):
+                # Just raise the first failed guard name
+                raise torch._dynamo.exc.PackageError(
+                    f"{failed} guard cannot be serialized."
+                )
+
+        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
+        used_global_vars = set()
+        used_local_vars = set()
+
+        def prune_variable(source: Source) -> None:
+            if name := get_global_source_name(source):
+                assert isinstance(name, str)
+                # Leave out the builtins dict key, as we will special handle
+                # it later because the guarded code rarely use the entire
+                # builtin dict in the common case.
+                if name not in (builtins_dict_name,):
+                    used_global_vars.add(name)
+            elif name := get_local_source_name(source):
+                assert isinstance(name, str)
+                used_local_vars.add(name)
+
+        output_graph_guards_state = output_graph.dump_guards_state()
+        # Only serialize the global variables that are actually used in guards.
+        for guard in sorted_guards:
+            if isinstance(guard.originating_source, ShapeEnvSource):
+                assert self.shape_code_parts
+                for source in self.shape_code_parts.shape_env_sources:
+                    prune_variable(source)
+            else:
+                prune_variable(guard.originating_source)
+
+        for source in output_graph.guard_on_key_order:
+            prune_variable(source)
+
+        def normalize_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+            if isinstance(x, functools.partial):
+
+                def _ref(x: Any) -> Any:
+                    if isinstance(x, (TensorWeakRef, weakref.ref)):
+                        return x()
+                    return x
+
+                new_args = tuple(_ref(a) for a in x.args)
+                new_keywords = {k: _ref(v) for k, v in x.keywords.items()}
+                return functools.partial(x.func, *new_args, **new_keywords)
+
+            return x
+
+        global_scope_state = {
+            k: v
+            for k, v in output_graph_guards_state.global_scope.items()
+            if k in used_global_vars or k in self.additional_used_global_vars
+        }
+        global_scope_state[builtins_dict_name] = {
+            k: v
+            for k, v in output_graph_guards_state.global_scope[
+                builtins_dict_name
+            ].items()  # type: ignore[attr-defined]
+            if k in self.used_builtin_vars
+        }
+        output_graph_guards_state = dataclasses.replace(
+            output_graph_guards_state,
+            local_scope={
+                k: v
+                for k, v in output_graph_guards_state.local_scope.items()
+                if k in used_local_vars or k in self.additional_used_local_vars
+            },
+            global_scope=global_scope_state,
+            _guards=torch._guards.GuardsSet(
+                {
+                    dataclasses.replace(
+                        guard,
+                        obj_weakref=None,
+                        guarded_class_weakref=None,
+                        create_fn=normalize_create_fn(guard.create_fn),
+                    )
+                    for guard in sorted_guards
+                }
+            ),
+            input_source_to_sizes_strides=pytree.tree_map(
+                convert_int_to_concrete_values,
+                output_graph_guards_state.input_source_to_sizes_strides,
+            ),
+            skip_guards_check=True,
+        )
+        guards_state = GuardsState(
+            output_graph=output_graph_guards_state,
+            shape_code_parts=self.shape_code_parts,
+        )
+
+        return pickle_guards_state(guards_state)
+
     def build_guards(
         self,
         sorted_guards: list[Guard],
         existing_diff_guard_sources: OrderedSet[str],
         f_code: types.CodeType,
-        output_graph: OutputGraph,
-        serialization_mode: Optional[str] = None,
+        output_graph: OutputGraphGuardsState,
+        save_guards: bool,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -3578,7 +3614,7 @@ class CheckFunctionManager:
             output_graph.global_scope,
             guard_manager,
             self,
-            serialization_mode,
+            save_guards,
             runtime_global_scope=self.runtime_global_scope,
         )
 
