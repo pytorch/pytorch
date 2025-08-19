@@ -5,11 +5,12 @@
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
+
+#include <torch/csrc/stable/accelerator.h>
+
 namespace torch::stable {
 
-// this is bigger than DeviceIndex in c10/core/Device.h but it is the type we
-// can converge on in this world as DeviceIndex in libtorch is not stable.
-using DeviceIndex = int32_t;
+using DeviceIndex = torch::stable::accelerator::DeviceIndex;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
 // the C shim Tensor APIs. We've modeled this class after TensorBase, as custom
@@ -136,6 +137,13 @@ class Tensor {
     TORCH_ERROR_CODE_CHECK(
         aoti_torch_get_device_type(ath_.get(), &device_type));
     return device_type == aoti_torch_device_type_cuda();
+  }
+
+  bool is_cpu() const {
+    int32_t device_type;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_device_type(ath_.get(), &device_type));
+    return device_type == aoti_torch_device_type_cpu();
   }
 
   int64_t size(int64_t dim) const {

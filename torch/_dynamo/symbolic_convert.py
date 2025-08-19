@@ -2727,8 +2727,9 @@ class InstructionTranslatorBase(
         op = inst.argval
         try:
             self.push(right.call_method(self, "__contains__", [left], {}))
-        except Unsupported:  # object doesn't support __contains__
+        except Unsupported as excp:  # object doesn't support __contains__
             # Use __iter__ as fallback
+            excp.remove_from_stats()
             self.push(
                 self.inline_user_function_return(
                     VariableTracker.build(self, impl_CONTAINS_OP_fallback),
@@ -3983,7 +3984,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                args = []
+                if not (
+                    isinstance(self.symbolic_result, ConstantVariable)
+                    and self.symbolic_result.value is None
+                ):
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
             else:
                 return self.symbolic_result
         else:
