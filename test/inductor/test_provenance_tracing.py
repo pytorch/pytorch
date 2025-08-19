@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
+import io
 import json
 import logging
 import re
@@ -26,6 +28,9 @@ try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
     from test_aot_inductor_utils import AOTIRunnerUtil
+
+
+trace_log = logging.getLogger("torch.__trace")
 
 
 class Model(torch.nn.Module):
@@ -481,6 +486,104 @@ class TestProvenanceTracingNodeMeta(TestCase):
 
         self.assertEqual(add_node.meta["stack_trace"], stack_trace)
         self.assertEqual(mm_node.meta["stack_trace"], stack_trace)
+
+
+class ProvenanceArtifactFilter(logging.Filter):
+    def filter(self, record):
+        if "artifact" in record.metadata:
+            return (
+                record.metadata["artifact"]["name"]
+                == "inductor_provenance_tracking_kernel_stack_traces"
+            )
+        return False
+
+
+class StructuredTracePayloadFormatter(logging.Formatter):
+    def format(self, record):
+        return record.payload.strip()
+
+
+class TestProvenanceTracingStackTraces(TestCase):
+    @contextlib.contextmanager
+    def _setup_provenance_capture(self):
+        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(ProvenanceArtifactFilter())
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+    def extract_code_line(self, s):
+        # Extract last non-empty line
+        return s.split("\n")[-2].strip()
+
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "trace.provenance_tracking_level": 2}
+    )
+    @requires_cuda_and_triton
+    def test_tlparse_kernel_stack_traces(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x, a, b, c):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.sigmoid(x)
+                d = a * 3.14
+                y = torch.addmm(c, d, b)
+                z = torch.nn.functional.gelu(y)
+                return x, z
+
+        device = "cuda"
+        model = Model().to(device)
+        x = torch.randn(8, 10).to(device)
+        a = torch.randn(10, 20).to(device)
+        b = torch.randn(20, 30).to(device)
+        c = torch.randn(10, 30).to(device)
+        example_inputs = (x, a, b, c)
+
+        expected = {
+            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0": [
+                "x = self.sigmoid(x)",
+                "x = self.fc1(x)",
+                "x = self.relu(x)",
+            ],
+            "triton_poi_fused_mul_1": [
+                "d = a * 3.14",
+            ],
+            "triton_poi_fused_addmm_gelu_2": [
+                "z = torch.nn.functional.gelu(y)",
+                "y = torch.addmm(c, d, b)",
+            ],
+            "extern_kernels.mm": [
+                "x = self.fc1(x)",
+                "y = torch.addmm(c, d, b)",
+            ],
+        }
+
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            compiled(*example_inputs)
+            payload_content = payload_buffer.getvalue().strip()
+            if payload_content:
+                data = json.loads(payload_content)
+                self.assertEqual(set(data.keys()), set(expected.keys()))
+                for key, expected_lines in expected.items():
+                    actual_lines = [self.extract_code_line(s) for s in data[key]]
+                    self.assertEqual(
+                        sorted(actual_lines),
+                        sorted(expected_lines),
+                        f"Mismatch for key: {key}",
+                    )
 
 
 if __name__ == "__main__":

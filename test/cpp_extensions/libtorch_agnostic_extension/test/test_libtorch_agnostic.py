@@ -209,6 +209,13 @@ if not IS_WINDOWS:
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
 
+        def test_my_is_cpu(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_is_cpu(t)
+            self.assertEqual(out, t.is_cpu)
+
         def test_fill_infinity(self, device):
             import libtorch_agnostic
 
