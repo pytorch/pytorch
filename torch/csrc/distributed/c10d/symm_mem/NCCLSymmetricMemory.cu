@@ -40,17 +40,29 @@ struct NCCLAllocation {
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
  NCCLSymmetricMemory(
+      void* ptr,
       std::shared_ptr<NCCLAllocation> allocation,
       const std::string& group_name,
       ncclWindow_t handle,
       ncclWindow_t signal_handle)
       : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
         handle_(handle),
         signal_handle_(signal_handle) {
     c10::cuda::CUDAGuard guard(device_idx_);
+    // Buffer size is rest of space available after ptr (this field may not be
+    // important in future thus subject to removal)
+    buffer_size_ = allocation->buffer_size -
+        (reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr));
+
+    GroupInfo& group_info = get_group_info(group_name_);
+    rank_ = group_info.rank;
+    world_size_ = group_info.world_size;
+
+    buffers_.reserve(world_size_);
+    buffers_[rank_] = ptr;
+    // TODO: Fill in `buffers_[peer]` once NCCL API is ready.
 
     // We need some API like nvshmem_extension::nvshmem_ptr()
     // put API to get the reference of remote memory.
@@ -75,6 +87,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return signal_pads_dev_;
   }
 
+  // This API is subject to removal
   size_t get_buffer_size() override {
     return buffer_size_;
   }
@@ -256,7 +269,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      void* ptr,  // data_ptr() of the tensor
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     {
@@ -265,9 +278,12 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
     }
+    // Today this would still find the ptr in the map because one allocation
+    // matches one tensor. But will break once we enable MemPool.
+    // TODO: implement a customized `find` that searches for the allocation that
+    // contains ptr.
     auto it = allocations_.find(ptr);
     TORCH_CHECK(it != allocations_.end(), "memory needs to be first allocated before calling rendezvous.");
-
 
     auto group = resolve_process_group(group_name.value());
     auto alloc = it->second;
@@ -313,7 +329,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         comm));
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(ptr, alloc, *group_name, std::move(handle), std::move(signal_handle));
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
