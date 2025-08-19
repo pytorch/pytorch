@@ -25,7 +25,7 @@ from .common import (
     maybe_realize,
     set_head_dim_values,
 )
-
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -65,7 +65,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
     Hkv = value.get_size()[1]
     ratio = Hq // Hkv
 
-    power_of_2 = V.graph.sizevars.evaluate_expr(
+    pw_of_two = V.graph.sizevars.guard_or_false(
         sympy.And(sympy.Gt(ratio, 0), sympy.Eq(ratio & (ratio - 1), 0))
     )
 
@@ -76,7 +76,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
         and static_num_heads
         and non_zero_length
         and valid_block_mask_num_heads
-        and power_of_2
+        and pw_of_two
     )
 
 
