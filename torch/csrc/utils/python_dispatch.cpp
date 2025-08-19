@@ -602,6 +602,43 @@ void initDispatchBindings(PyObject* module) {
             c10::parseDispatchKey(dispatch));
       });
 
+  // Bind SafeKernelFunction class
+  py::class_<c10::SafeKernelFunction>(m, "_SafeKernelFunction")
+      .def(
+          "call_boxed",
+          [](const c10::SafeKernelFunction& self,
+             c10::DispatchKeySet keyset,
+             py::args args,
+             const py::kwargs& kwargs) {
+            const auto& op = self.opHandle();
+            auto stack = torch::jit::createStackForSchema(
+                op.schema(),
+                std::move(args),
+                kwargs,
+                /*self=*/std::nullopt);
+            self.callBoxed(op, keyset, &stack);
+            return torch::jit::createPyObjectForStack(std::move(stack));
+          })
+      .def(
+          "__repr__",
+          [](const c10::SafeKernelFunction& self) {
+            return "SafeKernelFunction(debug='" + self.debug() + "')";
+          })
+      .def_property_readonly(
+          "op_handle", [](const c10::SafeKernelFunction& self) -> py::object {
+            return py::cast(self.opHandle());
+          });
+
+  m.def(
+      "_dispatch_get_computed_kernel_for_dispatch_key",
+      [](const char* name,
+         c10::DispatchKey dispatch) -> c10::SafeKernelFunction {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->getComputedKernelForDispatchKey(dispatch);
+      });
+
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
     auto danglingImpls = c10::Dispatcher::singleton().findDanglingImpls();
 
