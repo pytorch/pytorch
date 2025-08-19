@@ -1076,9 +1076,10 @@ static at::Tensor linear_int8_with_onednn_weight(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(
       binary_alpha == 1.0f, "onednn qlinear: alpha != 1 for binary post op is not yet supported.");
-  bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
-  bool bf16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
-  if (fp32_output || bf16_output) {
+  bool high_prec_output = output_dtype.has_value() &&
+    ((output_dtype.value() != c10::ScalarType::Byte) && !is_fp8);
+
+  if (high_prec_output) {
     TORCH_CHECK(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
@@ -1097,7 +1098,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       +-------------------+--------------+---------------+
     */
     TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op ", binary_post_op);
-    if (fp32_output || bf16_output) {
+    if (high_prec_output) {
       TORCH_CHECK(
           other_scale == 1.0f && other_zero_point == 0,
           "onednn qlinear: expect extra input scale = 1.0 and zero point = 0 when output dtype is ", output_dtype.value(),
@@ -1153,7 +1154,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       at::empty(
         dst_dims,
         at::device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : input.scalar_type()))
+            .dtype(high_prec_output ? output_dtype.value() : input.scalar_type())
       );
   if (output.numel() == 0) {
     return output;

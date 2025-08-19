@@ -2338,7 +2338,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self,
         inputs,
         device="cpu",
-        int8_mixed_bf16=False,
         do_permute=False,
         matcher_check_fn=None,
         bias=True,
@@ -2357,8 +2356,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 x = self.softmax(x.to(torch.float32))
                 x = self.linear2(x.to(torch.float16))
                 return x
-
-            #    return  self.linear2(self.softmax(self.linear(x).to(torch.float32)).to(torch.float16))
 
         mod = M(bias).eval().to(device=device, dtype=torch.float16)
         assert isinstance(inputs, tuple)
@@ -2381,7 +2378,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 if matcher_check_fn is not None
                 else _default_matcher_check_fn
             ),
-            check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             check_quantization=True,
             is_qat=is_qat,
             is_dynamic=is_dynamic,
