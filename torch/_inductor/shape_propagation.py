@@ -65,6 +65,11 @@ def broadcast_shapes_for_args(args: Sequence[ShapeArg]) -> BlockShapeType:
         elif isinstance(arg, torch.dtype):
             continue
         else:
+            from torch._inductor.loop_body import LoopBody, LoopBodyBlock
+
+            if isinstance(arg, (LoopBodyBlock, LoopBody)):
+                # TODO: fix me
+                return None
             raise TypeError(f"Unknown type: {type(arg)}")
 
     return result_shape
