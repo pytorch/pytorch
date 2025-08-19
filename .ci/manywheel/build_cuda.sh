@@ -113,8 +113,8 @@ DEPS_SONAME=(
 )
 
 
-# CUDA_VERSION 12.6, 12.8, 12.9
-if [[ $CUDA_VERSION == 12* ]]; then
+# CUDA_VERSION 12.*, 13.*
+if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
