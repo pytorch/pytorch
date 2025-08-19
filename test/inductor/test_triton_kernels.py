@@ -3081,7 +3081,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 # Compute output
                 w = tl.load(w1_block_ptr)
                 b = tl.load(b1_block_ptr)
-                o = tl.dot(x, w, allow_tf32=False)
+                o = tl.dot(x, w, input_precision="ieee")
                 o += b[None, :]
 
                 # Store output
