@@ -303,8 +303,6 @@ class TestDynamoTimed(TestCase):
         code = sample_func.__code__
         with mock.patch("torch._logging.trace_structured") as mock_trace:
             stack_strings = convert_frame.log_dynamo_start(code)
-            print("Stack strings:")
-            print(stack_strings)
             last_entry = stack_strings[-1]
             # Check if the last entry is a valid stack trace i.e for the sample_func
             self.assertIn(f"Line: {code.co_firstlineno}", last_entry, "")
