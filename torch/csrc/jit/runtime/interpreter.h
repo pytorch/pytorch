@@ -137,7 +137,10 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   std::optional<at::ThreadLocalState> tls_state_ = std::nullopt;
-  [[maybe_unused]] int64_t dist_autograd_context_id_;
+#ifndef USE_RPC
+  [[maybe_unused]]
+#endif
+  int64_t dist_autograd_context_id_;
 };
 
 // what is the tensors type, including state from the current execution context
