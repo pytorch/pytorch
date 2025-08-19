@@ -16,17 +16,19 @@ from typing import Optional
 
 
 # NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
-CUDA_ARCHES = ["12.6", "12.8", "12.9"]
+CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
+    "13.0": "13.0.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "12.8": "9",
     "12.9": "9",
+    "13.0": "9",
 }
 
 # NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
@@ -38,7 +40,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.9-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.9-aarch64", "13.0-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -92,6 +94,23 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "13.0": (
+        "nvidia-cuda-nvrtc-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu13==9.12.0.46; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu13==13.0.0.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu13==12.0.0.15; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu13==10.4.0.35; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu13==12.0.3.29; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu13==12.6.2.49; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu13==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu13==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu13==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile-cu13==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2025.1.1 | "
@@ -225,6 +244,8 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            if "13.0" in arches:
+                arches.remove("13.0")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -289,6 +310,8 @@ def generate_wheels_matrix(
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
+            if "13.0" in arches:
+                arches.remove("13.0")
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -323,7 +346,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.9", "12.8", "12.6"]
+                arch_version in ["13.0", "12.9", "12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
@@ -386,6 +409,7 @@ def generate_wheels_matrix(
     return ret
 
 
+validate_nccl_dep_consistency("13.0")
 validate_nccl_dep_consistency("12.9")
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
