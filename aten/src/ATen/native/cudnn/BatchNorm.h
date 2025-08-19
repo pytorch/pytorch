@@ -5,7 +5,7 @@ _get_cudnn_batch_norm_reserve_space_size(const Tensor& input_t, bool training);
 
 #if AT_CUDNN_ENABLED()
 
-// v7 functions for runtime switching (similar to Conv)
+// v7 functions for runtime switching
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm_v7(
     const Tensor& input,
     const Tensor& weight,

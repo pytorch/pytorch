@@ -221,8 +221,8 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out_v7(
     Tensor workspace = at::empty(workspace_size, input->options().dtype(kByte));
 
     // get the reserved size and allocate as tensor
-    size_t reserve_size =
-        _get_cudnn_batch_norm_reserve_space_size_v7(input_t, true /* training */);
+    size_t reserve_size = _get_cudnn_batch_norm_reserve_space_size_v7(
+        input_t, true /* training */);
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(
