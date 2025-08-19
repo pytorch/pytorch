@@ -433,7 +433,7 @@ Args:
 )
 
 
-def _handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
+def _wrap_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
     """Wrap a variadic functional op to handle overriding"""
     names = list(func.__annotations__)
     it = func.__annotations__.items()
@@ -451,7 +451,7 @@ def _handle_torch_function_variadic(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return wrapped
 
 
-def _handle_torch_function_unary(
+def _wrap_torch_function_unary(
     func: Callable[_Concatenate[Tensor, _P], _T],
 ) -> Callable[_Concatenate[Tensor, _P], _T]:
     """Wrap a unary functional op to handle overriding"""
@@ -465,7 +465,7 @@ def _handle_torch_function_unary(
     return wrapped
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def fractional_max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -567,7 +567,7 @@ fractional_max_pool2d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def fractional_max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -673,7 +673,7 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def max_pool1d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList1[int],
@@ -752,7 +752,7 @@ max_pool1d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -831,7 +831,7 @@ max_pool2d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -947,7 +947,7 @@ def _unpool_output_size(
     return ret
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def max_unpool1d(
     input: Tensor,
     indices: Tensor,
@@ -976,7 +976,7 @@ def max_unpool1d(
     ).squeeze(-1)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def max_unpool2d(
     input: Tensor,
     indices: Tensor,
@@ -999,7 +999,7 @@ def max_unpool2d(
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def max_unpool3d(
     input: Tensor,
     indices: Tensor,
@@ -1022,7 +1022,7 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def lp_pool3d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1051,7 +1051,7 @@ def lp_pool3d(
     )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def lp_pool2d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1078,7 +1078,7 @@ def lp_pool2d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def lp_pool1d(
     input: Tensor,
     norm_type: Union[int, float],
@@ -1105,7 +1105,7 @@ def lp_pool1d(
     )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
@@ -1153,7 +1153,7 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def adaptive_max_pool2d_with_indices(
     input: Tensor,
     output_size: BroadcastingList2[int],
@@ -1306,7 +1306,7 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
 
 
 # Activation functions
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1331,7 +1331,7 @@ def dropout(
     )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def alpha_dropout(
     input: Tensor,
     p: float = 0.5,
@@ -1617,7 +1617,7 @@ In-place version of :func:`~relu`.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
     r"""
     glu(input, dim=-1) -> Tensor
@@ -1678,7 +1678,7 @@ In-place version of :func:`~hardtanh`.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""relu6(input, inplace=False) -> Tensor
 
@@ -1693,7 +1693,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     return result
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     r"""Apply the Exponential Linear Unit (ELU) function element-wise.
 
@@ -1716,7 +1716,7 @@ In-place version of :func:`~elu`.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
     r"""selu(input, inplace=False) -> Tensor
 
@@ -1744,7 +1744,7 @@ In-place version of :func:`~selu`.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def celu(
     input: Tensor,
     alpha: float = 1.0,
@@ -1774,7 +1774,7 @@ In-place version of :func:`~celu`.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
@@ -1826,7 +1826,7 @@ See :class:`~torch.nn.PReLU` for more details.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def rrelu(
     input: Tensor,
     lower: float = 1.0 / 8,
@@ -1898,7 +1898,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def tanhshrink(input):  # noqa: D400,D402
     r"""tanhshrink(input) -> Tensor
 
@@ -1909,7 +1909,7 @@ def tanhshrink(input):  # noqa: D400,D402
     return input - input.tanh()
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def softsign(input):  # noqa: D400,D402
     r"""softsign(input) -> Tensor
 
@@ -1948,7 +1948,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     return ret
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def softmin(
     input: Tensor,
     dim: Optional[int] = None,
@@ -1978,7 +1978,7 @@ def softmin(
     return ret
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2018,7 +2018,7 @@ def softmax(
     return ret
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def gumbel_softmax(
     logits: Tensor,
     tau: float = 1,
@@ -2089,7 +2089,7 @@ def gumbel_softmax(
     return ret
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def log_softmax(
     input: Tensor,
     dim: Optional[int] = None,
@@ -2153,7 +2153,7 @@ def sigmoid(input):  # noqa: D400,D402
     return input.sigmoid()
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Hardsigmoid function element-wise.
 
@@ -2221,7 +2221,7 @@ Shape:
 )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
 
@@ -2245,7 +2245,7 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.silu(input)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply the Mish function, element-wise.
 
@@ -2264,7 +2264,7 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.mish(input)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply hardswish function, element-wise.
 
@@ -2414,7 +2414,7 @@ def embedding(
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def embedding_bag(
     input: Tensor,
     weight: Tensor,
@@ -2636,7 +2636,7 @@ def _verify_batch_size(size: list[int]) -> None:
         )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def batch_norm(
     input: Tensor,
     running_mean: Optional[Tensor],
@@ -2679,7 +2679,7 @@ def _verify_spatial_size(size: list[int]) -> None:
         )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def instance_norm(
     input: Tensor,
     running_mean: Optional[Tensor] = None,
@@ -2710,7 +2710,7 @@ def instance_norm(
     )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def layer_norm(
     input: Tensor,
     normalized_shape: list[int],
@@ -2727,7 +2727,7 @@ def layer_norm(
     )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def rms_norm(
     input: Tensor,
     normalized_shape: list[int],
@@ -2900,7 +2900,7 @@ if ctc_loss.__doc__:
     ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def nll_loss(
     input: Tensor,
     target: Tensor,
@@ -3089,7 +3089,7 @@ def gaussian_nll_loss(
         return loss
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def kl_div(
     input: Tensor,
     target: Tensor,
@@ -3155,7 +3155,7 @@ def kl_div(
     return reduced
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3236,7 +3236,7 @@ def cross_entropy(
     )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3287,7 +3287,7 @@ def binary_cross_entropy(
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def binary_cross_entropy_with_logits(
     input: Tensor,
     target: Tensor,
@@ -3345,7 +3345,7 @@ def binary_cross_entropy_with_logits(
     )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
@@ -3552,7 +3552,7 @@ def l1_loss(
         )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def mse_loss(
     input: Tensor,
     target: Tensor,
@@ -3616,7 +3616,7 @@ def mse_loss(
         )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def margin_ranking_loss(
     input1: Tensor,
     input2: Tensor,
@@ -3656,7 +3656,7 @@ def margin_ranking_loss(
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def hinge_embedding_loss(
     input: Tensor,
     target: Tensor,
@@ -3690,7 +3690,7 @@ def hinge_embedding_loss(
     return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def multilabel_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -3722,7 +3722,7 @@ def multilabel_margin_loss(
     return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -3754,7 +3754,7 @@ def soft_margin_loss(
     return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def multilabel_soft_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -3804,7 +3804,7 @@ def multilabel_soft_margin_loss(
     return ret
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def cosine_embedding_loss(
     input1: Tensor,
     input2: Tensor,
@@ -3840,7 +3840,7 @@ def cosine_embedding_loss(
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def multi_margin_loss(
     input: Tensor,
     target: Tensor,
@@ -4184,7 +4184,7 @@ def interpolate(  # noqa: F811
     pass
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
@@ -4595,7 +4595,7 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def grid_sample(
     input: Tensor,
     grid: Tensor,
@@ -4745,7 +4745,7 @@ def grid_sample(
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def affine_grid(
     theta: Tensor,
     size: list[int],
@@ -4844,7 +4844,7 @@ def affine_grid(
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def pad(
     input: Tensor,
     pad: list[int],
@@ -5050,7 +5050,7 @@ Examples:
 )
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def triplet_margin_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -5155,7 +5155,7 @@ def triplet_margin_with_distance_loss(
         return loss
 
 
-@_handle_torch_function_variadic
+@_wrap_torch_function_variadic
 def normalize(
     input: Tensor,
     p: float = 2.0,
@@ -5193,7 +5193,7 @@ def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def unfold(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -5222,7 +5222,7 @@ def unfold(
     )
 
 
-@_handle_torch_function_unary
+@_wrap_torch_function_unary
 def fold(
     input: Tensor,
     output_size: BroadcastingList2[int],
