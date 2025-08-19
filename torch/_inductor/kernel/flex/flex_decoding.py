@@ -25,7 +25,6 @@ from .common import (
     maybe_realize,
     set_head_dim_values,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 aten = torch.ops.aten
 prims = torch.ops.prims
