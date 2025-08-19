@@ -110,6 +110,9 @@ functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.reduce_scatter_tensor_coalesced.default,
     _c10d_functional_autograd.reduce_scatter_tensor.default,
     _c10d_functional.broadcast_.default,
+    _c10d_functional.isend.default,
+    _c10d_functional.irecv.default,
+    _c10d_functional.batch_p2p_ops.default,
     _dtensor.shard_dim_alltoall.default,
 }
 

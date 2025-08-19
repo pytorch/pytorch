@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from enum import auto, Enum
 from itertools import chain, product
 from unittest import mock, SkipTest
+import unittest
 
 import torch
 import torch.distributed as c10d
@@ -4848,6 +4849,267 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
             self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize(
+        "op_sizes_per_coalesce",
+        [
+            [(2, 3)],
+            [(2, 3), (5, 5), (1,)],
+        ],
+    )
+    @parametrize("timing_enabled", [True, False])
+    def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
+        def _pattern(op_sizes_per_coalesce):
+            ops = list()
+            for input_sizes in op_sizes_per_coalesce:
+                tensor = torch.ones(input_sizes).to(self.local_device)
+                if self.rank == 0:
+                    ops.append(
+                            dist.P2POp(dist.irecv, tensor, 1)
+                            )
+                elif self.rank == 1:
+                    tensor *= 2
+                    ops.append(
+                        dist.P2POp(dist.isend, tensor, 0)
+                            )
+                else:
+                    raise NotImplementedError
+            return dist.batch_isend_irecv(ops)[0].wait() # no calling .pop() here -- unclear
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
+        compiled_fn = torch.compile(_pattern)
+
+        num_coalesced_ops = 20
+        ops_per_coalesce = len(op_sizes_per_coalesce)
+
+        for _ in range(num_coalesced_ops):
+            compiled_fn(op_sizes_per_coalesce)
+
+        torch.cuda.synchronize()
+
+        if timing_enabled:
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertTrue(len(t["entries"]) > 0)
+        expected_total_entries = num_coalesced_ops * (ops_per_coalesce + 1)
+        self.assertEqual(len(t["entries"]), expected_total_entries) 
+
+        for seq in range(num_coalesced_ops):
+            coalesced_op_idx = seq * (ops_per_coalesce + 1) + ops_per_coalesce
+            
+            self.assertEqual(
+                    t["entries"][coalesced_op_idx]["profiling_name"], 
+                    "nccl:coalesced"
+                    )
+            try:
+                self.assertEqual(
+                        t["entries"][coalesced_op_idx]["state"], 
+                        "completed"
+                        )
+            except Exception as e:
+                self.assertEqual(
+                        t["entries"][coalesced_op_idx]["state"], 
+                        "scheduled"
+                        )
+
+    def _single_isend_with_wait_pattern(self, tensor, dst_rank): 
+        req = dist.isend(tensor, dst_rank)
+        req.wait()
+        return req
+
+    def _single_irecv_with_wait_pattern(self, tensor, src_rank):
+        req = dist.irecv(tensor, src_rank)
+        req.wait()
+        return req
+
+    def _paired_isend_irecv_with_waits_pattern(self, send_tensor, recv_tensor, peer_rank):
+        if self.rank == 0:
+            send_req = dist.isend(send_tensor, peer_rank)
+            recv_req = dist.irecv(recv_tensor, peer_rank)
+        else:
+            recv_req = dist.irecv(recv_tensor, peer_rank)
+            send_req = dist.isend(send_tensor, peer_rank)
+
+        send_req.wait()
+        recv_req.wait()
+        return send_req, recv_req
+
+    def _multiple_isend_with_waits_pattern(self, tensors, dst_rank):
+        reqs = []
+        for tensor in tensors:
+            req = dist.isend(tensor, dst_rank)
+            reqs.append(req)
+
+        for req in reqs:
+            req.wait()
+        return reqs
+
+    def _multiple_irecv_with_waits_pattern(self, tensors, src_rank):
+        reqs = []
+        for tensor in tensors:
+            req = dist.irecv(tensor, src_rank)
+            reqs.append(req)
+
+        for req in reqs:
+            req.wait()
+        return reqs
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_isend_with_wait(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        pg = self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        compiled_isend_wait = torch.compile(self._single_isend_with_wait_pattern)
+        compiled_irecv_wait = torch.compile(self._single_irecv_with_wait_pattern)
+
+        if self.rank == 0:
+            tensor = torch.ones(10, device=device) * 42
+            compiled_isend_wait(tensor, 1)
+        elif self.rank == 1:
+            tensor = torch.zeros(10, device=device)
+            compiled_irecv_wait(tensor, 0)
+            self.assertEqual(tensor, torch.ones(10, device=device) * 42)
+
+        torch.cuda.synchronize(device=device)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @unittest.expectedFailure
+    def test_compiled_with_reduce_overhead(self):
+        pg = self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        @torch.compile(mode='reduce-overhead')
+        def f(ops_list):
+            return (dist.batch_isend_irecv(ops_list)).wait()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("tensor_size", [(10,), (5, 5), (2, 3, 4)])
+    def test_compiled_paired_isend_irecv_with_waits(self, tensor_size):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        pg = self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        compiled_paired_comm = torch.compile(self._paired_isend_irecv_with_waits_pattern)
+
+        send_tensor = torch.ones(tensor_size, device=device) * (self.rank + 1)
+        recv_tensor = torch.zeros(tensor_size, device=device)
+
+        peer_rank = 1 if self.rank == 0 else 0
+        compiled_paired_comm(send_tensor, recv_tensor, peer_rank)
+
+        expected_recv = torch.ones(tensor_size, device=device) * (peer_rank + 1)
+        self.assertEqual(recv_tensor, expected_recv)
+
+        torch.cuda.synchronize(device=device)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("num_tensors", [1, 3, 5])
+    def test_compiled_multiple_isend_with_waits(self, num_tensors):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        pg = self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        compiled_multi_isend = torch.compile(self._multiple_isend_with_waits_pattern)
+        compiled_multi_irecv = torch.compile(self._multiple_irecv_with_waits_pattern)
+
+        if self.rank == 0:
+            tensors = [torch.ones(10, device=device) * i for i in range(num_tensors)]
+            compiled_multi_isend(tensors, 1)
+
+        elif self.rank == 1:
+            tensors = [torch.zeros(10, device=device) for _ in range(num_tensors)]
+            compiled_multi_irecv(tensors, 0)
+
+            for i, tensor in enumerate(tensors):
+                expected = torch.ones(10, device=device) * i
+                self.assertEqual(tensor, expected)
+
+        torch.cuda.synchronize(device=device)
+
+    
+    def _iterative_communication_pattern(self, tensor_size, num_iterations, peer_rank):
+        device = torch.device(f"cuda:{self.rank}")
+
+        for i in range(num_iterations):
+            if self.rank == 0:
+                tensor = torch.ones(tensor_size, device=device) * i
+                req = dist.isend(tensor, peer_rank)
+                req.wait()
+            else:
+                tensor = torch.zeros(tensor_size, device=device)
+                req = dist.irecv(tensor, peer_rank)
+                req.wait()
+                # Validation inside the compiled function
+                expected = torch.ones(tensor_size, device=device) * i
+                torch.testing.assert_close(tensor, expected)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("num_iterations", [5, 10])
+    def test_compiled_iterative_communication_with_waits(self, num_iterations):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        pg = self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        compiled_iterative_comm = torch.compile(self._iterative_communication_pattern)
+
+        peer_rank = 1 if self.rank == 0 else 0
+        tensor_size = (100,)
+
+        compiled_iterative_comm(tensor_size, num_iterations, peer_rank)
+
+        torch.cuda.synchronize(device=device)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_isend_irecv_timing_stress_with_waits(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        pg = self._create_process_group_nccl()
+        pg._enable_collectives_timing()
+        device = torch.device(f"cuda:{self.rank}")
+
+        compiled_isend_wait = torch.compile(self._single_isend_with_wait_pattern)
+        compiled_irecv_wait = torch.compile(self._single_irecv_with_wait_pattern)
+
+        num_iterations = 50
+
+        for i in range(num_iterations):
+            if self.rank == 0:
+                tensor = torch.ones(100, device=device) * i
+                compiled_isend_wait(tensor, 1)
+            elif self.rank == 1:
+                tensor = torch.zeros(100, device=device)
+                compiled_irecv_wait(tensor, 0)
+                expected = torch.ones(100, device=device) * i
+                self.assertEqual(tensor, expected)
+
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        self.assertTrue(True)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
