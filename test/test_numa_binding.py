@@ -10,7 +10,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Optional
-from unittest import skipUnless
+from unittest import skipIf, skipUnless
 from unittest.mock import mock_open, patch
 
 import torch
