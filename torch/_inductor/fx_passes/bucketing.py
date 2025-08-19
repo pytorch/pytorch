@@ -1,3 +1,4 @@
+import collections
 import logging
 from collections import defaultdict
 from typing import Any, Callable, Optional
@@ -10,7 +11,6 @@ from torch._dynamo.utils import detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._ordered_set import OrderedSet
-import collections
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -88,7 +88,9 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
 
-def collect_node_descendants(graph: torch.fx.Graph) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
+def collect_node_descendants(
+    graph: torch.fx.Graph,
+) -> dict[torch.fx.Node, OrderedSet[torch.fx.Node]]:
     """
     Collects the descendants of each node in the graph.
     Args:
@@ -96,7 +98,9 @@ def collect_node_descendants(graph: torch.fx.Graph) -> dict[torch.fx.Node, Order
     Returns:
         dict[torch.fx.Node, OrderedSet[torch.fx.Node]]: A dictionary mapping each node to its descendants.
     """
-    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = collections.defaultdict(OrderedSet)
+    node_descendants: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = (
+        collections.defaultdict(OrderedSet)
+    )
     outdegree = collections.defaultdict(int)
     queue = []
 
@@ -120,7 +124,6 @@ def collect_node_descendants(graph: torch.fx.Graph) -> dict[torch.fx.Node, Order
     return node_descendants
 
 
-
 def greedy_bucket_collective_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
@@ -128,8 +131,9 @@ def greedy_bucket_collective_by_mb(
     node_group_key: Callable[[torch.fx.Node], Any],
     filter_wait_node: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> list[list[torch.fx.Node]]:
-
-    if not gm.graph.find_nodes(op="call_function", target=torch.ops._c10d_functional.wait_tensor.default):
+    if not gm.graph.find_nodes(
+        op="call_function", target=torch.ops._c10d_functional.wait_tensor.default
+    ):
         return []
 
     g = gm.graph
@@ -363,10 +367,13 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     assert fake_mode is not None
     with fake_mode, enable_python_dispatcher():
         out = make_fx(fn)(*inps)
-        for node in out.graph.find_nodes(op="call_function", target=torch.ops.aten.detach.default):
+        for node in out.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.detach.default
+        ):
             node.replace_all_uses_with(node.args[0])
             out.graph.erase_node(node)
         return out
+
 
 def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     g: torch.fx.Graph,

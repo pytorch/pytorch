@@ -1596,7 +1596,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             # Create dependency: second allgather input depends on first allgather output
             # This prevents fusion of the two allgather operations
-            ag_1_modified = ag_1_cast + ag_0_out[:ag_1_cast.shape[0]]  # Use part of ag_0_out
+            ag_1_modified = (
+                ag_1_cast + ag_0_out[: ag_1_cast.shape[0]]
+            )  # Use part of ag_0_out
 
             # second allgather (now depends on the first one)
             ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
