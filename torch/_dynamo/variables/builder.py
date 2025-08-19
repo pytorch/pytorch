@@ -3009,6 +3009,12 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         in [
             torch._C._are_functorch_transforms_active,
             torch._C._functorch.is_batchedtensor,
+            torch._C._get_cudnn_sdp_enabled,
+            torch._C._get_flash_sdp_enabled,
+            torch._C._get_mem_efficient_sdp_enabled,
+            torch._C._get_math_sdp_enabled,
+            torch._C._get_overrideable_sdp_enabled,
+            torch._C._get_sdp_priority_order,
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
