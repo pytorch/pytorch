@@ -39,6 +39,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import typing
 import weakref
 from dataclasses import dataclass
@@ -119,6 +120,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .output_graph import DynamoTracerOutput
 from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
@@ -517,7 +519,7 @@ class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
 
 
-def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
+def _is_error_on_graph_break(tx: Optional[DynamoTracerOutput]) -> bool:
     if tx is None:
         return _get_error_on_graph_break()
     return tx.error_on_graph_break
@@ -731,9 +733,6 @@ from collections import OrderedDict
 from torch.utils.hooks import RemovableHandle
 
 
-if typing.TYPE_CHECKING:
-    from .output_graph import OutputGraph
-
 # we have to use `OrderedDict` to make `RemovableHandle` work.
 _bytecode_hooks: dict[int, BytecodeHook] = OrderedDict()
 
@@ -746,6 +745,89 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     handle = RemovableHandle(_bytecode_hooks)
     _bytecode_hooks[handle.id] = hook
     return handle
+
+
+@preserve_global_state
+def trace_frame(
+    code: types.CodeType,
+    globals: dict[str, object],
+    locals: dict[str, object],
+    builtins: dict[str, object],
+    closure: tuple[CellType],
+    compiler_fn: CompilerFn,
+    tf_mode_stack: list[torch.overrides.TorchFunctionMode],
+    one_graph: bool,
+    speculation_log: SpeculationLog,
+    instructions: list[Instruction],
+    code_options: dict[str, object],
+    *,
+    export: bool = False,
+    export_constraints: Optional[typing.Never] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    distributed_state: Optional[DistributedState] = None,
+    package: Optional[CompilePackage] = None,
+) -> DynamoTracerOutput:
+    from torch.fx.experimental.validator import bisect, translation_validation_enabled
+
+    speculation_log.restart()  # type: ignore[has-type]
+    exn_vt_stack = ExceptionStack()
+    tracer = InstructionTranslator(
+        instructions,
+        code,
+        locals,
+        globals,
+        builtins,
+        closure,
+        tf_mode_stack,
+        code_options,
+        compiler_fn,
+        one_graph,
+        export,
+        export_constraints,
+        frame_state=frame_state,
+        speculation_log=speculation_log,  # type: ignore[has-type]
+        exn_vt_stack=exn_vt_stack,
+        distributed_state=distributed_state,  # type: ignore[has-type]
+        package=package,
+    )
+
+    def run_tracer() -> None:
+        try:
+            tracer.output.mark_bytecode_tracing_start()
+            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+                tracer.run()
+        except exc.UnspecializeRestartAnalysis:
+            speculation_log.clear()  # type: ignore[has-type]
+            raise
+        except (
+            exc.SpeculationRestartAnalysis,
+            exc.TensorifyScalarRestartAnalysis,
+            exc.SkipFrame,
+        ):
+            raise
+        except Exception:
+            if translation_validation_enabled():
+                bisect(tracer.output.shape_env)
+            raise
+        finally:
+            tracer.output.call_cleanup_hooks()
+
+    try:
+        run_tracer()
+        tracer_output = DynamoTracerOutput(tracer)
+        output = tracer_output.output_graph
+        assert output is not None
+        assert output.output_instructions
+        instructions[:] = output.output_instructions
+        code_options.update(output.code_options)
+        propagate_inst_exn_table_entries(instructions)
+        check_inst_exn_tab_entries_valid(instructions)
+        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+    except Exception as e:
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
+        raise
+
+    return tracer_output
 
 
 def _compile(
@@ -773,78 +855,45 @@ def _compile(
 ) -> ConvertFrameReturn:
     from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
-        bisect,
         BisectValidationException,
-        translation_validation_enabled,
         ValidationException,
     )
 
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
-    output: Optional[OutputGraph] = None
-    tracer: Optional[InstructionTranslator] = None
+    tracer_output: Optional[DynamoTracerOutput] = None
 
-    tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
-        torch.overrides._get_current_function_mode_stack()
-    )
-
-    @preserve_global_state
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
     ) -> None:
-        nonlocal output
-        nonlocal tracer
-        speculation_log.restart()  # type: ignore[has-type]
-        exn_vt_stack = ExceptionStack()
-        tracer = InstructionTranslator(
-            instructions,
-            code,
-            locals,
-            globals,
-            builtins,
-            closure,
-            tf_mode_stack,
-            code_options,
-            compiler_fn,
-            one_graph,
-            export,
-            export_constraints,
-            frame_state=frame_state,
-            speculation_log=speculation_log,  # type: ignore[has-type]
-            exn_vt_stack=exn_vt_stack,
-            distributed_state=distributed_state,  # type: ignore[has-type]
-            package=package,
+        nonlocal tracer_output
+
+        tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
+            torch.overrides._get_current_function_mode_stack()
         )
-
         try:
-            tracer.output.mark_bytecode_tracing_start()
-            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
-                tracer.run()
-        except exc.UnspecializeRestartAnalysis:
-            speculation_log.clear()  # type: ignore[has-type]
+            tracer_output = trace_frame(
+                code,
+                globals,
+                locals,
+                builtins,
+                closure,
+                compiler_fn,
+                tf_mode_stack,
+                one_graph,
+                speculation_log,
+                instructions,
+                code_options,
+                export=export,
+                export_constraints=export_constraints,
+                frame_state=frame_state,
+                distributed_state=distributed_state,
+                package=package,
+            )
+        except Exception as e:
+            tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)  # type: ignore[attr-defined]
             raise
-        except (
-            exc.SpeculationRestartAnalysis,
-            exc.TensorifyScalarRestartAnalysis,
-            exc.SkipFrame,
-        ):
-            raise
-        except Exception:
-            if translation_validation_enabled():
-                bisect(tracer.output.shape_env)
-            raise
-        finally:
-            tracer.output.call_cleanup_hooks()
-
-        output = tracer.output
-        assert output is not None
-        assert output.output_instructions
-        instructions[:] = output.output_instructions
-        code_options.update(output.code_options)
-        propagate_inst_exn_table_entries(instructions)
-        check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
@@ -932,7 +981,7 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                if one_graph or _is_error_on_graph_break(tracer):
+                if one_graph or _is_error_on_graph_break(tracer_output):
                     log.debug(
                         "No graph captured with one_graph=True or error_on_graph_break=True"
                     )
@@ -960,7 +1009,8 @@ def _compile(
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
-        assert output is not None
+        assert tracer_output is not None and tracer_output.output_graph is not None
+        output = tracer_output.output_graph
 
         # Tests for new code objects.
         # The rationale for these tests can be found in torch/csrc/dynamo/eval_frame.c
@@ -1018,7 +1068,7 @@ def _compile(
                 cache_entry,
                 hooks.guard_fail_fn if hooks else None,
                 hooks.guard_filter_fn if hooks else None,
-                guards_serialization_mode="save" if package else None,
+                save_guards=True if package else False,
             )
 
         if package is not None:
@@ -1080,7 +1130,31 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        metrics_context.update_outer({"recompile_reason": recompile_reason})
+        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
+        inline_inbuilt_nn_modules_candidate = False
+        if not config.inline_inbuilt_nn_modules and frame:
+            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, skip_logging=True
+            )
+            inbuilt_nn_recompile_reason = (
+                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
+            )
+
+            if (
+                inbuilt_nn_recompile_reason is not None
+                and "[inline-inbuilt-nn-modules-candidate]"
+                in inbuilt_nn_recompile_reason
+            ):
+                inline_inbuilt_nn_modules_candidate = True
+
+        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
+        # regardless of whether inline_inbuilt_nn_modules is set or not
+        metrics_context.update_outer(
+            {
+                "recompile_reason": recompile_reason,
+                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+            }
+        )
 
         recompile_user_contexts = get_hook_for_recompile_user_context()
         if recompile_user_contexts:
@@ -1115,7 +1189,7 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _is_error_on_graph_break(tracer):
+            elif one_graph or _is_error_on_graph_break(tracer_output):
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1208,7 +1282,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            if tracer and tracer.is_tracing_resume_prologue:
+            if tracer_output and tracer_output.is_tracing_resume_prologue:
                 # Do not allow any errors to be suppressed if tracer is currently tracing
                 # through resume function.
                 raise ResumePrologueTracingError(
@@ -1249,9 +1323,14 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
-            if tracer:
-                tracer.output.local_scope = {}
-                tracer.f_locals = {}
+            output = None
+            if tracer_output:
+                output = tracer_output.output_graph
+            if output:
+                output.local_scope = {}
+                # tracer should already be None, keep an extra check here just in case.
+                if tracer := output.root_tx:
+                    tracer.f_locals = {}
 
             from .utils import curr_frame
 
@@ -1322,8 +1401,8 @@ def _compile(
             # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
-                    tracer.error_on_graph_break
-                    if tracer
+                    tracer_output.error_on_graph_break
+                    if tracer_output
                     else _get_error_on_graph_break()
                 )
 
@@ -1572,8 +1651,13 @@ class CatchErrorsWrapper:
                 )
             return ConvertFrameReturn()
 
-        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
-            # nametuple constructor
+        if (
+            frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
+        ) or (
+            frame.f_code.co_filename.endswith("collections/__init__.py")
+            and frame.f_code.co_name == "_make"
+        ):
+            # nametuple constructor/_make
             return ConvertFrameReturn()
         if torch._dynamo.utils.get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()

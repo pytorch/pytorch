@@ -38,10 +38,8 @@ inline KernelFunction::KernelFunction(const KernelFunction& other)
     : boxed_kernel_func_(other.boxed_kernel_func_),
       unboxed_kernel_func_(other.unboxed_kernel_func_),
       sym_unboxed_kernel_func_(other.sym_unboxed_kernel_func_) {
-  if (other.tokens_) {
-    tokens_ = std::make_unique<std::vector<std::weak_ptr<KernelToken>>>(
-        *other.tokens_);
-  }
+  // tokens_ is intentionally not copied as we only care about invalidating
+  // tokens if the original KernelFunction is destroyed
 }
 
 inline KernelFunction& KernelFunction::operator=(const KernelFunction& other) {
@@ -50,12 +48,8 @@ inline KernelFunction& KernelFunction::operator=(const KernelFunction& other) {
     unboxed_kernel_func_ = other.unboxed_kernel_func_;
     sym_unboxed_kernel_func_ = other.sym_unboxed_kernel_func_;
 
-    if (other.tokens_) {
-      tokens_ = std::make_unique<std::vector<std::weak_ptr<KernelToken>>>(
-          *other.tokens_);
-    } else {
-      tokens_.reset();
-    }
+    // tokens_ is intentionally not copied as we only care about invalidating
+    // tokens if the original KernelFunction is destroyed
   }
   return *this;
 }

@@ -261,6 +261,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         # kwargs might contain a callable that generates kwargs
+        torch._dynamo.reset()
         kwarg_gen_fn = kwargs.get("_gen_fn", None)
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
@@ -346,7 +347,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     self._frame_state.f_code,
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
-                    guards_serialization_mode="save",
+                    save_guards=True,
                 )
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
@@ -357,7 +358,6 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
                     guards_state.output_graph,
-                    guards_serialization_mode="load",
                     shape_code_parts=guards_state.shape_code_parts,
                     runtime_global_scope=self._frame_state.f_globals,
                 )
@@ -1180,7 +1180,6 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             check_fn_manager = CheckFunctionManager(
                 self._cached_f_code,
                 guards_state.output_graph,
-                guards_serialization_mode="load",
                 shape_code_parts=guards_state.shape_code_parts,
             )
             loaded = check_fn_manager.guard_manager
