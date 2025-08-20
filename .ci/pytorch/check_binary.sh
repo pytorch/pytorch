@@ -300,3 +300,5 @@ except RuntimeError as e:
     exit 1
   fi
 fi
+
+exit 0
