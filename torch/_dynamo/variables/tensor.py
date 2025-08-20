@@ -1090,8 +1090,7 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        target_cls = type(value)
-        if isinstance(target_cls, TensorVariable):
+        if isinstance(value, TensorVariable):
             # [Note: Tensor.__setitem__ and VariableTracker metadata]
             # At this point, we proxied a node representing `self[key] = value` into the graph.
             # When executed, this node will mutate `self`'s tensor metadata, so it's important
@@ -1107,7 +1106,7 @@ class TensorVariable(VariableTracker):
             from .builder import get_specialized_props, infer_subclass_type
 
             specialized_props = get_specialized_props(
-                target_cls, tx, example_value, infer_subclass_type(example_value)
+                type(value), tx, example_value, infer_subclass_type(example_value)
             )
             for k, v in specialized_props.items():
                 setattr(self, k, v)
