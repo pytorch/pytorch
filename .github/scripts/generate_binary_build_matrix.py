@@ -16,17 +16,19 @@ from typing import Optional
 
 
 # NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
-CUDA_ARCHES = ["12.6", "12.8", "12.9"]
+CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
+    "13.0": "13.0.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "12.8": "9",
     "12.9": "9",
+    "13.0": "9",
 }
 
 # NOTE: Please also update the ROCm sources in `PIP_SOURCES` in tools/nightly.py when changing this
@@ -223,6 +225,8 @@ def generate_libtorch_matrix(
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
+            if "13.0" in arches:
+                arches.remove("13.0")
         elif os == "windows":
             arches += CUDA_ARCHES
     if libtorch_variants is None:
@@ -287,6 +291,8 @@ def generate_wheels_matrix(
         arches = ["cpu"]
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
+            if "13.0" in arches:
+                arches.remove("13.0")
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
