@@ -22,12 +22,15 @@ import torch
 import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
-from .hipify import hipify_python
-from .hipify.hipify_python import GeneratedFileCleaner
-from typing import Optional, Union
+ffrom typing import Optional, Union
 from torch.torch_version import TorchVersion, Version
 
 from setuptools.command.build_ext import build_ext
+
+if torch.version.hip:
+    from .hipify import hipify_python
+    from .hipify.hipify_python import GeneratedFileCleaner
+
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')

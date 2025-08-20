@@ -24,13 +24,15 @@ from ..ir import (
 )
 from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
-from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
+
+if torch.version.hip:
+    from .aoti_hipify_utils import maybe_hipify_code_wrapper
 
 
 _cpp_string_literal_escapes = {
