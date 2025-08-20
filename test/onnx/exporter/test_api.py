@@ -29,10 +29,8 @@ class SampleModelTwoInputs(torch.nn.Module):
 
 
 class SampleModelReduction(torch.nn.Module):
-    def forward(self, x, b):
-        y = x + b
-        z = y.sum()
-        return z
+    def forward(self, x):
+        return x.sum()
 
 
 class SampleModelForDynamicShapes(torch.nn.Module):
