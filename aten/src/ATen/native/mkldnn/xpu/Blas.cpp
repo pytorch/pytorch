@@ -482,7 +482,7 @@ Tensor& _weight_fp8_mm_out_xpu(
 
   at::Tensor scales = scales_.has_value()
       ? scales_.value()
-      : at::ones({1}, B.options().dtype(B.dtype()));
+      : at::ones({1}, B.options().dtype(kFloat));
 
   TensorArg scales_arg{scales, "scales", 3};
 
