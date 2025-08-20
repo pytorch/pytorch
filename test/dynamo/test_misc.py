@@ -16,11 +16,13 @@ import logging
 import math
 import operator
 import os
+import pickle
 import random
 import sys
 import tempfile
 import threading
 import traceback
+import types
 import typing
 import unittest
 import unittest.mock as mock
@@ -1703,16 +1705,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             if hasattr(packed, "b"):
                 b = packed.b + 1
             c = packed[2]
-            return a + b + c
+            d = len(packed._fields)
+            return a + b + c + d
 
         v1 = torch.Tensor([1])
         v2 = torch.Tensor([2])
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 10)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_namedtuple3(self):
         def fn(x, packed):
@@ -1958,6 +1961,31 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         act = opt_fn(a, b)
 
         self.assertEqual(exp, act)
+
+    def test_class_binop(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __add__(self, other):
+                return Foo(self.x + other.x)
+
+        def fn(a, b):
+            return a + b
+
+        x = torch.randn(2)
+        a, b = Foo(x), Foo(x + 1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(opt_fn(a, b).x, 2 * x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        def fn(a, b):
+            return a - b
+
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        self.assertRaises(torch._dynamo.exc.Unsupported, opt_fn, a, b)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -8520,6 +8548,49 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
 
+    def test_fullgraph_capture(self):
+        def foo(x):
+            return x + x.shape[0]
+
+        compiled_foo = torch._dynamo.eval_frame.fullgraph_capture(foo)
+        compiled_foo(torch.randn(3, 2))
+        compiled_foo(torch.randn(4))
+        artifacts = compiled_foo.get_artifacts()
+
+        guarded_codes = artifacts.dynamo_artifacts.guarded_codes
+        backend_ids = list(artifacts.backend_inputs.keys())
+        gms = [b.graph_module for b in artifacts.backend_inputs.values()]
+
+        def _convert_to_ep_demo(code, backend_id, gm, args):
+            # Inject compiled function as the original gm
+            new_globals = copy.copy(globals())
+            new_globals[backend_id] = gm
+            # Minimal boilerplate to setup a callable.
+            SerializedCode = type(code.dynamo_code)
+            dynamo_bytecode = SerializedCode.to_code_object(code.dynamo_code)
+            guards_state = pickle.loads(code.guards_state)
+            guard_manager = torch._dynamo.guards.CheckFunctionManager(
+                foo.__code__,
+                guards_state.output_graph,
+                shape_code_parts=guards_state.shape_code_parts,
+                runtime_global_scope=new_globals,
+            ).guard_manager
+
+            class ModuleForExport(torch.nn.Module):
+                def forward(self, x):
+                    return types.FunctionType(dynamo_bytecode, new_globals)(x)
+
+            m = ModuleForExport()
+            return guard_manager, torch.export.export(m, args)
+
+        guards0, ep0 = _convert_to_ep_demo(
+            guarded_codes[0], backend_ids[0], gms[0], (torch.randn(3, 2),)
+        )
+        self.assertTrue(guards0.check({"x": torch.randn(3, 2)}))
+        self.assertFalse(guards0.check({"x": torch.randn(4)}))
+        input0 = torch.randn(3, 2)
+        self.assertEqual(ep0.module()(input0), foo(input0))
+
     def test_torch_guards_stack_frame_register_inlining_deep(self):
         x = torch.tensor([0.5, 0.5])
         y = torch.tensor([0.75, 0.75, 0.75, 0.75])
@@ -8557,15 +8628,64 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(seen_frames[1].name, "uwu_inline_me")
         self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
-    def test_error_on_recompile(self):
+    def test_recompile_on_disable_1(self):
+        # fix https://github.com/pytorch/pytorch/issues/157399
         @torch.compile(backend="eager")
-        def fn(a, b):
-            return a + b
+        def fn(x):
+            @torch._dynamo.disable
+            def inner(x):
+                return x + 10
+
+            return inner(x) + 1
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            try:
+                for i in range(5):
+                    fn(torch.rand(2, 3))
+            except torch._dynamo.exc.RecompileError as e:
+                self.fail("RecompileError raised unexpectedly: " + str(e))
+
+    def test_recompile_on_disable_2(self):
+        def outer(x, cond):
+            @torch._dynamo.disable()
+            def fn0(y):
+                return y + 1
+
+            @torch._dynamo.disable()
+            def fn1(y):
+                return y + 2
+
+            if cond:
+                f = fn0
+            else:
+                f = fn1
+
+            torch._dynamo.graph_break()
+            # there will be a resume function here
+            return f(x)
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             with self.assertRaises(torch._dynamo.exc.RecompileError):
-                fn(torch.rand(2, 3), torch.rand(2, 3))
-                fn(torch.rand(2, 3), (1, 2, 3))
+                x = torch.rand(2, 3)
+                self.assertEqual(outer(x, True), torch.compile(outer)(x, True))
+                self.assertEqual(outer(x, False), torch.compile(outer)(x, False))
+
+    def test_create_nested_fn_cache_clear(self):
+        def outer(x):
+            @torch._dynamo.disable()
+            def f(y):
+                return y + 2
+
+            return f(x) + 1
+
+        outer = torch.compile(outer)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                outer(torch.randn(3, 3))
+                from torch._dynamo.utils import create_nested_fn_cache
+
+                create_nested_fn_cache.clear()
+                outer(torch.randn(3, 3))
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -12727,6 +12847,36 @@ fn
         ref = f(x)
         res = opt_f(x)
         self.assertEqual(ref, res)
+
+    def test_builtin_complex(self):
+        def f(x):
+            c = (
+                complex(),
+                complex(1),
+                complex(2, 3),
+                complex(imag=2),
+                complex(real=1),
+                complex(imag=1, real=2),
+                complex("1+2j"),
+            )
+            return [x + z for z in c]
+
+        x = torch.randn(1)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        res = opt_f(x)
+        ref = f(x)
+        self.assertEqual(res, ref)
+
+    def test_builtin_complex_args(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(*args, **kwargs):
+            return torch.tensor(complex(*args, **kwargs))
+
+        self.assertRaises(Unsupported, f, 1, 1, 1)
+        self.assertRaises(Unsupported, f, 1, 1, fake_arg=1)
+        self.assertRaises(Unsupported, f, fake_arg=1)
+        self.assertRaises(Unsupported, f, [])
+        self.assertRaises(Unsupported, f, "1 + j")
 
 
 class TestTracer(JitTestCase):

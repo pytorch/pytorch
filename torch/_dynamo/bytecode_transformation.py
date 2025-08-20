@@ -22,7 +22,7 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -32,6 +32,10 @@ from .bytecode_analysis import (
     stacksize_analysis,
 )
 from .utils import is_safe_constant
+
+
+if TYPE_CHECKING:
+    from .output_graph import DynamoTracerOutput
 
 
 @dataclass_slots
@@ -1448,7 +1452,9 @@ def get_code_keys() -> list[str]:
 
 def transform_code_object(
     code: types.CodeType,
-    transformations: Callable[[list[Instruction], dict[str, Any]], Any],
+    transformations: Callable[
+        [list[Instruction], dict[str, Any]], Optional["DynamoTracerOutput"]
+    ],
     safe: bool = False,
 ) -> types.CodeType:
     keys = get_code_keys()
@@ -1456,6 +1462,7 @@ def transform_code_object(
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code, safe)
+    # propagate line nums again for added instructions
     propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
@@ -1561,6 +1568,8 @@ def _cached_cleaned_instructions(
     code: types.CodeType, safe: bool = False
 ) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
+    # propagate now in case we remove some instructions
+    propagate_line_nums(instructions)
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
         populate_kw_names_argval(instructions, code.co_consts)
