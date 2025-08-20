@@ -96,21 +96,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "13.0": (
-        "nvidia-cuda-nvrtc-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-runtime-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu13==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu13==9.12.0.46; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu13==13.0.0.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu13==12.0.0.15; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu13==10.4.0.35; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu13==12.0.3.29; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu13==12.6.2.49; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-nvrtc==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti==13.0.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn==9.12.0.46; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas==13.0.0.19; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft==12.0.0.15; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand==10.4.0.35; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver==12.0.3.29; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse==12.6.2.49; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl==2.27.7; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvshmem-cu13==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu13==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu13==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufile-cu13==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvtx==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink==13.0.39; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufile==1.15.0.42; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
         "intel-cmplr-lib-rt==2025.1.1 | "
@@ -143,7 +143,7 @@ def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
         str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
     )
-    return next(x for x in requirements if x.startswith("nvidia-nccl-cu")).split("==")[
+    return next(x for x in requirements if x.startswith("nvidia-nccl")).split("==")[
         1
     ]
 
