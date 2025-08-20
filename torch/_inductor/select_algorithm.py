@@ -275,7 +275,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            var_dtype = V.graph.get_buffer(name).dtype
+            buffer = V.graph.get_buffer(name)
+            var_dtype = buffer.dtype
             line = f"tl.load({var} + {index_str})"
 
             if (
@@ -285,11 +286,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
                 line += ".to(tl.float32)"
                 var_dtype = torch.float32
 
-            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            out = self.kernel.cse.generate(
+                self.kernel.compute, line, dtype=var_dtype, shape=()
+            )
             return out
 
         return self.kernel.cse.generate(
-            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+            self.kernel.compute,
+            f"({self.fixed_inputs[name]})",
+            dtype=torch.float32,
+            shape=(),
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -994,6 +1000,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
+        val_shape: Optional[list[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1044,7 +1051,9 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
+            epilogue_args = [
+                V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
+            ]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1630,7 +1639,7 @@ class TritonTemplate(KernelTemplate):
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
         if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
-            kwargs["ALLOW_TF32"] = "False"
+            kwargs["FLOAT32_PRECISION"] = '"ieee"'
 
         if call_sizes is None:
             call_sizes = layout.size
@@ -1763,7 +1772,7 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
+                "float32_precision": str(kwargs.get("FLOAT32_PRECISION", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
@@ -2395,12 +2404,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 important_keys = [
                     "ACC_TYPE",
-                    "ALLOW_TF32",
                     "BLOCK_K",
                     "BLOCK_M",
                     "BLOCK_N",
                     "EVEN_K",
                     "GROUP_M",
+                    "FLOAT32_PRECISION",
                     "USE_FAST_ACCUM",
                     "num_stages",
                     "num_warps",
