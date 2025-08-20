@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -66,6 +66,41 @@ inline Tensor pad(
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_pad(
       self.get(), pad.data(), pad.size(), mode.c_str(), &value, &ret0));
   return Tensor(ret0);
+}
+
+// We expect the following two functions to be stable versions of the
+// amax.default op with identical semantics to the existing amax.default op. If
+// `keepdim` is true, the result will have the same number of dimensions as
+// `self`, with the specified dimension having size 1. Otherwise, the result
+// will have one fewer dimension than `self`, with the specified dimension
+// removed.
+
+// This function is an overload to compute the maximum value along each slice of
+// `self` along a single dimension `dim`.
+inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
+  AtenTensorHandle ret = nullptr;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
+  return Tensor(ret);
+}
+
+// This function is an overload to compute the maximum value along each slice of
+// `self` reducing over all the dimensions in the vector `dims`. The
+// amax.default op takes in a SymInt[] as the dims argument, however dims is
+// typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
+// header-only (2) SymInt is not yet header-only
+inline Tensor amax(
+    Tensor& self,
+    std::vector<int64_t> dims,
+    bool keepdim = false) {
+  AtenTensorHandle ret = nullptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_amax(
+      self.get(),
+      dims.data(),
+      static_cast<int64_t>(dims.size()),
+      keepdim,
+      &ret));
+  return Tensor(ret);
 }
 
 // We expect this to be the stable version of the transpose op with identical

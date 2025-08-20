@@ -2726,8 +2726,9 @@ class InstructionTranslatorBase(
         op = inst.argval
         try:
             self.push(right.call_method(self, "__contains__", [left], {}))
-        except Unsupported:  # object doesn't support __contains__
+        except Unsupported as excp:  # object doesn't support __contains__
             # Use __iter__ as fallback
+            excp.remove_from_stats()
             self.push(
                 self.inline_user_function_return(
                     VariableTracker.build(self, impl_CONTAINS_OP_fallback),
