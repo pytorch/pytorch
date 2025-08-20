@@ -392,7 +392,7 @@ sycl::event woq_matmul_w8a16(
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
 
-  dnnl::memory wei_scales_t = scale_b.numel() == 1
+  dnnl::memory wei_scales_t = (scale_b.numel() == 1)
       ? at::native::onednn::make_onednn_memory(
             {{1}, at::native::onednn::get_onednn_dtype(scale_b), {1}},
             engine,
