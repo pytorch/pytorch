@@ -69,6 +69,7 @@ from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     counters,
+    create_nested_fn_cache,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -276,6 +277,11 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
+    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
+    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
+    if create_nested_fn_cache.get(cache_key):
+        return create_nested_fn_cache.get(cache_key)
+
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -287,7 +293,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-
+    create_nested_fn_cache.set(cache_key, func)
     return func
 
 
@@ -1066,6 +1072,18 @@ class UserMethodVariable(UserFunctionVariable):
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
         self.source_fn = source_fn
+        # Note on source and source_fn
+        # Be careful with `source` when delegating to UserFunctionVariable
+        # (base-class) methods. In this __init__, `source` is a *bound method*
+        # object, but the base class expects the underlying *function* object.
+        # One way is to simplly use `__func__` to unwrap it.
+        #
+        # For recursive dict-tag optimizations, it can be faster to fetch the
+        # function directly from `cls.__dict__`; that’s why we pass on
+        # `source_fn`. Whenever it is possible to access the function from
+        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
+        # operates on the unbound function, most guards should target
+        # `source_fn` rather than the original `source`.
         if source_fn is None and kwargs.get("source") is not None:
             self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
@@ -1454,7 +1472,13 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
+            install_guard(
+                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
+                    GuardBuilder.FUNCTION_MATCH
+                )
+            )
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
@@ -1838,10 +1862,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         if constant_args:
-            value = self.fn(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+            try:
+                value = self.fn(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except TypeError as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
