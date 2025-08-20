@@ -1358,7 +1358,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
 
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
-        self.matched_output_elements_positions = matched_output_elements_positions
+        self.matched_output_elements_positions = list(range(len(matched_output_elements_positions)))
         self.flat_results = flat_results
 
     def placeholder(
