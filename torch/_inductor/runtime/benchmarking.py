@@ -3,7 +3,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -173,7 +173,7 @@ class TritonBenchmarker(Benchmarker):
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
-class InductorBenchmarker(TritonBenchmarker):
+class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -205,15 +205,17 @@ class InductorBenchmarker(TritonBenchmarker):
         )
 
     @time_and_count
-    def benchmark_gpu(
+    def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
         estimation_iters: int = 5,
         memory_warmup_iters: int = 100,
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
+        return_mode: str = "min",
+        grad_to_none: Optional[list[torch.Tensor]] = None,
         **kwargs: Any,
-    ) -> float:
+    ) -> Union[float, list[float]]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:
@@ -231,10 +233,15 @@ class InductorBenchmarker(TritonBenchmarker):
         of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
         runtime of `_callable` and various other factors, and we then shrink
         `benchmark_iters` to fit in the allotted maximum duration.
+        - return_mode: Return mode for benchmark results. Options are "min" (default),
+        "all" (returns all measurements).
+        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
+        before each benchmark iteration.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
-        - The minimum runtime of `_callable`, in milliseconds.
+        - If return_mode="min": The minimum runtime of `_callable`, in milliseconds.
+        - If return_mode="all": List of all runtime measurements, in milliseconds.
         """
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
@@ -250,6 +257,10 @@ class InductorBenchmarker(TritonBenchmarker):
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters)
         for start_event, end_event in event_pairs:
+            # Clear gradients before timing (matches triton.testing.do_bench)
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
             buffer.zero_()
             start_event.record()
             _callable()
@@ -269,20 +280,37 @@ class InductorBenchmarker(TritonBenchmarker):
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters)
         for start_event, end_event in event_pairs:
+            # Clear gradients before timing (matches triton.testing.do_bench)
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
             buffer.zero_()
             start_event.record()
             _callable()
             end_event.record()
         torch.cuda.synchronize()
-        benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
         del buffer
 
-        # return the minimum of `estimated_timing` and `benchmarked_timing`,
-        # we just want the minimum timing overall so we might as well check both
-        return min(estimated_timing, benchmarked_timing)
+        # Return based on the requested mode
+        if return_mode == "all":
+            # Get all timings from event pairs
+            all_timings = [
+                start_event.elapsed_time(end_event)
+                for start_event, end_event in event_pairs
+            ]
+            return all_timings
+        elif return_mode == "min":
+            benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
+            # return the minimum of `estimated_timing` and `benchmarked_timing`,
+            # we just want the minimum timing overall so we might as well check both
+            return min(estimated_timing, benchmarked_timing)
+        else:
+            raise ValueError(
+                f"Unsupported return_mode: {return_mode}. Use 'min' or 'all'."
+            )
 
 
 benchmarker = (
