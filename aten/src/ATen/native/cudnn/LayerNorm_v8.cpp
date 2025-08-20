@@ -129,7 +129,7 @@ struct LayerNormGraphCache {
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
-// https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+// https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 thread_local LayerNormGraphCache<
     graph_and_tensors_forward,
     LayerNormCacheKeyWrapper>
