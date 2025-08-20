@@ -24,7 +24,7 @@ from torch.distributed._symmetric_memory import (
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_multicast_support,
     skip_if_lt_x_gpu,
@@ -52,7 +52,7 @@ device_module = torch.get_device_module(device_type)
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmetricMemoryTest(MultiProcContinousTest):
+class SymmetricMemoryTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -636,7 +636,7 @@ class SymmetricMemoryTest(MultiProcContinousTest):
 
 # This Test class is used to test the error handling of SymmetricMemory APIs.
 # Since a process restart is often needed after each test, we use the
-# MultiProcessTestCase instead of MultiProcContinousTest.
+# MultiProcessTestCase instead of MultiProcContinuousTest.
 @requires_cuda_p2p_access()
 class SymmMemNegativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -746,7 +746,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmMemCollectiveTest(MultiProcContinousTest):
+class SymmMemCollectiveTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
@@ -993,7 +993,7 @@ class SymmMemCollectiveTest(MultiProcContinousTest):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class LoweringTest(MultiProcContinousTest):
+class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
