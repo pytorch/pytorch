@@ -1179,7 +1179,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Allocate a device memory pointer for a primitive type.
-  void allocPrimitive(void** ptr, AllocParamsT& p) {
+  virtual void allocPrimitive(void** ptr, AllocParamsT& p) {
     if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
       *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(p.alloc_size);
       p.status = *ptr ? AllocParamsT::Ok : AllocParamsT::OOM;
@@ -1190,7 +1190,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Allocate a device memory pointer with an optional lock.
-  virtual void mallocMaybeCapturingWithLock(
+  virtual void mallocMaybeCapturingWithOptionalLock(
       void** ptr,
       AllocParamsT& p,
       std::unique_lock<std::recursive_mutex>& lock) = 0;
@@ -1398,7 +1398,7 @@ struct CachingDeviceAllocatorImpl {
       }
       return bool(p.block);
     } else {
-      mallocMaybeCapturingWithLock(&ptr, p, lock);
+      mallocMaybeCapturingWithOptionalLock(&ptr, p, lock);
       if (p.status == AllocParamsT::OOM) {
         return false;
       }
