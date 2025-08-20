@@ -375,6 +375,7 @@ struct ExtraFields<EventType::Kineto> {
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename... Args>
+  // this should probably be Args&&... but the compilation fails if I do that
   [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
     return std::shared_ptr<Result>(new Result(std::forward<Args>(args)...));
   }
