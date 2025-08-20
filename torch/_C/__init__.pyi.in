@@ -15,7 +15,6 @@ from typing import (
     IO,
     Literal,
     NamedTuple,
-    Optional,
     overload,
     SupportsIndex,
     TypeVar,
