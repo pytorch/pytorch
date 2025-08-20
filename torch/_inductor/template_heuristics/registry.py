@@ -8,13 +8,17 @@ for CUDA vs ROCm based on torch.version.hip.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from functools import cache
 from typing import Any, Optional, TYPE_CHECKING
 
+from .base import TemplateConfigHeuristics
+
 
 if TYPE_CHECKING:
-    from .triton import TemplateConfigHeuristics
+    from collections.abc import Iterator
+
 
 # Module-wide registry for template heuristics
 _TEMPLATE_HEURISTIC_REGISTRY: dict[tuple[str, ...], type[TemplateConfigHeuristics]] = {}
@@ -96,3 +100,42 @@ def get_template_heuristic(
             f"Available combinations: {list(_TEMPLATE_HEURISTIC_REGISTRY.keys())}"
         )
     return heuristic_class()
+
+
+@contextlib.contextmanager
+def override_template_heuristics(
+    device_type: str,
+    template_op_pairs: list[tuple[str, str]],
+) -> Iterator[None]:
+    """
+    Context manager to temporarily override template heuristics with an empty heuristic.
+
+    This is useful for testing purposes, where we want to ensure a specific template/op pair
+    is not used
+
+    Args:
+        device_type: Device type ("cuda", "cpu", "xpu")
+        template_op_pairs: List of (template_name, op_name) pairs to override.
+    """
+    # Save original entries to restore later
+    original_entries = {}
+    new_keys = []
+    get_template_heuristic.cache_clear()
+    try:
+        for template_name, op_name in template_op_pairs:
+            assert op_name is not None
+            key = (device_type, template_name, op_name)
+            if key in _TEMPLATE_HEURISTIC_REGISTRY:
+                original_entries[key] = _TEMPLATE_HEURISTIC_REGISTRY[key]
+                # TemplateConfigHeuristics base class returns no entries
+                # so we use it for overriding
+            _TEMPLATE_HEURISTIC_REGISTRY[key] = TemplateConfigHeuristics
+            new_keys.append(key)
+        yield
+    finally:
+        # Restore original entries or remove if they didn't exist before
+        for key in new_keys:
+            _TEMPLATE_HEURISTIC_REGISTRY.pop(key, None)
+            if key in original_entries:
+                _TEMPLATE_HEURISTIC_REGISTRY[key] = original_entries[key]
+        get_template_heuristic.cache_clear()

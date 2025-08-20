@@ -12,7 +12,6 @@ import tempfile
 import unittest
 from typing import Callable, Optional
 from unittest import mock
-from unittest.mock import MagicMock
 
 import torch
 from torch import multiprocessing as mp, nn
@@ -35,6 +34,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
+from torch._inductor.template_heuristics.registry import override_template_heuristics
 from torch._inductor.template_heuristics.triton import (
     CUDAMMTemplateConfigHeuristic,
     GemmConfig,
@@ -1254,16 +1254,14 @@ class TestMaxAutotune(TestCase):
 
         # Force only decomposeK choice
         with (
-            mock.patch(
-                "torch._inductor.kernel.mm.V.choices.get_mm_configs"
-            ) as base_mm_mock,
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
+            ),
             mock.patch(
                 "torch._inductor.kernel.mm.use_decompose_k_choice"
             ) as decompose_mock,
         ):
-            mm_configs_mock = MagicMock()
-            mm_configs_mock.return_value = []
-            base_mm_mock.return_value = mm_configs_mock
             decompose_mock.return_value = True
             compiled_f = torch.compile(f)
             out, code = run_and_get_code(compiled_f, a, b)
