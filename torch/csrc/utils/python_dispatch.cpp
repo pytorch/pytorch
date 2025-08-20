@@ -722,54 +722,40 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  // This list is sorted in the order defined within c10::DispatchKey, excluding
-  // backend components and functionality keys which are defined in a macro.
-  py::native_enum<c10::DispatchKey>(m, "DispatchKey", "enum.IntEnum")
+  py::enum_<c10::DispatchKey>(m, "DispatchKey")
       // clang-format off
       DEF_ONE(Undefined)
-      DEF_ONE(FPGA)
-      DEF_ONE(Vulkan)
-      DEF_ONE(Metal)
-      DEF_ONE(CustomRNGKeyId)
-      DEF_ONE(MkldnnCPU)
-      DEF_ONE(BackendSelect)
-      DEF_ONE(Python)
-      DEF_ONE(Fake)
-      DEF_ONE(FuncTorchDynamicLayerBackMode)
-      DEF_ONE(Functionalize)
-      DEF_ONE(Named)
-      DEF_ONE(Conjugate)
-      DEF_ONE(Negative)
-      DEF_ONE(ZeroTensor)
-      DEF_ONE(ADInplaceOrView)
-      DEF_ONE(AutogradOther)
+      DEF_ONE(CompositeExplicitAutogradNonFunctional)
+      DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+      DEF_ONE(CompositeImplicitAutograd)
       // NestedTensor is not a backend key
       DEF_ONE(AutogradNestedTensor)
-      DEF_ONE(Tracer)
+      DEF_ONE(AutogradOther)
+      DEF_ONE(Autograd)
+      DEF_ONE(Conjugate)
+      DEF_ONE(ZeroTensor)
+      DEF_ONE(Negative)
+      DEF_ONE(BackendSelect)
+      DEF_ONE(ADInplaceOrView)
+      DEF_ONE(PythonTLSSnapshot)
+      DEF_ONE(Python)
+      DEF_ONE(FuncTorchDynamicLayerFrontMode)
+      DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(FuncTorchBatchedDecomposition)
+      DEF_ONE(FuncTorchBatched)
+      DEF_ONE(FuncTorchVmapMode)
+      DEF_ONE(FuncTorchGradWrapper)
+      DEF_ONE(PythonDispatcher)
+      DEF_ONE(PreDispatch)
+      DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
-      DEF_ONE(AutocastMTIA)
-      DEF_ONE(AutocastMAIA)
-      DEF_ONE(AutocastXPU)
-      DEF_ONE(AutocastIPU)
-      DEF_ONE(AutocastHPU)
-      DEF_ONE(AutocastXLA)
       DEF_ONE(AutocastMPS)
+      DEF_ONE(AutocastXPU)
+      DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastIPU)
       DEF_ONE(AutocastCUDA)
       DEF_ONE(AutocastPrivateUse1)
-      DEF_ONE(FuncTorchBatched)
-      DEF_ONE(BatchedNestedTensor)
-      DEF_ONE(FuncTorchVmapMode)
-      DEF_ONE(Batched)
-      DEF_ONE(VmapMode)
-      DEF_ONE(FuncTorchGradWrapper)
-      DEF_ONE(DeferredInit)
-      DEF_ONE(PythonTLSSnapshot)
-      DEF_ONE(FuncTorchDynamicLayerFrontMode)
-      DEF_ONE(TESTING_ONLY_GenericWrapper)
-      DEF_ONE(TESTING_ONLY_GenericMode)
-      DEF_ONE(PreDispatch)
-      DEF_ONE(PythonDispatcher)
-      DEF_ONE(EndOfFunctionalityKeys)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
@@ -780,18 +766,12 @@ void initDispatchBindings(PyObject* module) {
   DEF_SINGLE(, EndOf##fullname##Backends)
 
       // clang-format off
-      C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
-      DEF_ONE(Autograd)
-      DEF_ONE(CompositeImplicitAutograd)
-      DEF_ONE(FuncTorchBatchedDecomposition)
-      DEF_ONE(CompositeImplicitAutogradNestedTensor)
-      DEF_ONE(CompositeExplicitAutograd)
-      DEF_ONE(CompositeExplicitAutogradNonFunctional)
+  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
   // clang-format on
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-                              .finalize();
+          ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -996,8 +976,7 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_autocast_supported_devices", []() {
-    std::vector<std::string> result(
-        at::autocast::_AUTOCAST_SUPPORTED_DEVICES.size());
+    std::vector<std::string> result;
     for (const auto device_type : at::autocast::_AUTOCAST_SUPPORTED_DEVICES) {
       result.emplace_back(
           c10::DeviceTypeName(device_type, /*lower_case*/ true));
@@ -1050,11 +1029,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
 
   using c10::impl::TorchDispatchModeKey;
-  py::native_enum<TorchDispatchModeKey>(m, "_TorchDispatchModeKey", "enum.Enum")
+  py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
-      .value("FAKE", TorchDispatchModeKey::FAKE)
-      .finalize();
+      .value("FAKE", TorchDispatchModeKey::FAKE);
 }
 
 // TODO: dedupe with the kernel

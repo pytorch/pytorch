@@ -2202,6 +2202,8 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr(
+      "_has_eigen_sparse", at::hasEigenSparse() ? Py_True : Py_False));
 
   py_module.def("_valgrind_supported_platform", []() {
 #if defined(USE_VALGRIND)
@@ -2237,8 +2239,7 @@ Call this whenever a new thread is created in order to propagate values from
       }))
       .def("expired", &WeakTensorRef::expired);
 
-  py::native_enum<at::native::ConvBackend>(
-      py_module, "_ConvBackend", "enum.IntEnum")
+  py::enum_<at::native::ConvBackend>(py_module, "_ConvBackend")
       .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
       .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
       .value("Cudnn", at::native::ConvBackend::Cudnn)
@@ -2248,7 +2249,6 @@ Call this whenever a new thread is created in order to propagate values from
       .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
       .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
       .value("Mkldnn", at::native::ConvBackend::Mkldnn)
-      .value("MkldnnTranspose", at::native::ConvBackend::MkldnnTranspose)
       .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
       .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
       .value("Overrideable", at::native::ConvBackend::Overrideable)
@@ -2262,8 +2262,7 @@ Call this whenever a new thread is created in order to propagate values from
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
       .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
       .value("Mps", at::native::ConvBackend::Mps)
-      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose)
-      .finalize();
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
 
   py_module.def(
       "_select_conv_backend",
@@ -2370,10 +2369,9 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readonly("is_causal", &sdp::sdp_params::is_causal)
       .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
-  py::native_enum<sdp::SDPBackend>(
+  py::enum_<sdp::SDPBackend>(
       py_module,
       "_SDPBackend",
-      "enum.IntEnum",
       "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
       "This backend class is designed to be used with the sdpa_kernel context manager."
       "See :func: torch.nn.attention.sdpa_kernel for more details.")
@@ -2382,8 +2380,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
       .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
       .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
-      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable)
-      .finalize();
+      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def("_is_flash_attention_available", []() {
 #ifdef USE_CUDA
@@ -2420,11 +2417,10 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
       });
 
-  py::native_enum<at::LinalgBackend>(py_module, "_LinalgBackend", "enum.Enum")
+  py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
       .value("Cusolver", at::LinalgBackend::Cusolver)
-      .value("Magma", at::LinalgBackend::Magma)
-      .finalize();
+      .value("Magma", at::LinalgBackend::Magma);
 
   py_module.def("_set_linalg_preferred_backend", [](at::LinalgBackend b) {
     at::globalContext().setLinalgPreferredBackend(b);
@@ -2433,12 +2429,11 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().linalgPreferredBackend();
   });
 
-  py::native_enum<at::BlasBackend>(py_module, "_BlasBackend", "enum.Enum")
+  py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
       .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
-      .value("Ck", at::BlasBackend::Ck)
-      .finalize();
+      .value("Ck", at::BlasBackend::Ck);
 
   py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
     at::globalContext().setBlasPreferredBackend(b);
@@ -2447,11 +2442,10 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().blasPreferredBackend();
   });
 
-  py::native_enum<at::ROCmFABackend>(py_module, "_ROCmFABackend", "enum.Enum")
+  py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
       .value("AOTriton", at::ROCmFABackend::AOTriton)
-      .value("Ck", at::ROCmFABackend::Ck)
-      .finalize();
+      .value("Ck", at::ROCmFABackend::Ck);
 
   py_module.def("_set_rocm_fa_preferred_backend", [](at::ROCmFABackend b) {
     at::globalContext().setROCmFAPreferredBackend(b);
@@ -2698,12 +2692,10 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("input"),
       py::arg("training"));
 
-  py::native_enum<at::native::BatchNormBackend>(
-      py_module, "_BatchNormBackend", "enum.Enum")
+  py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
       .value("Native", at::native::BatchNormBackend::Native)
       .value("Cudnn", at::native::BatchNormBackend::Cudnn)
-      .value("Miopen", at::native::BatchNormBackend::Miopen)
-      .finalize();
+      .value("Miopen", at::native::BatchNormBackend::Miopen);
 
   py_module.def(
       "_select_batch_norm_backend",
@@ -2741,14 +2733,14 @@ Call this whenever a new thread is created in order to propagate values from
       "DisableTorchFunction",
       (PyObject*)THPModule_DisableTorchFunctionType(),
       /* incref= */ false));
-  py::native_enum<at::impl::TorchFunctionDisabledState>(
-      py_module, "_TorchFunctionState", "enum.IntEnum")
+  py::enum_<at::impl::TorchFunctionDisabledState>(
+      py_module, "_TorchFunctionState")
       .value("ENABLED", at::impl::TorchFunctionDisabledState::ENABLED)
       .value(
           "SUBCLASSES_DISABLED",
           at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED)
-      .value("ALL_DISABLED", at::impl::TorchFunctionDisabledState::ALL_DISABLED)
-      .finalize();
+      .value(
+          "ALL_DISABLED", at::impl::TorchFunctionDisabledState::ALL_DISABLED);
 
   py_module.def(
       "_set_torch_function_state",

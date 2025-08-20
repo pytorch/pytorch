@@ -343,14 +343,6 @@ class ProcessGroup:
         XCCL = ...
         CUSTOM = ...
 
-    UNDEFINED = BackendType.UNDEFINED
-    GLOO = BackendType.GLOO
-    NCCL = BackendType.NCCL
-    UCC = BackendType.UCC
-    MPI = BackendType.MPI
-    XCCL = BackendType.XCCL
-    CUSTOM = BackendType.CUSTOM
-
     def __init__(
         self,
         store: Store,

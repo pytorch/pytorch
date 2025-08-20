@@ -830,6 +830,65 @@ def trace_frame(
     return tracer_output
 
 
+@dataclass
+class DynamoOutput:
+    tracer_output: DynamoTracerOutput
+    bytecode: types.CodeType
+    last_attempt_start_time: Optional[float]
+
+
+def compile_frame(  # type: ignore[return]
+    code: types.CodeType,
+    transform: Callable[[list[Instruction], dict[str, Any]], DynamoTracerOutput],
+    restart_reasons: set[str],
+) -> DynamoOutput:
+    last_attempt_start_time = None
+    for attempt in itertools.count():
+        CompileContext.get().attempt = attempt
+
+        try:
+            with dynamo_timed(f"compile_attempt_{attempt}", log_pt2_compile_event=True):
+                bytecode, tracer_output = transform_code_object(code, transform)
+                assert tracer_output is not None
+                return DynamoOutput(
+                    tracer_output=tracer_output,
+                    bytecode=bytecode,
+                    last_attempt_start_time=last_attempt_start_time,
+                )
+        except exc.RestartAnalysis as e:
+            if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                TensorifyState.clear()
+            log.info(
+                "Restarting analysis due to %s",
+                LazyString(format_traceback_short, e.__traceback__),
+            )
+            # If restart reason is None just log the type of the exception
+            restart_reasons.add(e.restart_reason or str(type(e)))
+            # We now have a new "last attempt", reset the clock
+            last_attempt_start_time = time.time()
+            if attempt > 100:
+                unimplemented_v2(
+                    gb_type="Excessive RestartAnalysis() calls",
+                    context="",
+                    explanation="Dynamo attempted to trace the same frame 100+ times. "
+                    "Giving up on compiling as the compile time tradeoff is likely not "
+                    "worth the performance gain.",
+                    hints=[],
+                )
+        except exc.SkipFrame as e:
+            if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                TensorifyState.clear()
+            log.debug(
+                "Skipping frame %s %s \
+                %s %s",
+                e,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+            )
+            raise
+
+
 def _compile(
     code: CodeType,
     globals: dict[str, object],
@@ -862,38 +921,34 @@ def _compile(
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
-    tracer_output: Optional[DynamoTracerOutput] = None
 
     def transform(
         instructions: list[Instruction], code_options: dict[str, object]
-    ) -> None:
-        nonlocal tracer_output
-
+    ) -> DynamoTracerOutput:
         tf_mode_stack: list[torch.overrides.TorchFunctionMode] = (
             torch.overrides._get_current_function_mode_stack()
         )
-        try:
-            tracer_output = trace_frame(
-                code,
-                globals,
-                locals,
-                builtins,
-                closure,
-                compiler_fn,
-                tf_mode_stack,
-                one_graph,
-                speculation_log,
-                instructions,
-                code_options,
-                export=export,
-                export_constraints=export_constraints,
-                frame_state=frame_state,
-                distributed_state=distributed_state,
-                package=package,
-            )
-        except Exception as e:
-            tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)  # type: ignore[attr-defined]
-            raise
+        tracer_output = trace_frame(
+            code,
+            globals,
+            locals,
+            builtins,
+            closure,
+            compiler_fn,
+            tf_mode_stack,
+            one_graph,
+            speculation_log,
+            instructions,
+            code_options,
+            export=export,
+            export_constraints=export_constraints,
+            frame_state=frame_state,
+            distributed_state=distributed_state,
+            package=package,
+        )
+
+        assert tracer_output is not None
+        return tracer_output
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
@@ -901,7 +956,7 @@ def _compile(
         one_graph: bool,
         hooks: Hooks,
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
-    ) -> ConvertFrameReturn:
+    ) -> tuple[ConvertFrameReturn, Optional[DynamoTracerOutput]]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
@@ -912,7 +967,8 @@ def _compile(
             return _compile_inner(code, one_graph, hooks, transform)
 
         return (
-            ConvertFrameReturn()
+            ConvertFrameReturn(),
+            None,
         )  # dead, but see https://github.com/python/mypy/issues/7577
 
     @maybe_cprofile
@@ -921,7 +977,7 @@ def _compile(
         one_graph: bool,
         hooks: Hooks,
         transform: Callable[[list[Instruction], dict[str, Any]], Any],
-    ) -> ConvertFrameReturn:
+    ) -> tuple[ConvertFrameReturn, DynamoTracerOutput]:
         nonlocal dynamo_time_before_restart
         last_attempt_start_time = start_time = time.time()
 
@@ -942,54 +998,23 @@ def _compile(
         )
 
         out_code = None
-        for attempt in itertools.count():
-            CompileContext.get().attempt = attempt
-            try:
-                with dynamo_timed(
-                    f"compile_attempt_{attempt}", log_pt2_compile_event=True
-                ):
-                    out_code = transform_code_object(code, transform)
-                break
-            except exc.RestartAnalysis as e:
-                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
-                    TensorifyState.clear()
-                log.info(
-                    "Restarting analysis due to %s",
-                    LazyString(format_traceback_short, e.__traceback__),
-                )
-                # If restart reason is None just log the type of the exception
-                restart_reasons.add(e.restart_reason or str(type(e)))
-                # We now have a new "last attempt", reset the clock
-                last_attempt_start_time = time.time()
-                if attempt > 100:
-                    unimplemented_v2(
-                        gb_type="Excessive RestartAnalysis() calls",
-                        context="",
-                        explanation="Dynamo attempted to trace the same frame 100+ times. "
-                        "Giving up on compiling as the compile time tradeoff is likely not "
-                        "worth the performance gain.",
-                        hints=[],
-                    )
-            except exc.SkipFrame as e:
-                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
-                    TensorifyState.clear()
+        try:
+            dynamo_output = compile_frame(code, transform, restart_reasons)
+        except exc.SkipFrame as e:
+            if one_graph or _is_error_on_graph_break(e._torch_dynamo_tracer_output):
                 log.debug(
-                    "Skipping frame %s %s \
-                    %s %s",
-                    e,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
+                    "No graph captured with one_graph=True or error_on_graph_break=True"
                 )
-                if one_graph or _is_error_on_graph_break(tracer_output):
-                    log.debug(
-                        "No graph captured with one_graph=True or error_on_graph_break=True"
-                    )
-                return ConvertFrameReturn()
+            assert e._torch_dynamo_tracer_output is not None
+            return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
         assert distributed_state is None or distributed_state.all_states is not None, (  # type: ignore[has-type]
             "compiler collective wasn't run before compilation completed"
         )
+        out_code = dynamo_output.bytecode
+        tracer_output = dynamo_output.tracer_output
+        if dynamo_output.last_attempt_start_time is not None:
+            last_attempt_start_time = dynamo_output.last_attempt_start_time
 
         assert out_code is not None
         log_bytecode(
@@ -1009,7 +1034,7 @@ def _compile(
         orig_code_map[out_code] = code
         output_codes.add(out_code)
         dynamo_time_before_restart = last_attempt_start_time - start_time
-        assert tracer_output is not None and tracer_output.output_graph is not None
+        assert tracer_output.output_graph is not None
         output = tracer_output.output_graph
 
         # Tests for new code objects.
@@ -1056,7 +1081,7 @@ def _compile(
         # are extra graphs now.
 
         if output.export and output.is_empty_graph():
-            return ConvertFrameReturn()
+            return ConvertFrameReturn(), tracer_output
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
@@ -1093,7 +1118,7 @@ def _compile(
             # they are benign and do not generate any new graphs.
             hooks.guard_export_fn(output.guards)
 
-        return wrap_guarded_code(guarded_code)
+        return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
     code_context = (
@@ -1189,7 +1214,7 @@ def _compile(
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or _is_error_on_graph_break(tracer_output):
+            elif one_graph or _get_error_on_graph_break():
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
@@ -1248,7 +1273,9 @@ def _compile(
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
-            guarded_code = compile_inner(code, one_graph, hooks, transform)
+            guarded_code, tracer_output = compile_inner(
+                code, one_graph, hooks, transform
+            )
 
             # NB: We only put_code_state in success case.  Success case here
             # does include graph breaks; specifically, if a graph break still
@@ -1282,6 +1309,7 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
+            tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
             if tracer_output and tracer_output.is_tracing_resume_prologue:
                 # Do not allow any errors to be suppressed if tracer is currently tracing
                 # through resume function.

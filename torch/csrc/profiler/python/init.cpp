@@ -288,7 +288,7 @@ void initPythonBindings(PyObject* module) {
 
   using namespace torch::profiler::impl;
 
-  py::native_enum<at::RecordScope>(m, "RecordScope", "enum.Enum")
+  py::enum_<at::RecordScope>(m, "RecordScope")
       .value("FUNCTION", at::RecordScope::FUNCTION)
       .value("BACKWARD_FUNCTION", at::RecordScope::BACKWARD_FUNCTION)
       .value("TORCHSCRIPT_FUNCTION", at::RecordScope::TORCHSCRIPT_FUNCTION)
@@ -298,10 +298,9 @@ void initPythonBindings(PyObject* module) {
       .value("LITE_INTERPRETER", at::RecordScope::LITE_INTERPRETER)
       .value("USER_SCOPE", at::RecordScope::USER_SCOPE)
       .value("STATIC_RUNTIME_OP", at::RecordScope::STATIC_RUNTIME_OP)
-      .value("STATIC_RUNTIME_MODEL", at::RecordScope::STATIC_RUNTIME_MODEL)
-      .finalize();
+      .value("STATIC_RUNTIME_MODEL", at::RecordScope::STATIC_RUNTIME_MODEL);
 
-  py::native_enum<ProfilerState>(m, "ProfilerState", "enum.Enum")
+  py::enum_<ProfilerState>(m, "ProfilerState")
       .value("Disabled", ProfilerState::Disabled)
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
@@ -312,26 +311,23 @@ void initPythonBindings(PyObject* module) {
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
           "KINETO_PRIVATEUSE1_FALLBACK",
-          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK)
-      .finalize();
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
 
-  py::native_enum<ActiveProfilerType>(m, "ActiveProfilerType", "enum.Enum")
+  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
       .value("LEGACY", ActiveProfilerType::LEGACY)
       .value("KINETO", ActiveProfilerType::KINETO)
       .value("NVTX", ActiveProfilerType::NVTX)
       .value("ITT", ActiveProfilerType::ITT)
-      .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1)
-      .finalize();
+      .value("PRIVATEUSE1", ActiveProfilerType::PRIVATEUSE1);
 
-  py::native_enum<ActivityType>(m, "ProfilerActivity", "enum.Enum")
+  py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA)
       .value("HPU", ActivityType::HPU)
-      .value("PrivateUse1", ActivityType::PrivateUse1)
-      .finalize();
+      .value("PrivateUse1", ActivityType::PrivateUse1);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
       .def(
@@ -452,15 +448,14 @@ void initPythonBindings(PyObject* module) {
           py::arg("trace_id") = "" // Make trace_id the only optional param
       );
 
-  py::native_enum<EventType>(m, "_EventType", "enum.Enum")
+  py::enum_<EventType>(m, "_EventType")
       .value("TorchOp", EventType::TorchOp)
       .value("Backend", EventType::Backend)
       .value("Vulkan", EventType::Vulkan)
       .value("Allocation", EventType::Allocation)
       .value("PyCall", EventType::PyCall)
       .value("PyCCall", EventType::PyCCall)
-      .value("Kineto", EventType::Kineto)
-      .finalize();
+      .value("Kineto", EventType::Kineto);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
       .def_property_readonly("impl_ptr", &TensorMetadata::impl)

@@ -1588,7 +1588,6 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
-        'intel-openmp==2025.1.1 ;platform_system == "Windows" ',  # for Windows inductor
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
