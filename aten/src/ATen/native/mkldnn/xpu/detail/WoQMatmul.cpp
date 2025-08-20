@@ -379,8 +379,6 @@ sycl::event woq_matmul_w8a16(
   } catch (dnnl::error& e) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "Onednn cannot create primitive due to: ", e.what());
-    // on any other error just re-throw
-    throw;
   }
 
   // Prepare args and execute primitive
