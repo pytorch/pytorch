@@ -502,7 +502,7 @@ class ContinueExecutionCache:
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
-        new_code = transform_code_object(code, update)
+        new_code, _ = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 
