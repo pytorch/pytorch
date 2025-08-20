@@ -1484,7 +1484,7 @@ static at::Tensor _fp8_convolution_onednn_ref(
     y_f32.div_(output_scale);
     if (x1.scalar_type() == at::kFloat8_e4m3fn) {
       // Avoid NaN
-      y_f32.clamp_(-448, 448);
+      y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
       // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
       y_f32 = y_f32.to(at::kHalf);
     }
@@ -1500,7 +1500,7 @@ static at::Tensor _fp8_convolution_onednn_ref(
   auto out_dtype = output_dtype.has_value() ? output_dtype.value() : at::kFloat8_e4m3fn;
   if (out_dtype == at::kFloat8_e4m3fn) {
     // Avoid NaN
-    y_f32.clamp_(-448, 448);
+    y_f32.clamp_(-FP8E4M3_MAX, FP8E4M3_MAX);
     // Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
     return y_f32.to(at::kHalf).to(out_dtype);
   }
@@ -1766,7 +1766,7 @@ static at::Tensor _quantized_convolution_onednn(
     // before converting to fp8
     auto post_ops = op_attr.get_post_ops();
     post_ops.append_eltwise(dnnl::algorithm::eltwise_linear, 1.0/output_scale, 0.0);
-    post_ops.append_eltwise(dnnl::algorithm::eltwise_clip, -448.0, 448.0);
+    post_ops.append_eltwise(dnnl::algorithm::eltwise_clip, -FP8E4M3_MAX, FP8E4M3_MAX);
     op_attr.set_post_ops(post_ops);
     output_scale = 1.0f;
   }
