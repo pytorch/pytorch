@@ -151,16 +151,11 @@ ARG XFORMERS_COMMIT=v0.0.31
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
-    echo 'git clone xformers...' \
-    && git clone https://github.com/facebookresearch/xformers.git --recursive \
-    && cd xformers \
-    && git checkout ${XFORMERS_COMMIT} \
-    && git submodule update --init --recursive \
-    && echo 'finish git clone xformers...' \
-    && rm -rf build \
-    && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
-    && cd .. \
-    && rm -rf xformers
+    echo 'git install xformers...' \
+    uv pip wheel -v --no-build-isolation --no-deps \
+      -w /tmp/xformers-dist \
+      "git+https://github.com/facebookresearch/xformers.git@${XFORMERS_COMMIT}#egg=xformers" \
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system xformers-dist/*.whl --verbose
 
