@@ -2,7 +2,7 @@
 import importlib
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import call, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,6 +11,18 @@ MOD = "cli.lib.core.vllm.lib"
 
 # We import inside tests so the MOD override above applies everywhere
 run_test_plan_import_path = f"{MOD}.run_test_plan"
+
+
+def _get_cmd(c):
+    # Support both kwargs and positional args
+    return c.kwargs.get("cmd", c.args[0] if c.args else None)
+
+
+def _get_check(c):
+    if "check" in c.kwargs:
+        return c.kwargs["check"]
+    # If positional, assume second arg is 'check' when present; default False
+    return c.args[1] if len(c.args) > 1 else False
 
 
 @pytest.fixture
@@ -29,10 +41,6 @@ def patch_module(monkeypatch):
     temp_calls: list[dict] = []
     workdir_calls: list[str] = []
 
-    def fake_temp_environ(env: dict):
-        temp_calls.append(env)
-        return nullcontext()
-
     def fake_working_directory(path: str):
         workdir_calls.append(path)
         return nullcontext()
@@ -47,7 +55,6 @@ def patch_module(monkeypatch):
         module, "pip_install_packages", pip_install_packages, raising=True
     )
     monkeypatch.setattr(module, "run_command", run_command, raising=True)
-    monkeypatch.setattr(module, "temp_environ", fake_temp_environ, raising=True)
     monkeypatch.setattr(
         module, "working_directory", fake_working_directory, raising=True
     )
@@ -71,34 +78,32 @@ def test_success_runs_all_steps_and_uses_env_and_workdir(monkeypatch, patch_modu
         "basic": {
             "title": "Basic suite",
             "package_install": [],
-            "env_var": {"GLOBAL_FLAG": "1"},
             "working_directory": "tests",
             "steps": [
-                {"command": "pytest -q", "env_var": {"A": "x"}},
-                {"command": "pytest -q tests/unit", "env_var": {"B": "y"}},
+                "export GLOBAL_FLAG=1",
+                "export A=x && pytest -q",
+                "export B=y && pytest -q tests/unit",
             ],
         }
     }
 
-    # All steps succeed
-    patch_module.run_command.side_effect = [0, 0]
+    # One exit code per step (export + two pytest)
+    patch_module.run_command.side_effect = [0, 0, 0]
 
     run_test_plan("basic", "cpu", tests_map)
 
-    # Called twice with our commands, check= False
-    assert patch_module.run_command.call_args_list == [
-        call(cmd="pytest -q", check=False),
-        call(cmd="pytest -q tests/unit", check=False),
-    ]
+    calls = patch_module.run_command.call_args_list
+    cmds = [_get_cmd(c) for c in calls]
+    checks = [_get_check(c) for c in calls]
 
-    # Outer env + two step env context entries, in order
-    assert patch_module.temp_calls == [
-        {"GLOBAL_FLAG": "1"},  # outer
-        {"A": "x"},  # step 1
-        {"B": "y"},  # step 2
+    assert cmds == [
+        "export GLOBAL_FLAG=1",
+        "export A=x && pytest -q",
+        "export B=y && pytest -q tests/unit",
     ]
+    assert all(chk is False for chk in checks)
 
-    # Working directory (defaults to "tests" already specified)
+    # No temp_env assertions anymore
     assert patch_module.workdir_calls == ["tests"]
 
 
@@ -109,7 +114,7 @@ def test_installs_packages_when_present(monkeypatch, patch_module):
         "with_pkgs": {
             "title": "Needs deps",
             "package_install": ["timm==1.0.0", "flash-attn"],
-            "steps": [{"command": "pytest -q"}],
+            "steps": ["pytest -q"],
         }
     }
 
@@ -138,9 +143,9 @@ def test_aggregates_failures_and_raises(monkeypatch, patch_module):
         "mix": {
             "title": "Some pass some fail",
             "steps": [
-                {"command": "pytest test_a.py"},  # 0 → pass
-                {"command": "pytest test_b.py"},  # 1 → fail
-                {"command": "pytest test_c.py"},  # 2 → fail
+                "pytest test_a.py",  # 0 → pass
+                "pytest test_b.py",  # 1 → fail
+                "pytest test_c.py",  # 2 → fail
             ],
         }
     }
@@ -166,7 +171,7 @@ def test_custom_working_directory_used(patch_module):
         "customwd": {
             "title": "Custom wd",
             "working_directory": "examples/ci",
-            "steps": [{"command": "pytest -q"}],
+            "steps": ["pytest -q"],
         }
     }
 
