@@ -22,7 +22,6 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
@@ -36,7 +35,7 @@ from .utils import is_safe_constant
 
 
 if TYPE_CHECKING:
-    from .output_graph import OutputGraph
+    from .output_graph import DynamoTracerOutput
 
 
 @dataclass_slots
@@ -1260,7 +1259,7 @@ def debug_bytes(*args: bytes) -> str:
 
 def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
-    dode = transform_code_object(code, lambda x, y: None, safe=True)
+    dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
     assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
 
@@ -1451,20 +1450,13 @@ def get_code_keys() -> list[str]:
     return keys
 
 
-@dataclass
-class DynamoTracerOutput:
-    error_on_graph_break: bool
-    is_tracing_resume_prologue: bool
-    output_graph: Optional["OutputGraph"] = None
-
-
 def transform_code_object(
     code: types.CodeType,
     transformations: Callable[
-        [list[Instruction], dict[str, Any]], Optional[DynamoTracerOutput]
+        [list[Instruction], dict[str, Any]], Optional["DynamoTracerOutput"]
     ],
     safe: bool = False,
-) -> types.CodeType:
+) -> tuple[types.CodeType, Optional["DynamoTracerOutput"]]:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
@@ -1473,8 +1465,9 @@ def transform_code_object(
     # propagate line nums again for added instructions
     propagate_line_nums(instructions)
 
-    transformations(instructions, code_options)
-    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
+    tracer_output = transformations(instructions, code_options)
+    _, bytecode = clean_and_assemble_instructions(instructions, keys, code_options)
+    return bytecode, tracer_output
 
 
 def clean_and_assemble_instructions(
