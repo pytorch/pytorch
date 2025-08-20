@@ -1251,25 +1251,25 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
-        # (3,2):(2,1) -> (6:1)
+        # ((3,2),(2,1)) -> (6,1)
         l = _Layout(((3, 2), (2, 1)))
         l = l.coalesce()
         print(l.sizes_and_strides)
         self.assertEqual(l.sizes_and_strides, ((6, 1),))
 
-        # (2,3,4):(12,4,1) -> (24:1)
+        # ((2,12),(3,4),(4,1)) -> (24,1)
         l = _Layout(((2, 12), (3, 4), (4, 1)))
         l = l.coalesce()
         self.assertEqual(l.sizes_and_strides, ((24, 1),))
 
     def test_coalesce_non_coalescible(self):
-        # (3,2):(4,1) stays as-is (4 ≠ 2*1)
+        # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
         l = _Layout(((3, 4), (2, 1)))
         l = l.coalesce()
         self.assertEqual(l.sizes_and_strides, ((3, 4), (2, 1)))
 
     def test_complement_n_group_layout(self):
-        # complement(4:2, 8) = 2:1; together form (8:1)
+        # complement((4,2), 8) = (2,1); together form (8,1)
         pg_layout = _Layout(((4, 2),))
         outer = pg_layout.complement(world_size=8)
         self.assertEqual(outer.sizes_and_strides, ((2, 1),))
@@ -1295,7 +1295,7 @@ class CuTeLayoutTest(TestCase):
                 [1, 3, 5, 7],
             ],
         )
-        # complement(4:2, 16) = [(2,8), (2,1)]; together form (16:1)
+        # complement((4,2), 16) = ((2,8), (2,1)); together form (16,1)
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(outer.sizes_and_strides, ((2, 8), (2, 1)))
         self.assertEqual(
@@ -1312,7 +1312,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Complement [(2,4), (2,1)] under world_size=16 → complement [(2,8), (2,2)]
+        # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
         pg_layout = _Layout(((2, 4), (2, 1)))
         self.assertEqual(
             pg_layout.layout_to_group_ranks(),
@@ -1335,7 +1335,7 @@ class CuTeLayoutTest(TestCase):
         )
 
     def test_composition(self):
-        # self = [(4,2), (2,1)], B = [(2,1)]  → A o B = [(2,2)]
+        # self = ((4,2), (2,1)), B = (2,1)  → A o B = (2,2)
         orig_l = _Layout(((4, 2), (2, 1)))
         right_l = _Layout(((2, 1),))
         composed_list = orig_l.composition(right_l)
@@ -1351,7 +1351,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # self = [(4,2), (2,1)], B = [(2,2), (2,1)]  → A o B = [[(2,4)], [(2,2)]]
+        # self = ((4,2), (2,1)), B = ((2,2), (2,1))  → A o B = ((2,4), (2,2))
         right_l = _Layout(((2, 2), (2, 1)))
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 2)
