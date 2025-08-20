@@ -539,6 +539,8 @@ class RingFlexAttentionTest(DTensorTestBase):
     def _test_ring_flex_attention(
         self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
     ) -> None:
+        enable_load_balance = True
+
         torch.cuda.manual_seed(10)
         dtype = torch.float32
         bs = B if B > 1 else 8
@@ -612,6 +614,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         from torch.distributed.tensor.experimental._attention import (
             create_cp_block_mask,
         )
+
+        # if load-balance is enabled, reorder input tensor and produce the index tensor
 
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
         cp_block_mask = create_cp_block_mask(
