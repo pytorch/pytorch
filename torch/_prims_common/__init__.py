@@ -1375,9 +1375,7 @@ def check_same_dtype(*args):
             if arg_type is not scalar_type:
                 msg = f"Tensor with corresponding Python type {arg_type} is not the expected type of {scalar_type}!"
                 raise RuntimeError(msg)
-        # Expensive check for a tuple of types; always do this last.
         elif isinstance(arg, Number):
-            # Can't check a non-tensor dtype.
             continue
         else:
             msg = f"Unexpected type when checking for same dtype, {type(arg)}!"
