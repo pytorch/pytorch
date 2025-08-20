@@ -2498,7 +2498,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             args[0],
             args[1:],
             gmod_kwargs,
-            "torch.utils.checkpoint.checkpoint",
+            "torch.utils.checkpoint._checkpoint_inner",
             under_activation_checkpoint=True,
         )
         if context_fn is not None:
