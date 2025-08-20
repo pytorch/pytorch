@@ -1756,7 +1756,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         return a - b
 
-    @unittest.expectedFailure
     @make_test
     def test_set_in_frozenset(x):
         var = set("abc")
