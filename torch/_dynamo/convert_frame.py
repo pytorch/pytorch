@@ -45,7 +45,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, List, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -1272,7 +1272,7 @@ def _compile(
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
-        exception_stack_trace: Optional[List[str]] = None
+        exception_stack_trace: Optional[list[str]] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
