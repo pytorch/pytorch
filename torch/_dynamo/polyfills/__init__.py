@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from . import (
         builtins as builtins,
         functools as functools,
+        heapq as heapq,
         itertools as itertools,
         operator as operator,
         os as os,

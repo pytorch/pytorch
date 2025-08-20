@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "builtins",
     "functools",
+    "heapq",
     "itertools",
     "operator",
     "os",
