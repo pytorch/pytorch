@@ -1630,12 +1630,10 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    if [[ "$BUILD_ENVIRONMENT" == *sm80* ]]; then
-      export TORCH_CUDA_ARCH_LIST="8.0"
-    elif [[ "$BUILD_ENVIRONMENT" == *sm90* ]]; then
-      export TORCH_CUDA_ARCH_LIST="9.0"
-    else
-      export TORCH_CUDA_ARCH_LIST="8.9"
+    if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]] && [[ "${TORCH_CUDA_ARCH_LIST:-}" == "" ]]; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+      export TORCH_CUDA_ARCH_LIST
+      echo "Cuda List: $TORCH_CUDA_ARCH_LIST"
     fi
     (cd .ci/lumen_cli && python -m pip install -e .)
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG"
