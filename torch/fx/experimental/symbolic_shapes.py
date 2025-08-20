@@ -4496,9 +4496,9 @@ class ShapeEnv:
         ex_storage_offset: IntLikeType,
         is_dim_dynamic: Sequence[bool],
         source: Source,
-        hint_overrides: Optional[dict[int, int]],
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        hint_overrides: Optional[dict[int, int]] = None,
     ) -> tuple[
         tuple[IntLikeType, ...],
         tuple[IntLikeType, ...],
