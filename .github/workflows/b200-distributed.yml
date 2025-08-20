@@ -42,8 +42,8 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.dgx.b200.4" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.dgx.b200.4" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.dgx.b200.8" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.dgx.b200.8" },
         ]}
     secrets: inherit
 
