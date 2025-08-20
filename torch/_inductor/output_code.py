@@ -723,7 +723,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[Union[str, Weights]]]
+    filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

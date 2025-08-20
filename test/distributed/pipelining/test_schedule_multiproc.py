@@ -31,7 +31,7 @@ from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
 )
 from torch.testing._internal.common_utils import (
@@ -199,7 +199,7 @@ def zero_gradients(stage_modules):
         stage_module.zero_grad()
 
 
-class ScheduleTest(MultiProcContinousTest):
+class ScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
@@ -802,7 +802,7 @@ class ScheduleTest(MultiProcContinousTest):
 instantiate_parametrized_tests(ScheduleTest)
 
 
-class CustomSchedulesTest(MultiProcContinousTest):
+class CustomSchedulesTest(MultiProcContinuousTest):
     """
     These schedules are from the ScheduleRegistry and require world_size == 2
     The schedules test weird and unconventional schedules for edge cases
