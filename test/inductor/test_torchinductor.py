@@ -10577,6 +10577,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @skipIfRocm # ROCm causes this test to wobble since xnumel is slightly different
     def test_mark_dynamic_with_hint_override(self):
         @torch.compile
         def no_override(x):
