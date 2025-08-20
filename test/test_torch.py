@@ -3448,47 +3448,6 @@ else:
         actual = torch.narrow_copy(inp, 1, 0, 10)
         self.assertEqual(expected, actual)
 
-    # FIXME: move to test indexing
-    # onlyNativeDeviceTypes due to an XLA error:
-    # https://github.com/pytorch/pytorch/issues/53256
-    @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_index_copy_scalars(self, device, dtype):
-        # Create the 8 possible combinations of scalar sizes for target / index / source
-        scalars = ((make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
-                    make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
-                    make_tensor(size_s, dtype=dtype, device=device, low=None, high=None))
-                   for size_t, size_i, size_s in product([(), (1,)], repeat=3))
-        for target, idx, source in scalars:
-            target.index_copy_(0, idx, source)
-            self.assertEqual(target.item(), source.item())
-
-    # FIXME: move to test indexing
-    @onlyCPU
-    def test_errors_index_copy(self, device):
-        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
-        idx_dim = 8
-        tgt_dim = 5
-        batch_dim = 3
-
-        # Too large of an index
-        a = torch.randn(batch_dim, tgt_dim, device=device)
-        idx = torch.full((idx_dim,), tgt_dim, device=device)
-        c = torch.zeros(batch_dim, idx_dim, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (negative indices)
-        idx = torch.full((idx_dim,), -1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
-        # Too small (very negative indices) - they should be unsupported even
-        # when support for negative indices is implemented for index_copy_
-        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
-        with self.assertRaises(IndexError):
-            a.index_copy_(1, idx, c)
-
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
+    all_types_complex_float8_and,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -35,6 +36,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfTorchDynamo,
     TEST_CUDA,
+    TEST_MPS,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -1005,7 +1007,8 @@ class TestIndexing(TestCase):
     @skipIfTorchDynamo(
         "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
     )
-    @serialTest(TEST_CUDA)
+    @serialTest(TEST_CUDA or TEST_MPS)
+    @expectedFailureMPS
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -1925,7 +1928,6 @@ class TestIndexing(TestCase):
             target.index_copy_(0, idx, source)
             self.assertEqual(target.item(), source.item())
 
-    # FIXME: move to test indexing
     @onlyCPU
     def test_errors_index_copy(self, device):
         # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
@@ -1964,6 +1966,163 @@ class TestIndexing(TestCase):
         src = torch.rand(b, device=device)
         index = torch.randint(a[dim], (elems,), device=device)
         return (x, index, src)
+
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
+    def test_index_copy_deterministic(self, device: torch.device) -> None:
+        for dim in range(3):
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
+                dim, device
+            )
+            with DeterministicGuard(True):
+                y0 = torch.index_copy(x, dim, index, src)
+
+            x0 = x.detach().clone()
+            index_list = index.tolist()
+            for i in range(len(index_list)):
+                if dim == 0:
+                    x0[index_list[i], :, :] = src[i, :, :]
+                elif dim == 1:
+                    x0[:, index_list[i], :] = src[:, i, :]
+                elif dim == 2:
+                    x0[:, :, index_list[i]] = src[:, :, i]
+
+            self.assertEqual(x0, y0, atol=0, rtol=0)
+
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
+    def test_index_add_deterministic(self, device: torch.device) -> None:
+        for dim in range(3):
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
+                dim, device
+            )
+            alpha = random.random() + 1
+            # on CPU it should be deterministic regardless of the deterministic mode
+            with DeterministicGuard(True):
+                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
+                for _ in range(3):
+                    y = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y, y0, atol=0, rtol=0)
+
+            with DeterministicGuard(False):
+                for _ in range(3):
+                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
+
+    @onlyNativeDeviceTypes
+    def test_index_put_non_accumulate_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            for i in range(3):
+                m = random.randint(10, 20)
+                elems = random.randint(20000, 30000)
+                values = torch.rand(elems, device=device)
+                indices = torch.randint(m, (elems,), device=device)
+                input = torch.rand(m, device=device)
+                output = input.index_put((indices,), values, accumulate=False)
+
+                input_list = input.tolist()
+                indices_list = indices.tolist()
+                values_list = values.tolist()
+                for i, v in zip(indices_list, values_list):
+                    input_list[i] = v
+
+                self.assertEqual(output, input_list)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @expectedFailureMPS
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex() and not device == "meta":
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
+        # Make sure that the result stays 0-dim while applied to
+        # a 0-dim input
+        x = torch.tensor(1, dtype=dtype, device=device)
+        self.assertEqual(0, x.index_fill(0, index, -1).dim())
+        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
+
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160737
+    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    def test_index_select(self, device, dtype):
+        num_src, num_out = 3, 5
+
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(
+                size_arg,
+                dtype=dtype,
+                device=device,
+                low=None,
+                high=None,
+                noncontiguous=not contig,
+            )
+
+        def ref_index_select(src, dim, idx):
+            # some types not supported on numpy
+            not_np_dtypes = (
+                torch.bfloat16,
+                torch.float8_e5m2,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            )
+            if dtype in not_np_dtypes:
+                src = src.float()
+            out = torch.from_numpy(
+                np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim)
+            )
+            if dtype in not_np_dtypes:
+                out = out.to(device=device, dtype=dtype)
+            return out
+
+        for src_contig, idx_contig in product([True, False], repeat=2):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor(
+                        (num_out,),
+                        dtype=torch.int64,
+                        device=device,
+                        low=0,
+                        high=num_src,
+                        noncontiguous=not idx_contig,
+                    )
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor(
+                (num_out,),
+                dtype=idx_type,
+                device=device,
+                low=0,
+                high=num_src,
+                noncontiguous=False,
+            )
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = (
+            (
+                make_tensor(size_s, dtype=dtype, device=device),
+                torch.zeros(size_i, dtype=torch.int64, device=device),
+            )
+            for size_s, size_i in product([(), (1,)], repeat=2)
+        )
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
