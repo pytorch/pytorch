@@ -108,10 +108,9 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         self.assertIs(hdl_0, hdl_1)
 
     @skipIfRocm
-    def test_mem_pool_context(self) -> None:
+    def test_mempool_tensor_factory(self) -> None:
         """
-        Test the effectiveness of MemPool context.
-        (More tests below to test reuseness etc.)
+        Test the effectiveness of MemPool on tensor factory ops.
         """
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -120,7 +119,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         dtype = torch.float
         numel = 1024
         src_rank = 0
-        dst_rank = 1
 
         allocator = symm_mem.get_mempool_allocator(self.device)
         mempool = torch.cuda.MemPool(allocator)
@@ -132,23 +130,13 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
-
-        if self.rank == src_rank:
-            torch.ops.symm_mem.nvshmem_put(tensor, dst_rank)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
-        else:
-            dist.barrier()
-
-        if self.rank == dst_rank:
-            self.assertEqual(
-                tensor, torch.arange(numel, dtype=dtype, device=self.device)
-            )
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     @skipIfRocm
-    def test_mem_pool_prev_op(self) -> None:
+    def test_mempool_compute_ops(self) -> None:
         """
-        Apply MemPool context to a previous op that creates input to collective.
+        Apply MemPool context to a compute op that creates input to collective.
         """
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -156,18 +144,20 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
         dtype = torch.float
         dim = 1024
-        lin = torch.nn.Linear(dim, dim, device=self.device)
-        x = torch.randn(dim, dtype=dtype, device=self.device)
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x0 = torch.ones(1, dim, dtype=dtype, device=self.device)
 
         allocator = symm_mem.get_mempool_allocator(self.device)
         mempool = torch.cuda.MemPool(allocator)
 
         with torch.cuda.use_mem_pool(mempool):
-            y = lin(x)
-            z = torch.nn.functional.relu(y)
+            x = x0 + self.rank
+            y = torch.mm(x, w)
 
-        # y and z should be both symm tensors
-        torch.ops.symm_mem.nvshmem_all_to_all(y, z, group_name)
+        # y should be a symm tensor
+        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        expected = torch.mm(x0, w)
+        self.assertEqual(y, expected)
 
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
