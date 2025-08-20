@@ -69,14 +69,22 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, param_shape: torch.Size) -> float:
+def _adjust_lr(lr: float, adjust_lr_fn: str, param_shape: torch.Size) -> float:
     """Default learning rate adjustment used by Muon. Method reported in the tech report https://arxiv.org/pdf/2502.16982.
 
     From Moonshot's experiments, with this adjustment Muon can directly reuse the learning rate and
     weight decay tuned for AdamW.
     """
     A, B = param_shape[:2]
-    adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+
+    if adjust_lr_fn == "match_rms_adamw":
+        adjusted_ratio = 0.2 * math.sqrt(max(A, B))
+    elif adjust_lr_fn == "default":
+        adjusted_ratio = math.sqrt(max(1, A / B))
+    else:
+        raise ValueError(
+            f"Adjust learning rate function {adjust_lr_fn} is not supported"
+        )
     return lr * adjusted_ratio
 
 
@@ -91,6 +99,7 @@ class Muon(Optimizer):
         ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
+        adjust_lr_fn: str = "default",
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -109,6 +118,7 @@ class Muon(Optimizer):
             "ns_coefficients": ns_coefficients,
             "eps": eps,
             "ns_steps": ns_steps,
+            "adjust_lr_fn": adjust_lr_fn,
         }
         super().__init__(params, defaults)
 
@@ -183,6 +193,7 @@ class Muon(Optimizer):
                 ns_coefficients=group["ns_coefficients"],
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
+                adjust_lr_fn=group["adjust_lr_fn"],
                 has_complex=has_complex,
             )
         return loss
@@ -217,7 +228,7 @@ Muon.__doc__ = (
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
-            &\rule{110mm}{0.4pt}
+            &\rule{110mm}{0.4pt}s
        \end{aligned}
 
     Here, :math:`\mathrm{NS}^{(a,b,c)}_{k}(\cdot;\varepsilon)` denotes :math:`k` iterations of the
@@ -225,15 +236,19 @@ Muon.__doc__ = (
     with numerical stabilization :math:`\varepsilon`.
 
     The purpose for :math:`\mathrm{AdjustLR}\!\big(\gamma;\ \mathrm{shape}\!\big(\theta_t \big) \big)`
-    is to match updating :math:`RMS` of AdamW. The adjustment is computed as:
-    :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
+    is to make the orthogonalized update have a consistent :math:`RMS` across rectangular matrices.
+
+    Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`,
     where :math:`A` and :math:`B` are dimension of the matrix being optimized.
+    
+    Moonshot's implementation also focuses on matching :math:`RMS` of AdamW. The adjustment is computed as:
+    :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     The method is adopted from `Muon is Scalable for LLM Training`_. Research
     result shows that with this adjustment Muon can directly reuse the learning rate
     and weight decay tuned for AdamW.
 
-    Note that Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`, which
-    is equivalent to the above if all matrices have the same second dimension.
+    We provide two options for the learning rate adjustment: "default" and "match_rms_adamw", allowing users to
+    choose between two implementations.
 
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
     and `Muon is Scalable for LLM Training`_.
@@ -243,16 +258,15 @@ Muon.__doc__ = (
         {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. for other
             parameters such as bias, and embedding, should beoptimized by a standard method such as AdamW.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
-        weight_decay (float, optional): weight decay (L2 penalty). According to Moonshot's scaling law experiments,
-            weight decay addresses the issue that model weight grew too large over time and demonstrate
-            better scalability.  (default: 0.1)
+        weight_decay (float, optional): weight decay (L2 penalty). (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
         nesterov (bool, optional): enables Nesterov momentum. Only applicable
             when momentum is non-zero
-        ns_coefficients (tuple of three floats, optional): coefficients \((a,b,c)\) for the
+        ns_coefficients (tuple of three floats, optional): coefficients \(a,b,c\) for the
             Newton–Schulz orthogonalization polynomial (default: ({DEFAULT_A}, {DEFAULT_B}, {DEFAULT_C}))
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
+        adjust_lr_fn (str, optional): function to adjust learning rate. One of "default" and "match_rms_adamw" (default: "default")
 
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
@@ -275,6 +289,7 @@ def _single_tensor_muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
+    adjust_lr_fn: str,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -294,7 +309,9 @@ def _single_tensor_muon(
             grad = buf
 
         update = _zeropower_via_newtonschulz(grad, ns_coefficients, ns_steps, eps)
-        adjusted_lr = _adjust_lr(lr, param.shape)
+
+        adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
+
         param.mul_(1 - lr * weight_decay)
         param.add_(update, alpha=-adjusted_lr)
 
@@ -313,6 +330,7 @@ def muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
+    adjust_lr_fn: str,
     has_complex: bool,
 ):
     r"""Functional API that performs Muon algorithm computation.
@@ -335,5 +353,6 @@ def muon(
         ns_coefficients=ns_coefficients,
         ns_steps=ns_steps,
         eps=eps,
+        adjust_lr_fn=adjust_lr_fn,
         has_complex=has_complex,
     )
