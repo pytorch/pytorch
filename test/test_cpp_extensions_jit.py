@@ -1227,7 +1227,7 @@ class TestCppExtensionJIT(common.TestCase):
         #include <torch/csrc/inductor/aoti_runtime/utils.h>
         #include <torch/csrc/inductor/aoti_torch/utils.h>
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-        #include <torch/csrc/stable/library.h>
+        #include <torch/csrc/stable/stableivalue_conversions.h>
 
         using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
