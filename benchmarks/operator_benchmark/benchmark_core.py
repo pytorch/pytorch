@@ -252,9 +252,28 @@ class BenchmarkRunner:
                     print(
                         f"Run: {run}, {mode} Execution Time (us) : {reported_run_time_us[run]:.3f}"
                     )
+                    metrics = getattr(test_case.op_bench, "extra_metrics", {})
+                    if metrics:
+                        time_s = reported_run_time_us[run] / 1e6
+                        if "flops" in metrics:
+                            tflops = metrics["flops"] / time_s / 1e12
+                            print(f"Run: {run}, TFLOP/s : {tflops:.3f}")
+                        if "bytes" in metrics:
+                            bandwidth = metrics["bytes"] / time_s / 1e9
+                            print(f"Run: {run}, Bandwidth (GB/s) : {bandwidth:.3f}")
                 print()
             else:
-                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
+                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}")
+                metrics = getattr(test_case.op_bench, "extra_metrics", {})
+                if metrics:
+                    time_s = reported_run_time_us[0] / 1e6
+                    if "flops" in metrics:
+                        tflops = metrics["flops"] / time_s / 1e12
+                        print(f"TFLOP/s : {tflops:.3f}")
+                    if "bytes" in metrics:
+                        bandwidth = metrics["bytes"] / time_s / 1e9
+                        print(f"Bandwidth (GB/s) : {bandwidth:.3f}")
+                print()
 
     def _perf_result_to_dict(self, reported_run_time_us, test_case):
         """This function is the parallel of _print_perf_result, which instead of
@@ -270,6 +289,15 @@ class BenchmarkRunner:
             "latency": round(reported_run_time_us[0], 3),
             "latency unit": "us",
         }
+
+        metrics = getattr(test_case.op_bench, "extra_metrics", {})
+        time_s = reported_run_time_us[0] / 1e6
+        if "flops" in metrics:
+            out["tflops"] = round(metrics["flops"] / time_s / 1e12, 3)
+            out["tflops unit"] = "TFLOP/s"
+        if "bytes" in metrics:
+            out["bandwidth"] = round(metrics["bytes"] / time_s / 1e9, 3)
+            out["bandwidth unit"] = "GB/s"
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
         # input: 'M: 1, N: 1, K: 1, device: cpu'
@@ -566,6 +594,8 @@ class BenchmarkRunner:
             "tag",
             "run_backward",
             "Execution Time",
+            "TFLOP/s",
+            "Bandwidth",
         ]
 
         if self.args.output_json or self.args.output_json_for_dashboard:
@@ -612,6 +642,14 @@ class BenchmarkRunner:
                 self._print_perf_result(reported_time, test_case)
 
                 # output results to csv
+                metrics = getattr(test_case.op_bench, "extra_metrics", {})
+                time_s = reported_time[0] / 1e6
+                tflops = (
+                    metrics["flops"] / time_s / 1e12 if "flops" in metrics else ""
+                )
+                bandwidth = (
+                    metrics["bytes"] / time_s / 1e9 if "bytes" in metrics else ""
+                )
                 self._output_csv(
                     output_csv_filename,
                     headers,
@@ -626,6 +664,8 @@ class BenchmarkRunner:
                         test_case.test_config.tag,
                         test_case.test_config.run_backward,
                         reported_time[0],
+                        tflops,
+                        bandwidth,
                     ],
                 )
                 if self.args.output_json or self.args.output_json_for_dashboard:

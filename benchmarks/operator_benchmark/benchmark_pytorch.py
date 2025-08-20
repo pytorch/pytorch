@@ -117,6 +117,10 @@ class PyTorchOperatorTestCase:
         self.framework = "PyTorch"
         self.time_series = []
         self._jit_forward_graph = None
+        # Optional dictionary storing precomputed metrics such as flops or bytes
+        # Subclasses of TorchBenchmarkBase may populate this during their init
+        # to enable additional reporting in the benchmark runner.
+        self.extra_metrics = getattr(op_bench, "extra_metrics", {})
 
     def _generate_jit_forward_graph(self):
         """generate a graph for the forward function via scripting"""

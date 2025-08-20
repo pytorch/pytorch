@@ -5,6 +5,12 @@ import torch
 
 """Microbenchmarks for torch.mm."""
 
+# Specify additional metrics to compute for this benchmark. Supported values
+# include "flops" and "bytes". Set this to a list like ["flops", "bytes"] to
+# enable TFLOP/s and memory bandwidth reporting. Leave as None to run the
+# benchmark with default latency-only metrics.
+metrics = None
+
 # Benchmark ops performance without broadcast
 ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
@@ -18,7 +24,10 @@ mm_short_configs = op_bench.config_list(
         [64, 64, 64],
         [64, 64, 128],
     ],
-    cross_product_configs={"device": ["cpu"], "dtype": [torch.float]},
+    cross_product_configs={
+        "device": ["cpu"],
+        "dtype": [torch.float],
+    },
     tags=["short"],
 )
 
@@ -39,6 +48,15 @@ class MmOpBenchmark(op_bench.TorchBenchmarkBase):
             "input_two": torch.randn(N, K, device=device).to(dtype=dtype),
         }
         self.op_func = op_func
+        if metrics:
+            self.extra_metrics = {}
+            if "flops" in metrics:
+                self.extra_metrics["flops"] = 2 * M * N * K
+            if "bytes" in metrics:
+                element_size = torch.tensor([], dtype=dtype).element_size()
+                self.extra_metrics["bytes"] = (
+                    (M * N + N * K + M * K) * element_size
+                )
 
     def forward(self, input_one, input_two):
         return self.op_func(input_one, input_two)
