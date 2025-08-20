@@ -1,5 +1,6 @@
 #include <ATen/native/mps/kernels/Pooling.h>
 #include <c10/metal/atomic.h>
+#include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
 
@@ -553,9 +554,10 @@ void avg_pool_2d_input_iter(
       padding,
       count_include_pad);
 
-  T value_sum = 0;
-  auto divisor = has_divisor_override ? divisor_override
-                                      : (bounds0.count) * (bounds1.count);
+  opmath_t<T> value_sum = 0;
+  opmath_t<T> divisor = has_divisor_override
+      ? divisor_override
+      : (bounds0.count) * (bounds1.count);
 
   for (auto i0 = bounds0.start; i0 < bounds0.end; i0++) {
     auto offset0 = input_strides[0] * i0;
@@ -563,10 +565,10 @@ void avg_pool_2d_input_iter(
     for (auto i1 = bounds1.start; i1 < bounds1.end; i1++) {
       auto offset1 = input_strides[1] * i1;
       auto input_value = input[offset0 + offset1];
-      value_sum += input_value;
+      value_sum += static_cast<opmath_t<T>>(input_value);
     }
   }
-  *output = value_sum / static_cast<T>(divisor);
+  *output = static_cast<T>(value_sum / divisor);
 }
 
 template <typename T>

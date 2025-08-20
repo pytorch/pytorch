@@ -933,8 +933,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar(dtype=torch.int32)
-        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32, shape=x.shape)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype, shape=x.shape)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -5467,7 +5467,7 @@ class KernelGroup:
             "win32",
         ]
         if enable_kernel_profile:
-            code.writelines(["#include <ATen/record_function.h>"])
+            code.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
@@ -5490,7 +5490,10 @@ class KernelGroup:
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        (
+                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                            f'record_{prefix + kernel_name}_("{prefix + kernel_name}", nullptr);'
+                        )
                     ]
                 )
             for old, new in self.args.aliases():
