@@ -145,16 +145,26 @@ ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 
+RUN echo ${TORCH_CUDA_ARCH_LIST}
+RUN echo ${MAX_JOBS}
+RUN pip freeze | grep -E 'ninja'
+
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-ARG XFORMERS_COMMIT=v0.0.31
-ENV CCACHE_DIR=/root/.cache/ccache
+ARG XFORMERS_COMMIT=eb0946a363464da96ea40afd1a7f72a907c25497
+NV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
-    echo 'git install xformers...' \
-    uv pip wheel -v --no-build-isolation --no-deps \
-      -w /tmp/xformers-dist \
-      "git+https://github.com/facebookresearch/xformers.git@${XFORMERS_COMMIT}#egg=xformers" \
+    echo 'git clone xformers...' \
+    && git clone https://github.com/facebookresearch/xformers.git --recursive \
+    && cd xformers \
+    && git checkout ${XFORMERS_COMMIT} \
+    && git submodule update --init --recursive \
+    && echo 'finish git clone xformers...' \
+    && rm -rf build \
+    && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
+    && cd .. \
+    && rm -rf xformers
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system xformers-dist/*.whl --verbose
@@ -162,7 +172,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-RUN cat  torch_build_versions.txt
+RUN cat torch_build_versions.txt
 
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
