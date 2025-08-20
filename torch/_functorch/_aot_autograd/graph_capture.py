@@ -18,6 +18,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
+from ..compile_utils import fx_graph_cse
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
@@ -267,6 +268,7 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
     fw_module.graph.eliminate_dead_code()
+    fw_module.graph = fx_graph_cse(fw_module.graph)
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)

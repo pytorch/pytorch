@@ -6,6 +6,8 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
+#include <atomic>
+#include <memory>
 #include <type_traits>
 
 namespace c10 {
@@ -16,6 +18,9 @@ using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
 class OperatorHandle;
 struct OperatorKernel;
 class KernelFunction;
+
+class KernelToken;
+class SafeKernelFunction;
 
 template <typename T>
 using has_symint = std::disjunction<
@@ -90,6 +95,12 @@ class TORCH_API KernelFunction final {
       BoxedKernel::BoxedKernelFunction_withDispatchKeys;
 
   KernelFunction();
+  ~KernelFunction();
+
+  KernelFunction(const KernelFunction&) = default;
+  KernelFunction& operator=(const KernelFunction&) = default;
+
+  KernelFunction(KernelFunction&&) noexcept = default;
 
   // Fast path for dispatch to allow not touching the boxed kernel in
   // the common case where unboxed is available.
@@ -262,6 +273,13 @@ class TORCH_API KernelFunction final {
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
+  // Register a token to be invalidated when this KernelFunction is destroyed
+  void registerToken(std::weak_ptr<KernelToken> token) const;
+
+  // List of tokens that need to be invalidated when this KernelFunction is
+  // destroyed
+  mutable std::vector<std::weak_ptr<KernelToken>> tokens_;
+
  private:
   explicit KernelFunction(
       std::unique_ptr<OperatorKernel> functor,
@@ -276,6 +294,47 @@ class TORCH_API KernelFunction final {
   BoxedKernel boxed_kernel_func_;
   void* unboxed_kernel_func_;
   void* sym_unboxed_kernel_func_;
+};
+
+// Token held by SafeKernelFunction that gets invalidated when KernelFunction is
+// destroyed
+class KernelToken {
+ public:
+  bool isValid() const;
+  void invalidate();
+
+ private:
+  std::atomic<bool> invalid_{false};
+};
+
+class SafeKernelFunction {
+ public:
+  SafeKernelFunction(
+      const KernelFunction* kernel,
+      std::string debug,
+      std::shared_ptr<OperatorHandle> opHandle);
+
+  // Safe callBoxed - checks token validity first
+  void callBoxed(
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Stack* stack) const;
+
+  // Get debug information
+  const std::string& debug() const {
+    return debug_;
+  }
+
+  // Get the OpHandle that lives on this SafeKernelFunction
+  const OperatorHandle& opHandle() const {
+    return *opHandle_;
+  }
+
+ private:
+  KernelFunction kernel_;
+  std::shared_ptr<KernelToken> token_;
+  std::string debug_;
+  std::shared_ptr<OperatorHandle> opHandle_;
 };
 
 } // namespace c10
