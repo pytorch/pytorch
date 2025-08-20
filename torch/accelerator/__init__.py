@@ -19,6 +19,7 @@ from .memory import (
     reset_peak_memory_stats,
 )
 
+
 __all__ = [
     "current_accelerator",
     "current_device_idx",  # deprecated
