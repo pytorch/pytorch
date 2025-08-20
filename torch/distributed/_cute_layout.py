@@ -30,13 +30,13 @@
 #
 #################################################################################################
 
-from functools import reduce
+import math
 from itertools import product
 
 
 class _Layout:
     """
-    Utility class for representing a integer layouts by leveraging CuTe Layout Algebra.
+    Utility class for representing an integer layout by leveraging CuTe Layout Algebra.
     See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
 
     Each layout is represented as a list of (size, stride) pairs. We use it as a way for mechanical bookkeeping
@@ -46,7 +46,7 @@ class _Layout:
     https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137,L257
     """
 
-    def __init__(self, sizes_and_strides: list[tuple[int, int]]):
+    def __init__(self, sizes_and_strides: tuple[tuple[int, int], ...]):
         self.sizes_and_strides = sizes_and_strides
 
     def __repr__(self) -> str:
@@ -66,7 +66,7 @@ class _Layout:
         return [s for _, s in self.sizes_and_strides]
 
     def numel(self) -> int:
-        return reduce(lambda x, y: x * y, self.sizes, 1)
+        return math.prod(self.sizes)
 
     def __eq__(self, other: object) -> bool:
         return (
@@ -75,7 +75,7 @@ class _Layout:
         )
 
     def __hash__(self) -> int:
-        return hash(tuple(self.sizes_and_strides))
+        return hash(self.sizes_and_strides)
 
     @staticmethod
     def ceil_div(n: int, m: int) -> int:
@@ -84,37 +84,39 @@ class _Layout:
     def coalesce(self) -> "_Layout":
         """
         A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
-        Two consecutive modes can be "merged" into one if their
+        Two consecutive dimensions can be "merged" into one if their
         strides are contiguous/multiplicative (i.e., the inner stride * inner size
         equals the next stride), we perform this kind of merge inside coalesce.
 
         Example 1 (simple): (3,2):(2,1)
-        - inner mode has stride=1, size=2
-        - outer mode stride = inner_stride * inner_size = 2
+        - inner dimension: has stride=1, size=2
+        - outer dimension: stride = inner_stride * inner_size = 2
         → coalesced = (6:1)    # acts like a flat 1D array of length 6
 
         Example 2 (non-coalescible): (3,2):(4,1)
-        - inner mode stride=1, size=2 → 2*1 = 2
-        - outer stride=4, mismatch (≠ 2)
+        - inner dimension: stride=1, size=2 → 2*1 = 2
+        - outer dimension: stride=4, mismatch (≠ 2)
         → cannot merge; result stays (3,2):(4,1)
         """
-        res = _Layout([])
+        res_sizes_and_strides: list[tuple[int, int]] = []
         for size, stride in self.sizes_and_strides:
             if size == 1:
                 pass
-            elif res.sizes_and_strides and res.strides[-1] == size * stride:
-                prev_size, _ = res.sizes_and_strides.pop()
-                res.sizes_and_strides.append((size * prev_size, stride))
+            elif (
+                res_sizes_and_strides and res_sizes_and_strides[-1][1] == size * stride
+            ):
+                prev_size, _ = res_sizes_and_strides.pop()
+                res_sizes_and_strides.append((size * prev_size, stride))
             else:
-                res.sizes_and_strides.append((size, stride))
-        return res
+                res_sizes_and_strides.append((size, stride))
+        return _Layout(tuple(res_sizes_and_strides))
 
     def composition(self, layout: "_Layout") -> list["_Layout"]:
         """
-        Perform a by-mode composition between this layout (self) and another layout (layout).
+        Perform a by-dimension composition between this layout (self) and another layout (layout).
 
         Mental model about how to understand the composition logic:
-        - Think of each mode (dimension) in this layout as a "slot" that can itself be
+        - Think of each dimension in this layout as a "slot" that can itself be
           refined by another layout.
         - Composition substitutes one of these slots with the provided `layout`, producing
           a new combined layout with updated sizes and strides.
@@ -139,7 +141,7 @@ class _Layout:
             return [
                 l
                 for ss in layout.sizes_and_strides
-                for l in self.composition(_Layout([ss]))
+                for l in self.composition(_Layout((ss,)))
             ]
 
         res: list[_Layout] = []
@@ -148,7 +150,7 @@ class _Layout:
         for sub_size in layout.sizes:
             sub_stride = numel_so_far
             numel_so_far *= sub_size
-            sub_res = _Layout([])
+            sub_res_sizes_and_strides = []
 
             # when self is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
             # for integral s and d means that we want:
@@ -163,7 +165,7 @@ class _Layout:
                 )
                 new_size = min(max(1, curr_size // sub_stride), sub_size)
                 if new_size != 1:
-                    sub_res.sizes_and_strides.append(
+                    sub_res_sizes_and_strides.append(
                         (new_size, sub_stride * curr_stride)
                     )
                 assert sub_size % new_size == 0, (
@@ -175,11 +177,12 @@ class _Layout:
             # When self is integral and has single-size sublayout, aka, self = a:b, layout = s:d,
             # the result is rather trivial: self o layout = a:b o s:d = s:(b*d).
             # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
-            if sub_size != 1 or len(sub_res.sizes_and_strides) == 0:
-                sub_res.sizes_and_strides.append(
+            if sub_size != 1 or len(sub_res_sizes_and_strides) == 0:
+                sub_res_sizes_and_strides.append(
                     (sub_size, sub_stride * self.strides[-1])
                 )
 
+            sub_res = _Layout(tuple(sub_res_sizes_and_strides))
             res.append(sub_res)
         return res
 
@@ -204,7 +207,7 @@ class _Layout:
         In distributed terms, complement() is often used to derive the "other"
         rank grouping when splitting processes into 2D meshes.
         """
-        res = _Layout([])
+        res_sizes_and_strides = []
         current_idx = 1
         for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
             if stride == 0 or size == 1:
@@ -213,17 +216,17 @@ class _Layout:
                 f"current_idx {current_idx} larger than numel so far {size * stride}."
             )
 
-            res.sizes_and_strides.append((stride // current_idx, current_idx))
+            res_sizes_and_strides.append((stride // current_idx, current_idx))
             current_idx = size * stride
 
-        res.sizes_and_strides.append(
+        res_sizes_and_strides.append(
             (self.ceil_div(world_size, current_idx), current_idx)
         )
         # This is different from original pycute implementation, because in pytorch we usually
         # have the right-most dimension as the innermost dimension (smallest stride).
-        res.sizes_and_strides.reverse()
+        res_sizes_and_strides.reverse()
 
-        return res.coalesce()
+        return _Layout(tuple(res_sizes_and_strides)).coalesce()
 
     def layout_to_group_ranks(self) -> list[int]:
         """
@@ -310,4 +313,4 @@ def init_layouts_from_mesh(
     assert len(mesh_size) == len(mesh_stride), (
         "mesh_size and mesh_stride must have the same length"
     )
-    return [_Layout([(size, stride)]) for size, stride in zip(mesh_size, mesh_stride)]
+    return [_Layout(((size, stride),)) for size, stride in zip(mesh_size, mesh_stride)]
