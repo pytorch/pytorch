@@ -1080,7 +1080,31 @@ def _compile(
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
-        metrics_context.update_outer({"recompile_reason": recompile_reason})
+        # Recheck for recompilation, for when inline_inbuilt_nn_modules is set to False
+        inline_inbuilt_nn_modules_candidate = False
+        if not config.inline_inbuilt_nn_modules and frame:
+            inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, skip_logging=True
+            )
+            inbuilt_nn_recompile_reason = (
+                None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
+            )
+
+            if (
+                inbuilt_nn_recompile_reason is not None
+                and "[inline-inbuilt-nn-modules-candidate]"
+                in inbuilt_nn_recompile_reason
+            ):
+                inline_inbuilt_nn_modules_candidate = True
+
+        # Set if the recompile is a candidate for inline_inbuilt_nn_modules
+        # regardless of whether inline_inbuilt_nn_modules is set or not
+        metrics_context.update_outer(
+            {
+                "recompile_reason": recompile_reason,
+                "inline_inbuilt_nn_modules_candidate": inline_inbuilt_nn_modules_candidate,
+            }
+        )
 
         recompile_user_contexts = get_hook_for_recompile_user_context()
         if recompile_user_contexts:
