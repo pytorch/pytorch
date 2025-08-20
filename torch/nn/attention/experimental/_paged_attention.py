@@ -55,6 +55,8 @@ class PagedAttention:
         # capacity: batch_idx -> allocated sequence length
         self.capacity = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
 
+        self.seq_lens: torch.Tensor = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
+
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
 
@@ -72,9 +74,16 @@ class PagedAttention:
             batch_idx (Tensor): batch index to be reserved; shape :math:`(1)`.
             seq_len (Tensor): minimum capacity for the given batch; shape :math:`(1)`.
         """
+        print("before. self.seq_lens:", self.seq_lens, ", self.capacity[batch_idx]:", self.capacity[batch_idx])
+
+        
+        self.seq_lens[batch_idx] = max(seq_len, self.seq_lens[batch_idx])
 
         if seq_len <= self.capacity[batch_idx]:
             return
+        self.seq_lens[batch_idx] = seq_len
+        print("after. self.seq_lens:", self.seq_lens)
+
 
         num_pages_to_allocate = _cdiv(
             seq_len - self.capacity[batch_idx], self.page_size
@@ -297,8 +306,14 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+
+            live_block = logical_block_idx >= 0
+            within_upper_bound = logical_kv_idx < self.seq_lens[b]
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
             return torch.where(
-                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
+                is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False
             )
 
         return new_mask_mod
@@ -327,8 +342,14 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+
+            live_block = logical_block_idx >= 0
+            within_upper_bound = logical_kv_idx < self.seq_lens[b]
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
             return torch.where(
-                logical_block_idx >= 0,
+                is_valid,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
                 float("-inf"),
             )

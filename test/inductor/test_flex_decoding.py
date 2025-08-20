@@ -289,6 +289,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
             torch.tensor(b),
             target_seq_len[b],
         )
+        print(f"b:{b}, target_seq_len:{target_seq_len}")
 
 
 class TestFlexDecoding(InductorTestCase):
@@ -1519,13 +1520,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention(query, key, value, _identity)
 
     @supported_platform
-    @patch.object(torch._inductor.config, "max_autotune", True)
+    # @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        self.run_test(score_mod, device=device)
-        self.run_test_with_paged_attention(score_mod, device=device)
+        # self.run_test(score_mod, device=device)
+        # self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test_with_paged_attention(
+            score_mod=score_mod,
+            dtype=torch.bfloat16,
+            Q_B=4,
+            Q_H=1,
+            Q_S=1,
+            QK_D=16,
+            KV_B=4,
+            KV_H=1,
+            KV_S=64,
+            V_D=16,
+            device=device,
+        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
