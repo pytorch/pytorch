@@ -2543,10 +2543,16 @@ def _reduction_configs(
                     num_warps = 4
             else:
                 # Maximize occupancy with only 1 dynamic input, otherwise enlarge
-                # r block similar to heavier reductions above
-                outer_r_block = (
-                    1 if num_dynamic == 1 else max(min((rnumel // 64), 64), 8)
-                )
+                # r block similar to heavier reductions above, balancing register
+                # pressure
+                if num_dynamic == 1:
+                    outer_r_block = (
+                        1
+                        if load_factor >= 3
+                        else min(next_power_of_2(max(rnumel, 128) // 128), 8)
+                    )
+                else:
+                    outer_r_block = max(min((rnumel // 64), 64), 8)
                 x_block = 64
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
