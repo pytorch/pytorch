@@ -65,10 +65,7 @@ class TypedExpr:
 
     def __post_init__(self):
         if _is_constant(self.expr):
-            expr = self.expr
-            if isinstance(expr, sympy.Expr):
-                expr = expr.expand(identity=True)
-            self.expr = dtype_to_type(self.dtype)(expr)
+            self.expr = dtype_to_type(self.dtype)(self.expr)
 
 
 class SymPyOps:

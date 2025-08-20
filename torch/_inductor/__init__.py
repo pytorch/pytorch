@@ -275,7 +275,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
+) -> Union[str, list[Union[str, Weights]]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 

@@ -1879,12 +1879,10 @@ def compute_required_storage_length(
     40
 
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     # Short-circuits if the shape has no elements
-    # Note: we are unsafely assuming tensor is not empty here, without
-    # runtime assertions.
-    if guard_or_false(reduce(operator.mul, shape, 1) == 0):
+    if guard_size_oblivious(reduce(operator.mul, shape, 1) == 0):
         return 0
 
     max_offset = sum((x - 1) * y for x, y in zip(shape, strides))

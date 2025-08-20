@@ -5467,7 +5467,7 @@ class KernelGroup:
             "win32",
         ]
         if enable_kernel_profile:
-            code.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
+            code.writelines(["#include <ATen/record_function.h>"])
         code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
@@ -5490,10 +5490,7 @@ class KernelGroup:
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        (
-                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
-                            f'record_{prefix + kernel_name}_("{prefix + kernel_name}", nullptr);'
-                        )
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
                     ]
                 )
             for old, new in self.args.aliases():

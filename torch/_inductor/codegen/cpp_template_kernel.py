@@ -190,11 +190,7 @@ class CppTemplateKernel(CppKernel):
         if config.cpp.enable_kernel_profile:
             graph_id = V.graph.graph_id
             prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
-            handle_str = (
-                "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
-                f'record_{prefix}{self.kernel_name}_("{prefix}{self.kernel_name}", nullptr);'
-            )
-            return handle_str
+            return f'RECORD_FUNCTION("{prefix}{self.kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
         else:
             return ""
 

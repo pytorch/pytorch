@@ -6,8 +6,6 @@ from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
 
-from torch._utils_internal import signpost_event
-
 from ._compatibility import compatibility
 from .graph import Graph
 from .node import Node
@@ -329,13 +327,7 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        signpost_event(
-            "inductor",
-            "provenance_tracking_error",
-            {
-                "function": "get_graph_provenance_json",
-                "error_msg": str(e),
-                "stack_trace": traceback.format_exc(),
-            },
-        )
+        # TODO: log the error to scuba table for better signal
+        log.error("Unexpected error in get_graph_provenance_json: %s", e)
+        log.error(traceback.format_exc())
         return {}

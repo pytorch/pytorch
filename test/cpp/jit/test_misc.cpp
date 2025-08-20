@@ -2709,7 +2709,6 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
 }
 
 TEST(RecordDebugHandles, Basic) {
-  GTEST_SKIP() << "Test is flaky and sometimes hangs on CI. ";
   // Enable the profiler in this thread
   const std::set<torch::autograd::profiler::ActivityType> activities(
       {torch::autograd::profiler::ActivityType::CPU});
