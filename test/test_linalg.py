@@ -7273,26 +7273,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @dtypes(torch.half)
     @onlyCUDA
     def test_addmm_baddbmm_overflow(self, device, dtype):
-        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        inp = torch.zeros(128, 128, dtype=torch.half, device=device)
-        mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
-        mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
-        out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
-        # just check for no overflow on ROCM
-        if TEST_WITH_ROCM:
-            self.assertFalse(out.isinf().any())
-        else:
-            self.assertTrue((out == 10000.).all())
-        inp = torch.zeros(3, 128, 128, dtype=torch.half, device=device)
-        mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
-        mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
-        out = torch.baddbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
-        if TEST_WITH_ROCM:
-            self.assertFalse(out.isinf().any())
-        else:
-            self.assertTrue((out == 10000.).all())
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
+        with torch.backends.cuda.flags(allow_fp16_reduced_precision_reduction=False):
+            inp = torch.zeros(128, 128, dtype=torch.half, device=device)
+            mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
+            mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
+            out = torch.addmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+            # just check for no overflow on ROCM
+            if TEST_WITH_ROCM:
+                self.assertFalse(out.isinf().any())
+            else:
+                self.assertTrue((out == 10000.).all())
+            inp = torch.zeros(3, 128, 128, dtype=torch.half, device=device)
+            mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
+            mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
+            out = torch.baddbmm(inp, mat1, mat2, alpha=0.001, beta=0.)
+            if TEST_WITH_ROCM:
+                self.assertFalse(out.isinf().any())
+            else:
+                self.assertTrue((out == 10000.).all())
 
     @dtypes(torch.float)
     def test_baddbmm_nan_input_with_zero_beta(self, device, dtype):

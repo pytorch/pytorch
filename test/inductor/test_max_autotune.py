@@ -1054,99 +1054,87 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
-        fp16_red_setting = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        )
-        bf16_red_setting = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        )
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+        with torch.backends.cuda.matmul.flags(
+            allow_fp16_reduced_precision_reduction=False,
+            allow_bf16_reduced_precision_reduction=False,
+        ):
+            M, N, K = sizes
 
-        M, N, K = sizes
+            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
 
-        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            possible_splits = range(2, min(K // M, K // N) + 1)
 
-        possible_splits = range(2, min(K // M, K // N) + 1)
+            divisors = {split for split in possible_splits if K % split == 0}
 
-        divisors = {split for split in possible_splits if K % split == 0}
+            def check_divisors(code):
+                for kernel in code:
+                    if "decompose_k" in kernel:
+                        divisor_found = False
+                        for divisor in divisors:
+                            if f"{divisor}_split" in kernel:
+                                divisor_found = True
+                                break
 
-        def check_divisors(code):
-            for kernel in code:
-                if "decompose_k" in kernel:
-                    divisor_found = False
-                    for divisor in divisors:
-                        if f"{divisor}_split" in kernel:
-                            divisor_found = True
-                            break
+                        self.assertTrue(
+                            divisor_found,
+                            f"Could not find a split in {divisors} in {kernel}",
+                        )
 
-                    self.assertTrue(
-                        divisor_found,
-                        f"Could not find a split in {divisors} in {kernel}",
-                    )
+            compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
+            # We assume with the large k dim relative to m, n, decompose_k will be most performant
+            out, code = run_and_get_code(compiled_func, a, b)
 
-        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
-        # We assume with the large k dim relative to m, n, decompose_k will be most performant
-        out, code = run_and_get_code(compiled_func, a, b)
+            if dynamic or torch.version.hip:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
 
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+            # Test adding epilogue also equivalent to eager
+            compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, a, b)
+            if dynamic or torch.version.hip:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(
+                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                )
 
-        # Test adding epilogue also equivalent to eager
-        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
-        out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+            # Test adding reinterpret view before subgraph
+            a = a.transpose(0, 1)
+            compiled_func = torch.compile(
+                lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
             )
+            out, code = run_and_get_code(compiled_func, a, b)
 
-        # Test adding reinterpret view before subgraph
-        a = a.transpose(0, 1)
-        compiled_func = torch.compile(
-            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
-        )
-        out, code = run_and_get_code(compiled_func, a, b)
-
-        # DecomposeK is not enabled for AMD yet
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b),
-                (a.transpose(0, 1) @ b).relu(),
-                atol=1e-2,
-                rtol=1e-2,
-            )
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            fp16_red_setting
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            bf16_red_setting
-        )
+            # DecomposeK is not enabled for AMD yet
+            if dynamic or torch.version.hip:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(
+                    compiled_func(a, b),
+                    (a.transpose(0, 1) @ b).relu(),
+                    atol=1e-2,
+                    rtol=1e-2,
+                )
 
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")

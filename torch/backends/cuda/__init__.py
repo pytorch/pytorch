@@ -126,31 +126,81 @@ class cuFFTPlanCacheManager:
 
 
 class cuBLASModule:
-    def __getattr__(self, name):
-        if name == "allow_tf32":
-            return torch._C._get_cublas_allow_tf32()
-        elif name == "allow_fp16_reduced_precision_reduction":
-            return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
-        elif name == "allow_bf16_reduced_precision_reduction":
-            return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
-        elif name == "allow_fp16_accumulation":
-            return torch._C._get_cublas_allow_fp16_accumulation()
-        elif name == "fp32_precision":
-            return torch._C._get_fp32_precision_getter("cuda", "matmul")
-        raise AttributeError("Unknown attribute " + name)
+    @property
+    def allow_tf32(self):
+        return torch._C._get_cublas_allow_tf32()
 
-    def __setattr__(self, name, value):
-        if name == "allow_tf32":
-            return torch._C._set_cublas_allow_tf32(value)
-        elif name == "allow_fp16_reduced_precision_reduction":
-            return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
-        elif name == "allow_bf16_reduced_precision_reduction":
-            return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
-        elif name == "allow_fp16_accumulation":
-            return torch._C._set_cublas_allow_fp16_accumulation(value)
-        elif name == "fp32_precision":
-            return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
-        raise AttributeError("Unknown attribute " + name)
+    @allow_tf32.setter
+    def allow_tf32(self, value):
+        torch._C._set_cublas_allow_tf32(value)
+
+    @property
+    def allow_fp16_reduced_precision_reduction(self) -> bool:
+        return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
+
+    @allow_fp16_reduced_precision_reduction.setter
+    def allow_fp16_reduced_precision_reduction(self, value):
+        torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
+
+    @property
+    def allow_bf16_reduced_precision_reduction(self) -> bool:
+        return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
+
+    @allow_bf16_reduced_precision_reduction.setter
+    def allow_bf16_reduced_precision_reduction(self, value):
+        torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
+
+    @property
+    def allow_fp16_accumulation(self) -> bool:
+        return torch._C._get_cublas_allow_fp16_accumulation()
+
+    @allow_fp16_accumulation.setter
+    def allow_fp16_accumulation(self, value):
+        torch._C._set_cublas_allow_fp16_accumulation(value)
+
+    @property
+    def fp32_precision(self) -> str:
+        return torch._C._get_fp32_precision_getter("cuda", "matmul")
+
+    @fp32_precision.setter
+    def fp32_precision(self, value):
+        torch._C._set_fp32_precision_setter("cuda", "matmul", value)
+
+    @contextlib.contextmanager
+    def flags(
+        self,
+        *,
+        allow_fp16_reduced_precision_reduction: bool | None = None,
+        allow_bf16_reduced_precision_reduction: bool | None = None,
+        allow_fp16_accumulation: bool | None = None,
+    ):
+        original = (
+            self.allow_fp16_reduced_precision_reduction,
+            self.allow_bf16_reduced_precision_reduction,
+            self.allow_fp16_accumulation,
+        )
+
+        if allow_fp16_reduced_precision_reduction is not None:
+            self.allow_fp16_reduced_precision_reduction = (
+                allow_fp16_reduced_precision_reduction
+            )
+
+        if allow_bf16_reduced_precision_reduction is not None:
+            self.allow_bf16_reduced_precision_reduction = (
+                allow_bf16_reduced_precision_reduction
+            )
+
+        if allow_fp16_accumulation is not None:
+            self.allow_fp16_accumulation = allow_fp16_accumulation
+
+        try:
+            yield
+        finally:
+            (
+                self.allow_fp16_reduced_precision_reduction,
+                self.allow_bf16_reduced_precision_reduction,
+                self.allow_fp16_accumulation,
+            ) = original
 
 
 _LinalgBackends = {
