@@ -2548,7 +2548,7 @@ def _reduction_configs(
                 if num_dynamic == 1:
                     outer_r_block = (
                         1
-                        if load_factor >= 3 and rnumel < 2048
+                        if load_factor >= 3
                         else min(next_power_of_2(max(rnumel, 128) // 128), 8)
                     )
                 else:
