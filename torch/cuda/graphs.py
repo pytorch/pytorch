@@ -229,6 +229,7 @@ class graph:
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
+        self.enable_gc_on_exit = False
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -241,6 +242,12 @@ class graph:
             # multiple cudagraph captures in a row. In theory it will only help
             # when a dead python cycle is holding onto CUDA memory.
             gc.collect()
+        elif gc.isenabled():
+            # Disable automatic garbage collection to avoid a
+            # situation where we destroy a CUDA Graph while capturing
+            # another CUDA Graph, which results in a CUDA error.
+            gc.disable()
+            self.enable_gc_on_exit = True
 
         torch.cuda.empty_cache()
 
@@ -257,6 +264,9 @@ class graph:
     def __exit__(self, *args: object) -> None:
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(*args)
+        if self.enable_gc_on_exit:
+            gc.enable()
+            self.enable_gc_on_exit = False
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
