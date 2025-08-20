@@ -9,7 +9,7 @@ structures across different parts of the network.
 
 import logging
 import operator
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Generator, Iterable
 from typing import Optional
 
@@ -80,8 +80,6 @@ when they are created in output_graph.
         (
             subgraph,
             external_node_usages,
-            node_usage_to_tuple_elems,
-            ind_to_tuple_spec,
         ) = _create_subgraph(region, inds_with_external_users)
 
         # Ignore regions with no args for now, could they possibly be evaluated at compile time?
@@ -102,8 +100,6 @@ when they are created in output_graph.
                 region,
                 get_subgraph_node,
                 external_node_usages,
-                node_usage_to_tuple_elems,
-                ind_to_tuple_spec,
                 inds_with_external_users,
                 subgraph_name,
                 node_to_additional_deps,
@@ -126,18 +122,14 @@ def _replace_region_with_subgraph(
     region: Region,
     get_subgraph_node: Node,
     external_node_usages: Iterable[OrderedSet[UsageIndex]],
-    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]],
-    ind_to_tuple_spec: dict[int, dict[tuple[int, ...], int]],
     inds_with_external_users: list[int],
     subgraph_name: str,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
     node_to_mutated_arg_positions: dict[Node, OrderedSet[int]],
 ) -> None:
     sub_args = []
-    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
     for usages in external_node_usages:
-        usage = next(iter(usages))
-        node_ind, usage_ind = usage
+        node_ind, usage_ind = next(iter(usages))
         node = region[node_ind]
         flattened_args_kwargs = _get_flat_args(node, {})
         for user_ind, node_usage_ind in usages:
@@ -148,19 +140,12 @@ def _replace_region_with_subgraph(
                         "NYI: Failed to substitute region %s due to mutation", region
                     )
                     return
-        if usage in node_usage_to_tuple_elems:
-            tuple_elems = [region[i] for i in node_usage_to_tuple_elems[usage]]
-            flattened_getitem_nodes.update(tuple_elems)
-            sub_args.extend(tuple_elems)
-        else:
-            sub_args.append(flattened_args_kwargs[usage_ind])
+        sub_args.append(flattened_args_kwargs[usage_ind])
 
     # Input/Output aliasing not supported in HOPs today
     # Note: we should use the nodes in the original graph (the region here)
     # because we use the original traced example values for this check
-    if _has_aliasing(
-        region, sub_args, inds_with_external_users, flattened_getitem_nodes
-    ):
+    if _has_aliasing(region, sub_args, inds_with_external_users):
         return
 
     invoke_args = (get_subgraph_node, subgraph_name, *sub_args)
@@ -171,35 +156,16 @@ def _replace_region_with_subgraph(
         invoke_args,  # type: ignore[arg-type]
         {},
     )
-
-    ind = 0
-    flattened_output_nodes: OrderedSet[Node] = OrderedSet()
-    for external_user_ind in inds_with_external_users:
+    for ind, external_user_ind in enumerate(inds_with_external_users):
         node = region[external_user_ind]
-        if _is_tuple_node(node):
-            tuple_spec = ind_to_tuple_spec[external_user_ind]
-            flattened_output_nodes.update(
-                _replace_tuple_outputs(
-                    node, ind, tuple_spec, invoke_subgraph_node, graph
-                )
-            )
-            ind += len(tuple_spec)
-        else:
-            subgraph_output = graph.create_node(
-                "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
-            )
-            node.replace_all_uses_with(subgraph_output, propagate_meta=True)
-            ind += 1
+        subgraph_output = graph.create_node(
+            "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
+        )
+        node.replace_all_uses_with(subgraph_output, propagate_meta=True)
 
     # Erase in reverse topological order
     for node in reversed(region):
-        if node in flattened_getitem_nodes:
-            # Don't erase these, since they will still be used
-            continue
-
-        if node not in flattened_output_nodes:
-            graph.erase_node(node)
-
+        graph.erase_node(node)
         # Remove any nodes with additional deps
         # This is safe; we've guaranteed that there is
         # no input mutation, so all additional deps
@@ -257,40 +223,14 @@ def _get_inds_with_external_users(region: Region, inds_unique: set[int]) -> None
 def _create_subgraph(
     region: Region,
     inds_with_external_users: list[int],
-) -> tuple[
-    torch.fx.Graph,
-    list[OrderedSet[UsageIndex]],
-    dict[UsageIndex, OrderedSet[int]],
-    dict[int, dict[tuple[int, ...], int]],
-]:
+) -> tuple[torch.fx.Graph, list[OrderedSet[UsageIndex]]]:
     subgraph: torch.fx.Graph = torch.fx.Graph()
     external_input_to_usages = _get_external_inputs(region)
     external_node_usages = list[OrderedSet[UsageIndex]]()
     region_to_subgraph_node = {}
-    flattened_getitem_nodes: OrderedSet[Node] = OrderedSet()
-    node_usage_to_tuple_elems: dict[UsageIndex, OrderedSet[int]] = {}
-
     for node, usage_indices in external_input_to_usages.items():
-        # We don't handle tuples as inputs today
-        if _is_tuple_node(node):
-            # If a node is a tuple we will possibly create multiple placeholders for them
-            # and track which nodes we won't copy into the subgraph because they are flattened away
-            # Later, when replacing each region with this subgraph, we will create a getitem node
-            # externally which will perform the flattening on the outer nodes.
-            flattened_node_indices = _get_flattened_node_indices(node, region)
-            for ind in flattened_node_indices:
-                placeholder = subgraph.placeholder(
-                    f"supgraph_input_{node.name}_flattened_{ind}"
-                )
-                region_to_subgraph_node[region[ind]] = placeholder
-                flattened_getitem_nodes.add(region[ind])
-            node_usage_to_tuple_elems[next(iter(usage_indices))] = (
-                flattened_node_indices
-            )
-        else:
-            placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
-            region_to_subgraph_node[node] = placeholder
-
+        placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
+        region_to_subgraph_node[node] = placeholder
         external_node_usages.append(usage_indices)
 
     def map_arg(node: Node) -> Node:
@@ -299,29 +239,15 @@ def _create_subgraph(
         else:
             return node
 
-    def copy_to_subgraph(node: Node) -> Node:
+    for node in region:
         subgraph_node = subgraph.node_copy(node, lambda old: map_arg(old))
         region_to_subgraph_node[node] = subgraph_node
-        return subgraph_node
 
-    output_list = []
-    ind_to_tuple_spec = {}
-    for ind, node in enumerate(region):
-        if node not in flattened_getitem_nodes:
-            subgraph_node = copy_to_subgraph(node)
-            if ind in inds_with_external_users:
-                # flatten tuple outputs by generating a getitem node tree
-                if _is_tuple_node(node):
-                    getitem_nodes, ind_to_tuple_spec[ind] = _create_getitem_nodes(
-                        node, subgraph_node, subgraph
-                    )
-                    output_list.extend(getitem_nodes)
-                else:
-                    output_list.append(subgraph_node)
+    node_list = [n for n in subgraph.nodes if n.op not in ("placeholder", "output")]
+    out_tup = tuple(node_list[ind] for ind in inds_with_external_users)
+    subgraph.output(out_tup)
 
-    subgraph.output(tuple(output_list))
-
-    return subgraph, external_node_usages, node_usage_to_tuple_elems, ind_to_tuple_spec
+    return subgraph, external_node_usages
 
 
 def _stable_topological_sort(
@@ -446,15 +372,11 @@ def _add_mutation_dependencies(
 
 
 def _has_aliasing(
-    region: Region,
-    inputs: list[Node],
-    inds_with_external_users: list[int],
-    flattened_getitem_nodes: OrderedSet[Node],
+    region: Region, inputs: list[Node], inds_with_external_users: list[int]
 ) -> bool:
     input_storages: dict[StorageWeakRef, Node] = dict()
+
     for node in inputs:
-        if node in flattened_getitem_nodes:
-            continue
         example_value = node.meta["example_value"]
         if isinstance(example_value, torch.Tensor):
             storage = StorageWeakRef(example_value._typed_storage())
@@ -468,11 +390,10 @@ def _has_aliasing(
                 )
                 return True
             input_storages[storage] = node
+
     output_storages: dict[StorageWeakRef, Node] = dict()
     for i in inds_with_external_users:
         out_node = region[i]
-        if out_node in flattened_getitem_nodes:
-            continue
         if out_node:
             example_value = out_node.meta["example_value"]
             assert not isinstance(example_value, list)
@@ -488,6 +409,7 @@ def _has_aliasing(
                     )
                     return True
                 output_storages[storage] = out_node
+
     intersected_storages = input_storages.keys() & output_storages.keys()
     if len(intersected_storages) > 0:
         # input-output aliasing
@@ -501,91 +423,5 @@ def _has_aliasing(
             aliased,
         )
         return True
+
     return False
-
-
-def _is_tuple_node(node: Node) -> bool:
-    return isinstance(node.meta["example_value"], tuple)
-
-
-def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
-    for user in node.users:
-        if user.target == operator.getitem and isinstance(user.args[1], int):
-            yield user
-
-
-def _get_flattened_node_indices(node: Node, region: Region) -> OrderedSet[int]:
-    """Returns an ordered set of indices, each representing a node in the region which will be flattened"""
-    flattened_node_to_ind = {n: i for i, n in enumerate(region)}
-    node_indices: OrderedSet[int] = OrderedSet()
-    queue = deque(_get_children_getitems(node))
-    while queue:
-        cur_node = queue.popleft()
-        if any(user in region for user in cur_node.users):
-            node_indices.add(flattened_node_to_ind[cur_node])
-        for child in _get_children_getitems(cur_node):
-            queue.append(child)
-    return node_indices
-
-
-def _create_getitem_nodes(
-    node: Node, subgraph_tuple_node: Node, subgraph: torch.fx.Graph
-) -> tuple[list[Node], dict[tuple[int, ...], int]]:
-    tup = node.meta["example_value"]
-    assert isinstance(tup, tuple), "_get_getitem_children expects tuple"
-
-    getitem_nodes: list[Node] = []
-    queue = deque([(e, (i,), subgraph_tuple_node) for i, e in enumerate(tup)])
-    path_to_output_index = {}
-
-    while queue:
-        cur_elem, path, parent = queue.popleft()
-
-        with subgraph.inserting_after(parent):
-            new_getitem_node = subgraph.create_node(
-                "call_function", operator.getitem, (parent, path[-1]), {}
-            )
-        new_getitem_node.meta["example_value"] = cur_elem
-
-        path_to_output_index[path] = len(getitem_nodes)
-        getitem_nodes.append(new_getitem_node)
-
-        if isinstance(cur_elem, tuple):
-            queue.extend(
-                [(e, path + (i,), new_getitem_node) for i, e in enumerate(cur_elem)]  # type: ignore[arg-type,misc]
-            )
-
-    return getitem_nodes, path_to_output_index  # type: ignore[return-value]
-
-
-def _replace_tuple_outputs(
-    node: Node,
-    output_index: int,
-    tuple_spec: dict[tuple[int, ...], int],
-    invoke_subgraph_node: Node,
-    graph: torch.fx.Graph,
-) -> OrderedSet[Node]:
-    assert _is_tuple_node(node), "_replace_tuple_outputs expects a tuple node"
-
-    queue = deque((c, (c.args[1],)) for c in _get_children_getitems(node))
-    erased_nodes: OrderedSet[Node] = OrderedSet()
-    while queue:
-        cur_node, path = queue.pop()
-
-        for c in _get_children_getitems(cur_node):
-            queue.append((c, path + (c.args[1],)))  # type: ignore[return-value, arg-type]
-
-        with graph.inserting_after(invoke_subgraph_node):
-            subgraph_output = graph.create_node(
-                "call_function",
-                operator.getitem,
-                (invoke_subgraph_node, output_index + tuple_spec[path]),  # type: ignore[index]
-                {},
-            )
-        cur_node.replace_all_uses_with(subgraph_output, propagate_meta=True)
-        graph.erase_node(cur_node)
-        erased_nodes.add(cur_node)
-
-    graph.erase_node(node)
-    erased_nodes.add(node)
-    return erased_nodes
