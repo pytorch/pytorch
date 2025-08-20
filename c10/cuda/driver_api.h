@@ -53,7 +53,8 @@
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuMulticastAddDevice, 12030)           \
   _(cuMulticastBindMem, 12030)             \
-  _(cuMulticastCreate, 12030)
+  _(cuMulticastCreate, 12030)              \
+  _(cuMulticastUnbind, 12030)
 #else
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_)
 #endif
@@ -66,6 +67,8 @@
   _(nvmlDeviceGetComputeRunningProcesses) \
   _(nvmlSystemGetCudaDriverVersion_v2)
 
+#define C10_NVML_DRIVER_API_OPTIONAL(_) _(nvmlDeviceGetGpuFabricInfoV)
+
 namespace c10::cuda {
 
 struct DriverAPI {
@@ -74,6 +77,7 @@ struct DriverAPI {
   C10_LIBCUDA_DRIVER_API_REQUIRED(CREATE_MEMBER_VERSIONED)
   C10_LIBCUDA_DRIVER_API_OPTIONAL(CREATE_MEMBER_VERSIONED)
   C10_NVML_DRIVER_API(CREATE_MEMBER)
+  C10_NVML_DRIVER_API_OPTIONAL(CREATE_MEMBER)
 #undef CREATE_MEMBER_VERSIONED
 #undef CREATE_MEMBER
 
