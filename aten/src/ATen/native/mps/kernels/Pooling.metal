@@ -503,8 +503,8 @@ void avg_pool_3d_input_iter(
       padding,
       count_include_pad);
 
-  T value_sum = 0;
-  auto divisor = has_divisor_override
+  opmath_t<T> value_sum = 0;
+  opmath_t<T> divisor = has_divisor_override
       ? divisor_override
       : (bounds0.count) * (bounds1.count) * (bounds2.count);
 
@@ -517,11 +517,11 @@ void avg_pool_3d_input_iter(
       for (auto i2 = bounds2.start; i2 < bounds2.end; i2++) {
         auto offset2 = input_strides[2] * i2;
         auto input_value = input[offset0 + offset1 + offset2];
-        value_sum += input_value;
+        value_sum += static_cast<opmath_t<T>>(input_value);
       }
     }
   }
-  *output = value_sum / static_cast<T>(divisor);
+  *output = static_cast<T>(value_sum / divisor);
 }
 
 // Iterates through all the input elements that this kernel needs to
