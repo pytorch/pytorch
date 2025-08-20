@@ -3401,6 +3401,9 @@ for details.
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
       .def_property(
+          "ptr"
+          [](const ncclConfig_t& self) { return reinterpret_cast<int64_t>(&self); })
+      .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
           // Note: NCCL calls free on the netName pointer
