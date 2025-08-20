@@ -1519,6 +1519,76 @@ class GraphModule(torch.nn.Module):
             )
         )
 
+    @requires_cuda_and_triton
+    def test_eager_backend(self, device):
+        # Test that AC HOP when run with eager backend has parity with eager AC
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            act_mem = (cur_mem - start_mem) / (1024 * 1024)
+            out.backward()
+            return act_mem
+
+        def get_bw_flops(f):
+            # Normalized so that a 512 square matmul returns 1
+            f().backward()
+            out = f()
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
+
+        x = torch.randn(512, 512, requires_grad=True, device=device)
+        y = torch.randn(512, 512, requires_grad=True, device=device)
+
+        def gn(x, y):
+            return torch.mm(x.cos(), y).sin().sum()
+
+        def fn_ac(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn_sac(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn,
+            )
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=context_fn
+            )
+
+        # Full AC
+        act_mem_ac_nocompile = get_act_mem(lambda: fn_ac(x, y))
+        bw_flops_ac_nocompile = get_bw_flops(lambda: fn_ac(x, y))
+
+        compiled_fn_ac = torch.compile(fn_ac, backend="eager", fullgraph=True)
+        act_mem_ac_compile_eager = get_act_mem(lambda: compiled_fn_ac(x, y))
+        bw_flops_ac_compile_eager = get_bw_flops(lambda: compiled_fn_ac(x, y))
+
+        self.assertEqual(act_mem_ac_nocompile, act_mem_ac_compile_eager)
+        self.assertEqual(bw_flops_ac_nocompile, bw_flops_ac_compile_eager)
+
+        # SAC
+        act_mem_sac_nocompile = get_act_mem(lambda: fn_sac(x, y))
+        bw_flops_sac_nocompile = get_bw_flops(lambda: fn_sac(x, y))
+
+        compiled_fn_sac = torch.compile(fn_sac, backend="eager", fullgraph=True)
+        act_mem_sac_compile_eager = get_act_mem(lambda: compiled_fn_sac(x, y))
+        bw_flops_sac_compile_eager = get_bw_flops(lambda: compiled_fn_sac(x, y))
+
+        # Verify parity between compiled and non-compiled SAC
+        self.assertEqual(act_mem_sac_nocompile, act_mem_sac_compile_eager)
+        self.assertEqual(bw_flops_sac_nocompile, bw_flops_sac_compile_eager)
+
     @requires_distributed()
     @requires_cuda_and_triton
     def test_distributed_utils_checkpoint_wrapper(self):
