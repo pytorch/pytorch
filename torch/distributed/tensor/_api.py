@@ -210,6 +210,35 @@ class _FromTorchTensor(torch.autograd.Function):
         # to test higher level gradients.
         return grad_output.to_local(), None, None, None, None, None
 
+def _maybe_fastpath_torch_dispatch(func, args, kwargs):
+    # These are all ops that can show up in AccumulateGrad,
+    # which is susceptible to DTensor overheads
+    if func is torch.ops.aten.detach.default:
+        return DTensor(args[0]._local_tensor.detach(), args[0]._spec, requires_grad=False)
+    if func in [
+        torch.ops.aten.add.Tensor,
+        torch.ops.aten.add_.Tensor,
+        torch.ops.aten.mul.Tensor,
+        torch.ops.aten.mul.out
+    ]:
+        if not isinstance(args[0], DTensor):
+            return None
+        if not isinstance(args[1], DTensor):
+            return None
+        if func is torch.ops.aten.mul.out:
+            out = kwargs['out']
+            if not isinstance(out, DTensor):
+                return None
+            if out._spec != args[0]._spec or out._spec != args[1]._spec:
+                return None
+            func(args[0]._local_tensor, args[1]._local_tensor, out=out._local_tensor)
+            return DTensor(out._local_tensor, out._spec, requires_grad=False)
+        else:
+            if args[0]._spec != args[1]._spec:
+                return None
+            out = func(args[0]._local_tensor, args[1]._local_tensor, **kwargs)
+            return DTensor(out, args[0]._spec, requires_grad=False)
+    return None
 
 class DTensor(torch.Tensor):
     """
@@ -355,6 +384,9 @@ class DTensor(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
+        fastpath_out = _maybe_fastpath_torch_dispatch(func, args, kwargs or {})
+        if fastpath_out is not None:
+            return fastpath_out
         return DTensor._op_dispatcher.dispatch(
             func,
             args,
