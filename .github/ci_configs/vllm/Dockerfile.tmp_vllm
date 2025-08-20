@@ -204,7 +204,7 @@ RUN --mount=type=bind,source=.git,target=.git \
 # Max jobs used by Ninja to build extensions
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
-ARG nvcc_threads=2
+ARG nvcc_threads=4
 ENV NVCC_THREADS=$nvcc_threads
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
