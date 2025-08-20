@@ -1,10 +1,13 @@
 # mypy: allow-untyped-defs
 """Functionality for Python <-> C++ frontend inter-op."""
 
+from collections.abc import Iterator, MutableMapping
+from typing import Any, Union
+
 from torch import nn
 
 
-class OrderedDictWrapper:
+class OrderedDictWrapper(MutableMapping):
     """A wrapper around a C++ OrderedDict.
 
     It dynamically evaluates the OrderedDict getter on a bound C++ module, such
@@ -34,17 +37,25 @@ class OrderedDictWrapper:
     def values(self):
         return self.cpp_dict.values()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         return self.cpp_dict.__iter__()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cpp_dict.__len__()
 
-    def __contains__(self, key):
+    def __contains__(self, key: Any) -> bool:
+        if not isinstance(key, str):
+            return False
         return self.cpp_dict.__contains__(key)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Union[int, str]) -> Any:
         return self.cpp_dict.__getitem__(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.cpp_dict.__setitem__(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        self.cpp_dict.__delitem__(key)
 
 
 class ModuleWrapper(nn.Module):
@@ -55,9 +66,9 @@ class ModuleWrapper(nn.Module):
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
         super().__init__()
-        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")  # type: ignore[assignment]
-        self._buffers: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_buffers")  # type: ignore[assignment]
-        self._modules: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_modules")  # type: ignore[assignment]
+        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")
+        self._buffers = OrderedDictWrapper(cpp_module, "_buffers")
+        self._modules = OrderedDictWrapper(cpp_module, "_modules")
         for attr in dir(cpp_module):
             # Skip magic methods and the three attributes above.
             if not attr.startswith("_"):
@@ -87,3 +98,6 @@ class ModuleWrapper(nn.Module):
 
     def __repr__(self):
         return self.cpp_module.__repr__()
+
+
+__all__ = ("OrderedDictWrapper", "ModuleWrapper")
