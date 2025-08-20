@@ -1477,50 +1477,44 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @contextmanager
     def _setup_graph_execution_capture(self):
-        """Helper to capture the 'inductor_graph_execution' structured trace."""
+        """Helper to capture the 'graph_execution' structured trace."""
         payload_buffer = io.StringIO()
         payload_handler = logging.StreamHandler(payload_buffer)
         payload_handler.setLevel(logging.DEBUG)
         payload_handler.setFormatter(StructuredTracePayloadFormatter())
-        payload_handler.addFilter(
-            StructuredTraceTestingFilter("inductor_graph_execution")
-        )
+        payload_handler.addFilter(StructuredTraceTestingFilter("graph_execution"))
         trace_log.addHandler(payload_handler)
         try:
             yield payload_buffer
         finally:
             trace_log.removeHandler(payload_handler)
 
-    @requires_tlparse
-    @torch._inductor.config.patch("fx_graph_cache", False)
-    @torch._inductor.config.patch("log_tlparse", True)
-    def test_graph_execution_simple(self):
-        class SimpleModule(torch.nn.Module):
-            def forward(self, x):
-                return torch.relu(x)
-
+    def test_graph_execution_order(self):
+        """Verify graph execution order is aggregated into a single artifact."""
         with self._setup_graph_execution_capture() as payload_buffer:
             torch._dynamo.reset()
-            with torch._inductor.debug.record_and_log_graph_execution_order():
-                mod1 = SimpleModule()
-                compiled1 = torch.compile(mod1, backend="inductor")
-                compiled1(torch.randn(2, 2))
-                mod2 = SimpleModule()
-                compiled2 = torch.compile(mod2, backend="inductor")
-                compiled2(torch.randn(2, 2))
+
+            def fn(x):
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y + 2
+
+            compiled = torch.compile(fn, backend="inductor")
+            from torch._inductor.debug import record_and_log_graph_execution_order
+
+            with record_and_log_graph_execution_order():
+                compiled(torch.randn(1))
 
             payload_content = payload_buffer.getvalue().strip()
+            payload = json.loads(payload_content)
+            executions = payload["graph_execution_order"]
+            self.assertTrue(all(isinstance(e["compile_id"], str) for e in executions))
+            for e in executions:
+                e["compile_id"] = "CID"
             self.assertExpectedInline(
-                payload_content,
-                """\
-{
-"graph_execution": [
-"graph_0",
-"graph_1"
-]
-}""",
+                json.dumps(payload, sort_keys=True),
+                """{"graph_execution_order": [{"compile_id": "CID"}, {"compile_id": "CID"}]}""",
             )
-
             self.assertParses()
 
 

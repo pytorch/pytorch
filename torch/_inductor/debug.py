@@ -33,7 +33,7 @@ from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
-from . import config, ir, output_code  # noqa: F811, this is needed
+from . import config, ir  # noqa: F811, this is needed
 from .ir import ExternKernelOut
 from .scheduler import (
     BaseSchedulerNode,
@@ -46,6 +46,10 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+# Graph execution tracking for debugging
+GRAPH_EXECUTION_ORDER: list[dict[str, object]] = []
+RECORD_GRAPH_EXECUTION: bool = False
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -803,31 +807,38 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
 
 
 def log_graph_execution() -> None:
+    """Emit a single structured artifact with the graph execution order.
+
+    Each entry records both the Dynamo compile_id and the Inductor graph_id
+    that executed.
+    """
+    if not GRAPH_EXECUTION_ORDER:
+        return
     try:
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "inductor_graph_execution",
+                "name": "graph_execution",
                 "encoding": "json",
             },
-            payload_fn=lambda: {
-                "graph_execution": list(output_code._graph_execution_order)
-            },
+            payload_fn=lambda: {"graph_execution_order": GRAPH_EXECUTION_ORDER},
         )
     except Exception:
-        log.debug("Failed to log inductor_graph_execution", exc_info=True)
+        log.debug("Failed to log graph_execution", exc_info=True)
 
 
-# Minimal user-facing context manager to record execution order and log on exit
 @contextlib.contextmanager
 def record_and_log_graph_execution_order() -> Iterator[None]:
-    output_code._record_graph_execution = True
-    output_code._graph_execution_order.clear()
+    """Record graph execution order and log it once on exit."""
+    global RECORD_GRAPH_EXECUTION
+    GRAPH_EXECUTION_ORDER.clear()
+    RECORD_GRAPH_EXECUTION = True
     try:
         yield
     finally:
-        output_code._record_graph_execution = False
         log_graph_execution()
+        RECORD_GRAPH_EXECUTION = False
+        GRAPH_EXECUTION_ORDER.clear()
 
 
 @dataclasses.dataclass

@@ -55,9 +55,6 @@ from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
 
 
-_graph_execution_order: list[str] = []
-_record_graph_execution: bool = False
-
 if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Sequence
@@ -430,6 +427,7 @@ class CompiledFxGraph(OutputCode):
     partition_maps: Optional[list[GraphPartitionMap]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
+    compile_id: Optional[str]
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
@@ -448,6 +446,7 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
+        compile_id: Optional[str],
         runnable_graph_str: str,
         inductor_post_grad_graph_str: str,
         compiled_fn_runner: Optional[Any] = None,
@@ -569,6 +568,7 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
+        self.compile_id = compile_id
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -585,10 +585,12 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
 
-        graph_id = self.fx_kwargs.get("graph_id")
-        name = f"graph_{graph_id}" if graph_id is not None else "unknown"
-        if _record_graph_execution:
-            _graph_execution_order.append(name)
+        if torch._inductor.debug.RECORD_GRAPH_EXECUTION:
+            torch._inductor.debug.GRAPH_EXECUTION_ORDER.append(
+                {
+                    "compile_id": self.compile_id,
+                }
+            )
         try:
             with record_function(
                 f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"

@@ -1619,6 +1619,7 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         graph_kwargs,
                         inputs_to_check,
+                        str(torch._guards.CompileContext.current_compile_id()),
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,
