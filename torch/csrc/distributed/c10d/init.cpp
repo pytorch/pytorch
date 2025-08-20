@@ -856,7 +856,6 @@ This class does not support ``__members__`` property.)");
   // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
   // I define some member methods.
   reduce_op
-      // todo(crcrpar): Support `RedOpType == ReduceOp`.
       .def(
           // This calls `operator==(const ReduceOp::RedOpType)`
           "__eq__",
