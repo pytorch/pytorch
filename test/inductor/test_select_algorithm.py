@@ -17,7 +17,6 @@ from torch._inductor.autotune_process import TritonBenchmarkRequest
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
-    PartialRender,
     TritonTemplate,
     TritonTemplateKernel,
 )
@@ -454,48 +453,21 @@ class TestTemplateRender(TestCase):
         hook_identifier = "# CUSTOM_HOOK"
 
         class ExtensionTritonTemplateKernel(TritonTemplateKernel):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._register_extra_template_env_fns(
+                    self.custom_hook,
+                )
+
             def custom_hook(self) -> str:
                 """
-                Custom hook that just returns a test string for
-                validation
+                Custom hook that just returns a test string for validation
                 """
 
                 def hook() -> str:
                     return hook_identifier
 
-                assert "<CUSTOM_HOOK>" not in self.render_hooks
-                self.render_hooks["<CUSTOM_HOOK>"] = hook
-                return "<CUSTOM_HOOK>"
-
-            def render(
-                self, template, kwargs, record_input_dependent_tracked_event=False
-            ):
-                if record_input_dependent_tracked_event:
-                    self.cached_replay_events = []
-
-                template_env = {
-                    fn.__name__: self.record_input_dependent_tracked_event()(fn)
-                    if record_input_dependent_tracked_event
-                    else fn
-                    for fn in [
-                        self.def_kernel,
-                        self.size,
-                        self.stride,
-                        self.store_output,
-                        self.load_input,
-                        self.make_load,
-                        self.modification,
-                        self.gen_argdefs,
-                        self.gen_defines,
-                        # This function registers a hook that the scheduler does
-                        # not directly finalize
-                        self.custom_hook,
-                    ]
-                }
-                return PartialRender(
-                    template.render(**template_env, **kwargs),
-                    self.render_hooks,
-                )
+                return self._register_hook("<CUSTOM_HOOK>", hook)
 
         class ExtensionTritonTemplate(TritonTemplate):
             kernel_type = ExtensionTritonTemplateKernel
