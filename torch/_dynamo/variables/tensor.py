@@ -1090,19 +1090,19 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        # [Note: Tensor.__setitem__ and VariableTracker metadata]
-        # At this point, we proxied a node representing `self[key] = value` into the graph.
-        # When executed, this node will mutate `self`'s tensor metadata, so it's important
-        # even during tracing to propagate. For example:
-        #   value.requires_grad is True => self.requires_grad becomes True
-        #   value.requires_grad is True => self.has_grad_fn becomes True
-
-        # Not sure if __setitem__ can ever save activations, disabling just in case
-        with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-            get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
-
         target_cls = type(value)
         if isinstance(target_cls, TensorVariable):
+            # [Note: Tensor.__setitem__ and VariableTracker metadata]
+            # At this point, we proxied a node representing `self[key] = value` into the graph.
+            # When executed, this node will mutate `self`'s tensor metadata, so it's important
+            # even during tracing to propagate. For example:
+            #   value.requires_grad is True => self.requires_grad becomes True
+            #   value.requires_grad is True => self.has_grad_fn becomes True
+
+            # Not sure if __setitem__ can ever save activations, disabling just in case
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
             example_value = self.proxy.node.meta.get("example_value")
             from .builder import get_specialized_props, infer_subclass_type
 
