@@ -2191,14 +2191,12 @@ class ReduceOpTest(TestCase):
             self.assertEqual(reduce_op_obj, reduce_op)
             self.assertNotEqual(reduce_op_obj, not_reduceop)
             self.assertNotEqual(reduce_op, not_reduceop)
-            # TODO(crcrpar): This needs to be `assertEqual` for the associativity even though
-            # the comparison of `RedOpType` and `ReduceOp` sounds less likely to happen compared
-            # to that of `ReduceOp` and `RedOptype`.
-            # this calls `RedOpType.__eq__(self, other)`
-            self.assertNotEqual(reduce_op, reduce_op_obj)
 
-            self.assertFalse(None in (reduce_op, reduce_op_obj))
-            self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
+            # check associativity
+            self.assertEqual(reduce_op, reduce_op_obj)
+
+            self.assertNotIn(None, (reduce_op, reduce_op_obj))
+            self.assertNotIn(not_reduceop, (reduce_op, reduce_op_obj))
 
 
 class LocalRankTest(MultiProcessTestCase):
