@@ -2490,9 +2490,7 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    def make_config(
-        x, r, num_warps=None, num_stages=1, register_intensive=False
-    ):
+    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
@@ -2558,7 +2556,10 @@ def _reduction_configs(
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
         return make_config(
-            x_block, outer_r_block, num_warps=num_warps, register_intensive=register_intensive
+            x_block,
+            outer_r_block,
+            num_warps=num_warps,
+            register_intensive=register_intensive
         )
 
     contiguous_config = make_config(
