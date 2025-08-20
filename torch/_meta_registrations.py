@@ -3718,6 +3718,7 @@ def kai_roundup(a: int, b: int) -> int:
 
 def get_kai_packed_weight_size(n_bits, N, K, groupsize):
     if n_bits == 4:
+        # Works for both fp32 and bf16 Kernels
         if groupsize == K:  # channelwise
             # dotprod params only [1x8x32_neon_dotprod]
             kai_nr = 8
@@ -3847,6 +3848,8 @@ def meta__dyn_quant_pack_4bit_weight(
         )
         return weights.new_empty(int(packed_weight_size), dtype=torch.uint8)
     packed_weight_size = weights.numel() + scales_zeros.numel()
+    if bias is not None:
+        packed_weight_size += bias.numel()
     return weights.new_empty(packed_weight_size, dtype=torch.float)
 
 

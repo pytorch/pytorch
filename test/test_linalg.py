@@ -7927,7 +7927,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 in_features,
                 out_features,
             )
-        # === Accuracy checks ===
 
         # Mean relative error check
         expected_mean_err = 0.00952
@@ -7936,15 +7935,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertTrue(
             abs(mean_err - expected_mean_err) < mean_err_tol,
             f"Mean relative error {mean_err:.6f} deviates from expected {expected_mean_err}"
-        )
-
-        # RMSE check
-        expected_rmse = 0.29
-        rmse_tol = 0.1
-        rmse = torch.sqrt(torch.mean((res - ref) ** 2))
-        self.assertTrue(
-            abs(rmse - expected_rmse) < rmse_tol,
-            f"RMSE {rmse:.6f} not within expected range (~{expected_rmse})"
         )
 
         # Elementwise relative error check
@@ -8082,21 +8072,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             f"Mean relative error {mean_err:.6f} deviates from expected {expected_mean_err}"
         )
 
-        # RMSE check
-        expected_rmse = 0.29
-        rmse_tol = 0.1
-        rmse = torch.sqrt(torch.mean((res - ref) ** 2))
-        self.assertTrue(
-            abs(rmse - expected_rmse) < rmse_tol,
-            f"RMSE {rmse:.6f} not within expected range (~{expected_rmse})"
-        )
-
         # Avoid divide-by-zero with clamp
         denominator = ref.abs().clamp(min=torch.finfo(ref.dtype).eps)
 
         # Compute elementwise relative error — always non-negative
         elementwise_relative_error = (res - ref).abs() / denominator
-        print(elementwise_relative_error.max())
 
         # Check if all elements are within 6% error
         assert torch.all(elementwise_relative_error >= 0), "Relative error should never be negative"

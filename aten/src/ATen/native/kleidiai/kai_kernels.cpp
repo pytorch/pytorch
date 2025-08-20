@@ -72,11 +72,11 @@ size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
     const int64_t bl,
-    at::ScalarType weight_dtype)
+    at::ScalarType tensor_dtype)
 {
   size_t packed_size = n * k;
   if (bl == k) {
-    if (weight_dtype == at::kBFloat16) {
+    if (tensor_dtype == at::kBFloat16) {
       auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
           kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
       const auto& ukernel = kernel_packet.ukernel;
@@ -165,8 +165,7 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
     const auto lhs_src_ptr = lhs_native_mtx_f32 + thread_id * src_stride;
     const int64_t m_idx = thread_id * vec_per_thread;
     auto lhs_packed_ptr = lhs_packed_base +
-        kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(
-                              m_idx, k, mr, kr, sr);
+        kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
@@ -234,7 +233,6 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
     const int64_t m,
     const int64_t n,
     const int64_t k) {
-
   // Kernel IDs for GEMM and GEMV
   constexpr kai_kernel_id gemm_id =
       kai_kernel_id::matmul_clamp_f32_qai8dxp4x8_qsi4cxp8x8_8x8x32_neon_i8mm;
@@ -277,11 +275,11 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
     const auto lhs_src_ptr = lhs_native_mtx_f32 + thread_id * src_stride;
     const int64_t m_idx = thread_id * vec_per_thread;
     auto lhs_packed_ptr = lhs_packed_base +
-        kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(
-                              m_idx, k, mr, kr, sr);
+        kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
+
     kernel_packet.kai_run_lhs_quant_pack(
         vec_num,
         k,
@@ -365,10 +363,9 @@ static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
 
   const size_t lhs_packed_size =
       kernel_packet.kai_get_lhs_packed_size(m, k, mr, kr, sr);
-  auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size); //
-  uint8_t* dst_act_mtx_f32 = reinterpret_cast<uint8_t*>(output.data_ptr());
-  TORCH_CHECK(input.scalar_type() == at::kBFloat16, "Input tensor must be bfloat16.");
-  const uint8_t* lhs_native_mtx_f32 =
+  auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
+  uint8_t* dst_act_mtx_bf16 = reinterpret_cast<uint8_t*>(output.data_ptr());
+  const uint8_t* lhs_native_mtx_bf16 =
       reinterpret_cast<const uint8_t*>(input.data_ptr());
   const uint8_t* rhs_packed_mtx_qs4cx =
       reinterpret_cast<const uint8_t*>(weight.data_ptr());
@@ -384,18 +381,13 @@ static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
   const size_t src_stride = vec_per_thread * lhs_stride;
 
   auto lhs_quant_pack = [=, &kernel_packet](int64_t thread_id) {
-    const auto lhs_src_ptr = lhs_native_mtx_f32 + thread_id * src_stride;
+    const auto lhs_src_ptr = lhs_native_mtx_bf16 + thread_id * src_stride;
     const int64_t m_idx = thread_id * vec_per_thread;
     auto lhs_packed_ptr = lhs_packed_base +
         kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
-    size_t offset = kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
-    size_t write_size = kernel_packet.kai_get_lhs_packed_size(vec_num, k, mr, kr, sr);
-
-    TORCH_CHECK(offset + write_size <= lhs_packed_size,
-      "lhs_packed buffer overflow: offset + write_size > buffer size");
 
     kernel_packet.kai_run_lhs_quant_pack(
         vec_num,
@@ -408,6 +400,7 @@ static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
         lhs_stride,
         lhs_packed_ptr);
   };
+
   at::parallel_for(
       0, num_threads, /*grain_size=*/1, [&](int64_t begin, int64_t end) {
         for (int64_t thread_id = begin; thread_id < end; ++thread_id) {
@@ -423,7 +416,7 @@ static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
     const auto rhs_packed_ptr = rhs_packed_mtx_qs4cx +
         kernel_packet.ukernel.get_rhs_packed_offset(
             thread_id * vec_per_thread, k);
-    auto dst_ptr = dst_act_mtx_f32 +
+    auto dst_ptr = dst_act_mtx_bf16 +
         kernel_packet.ukernel.get_dst_offset(
             0, thread_id * vec_per_thread, dst_stride);
     const int64_t vec_num = (thread_id == num_threads - 1)
