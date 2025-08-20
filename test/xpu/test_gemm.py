@@ -1541,7 +1541,6 @@ def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
 
 
 class TestFP8MatMul(TestCase):
-    # Most of the tests are similar with test_scaled_mm. In the future we may need to merge them
     @parametrize("m", [128])
     @parametrize("k", [512, 1024])
     @parametrize("n", [512, 1024])
@@ -1572,7 +1571,6 @@ class TestFP8MatMul(TestCase):
         scales = tensor_to_scale(w, w_dtype).float()
 
         w_fp8 = to_fp8_saturated(w * scales, w_dtype)
-        # print("w_fp8 is ", w_fp8)
         res_actual = weight_float8_mm(a, w_fp8, scales)
         res_emulated = weight_float8_mm_emulated(a, w_fp8, scales)
 
@@ -1580,8 +1578,6 @@ class TestFP8MatMul(TestCase):
             atol, rtol = 7e-2, 7e-2
         else:
             atol, rtol = 3e-3, 3e-3
-        # print("res_actual dtype" , res_actual.dtype)
-        # print("res emulated, ", res_emulated.dtype)
         torch.testing.assert_close(res_actual, res_emulated, atol=atol, rtol=rtol)
 
 
