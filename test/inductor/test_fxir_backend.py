@@ -557,6 +557,13 @@ class AOTFxirTestCase(InductorTestCase):
             )
             self.assertTrue(torch.allclose(model(*inp), gm(*inp)))
 
+            for node in gm.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target != triton_kernel_wrapper_mutation
+                ):
+                    self.assertTrue(node.meta.get("val", None) is not None)
+
     def test_aoti_fx_add(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
