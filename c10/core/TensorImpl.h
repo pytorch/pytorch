@@ -645,43 +645,40 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   ArrayRef<T> generic_sizes() {
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
+
     if constexpr (std::is_same_v<T, int64_t>) {
       return sizes();
-    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
-      return sym_sizes();
     } else {
-      TORCH_CHECK(
-          false,
-          "generic_sizes() only supports int64_t and c10::SymInt types, got ",
-          c10::demangle_type<T>());
+      return sym_sizes();
     }
   }
 
   template <typename T>
   ArrayRef<T> generic_strides() {
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
+
     if constexpr (std::is_same_v<T, int64_t>) {
       return strides();
-    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
-      return sym_strides();
     } else {
-      TORCH_CHECK(
-          false,
-          "generic_strides() only supports int64_t and c10::SymInt types, got ",
-          c10::demangle_type<T>());
+      return sym_strides();
     }
   }
 
   template <typename T>
   T generic_storage_offset() {
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
+
     if constexpr (std::is_same_v<T, int64_t>) {
       return storage_offset();
-    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
-      return sym_storage_offset();
     } else {
-      TORCH_CHECK(
-          false,
-          "generic_storage_offset() only supports int64_t and c10::SymInt types, got ",
-          c10::demangle_type<T>());
+      return sym_storage_offset();
     }
   }
 
