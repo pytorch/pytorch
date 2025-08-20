@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import enum
 import functools
 import io
@@ -724,6 +725,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
+    fx_wrapper: bool
 
 
 class _CompileFxCallable(Protocol):
@@ -745,6 +747,7 @@ def compile_fx_inner(
     kwargs.setdefault("is_backward", False)
     kwargs.setdefault("graph_id", None)
     kwargs.setdefault("cpp_wrapper", False)
+    kwargs.setdefault("fx_wrapper", False)
     kwargs.setdefault("is_inference", False)
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
@@ -840,7 +843,9 @@ def _compile_fx_inner(
     backends_support_caching = all(
         backend.supports_caching
         for backend in (
-            get_wrapper_codegen_for_device(device.type, config.cpp_wrapper)
+            get_wrapper_codegen_for_device(
+                device.type, config.cpp_wrapper, config.fx_wrapper
+            )
             for device in get_all_devices(gm)
         )
         if backend is not None
@@ -1070,6 +1075,16 @@ def _compile_fx_inner(
                 torch._inductor.debug.dump_inductor_provenance_info()
             ),
         )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(
+                torch._inductor.debug._inductor_kernel_stack_trace
+            ),
+        )
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
     if log.isEnabledFor(logging.INFO):
@@ -1177,6 +1192,7 @@ class _InProcessFxCompile(FxCompile):
         is_backward: bool = graph_kwargs.get("is_backward", False)
         graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
+        fx_wrapper: bool = graph_kwargs.get("fx_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
         extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]] = (
@@ -1379,8 +1395,12 @@ class _InProcessFxCompile(FxCompile):
                         is_inference=is_inference,
                         is_backward=is_backward,
                         is_const_graph=True,
+                        fx_wrapper=fx_wrapper,
                     )
-                    with V.set_graph_handler(const_graph):
+                    with (
+                        V.set_graph_handler(const_graph),
+                        V.set_extern_kernel_nodes([]),
+                    ):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                         const_graph.run()
                         const_wrapper_code, const_kernel_code = (
@@ -1409,13 +1429,14 @@ class _InProcessFxCompile(FxCompile):
                     ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
+                    fx_wrapper=fx_wrapper,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
                 # We are going to start code generating runtime asserts, so make sure
                 # you don't start adding new ones in the lowering process
                 graph.freeze_runtime_asserts()
-                with V.set_graph_handler(graph):
+                with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
@@ -1446,7 +1467,15 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
-                        if graph.aot_mode:
+                        if graph.aot_mode and graph.fx_wrapper:
+                            assert not graph.cpp_wrapper
+                            compiled_fn = graph.codegen()[0].gm  # type: ignore[attr-defined]
+                            output_code_log.debug(
+                                "Output graph module: \n%s",
+                                compiled_fn.print_readable(print_output=False),
+                            )
+
+                        elif graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
                             assert graph.cpp_wrapper, (
@@ -1462,11 +1491,9 @@ class _InProcessFxCompile(FxCompile):
                                 )
 
                             serialized_extern_kernel_nodes = None
-                            if graph.extern_kernel_nodes:
+                            if V.extern_kernel_nodes:
                                 serialized_extern_kernel_nodes = (
-                                    graph.extern_node_serializer(
-                                        graph.extern_kernel_nodes
-                                    )
+                                    graph.extern_node_serializer(V.extern_kernel_nodes)
                                 )
                                 output_code_log.debug(
                                     "Serialized Extern Kernel Nodes: \n%s",
@@ -1516,10 +1543,10 @@ class _InProcessFxCompile(FxCompile):
                             },
                         )
 
-                    # Collect and dump op runtimes for TLParse
+                    # Collect and dump op runtimes and tensor metadata for TLParse
                     if config.log_tlparse:
                         _, _, node_runtimes = graph.count_bytes()
-                        torch._inductor.debug.log_runtime_estimates(node_runtimes)
+                        torch._inductor.debug.log_runtime_and_tensor_meta(node_runtimes)
 
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
@@ -1560,7 +1587,9 @@ class _InProcessFxCompile(FxCompile):
                             V.graph.disable_cudagraphs_reason = disable
 
                     if V.aot_compilation:
-                        assert isinstance(compiled_fn, (str, list))
+                        assert isinstance(
+                            compiled_fn, (str, list, torch.fx.GraphModule)
+                        ), type(compiled_fn)
                         return CompiledAOTI(compiled_fn)
 
                     # TODO: Hoist this above V.aot_compilation
@@ -1841,17 +1870,17 @@ def compile_fx_aot(
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
-) -> Union[list[Union[str, Weights]], str]:
+) -> Union[list[Union[str, Weights]], str, GraphModule]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    config_patches: dict[str, Any] = (
-        {"cpp_wrapper": True}
-        if config_patches is None
-        else {**config_patches, "cpp_wrapper": True}
-    )
+    config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
+
+    if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
+        # If fx_wrapper is not set, then set cpp_wrapper
+        config_patches["cpp_wrapper"] = True
 
     output_path = config_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
@@ -2113,11 +2142,15 @@ def compile_fx(
             )
 
     # TODO: This probably shouldn't be a recursive call
-    if config.cpp_wrapper:
+    if config.cpp_wrapper or config.fx_wrapper:
+        cpp_wrapper_config = config.cpp_wrapper
+        fx_wrapper_config = config.fx_wrapper
+
         with (
             config.patch(
                 {
                     "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    "fx_wrapper": False,  # reset to break recursive call to compile_fx
                     **get_cpp_wrapper_config(),
                 }
             ),
@@ -2163,7 +2196,11 @@ def compile_fx(
                 return compile_fx(
                     patched_mod,
                     fake_args,
-                    inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                    inner_compile=functools.partial(
+                        inner_compile,
+                        cpp_wrapper=cpp_wrapper_config,
+                        fx_wrapper=fx_wrapper_config,
+                    ),
                     decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
                 )
@@ -2294,7 +2331,29 @@ def compile_fx(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "before_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
+
                     _recursive_joint_graph_passes(gm)
+
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "after_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)

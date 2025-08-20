@@ -22,7 +22,7 @@ import sys
 import types
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -32,6 +32,10 @@ from .bytecode_analysis import (
     stacksize_analysis,
 )
 from .utils import is_safe_constant
+
+
+if TYPE_CHECKING:
+    from .output_graph import DynamoTracerOutput
 
 
 @dataclass_slots
@@ -1448,7 +1452,9 @@ def get_code_keys() -> list[str]:
 
 def transform_code_object(
     code: types.CodeType,
-    transformations: Callable[[list[Instruction], dict[str, Any]], Any],
+    transformations: Callable[
+        [list[Instruction], dict[str, Any]], Optional["DynamoTracerOutput"]
+    ],
     safe: bool = False,
 ) -> types.CodeType:
     keys = get_code_keys()

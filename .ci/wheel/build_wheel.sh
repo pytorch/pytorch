@@ -133,6 +133,25 @@ EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
 RENAME_WHEEL=true
 case $desired_python in
+    3.14t)
+        echo "Using 3.14 deps"
+        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        PYYAML_PINNED_VERSION=">=6.0.1"
+        NUMPY_PINNED_VERSION="=2.1.0"
+        CONDA_ENV_CREATE_FLAGS="python-freethreading"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
+    3.14)
+        echo "Using 3.14t deps"
+        SETUPTOOLS_PINNED_VERSION=">=70.1.0"
+        PYYAML_PINNED_VERSION=">=6.0.1"
+        NUMPY_PINNED_VERSION="=2.1.0"
+        EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+        desired_python="3.14.0rc1"
+        RENAME_WHEEL=false
+        ;;
     3.13t)
         echo "Using 3.13 deps"
         SETUPTOOLS_PINNED_VERSION=">=70.1.0"

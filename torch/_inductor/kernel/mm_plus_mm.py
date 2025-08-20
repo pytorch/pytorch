@@ -90,7 +90,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k1, other=0.)
             b = tl.load(B, mask=rk[:, None] < k1, other=0.)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -103,7 +103,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             c = tl.load(C, mask=rk[None, :] < k2, other=0.)
             d = tl.load(D, mask=rk[:, None] < k2, other=0.)
-        acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(c, d, input_precision=FLOAT32_PRECISION)
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
 
