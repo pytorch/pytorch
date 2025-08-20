@@ -4496,7 +4496,7 @@ class ShapeEnv:
         ex_storage_offset: IntLikeType,
         is_dim_dynamic: Sequence[bool],
         source: Source,
-        hint_overrides: dict[int, int],
+        hint_overrides: Optional[dict[int, int]],
         *,
         symbolic_context: Optional[SymbolicContext] = None,
     ) -> tuple[
@@ -4505,6 +4505,9 @@ class ShapeEnv:
         IntLikeType,
     ]:
         dim = len(ex_size)
+
+        if not hint_overrides:
+            hint_overrides = {}
 
         # Reimplement the legacy behavior
         if symbolic_context is None:
