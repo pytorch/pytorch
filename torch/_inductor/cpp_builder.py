@@ -1374,13 +1374,14 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definitions.append(" USE_XPU")
+        xpu_error_string = (
+            "Intel GPU driver is not properly installed, please follow the instruction "
+            "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+        )
         if _IS_WINDOWS:
             ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
             if ze_root is None:
-                raise OSError(
-                    "Intel GPU driver is not properly installed, please follow the instruction "
-                    "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
-                )
+                raise OSError(xpu_error_string)
             include_dirs = [os.path.join(ze_root, "include")]
             libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
@@ -1389,10 +1390,7 @@ def get_cpp_torch_device_options(
             libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
             if not find_library("ze_loader"):
-                raise OSError(
-                    "Intel GPU driver is not properly installed, please follow the instruction "
-                    "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
-                )
+                raise OSError(xpu_error_string)
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
