@@ -293,8 +293,8 @@ class _Layout:
 
 
 def init_layouts_from_mesh(
-    mesh_size: tuple[int], mesh_stride: tuple[int]
-) -> list["_Layout"]:
+    mesh_size: tuple[int, ...], mesh_stride: tuple[int, ...]
+) -> tuple["_Layout", ...]:
     """
     Convert a PyTorch mesh tensor's metadata (size, stride) into a list of CuTe-style layouts.
 
@@ -313,4 +313,6 @@ def init_layouts_from_mesh(
     assert len(mesh_size) == len(mesh_stride), (
         "mesh_size and mesh_stride must have the same length"
     )
-    return [_Layout(((size, stride),)) for size, stride in zip(mesh_size, mesh_stride)]
+    return tuple(
+        _Layout(((size, stride),)) for size, stride in zip(mesh_size, mesh_stride)
+    )
