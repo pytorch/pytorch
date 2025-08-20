@@ -101,10 +101,10 @@ nvshmem_team_t group_to_team(
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   int rank = input_hdl->get_rank();
-  int world_size = input_hdl->get_world_size();
   auto team = group_to_team(group_name, input_hdl->get_rank_to_global_rank());
   void* buffer_ptr = input_hdl->get_buffer_ptrs()[rank];
-  TORCH_CHECK(root < world_size, "root must be smaller than world size");
+  int team_size = nvshmem_team_n_pes(team);
+  TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), root, stream);
