@@ -11,67 +11,7 @@
 
 #include <ATen/native/ConvUtils.h> // for cudnnv8_enabled_check_debug()
 
-#if !AT_CUDNN_ENABLED()
-
-namespace at {
-namespace native {
-
-// See Note [ATen preprocessor philosophy]
-
-std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
-    const Tensor& input,
-    const Tensor& weight,
-    const std::optional<Tensor>& bias_opt,
-    const std::optional<Tensor>& running_mean_opt,
-    const std::optional<Tensor>& running_var_opt,
-    bool training,
-    double exponential_average_factor,
-    double epsilon) {
-  TORCH_CHECK(false, "cudnn_batch_norm: ATen not compiled with cuDNN support");
-}
-
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
-    const Tensor& input,
-    const Tensor& weight,
-    const std::optional<Tensor>& bias,
-    const std::optional<Tensor>& running_mean,
-    const std::optional<Tensor>& running_var,
-    bool training,
-    double exponential_average_factor,
-    double epsilon,
-    Tensor& out,
-    Tensor& save_mean,
-    Tensor& save_var,
-    Tensor& reserve) {
-  AT_ERROR("cudnn_batch_norm_out: ATen not compiled with cuDNN support");
-}
-
-std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
-    const Tensor& input,
-    const Tensor& grad_output,
-    const Tensor& weight,
-    const std::optional<Tensor>& running_mean_opt,
-    const std::optional<Tensor>& running_var_opt,
-    const std::optional<Tensor>& save_mean_opt,
-    const std::optional<Tensor>& save_var_opt,
-    double epsilon,
-    const Tensor& reservedSpace) {
-  TORCH_CHECK(
-      false, "cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
-}
-
-size_t _get_cudnn_batch_norm_reserve_space_size(
-    const Tensor& input_t,
-    bool training) {
-  TORCH_CHECK(
-      false,
-      "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
-}
-
-} // namespace native
-} // namespace at
-
-#else // AT_CUDNN_ENABLED
+#if AT_CUDNN_ENABLED()
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <c10/macros/Macros.h>
@@ -657,13 +597,12 @@ size_t _get_cudnn_batch_norm_reserve_space_size_v8(
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
-  if (at::native::cudnnv8_enabled_check_debug()) {
 #ifndef USE_ROCM
+  if (at::native::cudnnv8_enabled_check_debug()) {
     return _get_cudnn_batch_norm_reserve_space_size_v8(input_t, training);
-#endif
-  } else {
-    return _get_cudnn_batch_norm_reserve_space_size_v7(input_t, training);
   }
+#endif
+  return _get_cudnn_batch_norm_reserve_space_size_v7(input_t, training);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out_v8(
@@ -761,8 +700,8 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
     Tensor& save_mean,
     Tensor& save_var,
     Tensor& reserve) {
-  if (at::native::cudnnv8_enabled_check_debug()) {
 #ifndef USE_ROCM
+  if (at::native::cudnnv8_enabled_check_debug()) {
     return cudnn_batch_norm_out_v8(
         input_t,
         weight_t,
@@ -776,22 +715,21 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
         save_mean,
         save_var,
         reserve);
-#endif
-  } else {
-    return cudnn_batch_norm_out_v7(
-        input_t,
-        weight_t,
-        bias_t_opt,
-        running_mean_t_opt,
-        running_var_t_opt,
-        training,
-        exponential_average_factor,
-        epsilon,
-        output_t,
-        save_mean,
-        save_var,
-        reserve);
   }
+#endif
+  return cudnn_batch_norm_out_v7(
+      input_t,
+      weight_t,
+      bias_t_opt,
+      running_mean_t_opt,
+      running_var_t_opt,
+      training,
+      exponential_average_factor,
+      epsilon,
+      output_t,
+      save_mean,
+      save_var,
+      reserve);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm_v8(
@@ -843,8 +781,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     bool training,
     double exponential_average_factor,
     double epsilon) {
-  if (at::native::cudnnv8_enabled_check_debug()) {
 #ifndef USE_ROCM
+  if (at::native::cudnnv8_enabled_check_debug()) {
     return cudnn_batch_norm_v8(
         input_t,
         weight_t,
@@ -854,18 +792,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         training,
         exponential_average_factor,
         epsilon);
-#endif
-  } else {
-    return cudnn_batch_norm_v7(
-        input_t,
-        weight_t,
-        bias_t_opt,
-        running_mean_t_opt,
-        running_var_t_opt,
-        training,
-        exponential_average_factor,
-        epsilon);
   }
+#endif
+  return cudnn_batch_norm_v7(
+      input_t,
+      weight_t,
+      bias_t_opt,
+      running_mean_t_opt,
+      running_var_t_opt,
+      training,
+      exponential_average_factor,
+      epsilon);
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward_v8(
@@ -954,19 +891,18 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
         save_var_t_opt,
         epsilon,
         reserveSpace);
-#endif
-  } else {
-    return cudnn_batch_norm_backward_v7(
-        input_t,
-        grad_output_t,
-        weight_t,
-        running_mean_opt,
-        running_var_opt,
-        save_mean_t_opt,
-        save_var_t_opt,
-        epsilon,
-        reserveSpace);
   }
+#endif
+  return cudnn_batch_norm_backward_v7(
+      input_t,
+      grad_output_t,
+      weight_t,
+      running_mean_opt,
+      running_var_opt,
+      save_mean_t_opt,
+      save_var_t_opt,
+      epsilon,
+      reserveSpace);
 }
 
 } // namespace native
