@@ -110,11 +110,19 @@ struct PartitionCache {
   // bit 1: is uint8
   // bit 2: fp16(0) / bf16(1)
   // bit 3: is fp32
-  // bit 4: is sdp pattern
-  // bit 5-7: N/A
+  // bit 4: is sdpa pattern
+  // bit 5: is sdpa backward pattern
+  // bit 6-7: reserved for future use
   // The rest of the bits depend upon the arguments provided
   // However, down the line, we might have different bitsets for different
   // patterns
+  static constexpr uint8_t kBitInt8 = 0;
+  static constexpr uint8_t kBitUint8 = 1;
+  static constexpr uint8_t kBitBfloat16 = 2;
+  static constexpr uint8_t kBitFloat32 = 3;
+  static constexpr uint8_t kBitSdpaPattern = 4;
+  static constexpr uint8_t kBitSdpaBwdPattern = 5;
+
   dnnl::graph::partition& insert_partition_cache(
       std::bitset<32>& patternID,
       dnnl::graph::partition& p) {
