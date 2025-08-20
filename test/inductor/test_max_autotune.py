@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 aten = torch.ops.aten
@@ -220,9 +220,11 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
         # Verify that we are using a TMA implementation
-        FileCheck().check("triton_tem_fused_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).run(code[0])
+        # depending on whether we're using the experimental API, we check for a different string
+        check_str = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+        if has_triton_stable_tma_api():
+            check_str = "triton.language.make_tensor_descriptor"
+        FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
