@@ -10577,6 +10577,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @config.patch({"force_disable_caches": True})
     def test_mark_dynamic_with_hint_override(self):
         @torch.compile
         def no_override(x):
@@ -10587,19 +10588,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return x.sum(dim=0)
 
         x_small = torch.randn(4096, 512, device=GPU_TYPE)
-
-        def extract_xnumel(code):
-            match = re.search(r"xnumel\s*=\s*(\d+)", code)
-            return int(match.group(1)) if match else None
-
+        torch._dynamo.decorators.mark_dynamic(x_small, 0)
         code1 = run_and_get_triton_code(no_override, x_small)
-        xnumel1 = extract_xnumel(code1)
+
+        torch._dynamo.reset_code_caches()
 
         torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 1000)
         code2 = run_and_get_triton_code(override, x_small)
-        xnumel2 = extract_xnumel(code2)
-
-        self.assertNotEqual(xnumel1, xnumel2)
+        self.assertNotEqual(code1, code2)
 
         self.assertEqual(no_override(x_small), override(x_small))
 
