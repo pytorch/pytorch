@@ -3047,7 +3047,7 @@ def infer_subclass_type(value):
         return type(value)
 
 
-def specialized_prop(target_cls, tx, example_value, subclass_type):
+def get_specialized_props(target_cls, tx, example_value, subclass_type):
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
@@ -3084,7 +3084,7 @@ def construct_tensor_variable(
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
     tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
-    options.update(specialized_prop(target_cls, tx, example_value, subclass_type))
+    options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
     return target_cls(proxy, **options)
 
 

@@ -1104,9 +1104,9 @@ class TensorVariable(VariableTracker):
         target_cls = type(value)
         if isinstance(target_cls, TensorVariable):
             example_value = self.proxy.node.meta.get("example_value")
-            from .builder import infer_subclass_type, specialized_prop
+            from .builder import get_specialized_props, infer_subclass_type
 
-            specialized_props = specialized_prop(
+            specialized_props = get_specialized_props(
                 target_cls, tx, example_value, infer_subclass_type(example_value)
             )
             for k, v in specialized_props.items():
