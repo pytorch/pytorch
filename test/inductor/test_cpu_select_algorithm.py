@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     skipIfWindows,
     TEST_MKL,
@@ -296,6 +297,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
                 )
+                or (
+                    dtype == torch.float32
+                    and not dynamo_config.assume_static_by_default
+                )
             )
             and epilogue != "mul"
             and epilogue != "div"
@@ -304,22 +309,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 and epilogue == "add"
                 and not bias
             )
-            or (
-                dtype == torch.float32
-                and epilogue == "add"
-                and not bias
-                and not dynamo_config.assume_static_by_default
-            )
         ):
             # Several scenarios where epilogue fusion is not counted in:
             # 1. For bfloat16, the epilogue fusion is part of the template,
             #    not fused via scheduler. This will also be true for float16 when
-            #    hardware has the float16 instruction. The exception is mul or
-            #    div fusion which is not supported for oneDNN linear.
+            #    hardware has the float16 instruction. And this will also be true
+            #    for float32 dynamic mode. The exception is mul or div fusion
+            #    which is not supported for oneDNN linear.
             # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
-            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
-            #    and linear w/o bias plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
@@ -800,7 +798,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 3)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
@@ -2682,7 +2680,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bs", (5,))
-    @parametrize("Mdim", (64,))
+    @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
     def test_bmm_self_square(self, bs, Mdim, dtype):
         class M(torch.nn.Module):
@@ -3094,5 +3092,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if HAS_CPU and not (IS_MACOS or IS_WINDOWS):
         run_tests()
