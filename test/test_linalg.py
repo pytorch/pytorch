@@ -7273,7 +7273,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @dtypes(torch.half)
     @onlyCUDA
     def test_addmm_baddbmm_overflow(self, device, dtype):
-        with torch.backends.cuda.flags(allow_fp16_reduced_precision_reduction=False):
+        with torch.backends.cuda.matmul.flags(allow_fp16_reduced_precision_reduction=False):
             inp = torch.zeros(128, 128, dtype=torch.half, device=device)
             mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
             mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
