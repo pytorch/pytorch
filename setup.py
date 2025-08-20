@@ -1194,16 +1194,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
-        # in system CFLAGS
-        c_flags = os.getenv("CFLAGS", "")
-        if (
-            IS_LINUX
-            and "-fstack-clash-protection" in c_flags
-            and "clang" in os.getenv("CC", "")
-        ):
-            os.environ["CC"] = str(os.environ["CC"])
-
         super().run()
 
         if IS_DARWIN:
@@ -1598,6 +1588,7 @@ def main() -> None:
         "networkx>=2.5.1",
         "jinja2",
         "fsspec>=0.8.5",
+        'intel-openmp==2025.1.1 ;platform_system == "Windows" ',  # for Windows inductor
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
@@ -1669,6 +1660,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
+        "_inductor/kernel/flex/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
