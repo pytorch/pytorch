@@ -233,15 +233,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
 
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if config.profiler_mark_wrapper_call or enable_kernel_profile:
-            # No C shim for profiling APIs, assuming profiling is a debugging feature which
-            # does not provide any ABI compatibility promise.
-            self.header.splice("#include <ATen/record_function.h>")
-
     def _include_extra_header(self, header: str):
         # This is needed for cpp to python dtype conversion
         self.header.splice(f"#include <{header}>")
@@ -1251,7 +1242,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 shim_fn_codes = textwrap.dedent(
                     f"""
                     {{
-                      RECORD_FUNCTION("{shim_fn}", c10::ArrayRef<c10::IValue>());
+                      RAIIAtenRecordFunctionHandle record_{shim_fn}_("{shim_fn}", nullptr);
                       {shim_fn_codes}
                     }}
                     """
@@ -1465,19 +1456,51 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def codegen_dynamic_select_index(self, node):
+    def codegen_dynamic_select_index(self, node, clamp):
         index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
 
-        index_compute_str = (
+        # codegen index
+        sym = node.unbacked_offset_symbol
+        index_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
         )
+        self.writeline(f"auto {sym}_index = {index_str};")
+        index_str_clamped = (
+            f"{sym}_index < 0 ? 0 : ({sym}_index > {size_cpp_str} ? {size_cpp_str} : {sym}_index)"
+            if clamp
+            else f"{sym}_index"
+        )
+        self.writeline(f"auto {sym}_index_clamped = {index_str_clamped};")
         self.writeline(
-            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
-            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+            f"auto {sym} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * {sym}_index_clamped;"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+        self.unbacked_symbol_decls.add(str(sym))
+
+    def codegen_dynamic_slice_size(self, node):
+        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
+        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+        sym = node.unbacked_size_symbol
+
+        def codegen_clamp(index_str, start=True):
+            suf = "start" if start else "end"
+            index_ = f"{sym}_{suf}_index"
+            self.writeline(
+                f"auto {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
+            )
+            self.writeline(
+                f"auto {sym}_{suf}_clamped = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
+            )
+
+        codegen_clamp(start_cpp_str, start=True)
+        codegen_clamp(end_cpp_str, start=False)
+        self.writeline(f"auto {sym}_raw = {sym}_end_clamped - {sym}_start_clamped;")
+        self.writeline(f"auto {sym} = {sym}_raw < 0 ? 0 : {sym}_raw;")
+        self.unbacked_symbol_decls.add(str(sym))
 
     def make_buffer_free(self, buffer):
         return (
@@ -1495,7 +1518,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
-            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
+            'RAIIAtenRecordFunctionHandle record_inductor_wrapper_call_("inductor_wrapper_call", nullptr);'
         )
 
     def generate_start_graph(self):
@@ -1651,7 +1674,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return f"RAIIAtenTensorHandle {name}({handle_name});"
 
-    def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
+    def codegen_alloc_from_pool(
+        self, name, offset, dtype, shape, stride
+    ) -> tuple[str, list[str]]:
         size = self.codegen_shape_tuple(shape)
         stride = self.codegen_shape_tuple(stride)
         tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1668,11 +1693,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ),
             f"&{tmp_name}",
         ]
-        self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
-        self.wrapper_call.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));"
-        )
-        return f"RAIIAtenTensorHandle({tmp_name})"
+        # We return the lines instead of writing here because writing here is bug prune.
+        # If you write aoti_torch__alloc_from_pool lines, you must write the RAIIAtenTensorHandle
+        # as well, otherwise you get memory leaks
+        allocations_to_write = [
+            f"AtenTensorHandle {tmp_name};",
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool({', '.join(args)}));",
+        ]
+        return f"RAIIAtenTensorHandle({tmp_name})", allocations_to_write
 
     def codegen_reinterpret_view(
         self,
@@ -2608,7 +2636,7 @@ if (!custom_op_wrapper) {
             "AtenTensorHandle", tensor_call_args, force_mutable=True
         )
 
-        extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
+        extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
         self.writeline(
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
