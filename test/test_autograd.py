@@ -14144,7 +14144,7 @@ class TestNestedCheckpoint(TestCase):
             return clone(x.sin().cos())
 
         # Test default
-        counter = [0]
+        # Early stopping is enabled by default
         a = torch.tensor(1.0, requires_grad=True)
         out = checkpoint(fn, a, use_reentrant=False)
         out.backward()
@@ -14164,6 +14164,9 @@ class TestNestedCheckpoint(TestCase):
         self.assertEqual(counter[0], 1)
 
         # Test context manager
+        # Expect early stopping to be disabled for all checkpoints ran under
+        # the context manager, even though context manager is no longer active
+        # when backward/recomputation is performed.
         counter = [0]
         a = torch.tensor(1.0, requires_grad=True)
         with torch.utils.checkpoint.set_checkpoint_early_stop(False):
