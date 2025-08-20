@@ -1387,7 +1387,7 @@ def get_cpp_torch_device_options(
             # Suppress multi-line comment warnings in sycl headers
             cflags += ["Wno-comment"]
             libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-            
+
             if not find_library("ze_loader"):
                 raise OSError(
                     "Intel GPU driver is not properly installed, please follow the instruction "
