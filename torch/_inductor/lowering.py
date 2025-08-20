@@ -725,8 +725,7 @@ def _foreach_map(subgraph, *args, _debug_assert_fused=False, **kwargs):
     below registers the buffers as horizontally fuseable in the scheduler.
     """
     from .subgraph_lowering import PointwiseSubgraphLowering
-    from torch._dynamo.exc import BackendCompilerFailed
-    
+
     inputs = args
 
     gm = subgraph.graph_module
@@ -760,9 +759,7 @@ def _foreach_map(subgraph, *args, _debug_assert_fused=False, **kwargs):
     if _debug_assert_fused:
         for (_, use_foreach), group in groups.items():
             if use_foreach and len(group) != 1:
-                raise BackendCompilerFailed(
-                    "foreach_map was not fully fused"
-                )
+                raise RuntimeError("foreach_map was not fully fused")
 
     return outputs
 

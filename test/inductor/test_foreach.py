@@ -1115,18 +1115,20 @@ class ForeachTests(TestCase):
         )
 
         out_eager = test_foreach_map(*inps)
-        out_compiled = torch.compile(foreach_map, fullgraph=True)(fn, *inps, _debug_assert_fused=True)
+        out_compiled = torch.compile(foreach_map, fullgraph=True)(
+            fn, *inps, _debug_assert_fused=True
+        )
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     def test_foreach_map_assert_fused_raises(self):
-        from torch._dynamo.exc import BackendCompilerFailed
         def non_pointwise(a, b):
             return (a + b).sum()
+
         x = torch.randn(10)
         y = torch.randn(10)
-        with self.assertRaises(BackendCompilerFailed):
+        with self.assertRaises(RuntimeError):
             torch.compile(foreach_map, fullgraph=True)(
                 non_pointwise, (x,), (y,), _debug_assert_fused=True
             )
@@ -1135,7 +1137,7 @@ class ForeachTests(TestCase):
         def fn(a, b):
             tmp = a + b
             return tmp * 2.0
-        
+
         def test_foreach_map(*args):
             return foreach_map(fn, *args)
 
@@ -1145,10 +1147,13 @@ class ForeachTests(TestCase):
         )
 
         out_eager = test_foreach_map(*inps)
-        out_compiled = torch.compile(foreach_map, fullgraph=True)(fn, *inps, _debug_assert_fused=True)
+        out_compiled = torch.compile(foreach_map, fullgraph=True)(
+            fn, *inps, _debug_assert_fused=True
+        )
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
