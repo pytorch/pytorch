@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 
+namespace {
 template <typename T>
 std::optional<T> mul_overflows(T a, T b) {
   T result{0};
@@ -10,6 +11,7 @@ std::optional<T> mul_overflows(T a, T b) {
     return std::nullopt;
   return result;
 }
+} // namespace
 
 TEST(MulOverflowsTest, Int64BasicOperations) {
   ASSERT_EQ(mul_overflows<int64_t>(2, 3), 6);
@@ -85,7 +87,9 @@ TEST(MulOverflowsTest, Uint64OverflowCases) {
   ASSERT_EQ(mul_overflows<uint64_t>(max_val, max_val), std::nullopt);
 
   uint64_t floor_sqrt_max = 4294967295ull;
-  ASSERT_EQ(mul_overflows<uint64_t>(floor_sqrt_max + 1ull, floor_sqrt_max + 1ull), std::nullopt);
+  ASSERT_EQ(
+      mul_overflows<uint64_t>(floor_sqrt_max + 1ull, floor_sqrt_max + 1ull),
+      std::nullopt);
 }
 
 TEST(MulOverflowsTest, Uint64LargeNumbersNoOverflow) {
@@ -96,7 +100,9 @@ TEST(MulOverflowsTest, Uint64LargeNumbersNoOverflow) {
   ASSERT_EQ(mul_overflows<uint64_t>(1ull << 31, 1ull << 31), 1ull << 62);
 
   uint64_t floor_sqrt_max = 4294967295ull;
-  ASSERT_EQ(mul_overflows<uint64_t>(floor_sqrt_max, floor_sqrt_max), 18446744065119617025ull);
+  ASSERT_EQ(
+      mul_overflows<uint64_t>(floor_sqrt_max, floor_sqrt_max),
+      18446744065119617025ull);
 }
 
 TEST(MulOverflowsTest, Uint64BoundaryValues) {
