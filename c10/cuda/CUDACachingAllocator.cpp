@@ -1336,7 +1336,7 @@ class DeviceCachingAllocator {
       process_events(context);
     } else {
       if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-        // We check if there is some block that is safe to free on this stream
+        // We check if there is some block that is safe to reuse on this stream
         free_safe_blocks_in_capture(context, stream);
       }
     }
@@ -1660,11 +1660,15 @@ class DeviceCachingAllocator {
       return true;
     };
 
-    // Try to add for allocation stream
+    // If any stream is not currently capturing, return an empty node vector.
+    // An empty vector indicates that the block should be deferred for freeing
+    // until after capture.
+
+    // Attempt to add an empty node for the allocation stream.
     if (!try_add_empty_node(block->stream)) {
       return {};
     }
-    // Try to add for all used streams
+    // Attempt to add empty nodes for all streams that have used the block.
     for (const auto& s : block->stream_uses) {
       if (!try_add_empty_node(s.stream())) {
         return {};
@@ -1707,12 +1711,12 @@ class DeviceCachingAllocator {
     return result;
   }
 
-  // Returns the set of "freeable" free markers (empty nodes) in the current
-  // CUDA graph capture. A free marker is considered freeable if it is a
-  // predecessor of every terminal node in stream.
+  // Returns the set of "reusable" free markers (empty nodes) in the current
+  // CUDA graph capture. A free marker is considered reusable if it is a
+  // predecessor of every terminal node.
   // This ensures that all future captured work will occur after the free
-  // marker, making it safe to reuse on the stream.
-  ska::flat_hash_set<cudaGraphNode_t> get_freeable_empty_nodes(
+  // marker, making it safe to reuse.
+  ska::flat_hash_set<cudaGraphNode_t> get_reusable_empty_nodes(
       cudaStream_t stream) {
     auto terminals = get_terminals(stream);
     if (terminals.empty()) {
@@ -1742,7 +1746,7 @@ class DeviceCachingAllocator {
 
     // For each terminal node, perform a reverse DFS to count, for each empty
     // node, how many terminals it can reach (i.e., for how many terminals it is
-    // a predecessor). An empty node is freeable if it is a predecessor of all
+    // a predecessor). An empty node is reusable if it is a predecessor of all
     // terminal nodes.
     ska::flat_hash_map<cudaGraphNode_t, size_t> num_terminals_reachable;
 
@@ -1768,63 +1772,64 @@ class DeviceCachingAllocator {
       reverse_dfs(terminal);
     }
 
-    ska::flat_hash_set<cudaGraphNode_t> freeable_empty_nodes;
+    ska::flat_hash_set<cudaGraphNode_t> reusable_empty_nodes;
     for (auto [node, count] : num_terminals_reachable) {
       if (count == terminals.size()) {
-        freeable_empty_nodes.insert(node);
+        reusable_empty_nodes.insert(node);
       }
     }
 
-    return freeable_empty_nodes;
+    return reusable_empty_nodes;
   }
 
-  // A block is freeable during capture iff every free-marker is a predecessor
-  // of every terminal.
+  // A block is considered reusable during CUDA graph capture if every free
+  // marker (empty node) associated with the block is a predecessor of every
+  // terminal node.
   //
-  // Any newly captured op will attach after some terminal. If all terminals are
-  // after all free-markers, then all future work is ordered after the block's
-  // last use on every stream, so the old lifetime ends before any new lifetime
-  // begins. We make this decision purely from DAG topology (no event queries)
-  // to remain legal during capture.
+  // This ensures that any new operation added to the graph will be attached
+  // after all terminal nodes, which themselves are after all free markers. As a
+  // result, all future work is guaranteed to occur after the block's last use
+  // on every stream, so the block's previous lifetime ends before any new
+  // lifetime begins. This check relies solely on the DAG topology and does not
+  // require event queries, making it safe to use during capture.
   //
-  // This function iterates over all deferred blocks, checks if their empty
-  // nodes are freeable, and frees the block if so.
+  // This function iterates over all deferred blocks, determines if their empty
+  // nodes are reusable according to the above criteria, and frees the block if
+  // so.
   void free_safe_blocks_in_capture(
       const std::shared_ptr<GatheredContext>& context,
       cudaStream_t stream) {
-    auto freeable_empty_nodes = get_freeable_empty_nodes(stream);
+    auto reusable_empty_nodes = get_reusable_empty_nodes(stream);
 
-    // If there are no freeable empty nodes (e.g., not currently capturing),
-    // nothing to do.
-    if (freeable_empty_nodes.empty()) {
+    // If there are no reusable empty nodes (e.g., not currently capturing),
+    // there is nothing to do.
+    if (reusable_empty_nodes.empty()) {
       return;
     }
 
     std::vector<Block*> blocks_to_erase;
 
     for (auto& [block, inserted_empty_nodes] : deferred_blocks) {
-      // If no empty nodes were inserted for this block, or the block is not
-      // allocated on the given stream, always defer free until after capture.
+      // Skip this block if it has no empty nodes, as we defer its freeing until
+      // after graph capture. Also skip if the block was not allocated on the
+      // current stream; such blocks will be freed when
+      // free_safe_blocks_in_capture is attempted on that stream.
       if (inserted_empty_nodes.empty() || block->stream != stream) {
         continue;
       }
 
-      bool is_freeable = true;
+      bool is_reusable = true;
 
-      // All inserted empty nodes must be in the set of freeable nodes.
-      for (const auto& free_node : inserted_empty_nodes) {
-        if (freeable_empty_nodes.find(free_node) ==
-            freeable_empty_nodes.end()) {
-          is_freeable = false;
+      for (const auto& node : inserted_empty_nodes) {
+        if (reusable_empty_nodes.find(node) == reusable_empty_nodes.end()) {
+          is_reusable = false;
           break;
         }
       }
 
-      // If all empty nodes are freeable, the block is safe to free.
-      if (is_freeable) {
+      if (is_reusable) {
         // Clear stream uses since the graph ensures proper synchronization.
-        // No need to insert events, as event queries are not allowed during
-        // capture.
+        // No need to insert events.
         block->stream_uses.clear();
 
         free_block(block, context);
@@ -1877,6 +1882,10 @@ class DeviceCachingAllocator {
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+          // insert_free_marker returns a vector of free markers,
+          // or an empty vector if any associated stream is not currently
+          // capturing. The empty vector means that we will defer the free until
+          // capture is finished.
           deferred_blocks.emplace(block, insert_free_marker(block));
         } else {
           // If graph_capture_record_stream_reuse is not enabled, always defer
