@@ -887,6 +887,18 @@ class SetVariable(ConstDictVariable):
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
+    def _fast_set_method(self, tx, fn, args, kwargs):
+        try:
+            res = fn(
+                *[x.as_python_constant() for x in [self, *args]],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except Exception as exc:
+            raise_observed_exception(
+                type(exc), tx, args=list(map(ConstantVariable.create, exc.args))
+            )
+        return VariableTracker.build(tx, res)
+
     def call_method(
         self,
         tx,
@@ -895,6 +907,23 @@ class SetVariable(ConstDictVariable):
         kwargs: dict[str, VariableTracker],
     ) -> "VariableTracker":
         # We forward the calls to the dictionary model
+        from ..utils import check_constant_args
+
+        if (
+            name
+            in (
+                "isdisjoint",
+                "union",
+                "intersection",
+                "difference",
+                "symmetric_difference",
+            )
+            and check_constant_args(args, kwargs)
+            and istype(self.python_type(), set)
+        ):
+            py_type = self.python_type()
+            return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
+
         if name == "__init__":
             temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, *kwargs)
             tx.output.side_effects.mutation(self)
