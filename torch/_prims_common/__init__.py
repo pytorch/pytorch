@@ -832,7 +832,7 @@ def is_cpu_scalar_tensor(a: Any) -> bool:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
-def check_same_device(*args, allow_cpu_scalar_tensors):
+def check_same_device(*args, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same device.
 
@@ -847,9 +847,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
     for arg in args:
-        if isinstance(arg, Number):
-            continue
-        elif isinstance(arg, TensorLike):
+        if isinstance(arg, TensorLike):
             if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
                 continue
 
@@ -857,18 +855,12 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
                 device = arg.device
 
             if device != arg.device:
-                msg = (
-                    "Tensor on device "
-                    + str(arg.device)
-                    + " is not on the expected device "
-                    + str(device)
-                    + "!"
-                )
+                msg = f"Tensor on device {arg.device} is not on the expected device {device}!"
                 raise RuntimeError(msg)
+        elif isinstance(arg, Number):
+            continue
         else:
-            msg = (
-                "Unexpected type when checking for same device, " + str(type(arg)) + "!"
-            )
+            msg = f"Unexpected type when checking for same device, {type(arg)}!"
             raise RuntimeError(msg)
 
 
@@ -894,9 +886,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     shape = None
 
     for arg in args:
-        if isinstance(arg, Number):
-            continue
-        elif isinstance(arg, TensorLike):
+        if isinstance(arg, TensorLike):
             if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
                 continue
 
@@ -906,10 +896,10 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
             if not is_same_shape(shape, arg.shape):
                 msg = f"Shape {arg.shape} is not the expected shape {shape}!"
                 raise RuntimeError(msg)
+        elif isinstance(arg, Number):
+            continue
         else:
-            msg = (
-                "Unexpected type when checking for same shape, " + str(type(arg)) + "!"
-            )
+            msg = f"Unexpected type when checking for same shape, {type(arg)}!"
             raise RuntimeError(msg)
 
 
@@ -920,9 +910,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     scalar_shape = None
 
     for arg in args:
-        if isinstance(arg, Number):
-            continue
-        elif isinstance(arg, TensorLike):
+        if isinstance(arg, TensorLike):
             if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
                 scalar_shape = arg.shape
                 continue
@@ -932,6 +920,8 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
             if not is_same_shape(shape, arg.shape):
                 return None
+        elif isinstance(arg, Number):
+            continue
         else:
             return None
 
@@ -1385,6 +1375,7 @@ def check_same_dtype(*args):
             if arg_type is not scalar_type:
                 msg = f"Tensor with corresponding Python type {arg_type} is not the expected type of {scalar_type}!"
                 raise RuntimeError(msg)
+        # Expensive check for a tuple of types; always do this last.
         elif isinstance(arg, Number):
             # Can't check a non-tensor dtype.
             continue

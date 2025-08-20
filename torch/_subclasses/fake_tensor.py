@@ -601,23 +601,26 @@ class SymNumberMemoDescriptor:
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
 
-    def _memo(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo(self) -> str:
         return f"_{self._name}"
 
-    def _memo_vc(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo_vc(self) -> str:
         return f"_{self._name}_vc"
 
     # When we retrace, we need to invalidate all the memos so that we can
     # accurately identify the first time unbacked SymInts are allocated.
     # This is only relevant for inputs; for intermediates, they will get fresh
     # fake tensors so you won't have a memo anyway
-    def _memo_epoch(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo_epoch(self) -> str:
         return f"_{self._name}_epoch"
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[type[FakeTensor]] = None
     ) -> Optional[Union[torch.SymInt, torch.SymFloat]]:
-        if (r := getattr(obj, self._memo(obj))) is None:
+        if (r := getattr(obj, self._memo)) is None:
             return None
 
         # If backed, it's ok to preserve memo since we know it won't renumber.
@@ -627,12 +630,12 @@ class SymNumberMemoDescriptor:
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
+            not self._is_nested_int and getattr(obj, self._memo_vc) != obj._version
         ) or (
             not self._is_nested_int
-            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            and getattr(obj, self._memo_epoch) != obj.fake_mode.epoch
         ):
-            setattr(obj, self._memo(obj), None)
+            setattr(obj, self._memo, None)
             return None
         return r
 
@@ -640,14 +643,14 @@ class SymNumberMemoDescriptor:
         self, obj: FakeTensor, value: Optional[Union[torch.SymInt, torch.SymFloat]]
     ) -> None:
         if value is None:
-            setattr(obj, self._memo(obj), None)
-            setattr(obj, self._memo_vc(obj), None)
-            setattr(obj, self._memo_epoch(obj), None)
+            setattr(obj, self._memo, None)
+            setattr(obj, self._memo_vc, None)
+            setattr(obj, self._memo_epoch, None)
         elif not obj.is_inference() or self._is_nested_int:
-            setattr(obj, self._memo(obj), value)
+            setattr(obj, self._memo, value)
             if not self._is_nested_int:
-                setattr(obj, self._memo_vc(obj), obj._version)
-            setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
+                setattr(obj, self._memo_vc, obj._version)
+            setattr(obj, self._memo_epoch, obj.fake_mode.epoch)
 
 
 class FakeTensor(Tensor):
@@ -759,12 +762,12 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type in ["cuda", "xpu"]:
+        if device.type in {"cuda", "xpu"}:
             init_gpu_context(device)
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
+            in {"cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()}
             and device.index is None
         ):
             if device.type != "mps" and getattr(torch, device.type).is_initialized():
