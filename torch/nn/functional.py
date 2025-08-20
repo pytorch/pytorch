@@ -1,9 +1,9 @@
 """Functional interface."""
 
+import enum
 import importlib
 import math
 import warnings
-from enum import Enum as _Enum
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -3454,21 +3454,26 @@ def cross_entropy(
             reduction=reduction,
             label_smoothing=label_smoothing,
         )
-    if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
-
     return torch._C._nn.cross_entropy_loss(
         input,
         target,
         weight,
-        _Reduction.get_enum(reduction),
+        _get_reduction(size_average, reduce, reduction),
         ignore_index,
         label_smoothing,
     )
 
 
+def _get_reduction(
+    size_average: Optional[bool], reduce: Optional[bool], reduction: str
+) -> int:
+    if size_average is not None or reduce is not None:
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    return _Reduction.get_enum(reduction)
+
+
 # TODO: works for now but inconsistent with existing code base.
-class _CrossEntropyChunkingStrategy(_Enum):
+class _CrossEntropyChunkingStrategy(enum.Enum):
     # Naive, unfused computation
     none = "none"
 
@@ -3533,15 +3538,16 @@ def linear_cross_entropy(
             lambda: f"{chunking_strategy=} is not yet implemented",
         )
 
-    return cross_entropy(
-        linear(input=input, weight=linear_weight, bias=bias),
+    return torch._C._nn.linear_cross_entropy_loss(
+        input,
         target,
-        ignore_index=ignore_index,
-        label_smoothing=label_smoothing,
-        reduce=reduce,
-        reduction=reduction,
-        size_average=size_average,
-        weight=cross_entropy_weight,
+        linear_weight,
+        bias,
+        cross_entropy_weight,
+        chunking_strategy,
+        _get_reduction(size_average, reduce, reduction),
+        ignore_index,
+        label_smoothing,
     )
 
 
