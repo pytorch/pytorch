@@ -426,6 +426,9 @@ def checkpoint(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        args: tuple containing inputs to the :attr:`function`
+
+    Keyword args:
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
@@ -461,7 +464,6 @@ def checkpoint(
             argument is ignored if ``use_reentrant=True``. Can be overridden
             globally using :func:`set_checkpoint_early_stop` context manager.
             Default: ``True``.
-        args: tuple containing inputs to the :attr:`function`
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
