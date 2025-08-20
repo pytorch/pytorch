@@ -146,6 +146,30 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             )
 
     @skipIfRocm
+    def test_mem_pool_prev_op(self) -> None:
+        """
+        Apply MemPool context to a previous op that creates input to collective.
+        """
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        dim = 1024
+        lin = torch.nn.Linear(dim, dim, device=self.device)
+        x = torch.randn(dim, dtype=dtype, device=self.device)
+
+        allocator = symm_mem.get_mempool_allocator(self.device)
+        mempool = torch.cuda.MemPool(allocator)
+
+        with torch.cuda.use_mem_pool(mempool):
+            y = lin(x)
+            z = torch.nn.functional.relu(y)
+
+        # y and z should be both symm tensors
+        torch.ops.symm_mem.nvshmem_all_to_all(y, z, group_name)
+
+    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
