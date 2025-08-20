@@ -2248,6 +2248,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
       .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
       .value("Mkldnn", at::native::ConvBackend::Mkldnn)
+      .value("MkldnnTranspose", at::native::ConvBackend::MkldnnTranspose)
       .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
       .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
       .value("Overrideable", at::native::ConvBackend::Overrideable)
