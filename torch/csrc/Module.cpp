@@ -2610,44 +2610,6 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
-// See note [Pybind11 ABI constants].  string_prefix is exclusively used for the
-// leading underscore on PYBIND11_COMPILER_TYPE, where present.
-#define SET_STR_DEFINE(name, string_prefix) \
-  ASSERT_TRUE(                              \
-      set_module_attr("_" #name, THPUtils_packString(string_prefix name)))
-
-#ifdef PYBIND11_COMPILER_TYPE
-#ifdef PYBIND11_COMPILER_TYPE_LEADING_UNDERSCORE
-  SET_STR_DEFINE(
-      PYBIND11_COMPILER_TYPE, PYBIND11_COMPILER_TYPE_LEADING_UNDERSCORE);
-#else
-  SET_STR_DEFINE(PYBIND11_COMPILER_TYPE, "");
-#endif
-#else
-  ASSERT_TRUE(
-      set_module_attr("_" C10_STRINGIZE(PYBIND11_COMPILER_TYPE), Py_None));
-#endif
-
-#ifdef PYBIND11_STDLIB
-  SET_STR_DEFINE(PYBIND11_STDLIB, "");
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_STDLIB), Py_None));
-#endif
-
-#ifdef PYBIND11_BUILD_ABI
-  SET_STR_DEFINE(PYBIND11_BUILD_ABI, "");
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
-#endif
-#undef SET_STR_DEFINE
-
-#ifdef PYBIND11_VERSION_HEX
-  ASSERT_TRUE(set_module_attr(
-      "_PYBIND11_VERSION", THPUtils_packUInt32(PYBIND11_VERSION_HEX)));
-#else
-  ASSERT_TRUE(set_module_attr("_PYBIND11_VERSION", Py_None));
-#endif
-
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
