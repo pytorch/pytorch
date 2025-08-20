@@ -1308,94 +1308,6 @@ struct CachingDeviceAllocatorImpl {
     set_fraction = true;
   }
 
-  // Dump a complete snapshot of the memory held by the allocator. Potentially
-  // VERY expensive.
-  std::vector<GenericSegmentInfo> snapshot(MempoolId_t mempool_id) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-
-    std::vector<BlockT*> all_blocks;
-
-    if (mempool_id.first != 0 || mempool_id.second != 0) {
-      // If there is an active mempool, we find the corresponding PrivatePool
-      // in graph_pools and only return the blocks from it.
-      auto pool = graph_pools.find(mempool_id);
-      if (pool != graph_pools.end()) {
-        all_blocks = get_private_pool_head_blocks(pool->second.get());
-      }
-    } else {
-      // When snapshot is called with non-default mempool_id, we return
-      // all the blocks in the CUDACachingAllocator (as returned by
-      // get_all_blocks).
-      all_blocks = get_all_blocks();
-    }
-
-    size_t total_active = 0;
-    std::vector<GenericSegmentInfo> result;
-
-    for (const BlockT* const head_block : all_blocks) {
-      // For expandable segments, we report one segment for each contiguous
-      // mapped range of memory
-      if (head_block->prev && head_block->prev->mapped) {
-        continue;
-      }
-      result.emplace_back();
-      GenericSegmentInfo& segment_info = result.back();
-      segment_info.device = head_block->device;
-      segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
-      segment_info.stream = head_block->stream.unwrap();
-      segment_info.is_large = (!head_block->pool->is_small);
-      segment_info.is_expandable = head_block->expandable_segment_;
-      segment_info.context_when_allocated =
-          head_block->context_when_segment_allocated;
-      MempoolId_t id = head_block->pool->owner_MempoolId();
-      if ((mempool_id.first == 0 && mempool_id.second == 0) ||
-          id == mempool_id) {
-        segment_info.owner_private_pool_id = id;
-      }
-
-      const BlockT* block = head_block;
-      while (block != nullptr && block->mapped) {
-        segment_info.blocks.emplace_back();
-        BlockInfo& block_info = segment_info.blocks.back();
-
-        block_info.size = block->size;
-        block_info.requested_size = block->requested_size;
-        block_info.allocated = block->allocated;
-        block_info.active = block->allocated || (block->event_count > 0) ||
-            !block->stream_uses.empty();
-
-        segment_info.total_size += block_info.size;
-        if (block_info.allocated) {
-          segment_info.allocated_size += block_info.size;
-        }
-        if (block_info.active) {
-          segment_info.active_size += block_info.size;
-          segment_info.requested_size += block_info.requested_size;
-        }
-        block_info.context_when_allocated = block->context_when_allocated;
-        block = block->next;
-      }
-      total_active += segment_info.active_size;
-    }
-
-    std::sort(
-        result.begin(),
-        result.end(),
-        [](const GenericSegmentInfo& a, const GenericSegmentInfo& b) {
-          return a.address < b.address;
-        });
-
-    record_trace(
-        GenericTraceEntry::SNAPSHOT,
-        0,
-        total_active,
-        nullptr,
-        0,
-        mempool_id,
-        nullptr);
-    return result;
-  }
-
   void setUseOnOOM(MempoolId_t mempool_id) {
     // Choose if this pool should be used as a last resort before ooming
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -1503,7 +1415,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Allocate a device memory pointer for a primitive type.
-  void allocPrimitive(void** ptr, AllocParamsT& p) {
+  virtual void allocPrimitive(void** ptr, AllocParamsT& p) {
     if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
       *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(p.alloc_size);
       p.status = *ptr ? AllocParamsT::Ok : AllocParamsT::OOM;
@@ -1514,7 +1426,7 @@ struct CachingDeviceAllocatorImpl {
   }
 
   // Allocate a device memory pointer with an optional lock.
-  virtual void mallocMaybeCapturingWithLock(
+  virtual void mallocMaybeCapturingWithOptionalLock(
       void** ptr,
       AllocParamsT& p,
       std::unique_lock<std::recursive_mutex>& lock) = 0;
@@ -1722,7 +1634,7 @@ struct CachingDeviceAllocatorImpl {
       }
       return bool(p.block);
     } else {
-      mallocMaybeCapturingWithLock(&ptr, p, lock);
+      mallocMaybeCapturingWithOptionalLock(&ptr, p, lock);
       if (p.status == AllocParamsT::OOM) {
         return false;
       }
@@ -2643,6 +2555,16 @@ struct CachingDeviceAllocatorImpl {
 
     if (record_history) {
       alloc_buffer.insertEntries(te);
+    }
+  }
+
+  void pushCompileContext(std::string& md) {
+    compile_context.push(md);
+  }
+
+  void popCompileContext() {
+    if (!compile_context.empty()) {
+      compile_context.pop();
     }
   }
 
