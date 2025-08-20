@@ -2533,8 +2533,8 @@ def _reduction_configs(
                 if load_factor < 4 or rnumel <= 128:
                     outer_r_block = 512 // x_block
                 else:
-                    # Heavier reductions contain a lot more overhead per loop iteration
-                    # We minimize the overhead by enlarging r block
+                    # Heavier reductions introduce more compute, enlarge r block
+                    # to try to do less ops
                     if rnumel >= 2048:
                         outer_r_block = 64
                     else:
@@ -2542,6 +2542,8 @@ def _reduction_configs(
                     x_block = min(x_block, 32)
                     num_warps = 4
             else:
+                # Maximize occupancy with only 1 dynamic input, otherwise enlarge
+                # r block similar to heavier reductions above
                 outer_r_block = (
                     1 if num_dynamic == 1 else max(min((rnumel // 64), 64), 8)
                 )
