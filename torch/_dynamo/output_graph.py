@@ -1423,7 +1423,7 @@ class OutputGraph(OutputGraphGuardsState):
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(
-                    tx, list(reversed(root_stack_values)), root
+                    tx, list(reversed(root_stack_values)), root, list(range(len(root_stack_values)))
                 )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
             )
@@ -1456,13 +1456,14 @@ class OutputGraph(OutputGraphGuardsState):
                 graph_output_var,
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
+                record_return_indices=True,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root, pass2.return_graph_indices)
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1673,6 +1674,7 @@ class OutputGraph(OutputGraphGuardsState):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
+        return_graph_indices: list[int]
     ) -> list[Instruction]:
         """
         Generate code from self.graph and return the Instruction()s to
@@ -1746,6 +1748,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
+            gm.meta["return_graph_indices"] = return_graph_indices
 
             graph_code_log.debug(
                 "%s",

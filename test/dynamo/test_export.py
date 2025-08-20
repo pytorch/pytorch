@@ -406,6 +406,24 @@ def forward(self, x, y):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_fallthrough(self):
+        def func(x):
+            y = x + 1
+            return x, y
+
+        inp = torch.tensor([0.1, 0.1])
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        real_result = opt_func(inp)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func)(inp)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(inp)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        
     def test_dupes_2(self):
         inp = torch.tensor([0.1, 0.1])
 

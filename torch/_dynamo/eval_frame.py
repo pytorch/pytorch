@@ -1358,7 +1358,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
 
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
-        self.matched_output_elements_positions = list(range(len(matched_output_elements_positions)))
+        self.matched_output_elements_positions = matched_output_elements_positions
         self.flat_results = flat_results
 
     def placeholder(
@@ -1576,9 +1576,7 @@ def rewrite_signature(
     )
 
     assert graph_captured_output is not None
-    matched_output_elements_positions = produce_matching(
-        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
-    )
+    matched_output_elements_positions = graph.meta.get("return_graph_indices", [])
 
     new_graph = FlattenInputOutputSignature(
         graph,
@@ -2044,6 +2042,8 @@ def export(
         ]
 
         if aten_graph:
+            gm_metadata = graph.meta.copy()
+
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args: Any) -> Any:
                 with torch.fx.traceback.preserve_node_meta():
@@ -2059,6 +2059,7 @@ def export(
                         pre_dispatch=pre_dispatch,
                         _allow_fake_constant=False,
                     )(*example_fake_inputs)
+                    graph.meta = gm_metadata
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
                     raise UserError(  # noqa: B904

@@ -77,6 +77,7 @@ class PyCodegen:
         graph_output_var: Optional[str] = None,
         tempvars: Optional[dict[Union[VariableTracker, Source], Any]] = None,
         overridden_sources: Optional[dict[Source, Source]] = None,
+        record_return_indices: bool = False,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
@@ -98,6 +99,10 @@ class PyCodegen:
         # this because sometimes we can't easily modify the original source
         # without affecting other components, e.g., guards.
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
+        # This is used to record the indices of the graph outputs that show up in
+        # original user code.
+        self.record_return_indices: bool = record_return_indices
+        self.return_graph_indices: list[int] = []
 
     def restore_stack(
         self, stack_values: list[Any], *, value_from_source: bool = True
@@ -230,10 +235,18 @@ class PyCodegen:
 
         if allow_cache:
             if self.top_of_stack is value:
+                if self.record_return_indices and isinstance(value, VariableTracker):
+                    idx = self._graph_idx_for_value(value)
+                    if idx is not None:
+                        self.return_graph_indices.append(idx)
                 output.append(create_dup_top())
                 return
 
             if self.tempvars.get(value) is not None:
+                if self.record_return_indices and isinstance(value, VariableTracker):
+                    idx = self._graph_idx_for_value(value)
+                    if idx is not None:
+                        self.return_graph_indices.append(idx)
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
@@ -386,6 +399,30 @@ class PyCodegen:
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
+        if self.record_return_indices:
+            self.return_graph_indices.append(index)
+
+    def _graph_idx_for_value(self, value: VariableTracker) -> Optional[int]:
+        """
+        In general there are DUP_TOP and LOAD_FAST instructions that are responsible
+        for already constructed value being returned.
+
+        DUP_TOP -> just duplicate at top of stack
+        LOAD_FAST -> find the value from somewhere in the stack, and load it.
+
+        This is used for handling cases like:
+        def f(x):
+            y = x + 1
+            return y, y
+
+        Where `y` is constructed in the graph and residual bytecode constructs actual (y, y)
+        """
+        try:
+            key = id(value.as_proxy())
+        except Exception:
+            return None
+        entry = self.graph_outputs.get(key)
+        return entry.index if entry else None
 
     def add_cache(self, value: Union[VariableTracker, Source]) -> None:
         var = self.new_var()
