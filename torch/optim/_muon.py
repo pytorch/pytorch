@@ -240,7 +240,7 @@ Muon.__doc__ = (
 
     Keller's original implementation scales the update by :math:`\sqrt{\max\!\left(1, \frac{A}{B}\right)}`,
     where :math:`A` and :math:`B` are dimension of the matrix being optimized.
-    
+
     Moonshot's implementation also focuses on matching :math:`RMS` of AdamW. The adjustment is computed as:
     :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     The method is adopted from `Muon is Scalable for LLM Training`_. Research

@@ -873,6 +873,8 @@ def optim_error_inputs_func_muon(device, dtype):
     complex_param.grad = torch.rand_like(complex_param)
     non_2d_param = torch.rand(2, 3, 4, device=device, dtype=dtype)
     non_2d_param.grad = torch.rand_like(non_2d_param)
+    param = torch.rand(2, 3, device=device, dtype=dtype)
+    param.grad = torch.rand_like(param)
     error_inputs += [
         ErrorOptimizerInput(
             OptimizerInput(
@@ -883,6 +885,16 @@ def optim_error_inputs_func_muon(device, dtype):
             error_type=ValueError,
             error_regex="Muon only supports 2D parameters",
             error_on=OptimizerErrorEnum.CONSTRUCTION_ERROR,
+        ),
+        ErrorOptimizerInput(
+            OptimizerInput(
+                params=[param],
+                kwargs={"adjust_lr_fn": "arbitrary"},
+                desc="only support `default` and `match_rms_adamw`",
+            ),
+            error_type=ValueError,
+            error_regex="Adjust learning rate function arbitrary is not supported",
+            error_on=OptimizerErrorEnum.STEP_ERROR,
         ),
         ErrorOptimizerInput(
             OptimizerInput(
