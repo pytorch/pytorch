@@ -2331,7 +2331,29 @@ def compile_fx(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "before_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
+
                     _recursive_joint_graph_passes(gm)
+
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "after_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)
