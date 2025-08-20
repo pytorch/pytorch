@@ -1289,6 +1289,46 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
 
+    @onlyXPU
+    def test_conv_backward_with_abnormal_stride(self, device):
+        batch_size = 1
+        input_dim = 6
+        input_spatial_dim = 2
+        kernel_size = 1
+        padding = 0
+        output_dim = 1
+
+        layer_cpu = nn.Conv2d(input_dim, output_dim, kernel_size, padding=padding)
+        layer_cpu.weight.data.fill_(1)
+        layer_cpu.bias.data.fill_(1)
+
+        input_data = torch.ones(
+            batch_size, input_dim, input_spatial_dim, input_spatial_dim
+        )
+        input_data[:, :, : input_spatial_dim // 2, : input_spatial_dim // 2] = -1
+
+        output_grad = torch.ones(
+            batch_size, output_dim, input_spatial_dim, input_spatial_dim
+        )
+        stride = output_grad.stride()
+        abnormal_stride = [stride[0], 1, stride[2], stride[3]]
+        output_grad = output_grad.as_strided(output_grad.size(), abnormal_stride)
+
+        # run on CPU
+        input_cpu = input_data.detach().requires_grad_()
+        output_cpu = layer_cpu(input_cpu)
+        torch.autograd.backward(output_cpu, output_grad)
+
+        # run on XPU
+        layer_xpu = copy.deepcopy(layer_cpu).to(device)
+        input_xpu = input_data.to(device).detach().requires_grad_()
+        output_xpu = layer_xpu(input_xpu)
+        torch.autograd.backward(output_xpu, output_grad.to(device))
+
+        self.assertTrue(
+            torch.allclose(layer_cpu.weight.grad, layer_xpu.weight.grad.cpu())
+        )
+
 
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
