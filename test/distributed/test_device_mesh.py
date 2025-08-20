@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._cute_layout import _CuTe_Layout
+from torch.distributed._cute_layout import _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -1252,25 +1252,25 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
         # (3,2):(2,1) -> (6:1)
-        l = _CuTe_Layout([(3, 2), (2, 1)])
+        l = _Layout([(3, 2), (2, 1)])
         l = l.coalesce()
         print(l.sizes_and_strides)
         self.assertEqual(l.sizes_and_strides, [(6, 1)])
 
         # (2,3,4):(12,4,1) -> (24:1)
-        l = _CuTe_Layout([(2, 12), (3, 4), (4, 1)])
+        l = _Layout([(2, 12), (3, 4), (4, 1)])
         l = l.coalesce()
         self.assertEqual(l.sizes_and_strides, [(24, 1)])
 
     def test_coalesce_non_coalescible(self):
         # (3,2):(4,1) stays as-is (4 ≠ 2*1)
-        l = _CuTe_Layout([(3, 4), (2, 1)])
+        l = _Layout([(3, 4), (2, 1)])
         l = l.coalesce()
         self.assertEqual(l.sizes_and_strides, [(3, 4), (2, 1)])
 
     def test_complement_n_group_layout(self):
         # complement(4:2, 8) = 2:1; together form (8:1)
-        pg_layout = _CuTe_Layout([(4, 2)])
+        pg_layout = _Layout([(4, 2)])
         outer = pg_layout.complement(world_size=8)
         self.assertEqual(outer.sizes_and_strides, [(2, 1)])
         self.assertEqual(
@@ -1313,7 +1313,7 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Complement [(2,4), (2,1)] under world_size=16 → complement [(2,8), (2,2)]
-        pg_layout = _CuTe_Layout([(2, 4), (2, 1)])
+        pg_layout = _Layout([(2, 4), (2, 1)])
         self.assertEqual(
             pg_layout.layout_to_group_ranks(),
             [0, 1, 4, 5],
@@ -1336,8 +1336,8 @@ class CuTeLayoutTest(TestCase):
 
     def test_composition(self):
         # self = [(4,2), (2,1)], B = [(2,1)]  → A o B = [(2,2)]
-        orig_l = _CuTe_Layout([(4, 2), (2, 1)])
-        right_l = _CuTe_Layout([(2, 1)])
+        orig_l = _Layout([(4, 2), (2, 1)])
+        right_l = _Layout([(2, 1)])
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 1)
         self.assertEqual(composed_list[0].sizes_and_strides, [(2, 2)])
@@ -1352,7 +1352,7 @@ class CuTeLayoutTest(TestCase):
         )
 
         # self = [(4,2), (2,1)], B = [(2,2), (2,1)]  → A o B = [[(2,4)], [(2,2)]]
-        right_l = _CuTe_Layout([(2, 2), (2, 1)])
+        right_l = _Layout([(2, 2), (2, 1)])
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 2)
         self.assertEqual(composed_list[0].sizes_and_strides, [(2, 4)])
@@ -1371,14 +1371,14 @@ class CuTeLayoutTest(TestCase):
             AssertionError,
             "Layouts do not meet stride divisibility condition",
         ):
-            right_l = _CuTe_Layout([(2, 3)])
+            right_l = _Layout([(2, 3)])
             composed_list = orig_l.composition(right_l)
 
         with self.assertRaisesRegex(
             AssertionError,
             "Layouts do not meet shape divisibility condition",
         ):
-            right_l = _CuTe_Layout([(3, 2)])
+            right_l = _Layout([(3, 2)])
             composed_list = orig_l.composition(right_l)
 
 

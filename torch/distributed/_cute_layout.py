@@ -32,19 +32,18 @@
 
 from functools import reduce
 from itertools import product
-from typing import Optional
-
-import torch
-from torch.distributed.distributed_c10d import get_world_size
 
 
-class _CuTe_Layout:
+class _Layout:
     """
     Utility class for representing a integer layouts by leveraging CuTe Layout Algebra.
     See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
 
     Each layout is represented as a list of (size, stride) pairs. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
+
+    Lots of methods of layout like coalesce, composition, complement, etc. are borrowed from pycute.
+    https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137,L257
     """
 
     def __init__(self, sizes_and_strides: list[tuple[int, int]]):
@@ -71,7 +70,7 @@ class _CuTe_Layout:
 
     def __eq__(self, other: object) -> bool:
         return (
-            isinstance(other, _CuTe_Layout)
+            isinstance(other, _Layout)
             and self.sizes_and_strides == other.sizes_and_strides
         )
 
@@ -82,9 +81,7 @@ class _CuTe_Layout:
     def ceil_div(n: int, m: int) -> int:
         return (n + m - 1) // m
 
-    # Borrowed from pycute.layout.coalesce
-    # https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137
-    def coalesce(self) -> "_CuTe_Layout":
+    def coalesce(self) -> "_Layout":
         """
         A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
         Two consecutive modes can be "merged" into one if their
@@ -101,7 +98,7 @@ class _CuTe_Layout:
         - outer stride=4, mismatch (≠ 2)
         → cannot merge; result stays (3,2):(4,1)
         """
-        res = _CuTe_Layout([])
+        res = _Layout([])
         for size, stride in self.sizes_and_strides:
             if size == 1:
                 pass
@@ -112,9 +109,7 @@ class _CuTe_Layout:
                 res.sizes_and_strides.append((size, stride))
         return res
 
-    # Borrowed from pycute.layout.composition
-    # https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L190
-    def composition(self, layout: "_CuTe_Layout") -> list["_CuTe_Layout"]:
+    def composition(self, layout: "_Layout") -> list["_Layout"]:
         """
         Perform a by-mode composition between this layout (self) and another layout (layout).
 
@@ -144,16 +139,16 @@ class _CuTe_Layout:
             return [
                 l
                 for ss in layout.sizes_and_strides
-                for l in self.composition(_CuTe_Layout([ss]))
+                for l in self.composition(_Layout([ss]))
             ]
 
-        res: list[_CuTe_Layout] = []
+        res: list[_Layout] = []
         # Since we now only compose with single-size sublayout, we can assume numel_so_far is always from strides[0].
         numel_so_far = layout.strides[0]
         for sub_size in layout.sizes:
             sub_stride = numel_so_far
             numel_so_far *= sub_size
-            sub_res = _CuTe_Layout([])
+            sub_res = _Layout([])
 
             # when self is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
             # for integral s and d means that we want:
@@ -188,9 +183,7 @@ class _CuTe_Layout:
             res.append(sub_res)
         return res
 
-    # Borrowed from pycute.layout.complement
-    # https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L232
-    def complement(self, world_size: Optional[int] = None) -> "_CuTe_Layout":
+    def complement(self, world_size: int) -> "_Layout":
         """
         Compute the "complement layout" relative to a given world_size.
         A complement layout fills in the "missing" factor so that: self ⊗ complement(self, world_size)
@@ -211,10 +204,8 @@ class _CuTe_Layout:
         In distributed terms, complement() is often used to derive the "other"
         rank grouping when splitting processes into 2D meshes.
         """
-        res = _CuTe_Layout([])
+        res = _Layout([])
         current_idx = 1
-        world_size = world_size or get_world_size()
-
         for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
             if stride == 0 or size == 1:
                 continue
@@ -233,27 +224,6 @@ class _CuTe_Layout:
         res.sizes_and_strides.reverse()
 
         return res.coalesce()
-
-    @staticmethod
-    def rank_tensor_to_layouts(mesh: torch.Tensor) -> list["_CuTe_Layout"]:
-        """
-        Convert a PyTorch mesh tensor's shape/stride metadata into a list of CuTe-style layouts.
-
-        For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
-        and then wrap that (size, stride) pair into a 1D CuTe layout.
-
-        The result is a list of independent per-rank layouts, one per dimension.
-        Each layout describes how indices in that dimension map to memory offsets.
-
-        Example:
-          Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
-          Then:
-            layouts[0] = (3:4)   # first dimension: size=3, stride=4
-            layouts[1] = (4:1)   # second dimension: size=4, stride=1
-        """
-        return [
-            _CuTe_Layout([(mesh.size(i), mesh.stride(i))]) for i in range(mesh.ndim)
-        ]
 
     def layout_to_group_ranks(self) -> list[int]:
         """
@@ -294,9 +264,7 @@ class _CuTe_Layout:
             for coord in product(*(range(s) for s in self.sizes))
         ]
 
-    def layout_to_global_ranks(
-        self, world_size: Optional[int] = None
-    ) -> list[list[int]]:
+    def layout_to_global_ranks(self, world_size: int) -> list[list[int]]:
         """
         Build global ranks specified by the layout via two-level ranks composition.
 
@@ -315,8 +283,31 @@ class _CuTe_Layout:
                             [12+0, 12+1, 12+2, 12+3],          # → [12,13,14,15]
                         ]
         """
-        world_size = world_size or get_world_size()
         return [
             [group_offset + group_rank for group_rank in self.layout_to_group_ranks()]
             for group_offset in self.complement(world_size).layout_to_group_ranks()
         ]
+
+
+def init_layouts_from_mesh(
+    mesh_size: tuple[int], mesh_stride: tuple[int]
+) -> list["_Layout"]:
+    """
+    Convert a PyTorch mesh tensor's metadata (size, stride) into a list of CuTe-style layouts.
+
+    For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
+    and then wrap that (size, stride) pair into a 1D CuTe layout.
+
+    The result is a list of independent layout, one per dimension.
+    Each layout describes how indices in that dimension map to backend ranks.
+
+    Example:
+        Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
+        Then:
+        layouts[0] = (3:4)   # first dimension: size=3, stride=4
+        layouts[1] = (4:1)   # second dimension: size=4, stride=1
+    """
+    assert len(mesh_size) == len(mesh_stride), (
+        "mesh_size and mesh_stride must have the same length"
+    )
+    return [_Layout([(size, stride)]) for size, stride in zip(mesh_size, mesh_stride)]
