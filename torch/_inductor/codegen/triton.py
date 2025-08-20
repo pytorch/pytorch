@@ -318,6 +318,14 @@ class BlockDescriptorOptions:
         # Combine all removable dims.
         removable_dims = [any(dims) for dims in zip(singleton_dims, broadcasting_dims)]
 
+        # Remove singleton_dims from broadcasting_dims so that
+        # broadcast_shape and broadcasting_dims have the same length
+        broadcasting_dims = [
+            dim
+            for dim, is_singleton in zip(broadcasting_dims, singleton_dims)
+            if not is_singleton
+        ]
+
         def remove_dims(it):
             """Removes any broadcasting or singleton dims from a given sequence"""
             return [
