@@ -17,6 +17,7 @@ from torch.onnx._internal.exporter import (
     _dynamic_shapes,
     _onnx_program,
     _registration,
+    _constants,
 )
 
 
@@ -107,7 +108,21 @@ def export_compat(
     dynamic_shapes_with_export_dim, need_axis_mapping = (
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )
-    registry = _registration.ONNXRegistry().from_torchlib(opset_version=opset_version)
+
+    if opset_version < _constants.TORCHLIB_OPSET:
+        logger.info(
+            "Setting torchlib registry to %s to use the torchlib opset version because "
+            "the requested opset_version %s is a lower version. Version conversion will be done after export",
+            _constants.TORCHLIB_OPSET,
+            opset_version,
+        )
+        registry_opset_version = _constants.TORCHLIB_OPSET
+    else:
+        registry_opset_version = opset_version
+
+    registry = _registration.ONNXRegistry().from_torchlib(
+        opset_version=registry_opset_version
+    )
     if custom_translation_table is not None:
         for torch_op, onnx_ops in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations
