@@ -367,6 +367,8 @@ class simplefsdp:
     enable_bucket_ir = False
     enable_reorder_ir = False
     simplefsdp_only = False
+    bucketing_type = "manual"
+    bucketing_plan = []
 
 
 # DEPRECATED. This setting is ignored.
