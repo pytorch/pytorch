@@ -1580,9 +1580,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
-            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
-            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
+            .check_count(".all_gather_into_tensor_out.default(", 2, exactly=True)
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
