@@ -909,13 +909,18 @@ class SetVariable(ConstDictVariable):
         # We forward the calls to the dictionary model
         from ..utils import check_constant_args
 
-        if name in (
-            "isdisjoint",
-            "union",
-            "intersection",
-            "difference",
-            "symmetric_difference",
-        ) and check_constant_args(args, kwargs):
+        if (
+            name
+            in (
+                "isdisjoint",
+                "union",
+                "intersection",
+                "difference",
+                "symmetric_difference",
+            )
+            and check_constant_args(args, kwargs)
+            and istype(self.python_type(), set)
+        ):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
 
