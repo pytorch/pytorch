@@ -1,3 +1,5 @@
+#include <type_traits>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <torch/csrc/utils/pybind.h>
@@ -52,7 +54,11 @@ extern void initCudartBindings(PyObject* module) {
   cudart.def(
       "cuda"
       "GetErrorString",
-      cudaGetErrorString);
+      // Since we only wrap one enum value directly, do an indirection here to
+      // accept any returned error code as an input to this function.
+      [](std::underlying_type_t<cudaError_t> error_enum) {
+        return cudaGetErrorString(static_cast<cudaError_t>(error_enum));
+      });
   cudart.def(
       "cuda"
       "ProfilerStart",
