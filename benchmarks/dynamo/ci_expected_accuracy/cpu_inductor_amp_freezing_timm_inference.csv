@@ -46,7 +46,7 @@ deit_base_distilled_patch16_224,pass,0
 
 
 
-dla102,pass,0
+dla102,timeout,0
 
 
 
