@@ -386,7 +386,7 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
-void decrease_stat_array(
+inline void decrease_stat_array(
     StatArray& stat_array,
     size_t amount,
     const StatTypes& stat_types) {
