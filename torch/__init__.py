@@ -22,6 +22,8 @@ import platform
 import sys
 import textwrap
 import threading
+import importlib.metadata as md
+import re
 from typing import (
     Any as _Any,
     Callable as _Callable,
@@ -308,6 +310,16 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     ctypes.CDLL(lib_path)
 
 
+#following finds Cuda-12 libcudart.so and Cuda-13 libcudart.so.13
+_pat_cudart = re.compile(r"libcudart\.so(?:\.\d+(?:\.\d+)*)?")
+def _wheel_contains_cudart() -> bool:
+    """Checks if an installed Python wheel contains libcudart.so."""
+    return any(
+        _pat_cudart.search(str(f).replace("\\", "/"))
+        for dist in md.distributions()
+        for f in (dist.files or [])
+    )
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
     if platform.system() == "Windows":
@@ -317,28 +329,31 @@ def _load_global_deps() -> None:
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
+
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+
         # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
         # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
         # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
         # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
         # See https://github.com/pytorch/pytorch/issues/145580
-        try:
-            with open("/proc/self/maps") as f:
-                _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
-                return
-            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
-            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
-        except Exception:
-            pass
+.
+        if not _wheel_contains_cudart():
+            # If no CUDA runtime is found in a wheel, there are no dependencies to preload.
+            return
+
+        # Preload CUDA dependencies (nvrtc and nvjitlink)
+        # The order is important, especially for older CUDA versions.
+        _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+        _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+
+    except Exception:
+        # Never hard-fail.
+        pass
 
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
