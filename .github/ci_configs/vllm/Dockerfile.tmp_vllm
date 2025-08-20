@@ -147,7 +147,7 @@ ENV MAX_JOBS=${max_jobs}
 
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
+ARG XFORMERS_COMMIT=v0.0.31
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \

@@ -75,7 +75,7 @@ class VllmTestRunner(BaseRunner):
 
         # Match the structure of the artifacts.zip from vllm external build
         self.VLLM_TEST_WHLS_REGEX = [
-            "xformers/xformers*.whl",
+            "xformers/*.whl",
             "vllm/vllm*.whl",
             "flashinfer-python/flashinfer*.whl",
         ]
