@@ -27,7 +27,10 @@ class DTensorSpec:
     placements: tuple[Placement, ...]
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
-    # device order is used to specify the order of the device mesh, range(0, mesh.ndim)
+    # When a tensor dimension is sharded across multiple mesh axes,
+    # `device_order` specifies the sequence in which these shardings are
+    # applied, which in turn determines the placement of tensor shards on
+    # devices.
     device_order: Optional[tuple[int, ...]] = None
 
     def __post_init__(self) -> None:
@@ -45,6 +48,16 @@ class DTensorSpec:
         # change (though we do not expect `mesh` or `placements` to change)
         if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
             self._hash = None
+        # This assert was triggered by buggy handling for dict outputs in some
+        # FX passes, where you accidentally iterate over a dict and try to put
+        # keys into TensorMeta.  See https://github.com/pytorch/pytorch/issues/157919
+        if attr == "tensor_meta" and value is not None:
+            from torch.fx.passes.shape_prop import TensorMetadata
+
+            # TODO: the TensorMetadata arises from
+            # test/distributed/tensor/experimental/test_tp_transform.py::TensorParallelTest::test_tp_transform_e2e
+            # but I actually can't reproduce it, maybe it is also a bug!
+            assert isinstance(value, (TensorMeta, TensorMetadata)), value
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -63,7 +76,7 @@ class DTensorSpec:
                     self.device_order,
                 )
             )
-        return hash((self.mesh, self.placements))
+        return hash((self.mesh, self.placements, self.device_order))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -79,6 +92,7 @@ class DTensorSpec:
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
             and self.placements == other.placements
+            and self.device_order == other.device_order
         ):
             return False
         if self.tensor_meta is None or other.tensor_meta is None:
@@ -88,7 +102,6 @@ class DTensorSpec:
             self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
             and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
             and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
-            and self.device_order == other.device_order  # type: ignore[union-attr]
         )
 
     def __str__(self) -> str:
