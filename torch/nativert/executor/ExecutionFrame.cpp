@@ -11,6 +11,7 @@ ExecutionFrame::ExecutionFrame(const Graph& graph)
       persistent_(graph.numValues()),
       moveable_output_mask_(graph.userOutputs().size()) {
   updatePersistentValues(/* weights = nullptr */);
+  updateMovableOutputs();
 }
 
 ExecutionFrame::ExecutionFrame(
