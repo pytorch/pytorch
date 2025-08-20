@@ -121,7 +121,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
     curl -k -L "https://ossci-windows.s3.amazonaws.com/%CUDA_INSTALL_EXE%" --output "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" & REM @lint-ignore
     if errorlevel 1 exit /b 1
     set "CUDA_SETUP_FILE=%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%"
-    set "ARGS=cuda_profiler_api_13.0 thrust_13.0 nvcc_13.0 cuobjdump_13.0 nvprune_13.0 nvprof_13.0 cupti_13.0 cublas_13.0 cublas_dev_13.0 cudart_13.0 cufft_13.0 cufft_dev_13.0 curand_13.0 curand_dev_13.0 cusolver_13.0 cusolver_dev_13.0 cusparse_13.0 cusparse_dev_13.0 npp_13.0 npp_dev_13.0 nvrtc_13.0 nvrtc_dev_13.0 nvml_dev_13.0 nvjitlink_13.0 nvtx_13"
+    set "ARGS="
 )
 
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.12.0.46_cuda13-archive
