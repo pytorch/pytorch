@@ -2598,19 +2598,19 @@ class CommonTemplate:
         m = 32
         k = 128
         n = 128
+        q_group = k
 
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.bfloat16)
         b = torch.rand((k, n), dtype=torch.bfloat16)
 
+        # codegen_dynamic_shape test fails without explicitly marking these dynamic
         torch._dynamo.mark_dynamic(a, 0)
         torch._dynamo.mark_dynamic(b, 1)
 
         in_features = b.size(0)
         out_features = b.size(1)
-        q_group = in_features
-        a = a.to(torch.bfloat16)
-        b = b.to(torch.bfloat16)
+
         if not self.is_dtype_supported(torch.bfloat16):
             raise unittest.SkipTest(
                 f"torch.bfloat16 not supported for device {self.device}"
@@ -2633,7 +2633,6 @@ class CommonTemplate:
 
         def fn(a, q_group, in_features, out_features):
             b_int4pack, _ = dyn_quant_pack_4bit_weight(b, in_features, out_features)
-            a = a.to(torch.bfloat16)
             res = torch.ops.aten._dyn_quant_matmul_4bit(
                 a,
                 b_int4pack,
