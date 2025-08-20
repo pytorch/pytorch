@@ -327,10 +327,10 @@ void woq_matmul_int4(
 }
 
 sycl::event woq_matmul_w8a16(
-    Tensor& result, // [M, K], dtype: fp16,bf16
+    Tensor& result, // [M, N], dtype: fp16,bf16
     const Tensor& mat1, // [M, K], Activation. dtype: fp16,bf16
     const Tensor& mat2, // [K, N], Weight. dtype: fp8_e4m3, fp8_e5m2
-    const Tensor& scale_b, // [K, N], dtype: fp32
+    const Tensor& scale_b, // [1, N] or [1],, dtype: fp32
     const std::vector<sycl::event>& deps = {}) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();

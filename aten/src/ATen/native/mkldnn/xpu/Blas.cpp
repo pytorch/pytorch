@@ -508,8 +508,8 @@ Tensor& _weight_fp8_mm_out_xpu(
         "If provided scales, it must be a scalar or 2D tensor, but got ",
         scales.dim());
     TORCH_CHECK(
-        (scales.numel() == 1 || scales.numel() == A.size(0)),
-        "scales must be scalar or match A's first dimension. But got scales size: (",
+        (scales.numel() == 1 || scales.numel() == B.size(1)),
+        "scales must be scalar or match B's first dimension. But got scales size: (",
         scales.sizes()[0],
         ", ",
         scales.dim() > 1 ? scales.size(1) : 1,
@@ -555,7 +555,7 @@ Tensor _weight_fp8_mm_xpu(
     const std::optional<Tensor>& scales_) {
   at::Tensor scales = scales_.has_value()
       ? scales_.value()
-      : at::ones({1}, B.options().dtype(B.dtype()));
+      : at::ones({1}, B.options().dtype(kFloat));
   // Initialize the empty out tensor and do actual allocation once all check
   // passed.
   auto out = at::empty({0}, A.options());
