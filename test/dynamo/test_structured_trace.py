@@ -1501,23 +1501,22 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
         with self._setup_graph_execution_capture() as payload_buffer:
             torch._dynamo.reset()
-            mod1 = SimpleModule()
-            compiled1 = torch.compile(mod1, backend="inductor")
-            compiled1(torch.randn(2, 2))
-            mod2 = SimpleModule()
-            compiled2 = torch.compile(mod2, backend="inductor")
-            compiled2(torch.randn(2, 2))
-            torch._inductor.debug.log_graph_execution()
+            with torch._inductor.debug.record_and_log_graph_execution_order():
+                mod1 = SimpleModule()
+                compiled1 = torch.compile(mod1, backend="inductor")
+                compiled1(torch.randn(2, 2))
+                mod2 = SimpleModule()
+                compiled2 = torch.compile(mod2, backend="inductor")
+                compiled2(torch.randn(2, 2))
 
             payload_content = payload_buffer.getvalue().strip()
-            normalized = re.sub(r"graph_\d+", "GRAPH", payload_content)
             self.assertExpectedInline(
-                normalized,
+                payload_content,
                 """\
 {
 "graph_execution": [
-"GRAPH",
-"GRAPH"
+"graph_0",
+"graph_1"
 ]
 }""",
             )

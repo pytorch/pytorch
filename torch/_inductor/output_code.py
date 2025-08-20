@@ -56,6 +56,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 
 _graph_execution_order: list[str] = []
+_record_graph_execution: bool = False
 
 if TYPE_CHECKING:
     from collections import Counter
@@ -586,7 +587,7 @@ class CompiledFxGraph(OutputCode):
 
         graph_id = self.fx_kwargs.get("graph_id")
         name = f"graph_{graph_id}" if graph_id is not None else "unknown"
-        if config.log_tlparse:
+        if _record_graph_execution:
             _graph_execution_order.append(name)
         try:
             with record_function(

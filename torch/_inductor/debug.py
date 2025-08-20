@@ -1,4 +1,3 @@
-import atexit
 import collections
 import contextlib
 import copy
@@ -819,9 +818,16 @@ def log_graph_execution() -> None:
         log.debug("Failed to log inductor_graph_execution", exc_info=True)
 
 
-# Dump accumulated graph executions on process exit
-if config.log_tlparse:
-    atexit.register(log_graph_execution)
+# Minimal user-facing context manager to record execution order and log on exit
+@contextlib.contextmanager
+def record_and_log_graph_execution_order() -> Iterator[None]:
+    output_code._record_graph_execution = True
+    output_code._graph_execution_order.clear()
+    try:
+        yield
+    finally:
+        output_code._record_graph_execution = False
+        log_graph_execution()
 
 
 @dataclasses.dataclass
