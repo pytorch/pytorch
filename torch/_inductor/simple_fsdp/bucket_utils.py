@@ -27,7 +27,9 @@ def get_fx_node(
             f"Expected BaseSchedulerNode or IRNode, got {type(snode_or_ir_node)}. Offending value: {snode_or_ir_node}"
         )
     origins_with_expected_op = [o for o in origins if o.target == expected_op]
-    assert len(origins_with_expected_op) == 1
+    if len(origins_with_expected_op) != 1:
+        print("[Get FX exception happen]origins_with_expected_op", origins_with_expected_op, "expected_op", expected_op, "snode_or_ir_node", snode_or_ir_node)
+        return None
     return origins_with_expected_op[0]
 
 

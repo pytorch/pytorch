@@ -187,14 +187,20 @@ def get_bucketing_plan(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
             has_fsdp_comm = True
-            fsdp_world_size = get_ag_node_pg_info(snode)[0]
+            pg_info = get_ag_node_pg_info(snode)
+            if pg_info is None:
+                continue
+            fsdp_world_size = pg_info[0]
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
         ) and _check_ir_node_fsdp(snode.node):
             has_fsdp_comm = True
-            fsdp_world_size, _, fsdp_rs_reduce_op = get_rs_node_pg_info(
+            pg_info = get_rs_node_pg_info(
                 snode, return_reduce_op=True
             )
+            if pg_info is None:
+                continue
+            fsdp_world_size, _, fsdp_rs_reduce_op = pg_info
             break
 
     # if there is no fsdp comm., return

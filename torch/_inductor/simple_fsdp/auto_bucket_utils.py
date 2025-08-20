@@ -26,6 +26,8 @@ def get_ag_node_pg_info(snode, resolve_pg=False):
         snode,
         expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
     )
+    if ag_fx_node is None:
+        return None
     group_size, group_name = ag_fx_node.args[1], ag_fx_node.args[2]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
@@ -37,6 +39,8 @@ def get_rs_node_pg_info(snode, resolve_pg=False, return_reduce_op=False):
         snode,
         expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
     )
+    if rs_fx_node is None:
+        return None
     group_size, group_name = rs_fx_node.args[2], rs_fx_node.args[3]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
@@ -51,6 +55,8 @@ def get_all_reduce_node_pg_info(snode, resolve_pg=False):
         snode,
         expected_op=torch.ops._c10d_functional.all_reduce_.default,
     )
+    if all_reduce_fx_node is None:
+        return None
     group_size, group_name = all_reduce_fx_node.args[1], all_reduce_fx_node.args[2]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
@@ -62,6 +68,8 @@ def get_all_to_all_node_pg_info(snode, resolve_pg=False):
         snode,
         expected_op=torch.ops._c10d_functional.all_to_all_single.default,
     )
+    if all_to_all_fx_node is None:
+        return None
     group_size, group_name = 0, all_to_all_fx_node.args[3]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
@@ -199,6 +207,8 @@ def calibrate_with_cache(
             release_steps.append(idx)
             node_tensor_info = get_node_tensor_info(snode)
             node_pg_info = get_ag_node_pg_info(snode, resolve_pg=True)
+            if node_pg_info is None:
+                continue
             node_info = node_tensor_info[:-2] + node_pg_info
             input_size = node_tensor_info[-2]
             if _check_ir_node_fsdp(snode.node):
@@ -211,6 +221,8 @@ def calibrate_with_cache(
         ):
             node_tensor_info = get_node_tensor_info(snode)
             node_pg_info = get_rs_node_pg_info(snode, resolve_pg=True)
+            if node_pg_info is None:
+                continue
             node_info = node_tensor_info[:-2] + node_pg_info
             output_size = node_tensor_info[-1]
             if _check_ir_node_fsdp(snode.node):
@@ -223,6 +235,8 @@ def calibrate_with_cache(
         ):
             node_tensor_info = get_node_tensor_info(snode)
             node_pg_info = get_all_reduce_node_pg_info(snode, resolve_pg=True)
+            if node_pg_info is None:
+                continue
             node_info = node_tensor_info[:-2] + node_pg_info
             input_size = node_tensor_info[-2]
             all_reduce_input_size_dict[node_info].append(input_size)
@@ -231,6 +245,8 @@ def calibrate_with_cache(
         ):
             node_tensor_info = get_node_tensor_info(snode)
             node_pg_info = get_all_to_all_node_pg_info(snode, resolve_pg=True)
+            if node_pg_info is None:
+                continue
             node_info = node_tensor_info[:-2] + node_pg_info
             input_size = node_tensor_info[-2]
             all_to_all_input_size_dict[node_info].append(input_size)
