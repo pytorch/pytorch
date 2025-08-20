@@ -31,7 +31,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -337,7 +337,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
-class DTensorContinuousTestBase(MultiProcContinousTest):
+class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def device_type(cls) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU

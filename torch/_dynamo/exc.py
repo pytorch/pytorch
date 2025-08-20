@@ -264,7 +264,14 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class IncorrectUsage(Exception):
@@ -373,7 +380,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.set_current_exception(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raise get_dynamo_observed_exception(exc_type)
 
 
