@@ -1336,12 +1336,8 @@ class DeviceCachingAllocator {
       process_events(context);
     } else {
       if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-#ifndef USE_ROCM
         // We check if there is some block that is safe to free on this stream
         free_safe_blocks_in_capture(context, stream);
-#else
-        TORCH_CHECK(false, "Capture safe free blocks not supported on ROCm");
-#endif // USE_ROCM
       }
     }
     size_t size = round_size(orig_size);
@@ -1633,7 +1629,6 @@ class DeviceCachingAllocator {
     return block;
   }
 
-#ifndef USE_ROCM
   // Insert "free marker" (empty nodes) into the CUDA graph for all streams that
   // have used the block, including the allocation stream. These nodes mark the
   // last use of the block in the capture graph. Returns a vector of the
@@ -1646,7 +1641,7 @@ class DeviceCachingAllocator {
       cudaGraph_t graph{};
       const cudaGraphNode_t* deps = nullptr;
       size_t num_deps = 0;
-      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
           stream, &status, nullptr, &graph, &deps, &num_deps));
 
       TORCH_INTERNAL_ASSERT(
@@ -1690,7 +1685,7 @@ class DeviceCachingAllocator {
     const cudaGraphNode_t* dependencies = nullptr;
     size_t num_dependencies = 0;
 
-    C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+    C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
         stream,
         &status,
         /*id=*/nullptr,
@@ -1842,7 +1837,6 @@ class DeviceCachingAllocator {
       deferred_blocks.erase(block);
     }
   }
-#endif // USE_ROCM
 
   void free(Block* block) {
     std::shared_ptr<GatheredContext> context =
@@ -1883,11 +1877,7 @@ class DeviceCachingAllocator {
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(!captures_underway.empty())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
-#ifndef USE_ROCM
           deferred_blocks.emplace(block, insert_free_marker(block));
-#else
-          TORCH_CHECK(false, "Capture safe free blocks not supported on ROCm");
-#endif // USE_ROCM
         } else {
           // If graph_capture_record_stream_reuse is not enabled, always defer
           // the free until capture is finished.

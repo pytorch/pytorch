@@ -5613,7 +5613,6 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
-    @skipIfRocm(msg="graph_capture_record_stream_reuse is not supported on ROCm")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -5661,7 +5660,6 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
-    @skipIfRocm(msg="graph_capture_record_stream_reuse is not supported on ROCm")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
