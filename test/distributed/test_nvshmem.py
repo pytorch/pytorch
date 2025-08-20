@@ -130,7 +130,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
-        torch.ops.symm_mem.nvshmem_broadcast(tensor, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
     @skipIfRocm
@@ -155,7 +155,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
-        torch.ops.symm_mem.nvshmem_broadcast(y, group_name)
+        torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
 
