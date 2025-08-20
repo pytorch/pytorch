@@ -143,9 +143,7 @@ def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
         str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
     )
-    return next(x for x in requirements if x.startswith("nvidia-nccl")).split("==")[
-        1
-    ]
+    return next(x for x in requirements if x.startswith("nvidia-nccl")).split("==")[1]
 
 
 def read_nccl_pin(arch_version: str) -> str:
