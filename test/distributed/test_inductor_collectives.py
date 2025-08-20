@@ -823,8 +823,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 @instantiate_parametrized_tests
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(
-    not torch.cuda.is_available() and not torch.xpu.is_available(),
-    "Neither CUDA and XPU is available",
+    not torch.accelerator.is_available(),
+    "No accelerator is available",
 )
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """

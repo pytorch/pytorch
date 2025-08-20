@@ -1778,26 +1778,16 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         ]
 
         if TEST_XPU:
-            backend_config_strings_and_expected_values.remove(
-                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy")
-            )
-            backend_config_strings_and_expected_values.remove(
-                ("DUMMY", "cpu:dummy,cuda:dummy")
-            )
-            backend_config_strings_and_expected_values.remove(
-                ("dummy", "cpu:dummy,cuda:dummy")
-            )
-            backend_config_strings_and_expected_values.extend(
-                [
-                    (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
-                    ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
-                    ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
-                    ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
-                    ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
-                    ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
-                    ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
-                ]
-            )
+            # Override backend_config_strings_and_expected_values for Intel GPU.
+            backend_config_strings_and_expected_values[4:10] = [
+                (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("DUMMY", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("dummy", "cpu:dummy,cuda:dummy,xpu:dummy"),
+                ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+                ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+                ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+                ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
+            ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
             with self.subTest(config_str):

@@ -27,7 +27,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfXpu
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -49,7 +49,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
-@skipIfXpu
+@unittest.skipIf(TEST_XPU, "XPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -60,7 +60,7 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         mesh_group = mesh.get_group()
         default_group = _get_default_group()
-        if torch.accelerator.is_available():
+        if torch.cuda.is_available():
             self.assertNotEqual(mesh_group, default_group)
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
@@ -79,7 +79,7 @@ class DeviceMeshSetDeviceTest(DTensorTestBase):
 
         # Set the device on each process before DeviceMesh constructor,
         # and device to be different than the default world rank
-        torch.accelerator.set_device_idx((self.rank + 2) % self.world_size)
+        torch.accelerator.set_device_index((self.rank + 2) % self.world_size)
         _set_env_var(world_size=self.world_size, rank=self.rank)
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())

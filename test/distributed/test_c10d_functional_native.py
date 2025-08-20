@@ -275,9 +275,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         # check memory leak
         for i in range(1, 10):
-            mem_usage[i] = torch.get_device_module(
-                self.device.type
-            ).max_memory_allocated()
+            mem_usage[i] = torch.accelerator.max_memory_allocated()
             compiled(arg)
 
         assert mem_usage[9] == mem_usage[8]

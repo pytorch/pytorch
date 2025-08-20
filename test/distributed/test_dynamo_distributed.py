@@ -48,6 +48,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import skipIfXpu, TEST_XPU
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def reset_rng_state():
@@ -559,10 +560,6 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
 # # optimizer, you should be able to repro it single process!
-# @skip_but_pass_in_sandcastle_if(
-#     not dist.is_nccl_available() and not dist.is_xccl_available(),
-#     "c10d was not compiled with the NCCL or XCCL backend",
-# )
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 class TestMultiProc(DynamoDistributedMultiProcTestCase):
     """
@@ -696,9 +693,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(
-        TEST_XPU, "torch._inductor.cudagraph_trees is not supported on XPU"
-    )
+    @requires_cuda_and_triton
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
