@@ -55,6 +55,8 @@ from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
 
 
+_graph_execution_order: list[str] = []
+
 if TYPE_CHECKING:
     from collections import Counter
     from collections.abc import Sequence
@@ -581,12 +583,11 @@ class CompiledFxGraph(OutputCode):
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
-        from . import debug
 
         graph_id = self.fx_kwargs.get("graph_id")
         name = f"graph_{graph_id}" if graph_id is not None else "unknown"
         if config.log_tlparse:
-            debug.log_graph_execution(name)
+            _graph_execution_order.append(name)
         try:
             with record_function(
                 f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
@@ -729,7 +730,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[Union[str, Weights]]]
+    filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

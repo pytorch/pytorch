@@ -1501,20 +1501,24 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
         with self._setup_graph_execution_capture() as payload_buffer:
             torch._dynamo.reset()
-            mod = SimpleModule()
-            compiled = torch.compile(mod, backend="inductor")
-            compiled(torch.randn(2, 2))
+            mod1 = SimpleModule()
+            compiled1 = torch.compile(mod1, backend="inductor")
+            compiled1(torch.randn(2, 2))
+            mod2 = SimpleModule()
+            compiled2 = torch.compile(mod2, backend="inductor")
+            compiled2(torch.randn(2, 2))
+            torch._inductor.debug.log_graph_execution()
 
-            # Assert payload inline with dynamic graph name normalized
             payload_content = payload_buffer.getvalue().strip()
-            normalized = re.sub(
-                r"(\"graph\":\s*)\"[^\"]+\"", r'\1"GRAPH"', payload_content
-            )
+            normalized = re.sub(r"graph_\d+", "GRAPH", payload_content)
             self.assertExpectedInline(
                 normalized,
                 """\
 {
-"graph": "GRAPH"
+"graph_execution": [
+"GRAPH",
+"GRAPH"
+]
 }""",
             )
 

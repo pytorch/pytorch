@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -46,14 +48,18 @@ struct NVSHMEMAllocation {
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
+      void* ptr,
       std::shared_ptr<NVSHMEMAllocation> allocation,
       const std::string& group_name)
       : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
     // For logging only
     static int exchanged_n_times = 0;
+    // Buffer size is rest of space available after ptr (this field may not be
+    // important in future thus subject to removal)
+    buffer_size_ = allocation->buffer_size -
+        (reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(allocation->ptr));
     c10::cuda::CUDAGuard guard(device_idx_);
 
     auto global_rank = get_group_info("0").rank;
@@ -78,11 +84,12 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
       buffers_.push_back(nvshmem_ptr(
-          allocation->ptr, rank_to_global_rank_[r]));
+          ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
     void* signal_pad_ptr = nvshmem_malloc(signal_pad_size);
+    TORCH_CHECK(signal_pad_ptr != nullptr, "nvshmem_malloc failed");
     AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
 
     for (int r = 0; r < world_size_; ++r) {
@@ -133,6 +140,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return signal_pads_dev_;
   }
 
+  // This API is subject to removal
   size_t get_buffer_size() override {
     return buffer_size_;
   }
@@ -345,6 +353,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     initialize_nvshmem_with_store(store, rank, world_size);
     auto ptr = nvshmem_malloc(size);
+    // If size is 0 (which is legal allocation request) we shouldn't error out
+    TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
@@ -367,7 +377,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      void* ptr,  // data_ptr() of the tensor
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
     {
@@ -376,10 +386,25 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
     }
-    auto it = allocations_.find(ptr);
-    TORCH_CHECK(it != allocations_.end());
+    // This is the first time the tenosr gets rendezvous'ed. We need to first
+    // search for an allocations that backs it (below).
+
+    // [Note] In case of MemPool or when the tensor is a slice of another, the
+    // tensor's data_ptr() may not match exactly with an allocation's base
+    // address. Thus we perform the search by testing if the tensor's data_ptr
+    // is within an allocation's range.
+    auto it = std::find_if(allocations_.begin(), allocations_.end(),
+                               [&](const auto& pair){
+                                  auto& allocation = pair.second;
+                                  auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                  auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                  return ptr_int >= base_ptr && ptr_int < base_ptr + allocation->buffer_size; });
+    TORCH_CHECK(it != allocations_.end(),
+        "Pointer not within any SymmetricMemory allocation, "
+        "is the tensor allocated from SymmetricMemory?");
+
     auto symm_mem =
-        c10::make_intrusive<NVSHMEMSymmetricMemory>(it->second, *group_name);
+        c10::make_intrusive<NVSHMEMSymmetricMemory>(ptr, it->second, *group_name);
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
