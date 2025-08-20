@@ -25,10 +25,12 @@ std::shared_ptr<Weights> loadWeightsDefault(
       "{}{}.pt", torch::_export::archive_spec::WEIGHTS_DIR, modelName);
   auto constantsPath = fmt::format(
       "{}{}.pt", torch::_export::archive_spec::CONSTANTS_DIR, modelName);
+
   TORCH_CHECK(
       reader.hasRecord(weightsPath), weightsPath, " not found in package");
   TORCH_CHECK(
       reader.hasRecord(constantsPath), constantsPath, " not found in package");
+
   const auto& [weightsData, weightsSize] = reader.getRecord(weightsPath);
   auto weights =
       torch::jit::pickle_load_obj(

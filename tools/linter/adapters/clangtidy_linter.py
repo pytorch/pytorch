@@ -145,11 +145,13 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
+    config_file: str | None = None,
 ) -> list[LintMessage]:
     try:
-        proc = run_command(
-            [binary, f"-p={build_dir}", *include_args, filename],
-        )
+        args = [binary, f"-p={build_dir}", *include_args, filename]
+        if config_file:
+            args.insert(2, f"--config-file={os.path.join(PYTORCH_ROOT, config_file)}")
+        proc = run_command(args)
     except OSError as err:
         return [
             LintMessage(
@@ -203,6 +205,12 @@ def main() -> None:
         "--binary",
         required=True,
         help="clang-tidy binary path",
+    )
+    parser.add_argument(
+        "--config-file",
+        "--config_file",
+        required=False,
+        help="clang-tidy config file",
     )
     parser.add_argument(
         "--build-dir",
@@ -262,7 +270,6 @@ def main() -> None:
     # When it happens in a race condition, the linter command will fails with
     # the following no such file or directory error: '.lintbin/clang-tidy'
     binary_path = os.path.abspath(args.binary)
-
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),
         thread_name_prefix="Thread",
@@ -273,6 +280,7 @@ def main() -> None:
                 filename,
                 binary_path,
                 abs_build_dir,
+                args.config_file,
             ): filename
             for filename in args.filenames
         }

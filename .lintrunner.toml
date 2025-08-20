@@ -307,6 +307,35 @@ command = [
 ]
 
 [[linter]]
+code = 'CLANGTIDYNATIVERT'
+include_patterns = [
+    'torch/nativert/*.h',
+    'torch/nativert/*.cpp',
+    'torch/nativert/**/*.h',
+    'torch/nativert/**/*.cpp',
+]
+exclude_patterns = [
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=clang-tidy',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=clang-tidy',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/clangtidy_linter.py',
+    '--binary=.lintbin/clang-tidy',
+    '--build_dir=./build',
+    '--config_file=torch/nativert/.clang-tidy',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'TYPEIGNORE'
 include_patterns = ['**/*.py', '**/*.pyi']
 exclude_patterns = [
