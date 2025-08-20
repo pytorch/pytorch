@@ -772,11 +772,12 @@ def distribute_tensor(
 
     placements = list(placements)
     device_order = device_order or tuple(range(device_mesh.ndim))
-    if len(device_order) != device_mesh.ndim:
-        raise ValueError(
-            f"device_order must have the same length as device_mesh.ndim! "
-            f"Found device_order length: {len(device_order)}, and device_mesh.ndim: {device_mesh.ndim}."
-        )
+    if device_order is not None:
+        if sorted(device_order) != list(range(device_mesh.ndim)):
+            raise ValueError(
+                f"device_order must be a permutation of list range(0, device_mesh.ndim)."
+                f"Found device_order {device_order}, and device_mesh.ndim: {device_mesh.ndim}."
+            )
     sorted_placements = sorted(enumerate(placements), key=lambda x: device_order[x[0]])
     for mesh_dim, placement in sorted_placements:
         if placement.is_shard():

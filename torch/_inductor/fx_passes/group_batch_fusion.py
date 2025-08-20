@@ -1365,10 +1365,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             print_output=False, include_stride=True, include_device=True
         )
 
+        name = f"optimus_{str(rule.__class__.__name__)}"
+        if "MTIA" in name:
+            name = f"cff_{str(rule.__class__.__name__)}"
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "name": name,
                 "encoding": "string",
             },
             payload_fn=lambda: graph_str,
