@@ -151,6 +151,7 @@ RUN pip freeze | grep -E 'ninja'
 
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
+# sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
 ARG XFORMERS_COMMIT=v0.0.30
 ENV CCACHE_DIR=/root/.cache/ccache
 
