@@ -85,10 +85,9 @@ void initMonitorBindings(PyObject* module) {
 
   auto m = rootModule.def_submodule("_monitor");
 
-  py::native_enum<Aggregation>(
+  py::enum_<Aggregation>(
       m,
       "Aggregation",
-      "enum.Enum",
       R"DOC(
         These are types of aggregations that can be used to accumulate stats.
       )DOC")
@@ -128,8 +127,7 @@ void initMonitorBindings(PyObject* module) {
           R"DOC(
             MIN returns the min of the added values.
           )DOC")
-      .export_values()
-      .finalize();
+      .export_values();
 
   py::class_<Stat<double>>(
       m,

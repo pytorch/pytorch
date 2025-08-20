@@ -1,5 +1,3 @@
-#include <type_traits>
-
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <torch/csrc/utils/pybind.h>
@@ -22,7 +20,7 @@ hipError_t hipReturnSuccess() {
 } // namespace
 #endif
 
-extern void initCudartBindings(PyObject* module) {
+void initCudartBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cudart = m.def_submodule("_cudart", "libcudart.so bindings");
@@ -33,32 +31,24 @@ extern void initCudartBindings(PyObject* module) {
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12000
   // cudaOutputMode_t is used in cudaProfilerInitialize only. The latter is gone
   // in CUDA 12.
-  py::native_enum<cudaOutputMode_t>(
+  py::enum_<cudaOutputMode_t>(
       cudart,
       "cuda"
-      "OutputMode",
-      "enum.IntEnum")
+      "OutputMode")
       .value("KeyValuePair", cudaKeyValuePair)
-      .value("CSV", cudaCSV)
-      .finalize();
+      .value("CSV", cudaCSV);
 #endif
 
-  py::native_enum<cudaError_t>(
+  py::enum_<cudaError_t>(
       cudart,
       "cuda"
-      "Error",
-      "enum.IntEnum")
-      .value("success", cudaSuccess)
-      .finalize();
+      "Error")
+      .value("success", cudaSuccess);
 
   cudart.def(
       "cuda"
       "GetErrorString",
-      // Since we only wrap one enum value directly, do an indirection here to
-      // accept any returned error code as an input to this function.
-      [](std::underlying_type_t<cudaError_t> error_enum) {
-        return cudaGetErrorString(static_cast<cudaError_t>(error_enum));
-      });
+      cudaGetErrorString);
   cudart.def(
       "cuda"
       "ProfilerStart",

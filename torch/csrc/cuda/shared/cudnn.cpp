@@ -74,17 +74,16 @@ size_t getVersionInt() {
 
 namespace torch::cuda::shared {
 
-extern void initCudnnBindings(PyObject* module) {
+void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cudnn = m.def_submodule("_cudnn", "libcudnn.so bindings");
 
-  py::native_enum<cudnnRNNMode_t>(cudnn, "RNNMode", "enum.IntEnum")
+  py::enum_<cudnnRNNMode_t>(cudnn, "RNNMode")
       .value("rnn_relu", CUDNN_RNN_RELU)
       .value("rnn_tanh", CUDNN_RNN_TANH)
       .value("lstm", CUDNN_LSTM)
-      .value("gru", CUDNN_GRU)
-      .finalize();
+      .value("gru", CUDNN_GRU);
 
   // The runtime version check in python needs to distinguish cudnn from miopen
 #ifdef USE_CUDNN
