@@ -2559,7 +2559,7 @@ def _reduction_configs(
             x_block,
             outer_r_block,
             num_warps=num_warps,
-            register_intensive=register_intensive
+            register_intensive=register_intensive,
         )
 
     contiguous_config = make_config(
