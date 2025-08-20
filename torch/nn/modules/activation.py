@@ -283,7 +283,10 @@ class Hardtanh(Module):
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
-        assert self.max_val > self.min_val
+        
+        # Validate that max_val is greater than min_val
+        if self.max_val <= self.min_val:
+            raise ValueError(f"max_val ({self.max_val}) must be greater than min_val ({self.min_val})")
 
     def forward(self, input: Tensor) -> Tensor:
         """

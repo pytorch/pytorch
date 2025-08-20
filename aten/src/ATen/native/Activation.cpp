@@ -452,6 +452,11 @@ Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, T
     min_ = min;
     max_ = max;
   }
+  
+  // Check that min_val is not greater than max_val
+  TORCH_CHECK(min_.to<double>() <= max_.to<double>(), 
+             "min_val cannot be greater than max_val");
+  
   return at::clamp_out(result, self, min_, max_);
 }
 
