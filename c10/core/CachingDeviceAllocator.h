@@ -1285,6 +1285,29 @@ struct CachingDeviceAllocatorImpl {
     trace_trackers_.emplace_back(std::move(tracker));
   }
 
+  // Get memory fraction limiting maximum allocated memory
+  virtual double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    getMemoryInfo(device_index_, device_free, device_total);
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_total);
+  }
+
+  // Set memory fraction to limit maximum allocated memory
+  virtual void setMemoryFraction(double fraction) {
+    size_t device_free = 0;
+    size_t device_total = 0;
+    getMemoryInfo(device_index_, device_free, device_total);
+    allowed_memory_maximum =
+        static_cast<size_t>(fraction * static_cast<double>(device_total));
+    set_fraction = true;
+  }
+
   // Dump a complete snapshot of the memory held by the allocator. Potentially
   // VERY expensive.
   std::vector<GenericSegmentInfo> snapshot(MempoolId_t mempool_id) {
@@ -1444,6 +1467,25 @@ struct CachingDeviceAllocatorImpl {
       // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+    }
+  }
+
+  std::vector<c10::DeviceIndex> peers() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return devices_with_peer_access_;
+  }
+
+  void addPeerAccess(c10::DeviceIndex dev_to_access) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (std::find(
+            devices_with_peer_access_.begin(),
+            devices_with_peer_access_.end(),
+            dev_to_access) != devices_with_peer_access_.end()) {
+      return;
+    }
+    devices_with_peer_access_.push_back(dev_to_access);
+    for (auto& es : expandable_segments_) {
+      es->addPeer(dev_to_access);
     }
   }
 
