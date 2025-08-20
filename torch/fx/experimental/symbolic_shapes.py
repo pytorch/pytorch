@@ -56,6 +56,7 @@ import torch.utils._pytree as pytree
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
+from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
@@ -1146,7 +1147,10 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
-    elif isinstance(a, torch.Tensor):
+    elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
+        unwrapped_tensor = get_unwrapped(a)
+        r.update(go(unwrapped_tensor, path))
+    elif isinstance(a, torch.Tensor) and not is_batchedtensor(a):
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
