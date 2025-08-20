@@ -139,12 +139,10 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
   const auto num_args = 6;
   StableIValue stack[num_args];
 
-  int32_t t_dtype;
-  aoti_torch_get_dtype(t.get(), &t_dtype);
   auto mf = aoti_torch_memory_format_contiguous_format();
 
   stack[0] = from(t);
-  stack[1] = from(std::optional(t_dtype));    // dtype
+  stack[1] = from(std::optional(t.scalar_type()));    // dtype
   stack[2] = from(std::nullopt);              // layout
   stack[3] = from(std::optional(device));     // device
   stack[4] = from(std::optional(false));      // pin_memory
@@ -288,6 +286,16 @@ void boxed_empty_like(StableIValue* stack, uint64_t num_args, uint64_t num_outpu
   stack[0] = from(res);
 }
 
+bool my_is_cpu(Tensor t) {
+  return t.is_cpu();
+}
+
+
+void boxed_my_is_cpu(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_is_cpu(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 Tensor fill_infinity(Tensor t) {
   auto value = std::numeric_limits<float>::infinity();
   return fill_(t, value);
@@ -344,6 +352,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", &boxed_my_transpose);
   m.impl("my_empty_like", &boxed_empty_like);
   m.impl("fill_infinity", &boxed_fill_infinity);
+  m.impl("my_is_cpu", &boxed_my_is_cpu);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {
@@ -360,8 +369,31 @@ void boxed_my_zero_(StableIValue* stack, uint64_t num_args, uint64_t num_outputs
   stack[0] = from(res);
 }
 
+Tensor my_amax(Tensor t) {
+  return amax(t, 0, false);
+}
+
+void boxed_my_amax(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+Tensor my_amax_vec(Tensor t) {
+  std::vector<int64_t> v = {0,1};
+  return amax(t, v, false);
+}
+
+void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_amax_vec(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
+  m.def("my_amax(Tensor a) -> Tensor");
+  m.def("my_amax_vec(Tensor a) -> Tensor");
+  m.def("my_is_cpu(Tensor t) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
@@ -401,6 +433,8 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_default_constructor", &boxed_test_default_constructor);
+  m.impl("my_amax", &boxed_my_amax);
+  m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
 // Test functions for torch::stable::accelerator APIs

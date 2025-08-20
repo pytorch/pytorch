@@ -149,15 +149,6 @@ class VllmTestRunner(BaseRunner):
             "--torch-backend cu128"
         )
         pip_install_packages(requirements="test.txt", prefer_uv=True)
-
-        # install mambda from source since it does not work now with pip
-        pip_install_packages(
-            packages=[
-                "--no-build-isolation",
-                "git+https://github.com/state-spaces/mamba@v2.2.4",
-            ],
-            prefer_uv=True,
-        )
         logger.info("Done. installed requirements for test dependencies")
 
     def _install_dependencies(self):
