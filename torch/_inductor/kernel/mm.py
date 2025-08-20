@@ -136,9 +136,9 @@ mm_template = TritonTemplate(
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
         {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
         {% else %}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
         {% endif %}
 
     # rematerialize rm and rn to save registers
@@ -211,9 +211,9 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
         {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
         {% else %}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
         {% endif %}
 
     # rematerialize rm and rn to save registers
@@ -323,13 +323,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc,
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc,
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -347,7 +347,7 @@ persistent_tma_mm_template = TritonTemplate(
         acc += tl.dot(
             a if A_ROW_MAJOR else a.T,
             b if B_ROW_MAJOR else b.T,
-            allow_tf32=ALLOW_TF32,
+            input_precision=FLOAT32_PRECISION,
         )
 
         if ki == k_tiles - 1:
