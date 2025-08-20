@@ -474,6 +474,7 @@ class TestDynamoTimed(TestCase):
             e.python_version = None
             e.stack_trace = None
             e.graph_node_shapes = None
+            e.exception_stack_trace = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -512,6 +513,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': 0.0,
  'end_time_us': 100,
  'entire_frame_compile_time_s': 0.0,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -596,6 +598,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': 0.0,
  'end_time_us': 100,
  'entire_frame_compile_time_s': 0.0,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -691,6 +694,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': None,
  'end_time_us': 100,
  'entire_frame_compile_time_s': None,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -775,6 +779,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': None,
  'end_time_us': 100,
  'entire_frame_compile_time_s': None,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
