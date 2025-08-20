@@ -98,6 +98,13 @@ TORCH_API void woq_matmul_int4(
     int64_t group_size,
     bool pri_cache = true);
 
+TORCH_API sycl::event woq_matmul_w8a16(
+    Tensor& result, // [M, K], dtype: fp16,bf16. Depending on mat1.
+    const Tensor& mat1, // [M, K], Activation. dtype: fp16,bf16
+    const Tensor& mat2, // [K, N], Weight. dtype: fp8_e4m3, fp8_e5m2
+    const Tensor& scale_b, // [K, N] or [1], dtype: fp32
+    const std::vector<sycl::event>& deps = {});
+
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
     IntArrayRef src_tz,

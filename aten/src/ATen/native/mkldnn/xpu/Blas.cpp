@@ -470,6 +470,98 @@ Tensor _weight_int4pack_mm_xpu(
   return C;
 }
 
+Tensor& _weight_fp8_mm_out_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    const std::optional<Tensor>& scales_,
+    Tensor& out) {
+  // Currently, supports A16W8 matmul.
+  TensorArg out_arg{out, "out", 0};
+  TensorArg A_arg{A, "A", 1};
+  TensorArg B_arg{B, "B", 2};
+
+  at::Tensor scales = scales_.has_value()
+      ? scales_.value()
+      : at::ones({1}, B.options().dtype(B.dtype()));
+
+  TensorArg scales_arg{scales, "scales", 3};
+
+  checkAllSameGPU("_weight_fp8_mm_out", {out_arg, A_arg, B_arg, scales_arg});
+
+  TORCH_CHECK(A.dim() == 2, "A must be 2D matrix but got ", A.dim());
+  TORCH_CHECK(B.dim() == 2, "B must be a 2D matrix but got ", B.dim());
+  TORCH_CHECK(
+      A.sizes()[1] == B.sizes()[0],
+      "A and B cannot be multiplied (",
+      A.sizes()[0],
+      ",",
+      A.sizes()[1],
+      ") x (",
+      B.sizes()[0],
+      ",",
+      B.sizes()[1],
+      ")");
+
+  if (scales_.has_value()) {
+    TORCH_CHECK(
+        (scales.numel() == 1 || scales.dim() == 2),
+        "If provided scales, it must be a scalar or 2D tensor, but got ",
+        scales.dim());
+    TORCH_CHECK(
+        (scales.numel() == 1 || scales.numel() == A.size(0)),
+        "scales must be scalar or match A's first dimension. But got scales size: (",
+        scales.sizes()[0],
+        ", ",
+        scales.dim() > 1 ? scales.size(1) : 1,
+        ")");
+  }
+
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      __func__,
+      " : expect A to be 16-bit tensor, but got ",
+      A.dtype());
+
+  TORCH_CHECK(
+      at::isFloat8Type(B.scalar_type()),
+      __func__,
+      " : expect weight to be fp8 tensor with e5m2 or e4m3fn, but got ",
+      B.dtype());
+
+  TORCH_CHECK(
+      out.dtype() == A.dtype(),
+      __func__,
+      " : expect out dtype the same with A , but got out: ",
+      out.dtype(),
+      " and A: ",
+      A.dtype());
+
+  TORCH_CHECK(
+      scales.dtype() == kFloat,
+      __func__,
+      " : expect scales to be fp32 tensor, but got ",
+      scales.dtype());
+
+  // Check passed. Now initialize the actual out tensor.
+  at::native::resize_output(out, {A.size(0), B.size(1)});
+
+  at::native::onednn::woq_matmul_w8a16(out, A, B, scales);
+  return out;
+}
+
+Tensor _weight_fp8_mm_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    const std::optional<Tensor>& scales_) {
+  at::Tensor scales = scales_.has_value()
+      ? scales_.value()
+      : at::ones({1}, B.options().dtype(B.dtype()));
+  // Initialize the empty out tensor and do actual allocation once all check
+  // passed.
+  auto out = at::empty({0}, A.options());
+  return _weight_fp8_mm_out_xpu(A, B, scales, out);
+}
+
 Tensor& _int_mm_out_xpu(
     const Tensor& self,
     const Tensor& mat2,

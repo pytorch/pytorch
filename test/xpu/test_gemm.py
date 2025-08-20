@@ -1447,7 +1447,146 @@ def forward(self, x_1, w_1):
         )
 
 
+# ======== Utilis functions for TestFP8MatMul ========
+# [TODO: stonepia] These functions are ported from the scaled_mm, and they will be removed once
+# scaled_mm PR is merged.
+
+e4m3_type = torch.float8_e4m3fn
+e5m2_type = torch.float8_e5m2
+E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
+# avoid division by zero when calculating scale
+EPS = 1e-12
+
+
+def amax_to_scale(
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
+):
+    """Converts the amax value of a tensor to the fp8 scale.
+    Args:
+        amax: The amax value of the tensor.
+        float8_dtype: the float8 dtype.
+        orig_dtype: The original dtype of the tensor.
+    """
+    scale = torch.empty_like(amax, dtype=torch.float32)
+    if float8_dtype == e4m3_type:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+    elif float8_dtype == e5m2_type:
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+    else:
+        raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
+
+    # Ensure the scale is representable in float16,
+    # this helps when amax is small. We are assuming that we don't need
+    # to care about this for float32/bfloat16
+    if orig_dtype is torch.float16:
+        res = torch.clamp(res, max=torch.finfo(torch.float16).max)
+
+    scale.copy_(res)
+    return scale
+
+
+def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, dim=None):
+    if dim is None:
+        amax = torch.max(torch.abs(x))
+    else:
+        amax = torch.max(torch.abs(x), dim=dim, keepdim=True).values
+
+    return amax_to_scale(amax, float8_dtype, x.dtype)
+
+
+def weight_float8_mm_emulated(x, y, y_scale) -> torch.Tensor:
+    # naive implementation: dq -> op -> q
+    x_fp32 = x.to(torch.float)
+    y_fp32 = y.to(torch.float) / y_scale
+    out_fp32 = torch.mm(x_fp32, y_fp32)
+
+    return out_fp32.to(x.dtype)
+
+
+def weight_float8_mm(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    b_scale: torch.Tensor,
+) -> torch.Tensor:
+    b_inverse_scale = b_scale.reciprocal()
+    return torch._weight_fp8_mm(a, b, b_inverse_scale)
+
+
+def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """Computes the error between two tensors in dB.
+
+    For more details see:
+        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
+
+    Args:
+        x: The original tensor.
+        y: The tensor to compare to the original tensor.
+    """
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
+
+
+def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
+    if fp8_dtype == e4m3_type:
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+    elif fp8_dtype == e5m2_type:
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+    else:
+        raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
+
+    return x.to(fp8_dtype)
+
+
+class TestFP8MatMul(TestCase):
+    # Most of the tests are similar with test_scaled_mm. In the future we may need to merge them
+    @parametrize("m", [128])
+    @parametrize("k", [512, 1024])
+    @parametrize("n", [512, 1024])
+    @parametrize("a_dtype", [torch.float16, torch.bfloat16])
+    @parametrize("w_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize("scales", [torch.tensor(1.0)])
+    def test__weight_fp8_mm_basics(
+        self, m, k, n, a_dtype, w_dtype, scales, device="xpu"
+    ):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=a_dtype, device=device)
+        w_ref = torch.rand((k, n), dtype=a_dtype, device=device)
+        w = w_ref.to(w_dtype)
+
+        ref = torch.mm(a, w_ref)
+        scales = scales.to(device)
+        res = torch._weight_fp8_mm(a, w, scales)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err.cpu() < 0.05)
+
+    @parametrize("a_dtype", [torch.float16, torch.bfloat16])
+    @parametrize("w_dtype", [torch.float8_e4m3fn])
+    def test__weight_fp8_mm_vs_emulated(self, a_dtype, w_dtype, device="xpu"):
+        torch.manual_seed(42)
+        a = torch.rand((16, 16), dtype=a_dtype, device=device)
+        w = torch.rand((16, 32), dtype=a_dtype, device=device)
+        scales = tensor_to_scale(w, w_dtype).float()
+
+        w_fp8 = to_fp8_saturated(w * scales, w_dtype)
+        # print("w_fp8 is ", w_fp8)
+        res_actual = weight_float8_mm(a, w_fp8, scales)
+        res_emulated = weight_float8_mm_emulated(a, w_fp8, scales)
+
+        if a_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 3e-3, 3e-3
+        # print("res_actual dtype" , res_actual.dtype)
+        # print("res emulated, ", res_emulated.dtype)
+        torch.testing.assert_close(res_actual, res_emulated, atol=atol, rtol=rtol)
+
+
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestFP8MatMul, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
