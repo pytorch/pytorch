@@ -247,64 +247,7 @@ struct ExpandableSegmentTraits<cuda::CUDAStream> {
 };
 
 struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
-
-  private:
-  size_t getReservedVirtualMemorySize() override {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    return prop.totalGlobalMem + prop.totalGlobalMem / 8;
-  }
-
-  void createVirtualMemoryAddress(void** ptr) override {
-    CUdeviceptr devPtr{};
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
-      &devPtr, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
-    *ptr = reinterpret_cast<void*>(devPtr);
-  }
-
-
-
-
-  struct ShareHeader {
-    pid_t pid;
-    size_t segment_size;
-    size_t num_handles;
-  };
-}
-struct ExpandableSegment {
-  ExpandableSegment(
-      c10::DeviceIndex device,
-      std::optional<cudaStream_t> stream,
-      size_t segment_size,
-      std::vector<c10::DeviceIndex> peers)
-      : device_(device),
-        stream_(stream),
-        // 2MB for small pool, 20MB for large pool
-        segment_size_(segment_size),
-        peers_(std::move(peers)) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
-  }
-  ExpandableSegment(const ExpandableSegment&) = delete;
-  ExpandableSegment(ExpandableSegment&&) = delete;
-  ExpandableSegment operator=(const ExpandableSegment&) = delete;
-  ExpandableSegment operator=(ExpandableSegment&&) = delete;
-
-  // begin must be aligned to segment_size_.
-  // returns the actual range mapped, which may be
-  // greater than requested if size is not aligned to segment_size_.
-  // return size of 0 indicates OOM
-  // return nullptr indicates the handle type is not supported.
-  SegmentRange map(SegmentRange range) {
+  SegmentRange map(SegmentRange range) override {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
@@ -384,20 +327,11 @@ struct ExpandableSegment {
       }
       handles_.at(i) = Handle{handle, std::nullopt};
     }
-    mapAndSetAccess(begin, end);
-    return rangeFromHandles(begin, end);
-  }
-
-  // unmaps all the completely empty segment_size_ segments between
-  // [begin, begin + size), returns the offset where the range begin,
-  // and the actual size unmapped (multiple of segment_size_)
-  SegmentRange unmap(SegmentRange range) {
-    auto begin = segmentRight(range.ptr);
-    auto end = segmentLeft(range.ptr + range.size);
-    if (begin >= end) {
-      return SegmentRange{range.ptr, 0};
+    mapHandles(begin, end);
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
     }
-    unmapHandles(begin, end);
     return rangeFromHandles(begin, end);
   }
 
@@ -445,14 +379,14 @@ struct ExpandableSegment {
     return rangeFromHandles(begin, end);
   }
 
-  static std::unique_ptr<ExpandableSegment> fromShared(
+  static std::unique_ptr<CUDAExpandableSegment> fromShared(
       c10::DeviceIndex device,
       std::vector<c10::DeviceIndex> peers,
       std::istream& buf) {
     ShareHeader header{};
     buf.read((char*)&header, sizeof(ShareHeader));
-    auto segment = std::make_unique<ExpandableSegment>(
-        device, std::nullopt, header.segment_size, std::move(peers));
+    auto segment = std::make_unique<CUDAExpandableSegment>();
+    segment->init(device, std::nullopt, header.segment_size, std::move(peers));
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
 #ifndef SYS_pidfd_open
@@ -515,60 +449,51 @@ struct ExpandableSegment {
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
     }
-    segment->mapAndSetAccess(0, header.num_handles);
+    segment->mapHandles(0, header.num_handles);
+    segment->setAccess(device_, 0, header.num_handles);
+    for (auto p : peers_) {
+      segment->setAccess(p, 0, header.num_handles);
+    }
     return segment;
   }
 
-  char* ptr() const {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return reinterpret_cast<char*>(ptr_);
-  }
-
-  size_t size() const {
-    return max_handles_ * segment_size_;
-  }
-
-  void addPeer(c10::DeviceIndex device) {
-    peers_.push_back(device);
-    forEachAllocatedRange(
-        [&](size_t begin, size_t end) { setAccess(device, begin, end); });
-  }
-
-  ~ExpandableSegment() {
-    forEachAllocatedRange(
-        [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
-        ptr_, segment_size_ * max_handles_));
-  }
-
  private:
-  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
-    CUmemAccessDesc desc;
-    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    desc.location.id = static_cast<int>(device);
-    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+  size_t getReservedVirtualMemorySize(c10::DeviceIndex device) override {
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    // we allocate enough address space for 1 1/8 the total memory on the GPU.
+    // This allows for some cases where we have to unmap pages earlier in the
+    // segment to put them at the end.
+    return prop.totalGlobalMem + prop.totalGlobalMem / 8;
   }
 
-  void mapAndSetAccess(size_t begin, size_t end) {
+  void createVirtualMemoryAddress(void** ptr) override {
+    CUdeviceptr devPtr{};
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
+        &devPtr, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    *ptr = reinterpret_cast<void*>(devPtr);
+  }
+
+  void releaseVirtualMemoryAddress(void* ptr) override {
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr);
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
+        devPtr, segment_size_ * max_handles_));
+  }
+
+  void mapHandles(size_t begin, size_t end) override {
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
     for (auto i : c10::irange(begin, end)) {
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
-          ptr_ + i * segment_size_,
+          devPtr + i * segment_size_,
           segment_size_,
           0,
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           handles_.at(i).value().handle,
           0ULL));
     }
-    setAccess(device_, begin, end);
-    for (auto p : peers_) {
-      setAccess(p, begin, end);
-    }
   }
 
-  void unmapHandles(size_t begin, size_t end) {
+  void unmapHandles(size_t begin, size_t end) override {
     // note: unlike cudaFree, MemUnmap and MemRelease do
     // not appear to synchronize in all cases, so we have to wait for the
     // stream to finish before this memory is truly free.
@@ -582,12 +507,13 @@ struct ExpandableSegment {
       cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
-          ptr_ + segment_size_ * i, segment_size_));
+          devPtr + segment_size_ * i, segment_size_));
       if (h.shareable_handle) {
         close(std::get<int>(*h.shareable_handle));
       }
@@ -595,84 +521,52 @@ struct ExpandableSegment {
     }
     trimHandles();
   }
-  void trimHandles() {
-    while (!handles_.empty() && !handles_.back()) {
-      handles_.pop_back();
-    }
+
+  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) override {
+    CUmemAccessDesc desc{};
+    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    desc.location.id = static_cast<int>(device);
+    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
+        devPtr + begin * segment_size_,
+        (end - begin) * segment_size_,
+        &desc,
+        1));
   }
-  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
-    size_t start = 0;
-    for (auto i : c10::irange(handles_.size())) {
-      if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
-        start = i;
-      }
-      if (handles_.at(i) && (i + 1 == handles_.size() || !handles_.at(i + 1))) {
-        fn(start, i + 1);
-      }
-    }
-  }
-  size_t numSegments(size_t size) {
-    return (size + segment_size_ - 1) / segment_size_;
-  }
-  size_t segmentLeft(char* p) {
-    auto size = p - ptr();
-    return size / segment_size_;
-  }
-  size_t segmentRight(char* p) {
-    auto size = p - ptr();
-    return numSegments(size);
-  }
-  SegmentRange rangeFromHandles(size_t begin, size_t end) {
-    return SegmentRange(
-        ptr() + segment_size_ * begin, segment_size_ * (end - begin));
-  }
-  c10::DeviceIndex device_;
-  std::optional<cudaStream_t> stream_;
-  CUdeviceptr ptr_{};
-  size_t segment_size_;
-  size_t max_handles_;
-  struct Handle {
-    CUmemGenericAllocationHandle handle;
-    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+
+  struct ShareHeader {
+    pid_t pid;
+    size_t segment_size;
+    size_t num_handles;
   };
-  
-  std::vector<std::optional<Handle>> handles_;
-  // devices on which this memory should be mapped in addition
-  // to the device where the physical memory lives (device_).
-  std::vector<c10::DeviceIndex> peers_;
 };
 #else
-struct ExpandableSegment {
-  ExpandableSegment(
+struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
+  void init(
       c10::DeviceIndex device,
-      std::optional<cudaStream_t> stream,
+      std::optional<StreamT> stream,
       size_t segment_size,
-      std::vector<c10::DeviceIndex> peers) {
+      std::vector<c10::DeviceIndex> peers) override {
     TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
   }
-  SegmentRange map(SegmentRange range) {
-    return SegmentRange(nullptr, 0);
-  }
-  SegmentRange unmap(SegmentRange range) {
-    return SegmentRange(nullptr, 0);
-  }
-  SegmentRange share(SegmentRange range, std::ostream& ss) {
-    return SegmentRange(nullptr, 0);
-  }
-  static std::unique_ptr<ExpandableSegment> fromShared(
-      c10::DeviceIndex device,
-      std::vector<c10::DeviceIndex> peers,
-      std::istream& buf) {
-    return {};
-  }
-  char* ptr() const {
-    return nullptr;
-  }
-  size_t size() const {
+
+ private:
+  size_t getReservedVirtualMemorySize(c10::DeviceIndex device) override {
     return 0;
-  }
-  void addPeer(c10::DeviceIndex device) {}
-};
+  };
+
+  void createVirtualMemoryAddress(void** ptr) override {};
+
+  void releaseVirtualMemoryAddress(void* ptr) override {};
+
+  void mapHandles(size_t begin, size_t end) override {};
+
+  void unmapHandles(size_t begin, size_t end) override {};
+
+  void setAccess(c10::DeviceIndex device, size_t begin, size_t end) override {};
+}
 #endif
 
 // BlockState, BlockPoolState, and PrivatePoolState contain the information
@@ -713,49 +607,6 @@ struct PrivatePoolState : AllocatorState {
 struct RestoreResult {
   std::vector<void*> allocations_freed;
   std::vector<Block*> allocations_created;
-};
-
-static bool BlockComparatorSize(const Block* a, const Block* b) {
-  if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
-  }
-  if (a->size != b->size) {
-    return a->size < b->size;
-  }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
-}
-static bool BlockComparatorAddress(const Block* a, const Block* b) {
-  if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
-  }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
-}
-
-struct AllocParams {
-  AllocParams(
-      c10::DeviceIndex device,
-      size_t size,
-      cudaStream_t stream,
-      BlockPool* pool,
-      size_t alloc_size)
-      : search_key(device, stream, size), pool(pool), alloc_size(alloc_size) {}
-
-  c10::DeviceIndex device() const {
-    return search_key.device;
-  }
-  cudaStream_t stream() const {
-    return search_key.stream;
-  }
-  size_t size() const {
-    return search_key.size;
-  }
-
-  Block search_key;
-  BlockPool* pool;
-  size_t alloc_size;
-  Block* block{nullptr};
-  StatTypes stat_types = {false};
-  cudaError_t err{cudaSuccess};
 };
 
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
@@ -811,49 +662,6 @@ class EventPool {
   };
   std::vector<PerDevicePool> pools_;
 };
-
-// CUDA graphs helper
-struct PrivatePool {
-  PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
-      : id(std::move(id)),
-        allocator_(allocator),
-        large_blocks(/*small=*/false, this),
-        small_blocks(/*small=*/true, this) {}
-  PrivatePool(const PrivatePool&) = delete;
-  PrivatePool(PrivatePool&&) = delete;
-  PrivatePool& operator=(const PrivatePool&) = delete;
-  PrivatePool& operator=(PrivatePool&&) = delete;
-  ~PrivatePool() = default;
-
-  MempoolId_t id{0, 0};
-  // Number of live graphs using this pool
-  int use_count{1};
-  // Number of unfreed cudaMallocs made for this pool. When use_count and
-  // cudaMalloc_count drop to zero, we can delete this PrivatePool from
-  // graph_pools.
-  int cudaMalloc_count{0};
-  // Instead of maintaining private BlockPools here, I could stuff all blocks
-  // (private or no) into the top-level large_blocks and small_blocks, and
-  // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critical though,
-  // I'd rather not add more logic to it.
-  CUDAAllocator* allocator_;
-  BlockPool large_blocks;
-  BlockPool small_blocks;
-
- public:
-  CUDAAllocator* allocator() {
-    return allocator_;
-  }
-};
-
-MempoolId_t BlockPool::owner_MempoolId() const {
-  if (owner_PrivatePool) {
-    return owner_PrivatePool->id;
-  } else {
-    return {0, 0};
-  }
-}
 
 BlockState::BlockState(Block* block)
     : device(block->device),
