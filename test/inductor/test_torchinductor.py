@@ -10593,7 +10593,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         torch._dynamo.reset_code_caches()
 
-        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 1000)
+        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 10)
         code2 = run_and_get_triton_code(override, x_small)
         self.assertNotEqual(code1, code2)
 
