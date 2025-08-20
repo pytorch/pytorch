@@ -16,7 +16,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_nccl,
 )
@@ -63,7 +63,7 @@ def get_flatten_hook():
     return flatten_hook
 
 
-class StageTest(MultiProcContinousTest):
+class StageTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend

@@ -55,6 +55,9 @@ python -m pip install pulp==2.9.0
 # Install expecttest to merge https://github.com/pytorch/pytorch/pull/155308
 python -m pip install expecttest==0.3.0
 
+# Install intel-openmp
+python -m pip install intel-openmp==2025.1.1
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
