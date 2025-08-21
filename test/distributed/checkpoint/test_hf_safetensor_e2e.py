@@ -119,9 +119,7 @@ class TestSingleRankSaveLoad(TestCase):
 
     @with_temp_dir
     def test_load_with_multiple_threads(self) -> None:
-        try:
-            import safetensors
-        except ImportError:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
