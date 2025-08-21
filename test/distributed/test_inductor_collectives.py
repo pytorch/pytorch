@@ -1580,13 +1580,64 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
-            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
-            .check("= torch.ops._c10d_functional.all_gather_into_tensor")
+            .check_count(".all_gather_into_tensor_out.default(", 2, exactly=True)
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_all_gather_bucket_path(self):
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16)
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            # first allgather
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_0_out = ag_0_out * 2
+
+            # Create dependency: second allgather input depends on first allgather output
+            # This prevents fusion of the two allgather operations
+            ag_1_modified = (
+                ag_1_cast + ag_0_out[: ag_1_cast.shape[0]]
+            )  # Use part of ag_0_out
+
+            # second allgather (now depends on the first one)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_modified, group_size, group_name
+            )
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            return y, ag_0_out, ag_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        # shouldnt have bucketed
+        FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")

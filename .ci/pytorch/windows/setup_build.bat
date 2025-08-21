@@ -9,6 +9,8 @@ call "internal\install_python.bat"
 set "PATH=%CD%\Python\Lib\site-packages\cmake\data\bin;%CD%\Python\Scripts;%CD%\Python;%PATH%"
 
 set NUMPY_PINNED_VERSION=""
+if "%DESIRED_PYTHON%" == "3.14t" set NUMPY_PINNED_VERSION="==2.3.2"
+if "%DESIRED_PYTHON%" == "3.14" set NUMPY_PINNED_VERSION="==2.3.2"
 if "%DESIRED_PYTHON%" == "3.13t" set NUMPY_PINNED_VERSION="==2.2.1"
 if "%DESIRED_PYTHON%" == "3.13" set NUMPY_PINNED_VERSION="==2.1.2"
 if "%DESIRED_PYTHON%" == "3.12" set NUMPY_PINNED_VERSION="==2.0.2"
