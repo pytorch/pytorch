@@ -106,7 +106,8 @@ class InductorChoices:
         layout: Any,
         template_name: str,
         op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
+        kwarg_overrides: Optional[dict[str, Any]] = None,
+    ) -> Generator[tuple[dict[str, Any], dict[str, Any]], None, None]:
         """
         Get generator of template parameters for MM templates using template-specific heuristics.
 
@@ -115,7 +116,8 @@ class InductorChoices:
             layout: Output layout
             template_name: Template name (e.g., "bmm", "mm", "mm_persistent_tma")
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
-
+            kwarg_overrides: Optional dict of kwargs to override for the template heuristic
+                             these only override the per config kwargs, not the extra kwargs
         Yields:
             Template parameter dictionaries ready for maybe_append_choice
         """
@@ -129,7 +131,13 @@ class InductorChoices:
         # Get the appropriate template-specific heuristic
         heuristic = get_template_heuristic(template_name, device_type, op_name)
 
-        yield from heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        cs = heuristic.get_template_configs(kernel_inputs, layout, op_name)
+        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+        overrides = kwarg_overrides if kwarg_overrides is not None else {}
+        for c in cs:
+            # yield in a comprehensive package what the extra kwargs are
+            # fixed for template/op combo, and the config kwargs (c)
+            yield {**c, **overrides}, extra_kwargs
 
     def triton_kernel_kwargs(
         self,
