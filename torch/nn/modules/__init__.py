@@ -235,7 +235,6 @@ __all__ = [
     "InstanceNorm3d",
     "KLDivLoss",
     "L1Loss",
-    "LinearCrossEntropyLoss",
     "LPPool1d",
     "LPPool2d",
     "LPPool3d",

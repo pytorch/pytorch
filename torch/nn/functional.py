@@ -3474,8 +3474,11 @@ def _get_reduction(
 
 # TODO: works for now but inconsistent with existing code base.
 class _CrossEntropyChunkingStrategy(enum.Enum):
-    # Naive, unfused computation
-    none = "none"
+    # Unfused computation
+    unfused = "unfused"
+
+    # Unfused computation, delete to existing
+    unf1used_delegate = "unfused_delegate"
 
     # Chunk by inputs on batch dimension
     inputs_on_batch = "inputs_on_batch"
@@ -3489,15 +3492,15 @@ def linear_cross_entropy(
     target: Tensor,
     linear_weight: Tensor,
     bias: Optional[Tensor] = None,
+    reduce: Optional[bool] = None,
     cross_entropy_weight: Optional[Tensor] = None,
-    reduce: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
     chunking_strategy: Optional[str] = None,
+    size_average: Optional[bool] = None,
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
     reduction: str = "mean",
 ) -> Tensor:
-    tensors = input, target, linear_weight, cross_entropy_weight, reduce
+    tensors = input, target, linear_weight, cross_entropy_weight, bias
     if has_torch_function_variadic(*tensors):
         return handle_torch_function(
             linear_cross_entropy,
@@ -3507,7 +3510,6 @@ def linear_cross_entropy(
             linear_weight,
             bias=bias,
             cross_entropy_weight=cross_entropy_weight,
-            reduce=reduce,
             size_average=size_average,
             chunking_strategy=chunking_strategy,
             ignore_index=ignore_index,
@@ -3516,7 +3518,7 @@ def linear_cross_entropy(
         )
 
     def choose_chunking() -> str:
-        return _CrossEntropyChunkingStrategy.none
+        return _CrossEntropyChunkingStrategy.unfused_delegate
 
     if chunking_strategy is None:
         chunking_strategy = choose_chunking().value
@@ -3534,7 +3536,7 @@ def linear_cross_entropy(
         )
         torch._check_with(
             NotImplementedError,
-            chunking_strategy == _CrossEntropyChunkingStrategy.none.value,
+            chunking_strategy == _CrossEntropyChunkingStrategy.unfused_delegate.value,
             lambda: f"{chunking_strategy=} is not yet implemented",
         )
 

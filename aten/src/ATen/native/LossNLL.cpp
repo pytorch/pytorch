@@ -18,6 +18,7 @@
 #include <ATen/ops/cross_entropy_loss_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/linear_native.h>
+#include <ATen/ops/linear_cross_entropy_loss_native.h>
 #include <ATen/ops/log_softmax.h>
 #include <ATen/ops/nll_loss.h>
 #include <ATen/ops/nll_loss2d.h>
@@ -665,11 +666,11 @@ Tensor linear_cross_entropy_loss_symint(
     Tensor const& linear_weight,
     std::optional<Tensor> const& bias,
     std::optional<Tensor> const& cross_entropy_weight,
-    std::string chunking_strategy,
+    std::string_view chunking_strategy,
+    int64_t reduction,
     c10::SymInt ignore_index,
-    float label_smoothing,
-    int64_t reduction)
-{
+    double label_smoothing) {
+  #
   return cross_entropy_loss_symint(
     linear(input, linear_weight, bias),
     target,
