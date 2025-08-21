@@ -642,11 +642,12 @@ def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
         if not _LOGGED_DYNAMIC_ALLOWLIST:
             torch._utils_internal.add_mlhub_insight(
                 category="dynamic_shapes_analysis",
-                insight="Dynamic shapes detected",
+                insight="Dynamic shape recompilation detected",
                 insight_description="PGO detected a recompilation due to dynamic shapes. \
-                Please follow the instruction from the action link to reduce shape recompilations.",
+                Please follow the instruction from the action link to reduce \
+                recompilation overhead.",
             )
-            # add mlhub insight only once per job
+            # add mlhub insight only once per rank
             _LOGGED_DYNAMIC_ALLOWLIST = True
 
 

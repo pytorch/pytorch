@@ -464,15 +464,50 @@ class NumaBindingTest(TestCase):
         # Inner import to avoid crashing if not torch.distributed.is_available()
         from torch.distributed.launcher.api import LaunchConfig
 
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=2,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
         with patch(
             "torch.distributed.launcher.api.get_default_numa_options"
         ) as mock_get_default_numa_options:
             launch_config = LaunchConfig(
                 min_nodes=1,
                 max_nodes=1,
-                nproc_per_node=1,
+                nproc_per_node=2,
                 start_method="fork",
                 # Don't provide numa_options
+            )
+            # Verify get_default_numa_options was not called
+            mock_get_default_numa_options.assert_not_called()
+            # Verify numa_options is None when start_method is fork
+            self.assertIsNone(launch_config.numa_options)
+
+    def test_nproc_must_equal_cuda_device_count_to_use_default_numa_options(
+        self,
+    ) -> None:
+        # Inner import to avoid crashing if not torch.distributed.is_available()
+        from torch.distributed.launcher.api import LaunchConfig
+
+        self._add_mock_hardware(
+            num_sockets=1,
+            num_numa_nodes_per_socket=1,
+            num_gpus_per_numa_node=1,
+            num_l3_caches_per_numa_node=1,
+            num_physical_core_per_l3_cache=1,
+        )
+
+        with patch(
+            "torch.distributed.launcher.api.get_default_numa_options"
+        ) as mock_get_default_numa_options:
+            launch_config = LaunchConfig(
+                min_nodes=1,
+                max_nodes=1,
+                nproc_per_node=2,
             )
             # Verify get_default_numa_options was not called
             mock_get_default_numa_options.assert_not_called()
