@@ -860,6 +860,7 @@ class DynamoOutput:
 
 @dataclass
 class BackendInput:
+    backend_id: str
     graph_module: torch.fx.GraphModule
     example_inputs: Any
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
@@ -891,7 +892,7 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         nonlocal backend_input
         fake_mode = TracingContext.get().fake_mode
         assert fake_mode is not None
-        backend_input = BackendInput(gm, example_inputs, fake_mode)
+        backend_input = BackendInput(gm._backend_id, gm, example_inputs, fake_mode)
         return gm
 
     dynamo_output = compile_frame(
