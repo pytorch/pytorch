@@ -263,11 +263,6 @@ scipy==1.14.1 ; python_version >= "3.12"
 #Pinned versions:
 #test that import:
 
-tb-nightly==2.13.0a20230426
-#Description: TensorBoard
-#Pinned versions:
-#test that import:
-
 # needed by torchgen utils
 typing-extensions>=4.10.0
 #Description: type hints for python
