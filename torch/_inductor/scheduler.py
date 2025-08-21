@@ -1558,13 +1558,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_side_effects(self) -> bool:
         if self.snodes is not None:
-            return any(
-                isinstance(node, SchedulerNode)
-                and node._body is not None
-                and hasattr(node._body, "has_op")
-                and node._body.has_op("device_assert_async")
-                for node in self.snodes
-            )
+            return any(node.has_side_effects() for node in self.snodes)
         return super().has_side_effects()
 
 
