@@ -1283,15 +1283,35 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (use_fast_accum) {
     TORCH_CHECK(mat1.scalar_type() != ScalarType::Float4_e2m1fn_x2 && mat2.scalar_type() != ScalarType::Float4_e2m1fn_x2, "`use_fast_accum` is not supported when `mat1` or `mat2` tensors have the `Float4_e2m1fn_x2` dtype.");
   }
+#ifdef USE_ROCM
+  if (mat1.scalar_type() == ScalarType::Float4_e2m1fn_x2 || mat2.scalar_type() == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(ROCM_VERSION >= 70000, "Float4_e2m1fn_x2 is only supported for ROCm 7.0 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e5m2 || mat2.scalar_type() == ScalarType::Float8_e5m2) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e5m2 is only supported for ROCm 6.5 and above");
+  }
+  if (mat1.scalar_type() == ScalarType::Float8_e4m3fn || mat2.scalar_type() == ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(ROCM_VERSION >= 60500, "Float8_e4m3fn is only supported for ROCm 6.5 and above");
+  }
+#endif
   if (bias) {
-    TORCH_CHECK(out.scalar_type() != kFloat, "Bias is not supported when out_dtype is set to Float32");
-    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 || bias->scalar_type() == ScalarType::Half,
-         "Bias must be either Half or BFloat16, but got ", bias->scalar_type());
-    TORCH_CHECK((out.scalar_type() != kFloat && out.scalar_type() != ScalarType::BFloat16) ||
-          bias->scalar_type() == ScalarType::BFloat16,
-          "Bias must be BFloat16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
-    TORCH_CHECK(out.scalar_type() != ScalarType::Half || bias->scalar_type() == ScalarType::Half,
-          "Bias must be Float16 to compute ", out.scalar_type(), " output, but got ", bias->scalar_type());
+    TORCH_CHECK(out.scalar_type() != kFloat,
+        "Bias is not supported when out_dtype is set to Float32");
+
+    TORCH_CHECK(bias->scalar_type() == ScalarType::BFloat16 ||
+                bias->scalar_type() == ScalarType::Half,
+        "Bias must be BFloat16 or Half, but got ", bias->scalar_type());
+
+    TORCH_CHECK((out.scalar_type() != kFloat &&
+                 out.scalar_type() != ScalarType::BFloat16) ||
+                bias->scalar_type() == ScalarType::BFloat16,
+        "Bias must be BFloat16 to compute ", out.scalar_type(),
+        " output, but got ", bias->scalar_type());
+
+    TORCH_CHECK(out.scalar_type() != ScalarType::Half ||
+                bias->scalar_type() == ScalarType::Half,
+        "Bias must be Float16 to compute ", out.scalar_type(),
+        " output, but got ", bias->scalar_type());
   }
   {
     auto bias_ = bias.value_or(Tensor());
@@ -1327,7 +1347,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // We are doing row-wise scaling
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise
-      && (dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)) {
+      && ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
+      // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
+      ||  (dprops->major == 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
@@ -1352,6 +1374,22 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // Until more than bf16 is supported.
     TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
          "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
+  }
+  else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
+    #if ROCM_VERSION >= 70000
+    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
+                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
+                "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+                out.scalar_type() == ScalarType::Half,
+                "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
   }
 #endif
 
@@ -1430,12 +1468,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.k = args.k;
       params.a = args.mata->data_ptr();
       params.a_scale_ptr = args.scale_mata_ptr;
+      params.a_scale_dtype = args.scale_mata_dtype.value();
       params.lda = args.lda;
       params.a_dtype = args.mata->scalar_type();
       params.a_scale_dtype = args.scale_mata_dtype.value();
       params.a_scaling_type = args.scaling_mata_type.value();
       params.b = args.matb->data_ptr();
       params.b_scale_ptr = args.scale_matb_ptr;
+      params.b_scale_dtype = args.scale_matb_dtype.value();
       params.ldb = args.ldb;
       params.b_dtype = args.matb->scalar_type();
       params.b_scale_dtype = args.scale_matb_dtype.value();
