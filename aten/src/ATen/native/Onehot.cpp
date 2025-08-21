@@ -17,9 +17,7 @@ namespace at::native {
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
 
-    // Route Meta and Fake tensors (dynamic shape tracing) to functional path.
-    // The MetaBit check was intended to catch Fake Tensor as well; explicitly
-    // include Fake dispatch key to be robust under dynamo/functorch tracing.
+    // using meta bit test to catch Fake Tensor as well until __torch_function__
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
         // functional version that torch.compiles better and works with dynamic shapes
