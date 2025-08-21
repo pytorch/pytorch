@@ -58,7 +58,7 @@ class TestSyncCheckpointer(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_sync")
 
         # Save the checkpoint synchronously
-        result = self.checkpointer.save(self.state_dict, checkpoint_path)
+        result = self.checkpointer.save(checkpoint_path, self.state_dict)
         self.assertIsNone(result)  # Sync mode returns None
 
         # Verify that the checkpoint file exists
@@ -81,7 +81,7 @@ class TestSyncCheckpointer(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_map_location")
 
         # Save the checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+        self.checkpointer.save(checkpoint_path, self.state_dict)
 
         # Load the checkpoint with map_location='cpu'
         loaded_state_dict = self.checkpointer.load(
@@ -99,7 +99,7 @@ class TestSyncCheckpointer(TestCase):
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_partial")
 
         # Save the full checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+        self.checkpointer.save(checkpoint_path, self.state_dict)
 
         # Create a partial state dictionary with only some keys
         partial_state_dict = {
@@ -142,7 +142,7 @@ class TestSyncCheckpointer(TestCase):
             config=self.writer_config,
             rank_info=self.rank_info,
         )
-        writer.write(nested_state_dict, checkpoint_path)
+        writer.write(checkpoint_path, nested_state_dict)
 
         # Create a partial state dictionary with nested structure
         partial_state_dict = {

@@ -204,7 +204,6 @@ BENCHMARK_USE_SGD = {
     "PLBartForCausalLM",
     "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
-    "Speech2Text2ForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
     # TIMM
@@ -4191,7 +4190,7 @@ def run(runner, args, original_dir=None):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
-                        torch._dynamo.mark_dynamic(t, i)
+                        torch._dynamo.maybe_mark_dynamic(t, i)
                         marked = True
                         break
 
