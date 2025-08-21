@@ -303,7 +303,7 @@ def _single_tensor_muon(
 
         buf = muon_momentum_bufs[i]
         buf.lerp_(grad, 1 - momentum)
-        grad = grad.lerp_(buf, momentum) if nesterov else buf
+        grad = grad.lerp(buf, momentum) if nesterov else buf
 
         update = _zeropower_via_newtonschulz(grad, ns_coefficients, ns_steps, eps)
 
