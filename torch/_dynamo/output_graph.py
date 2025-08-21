@@ -3036,7 +3036,7 @@ class SubgraphTracer(fx.Tracer):
             storage_offset = example_value.storage_offset()
             if need_bind(storage_offset):
                 log.debug(
-                    "_track_produced_symints %s for %s.storage_offset() at debug_level %s",
+                    "track_produced_symints %s for %s.storage_offset() at debug_level %s",
                     storage_offset,
                     e_proxy,
                     tracer.debug_level,
