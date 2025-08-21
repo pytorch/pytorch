@@ -152,7 +152,9 @@ function get_pinned_commit() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]] && [[ "${TORCH_CUDA_ARCH_LIST:-}" == "" ]]; then
+  # TODO (huydhn): PyTorch CI docker image set the default TORCH_CUDA_ARCH_LIST
+  # to Maxwell. This default doesn't make sense anymore and should be cleaned up
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
     TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
     export TORCH_CUDA_ARCH_LIST
   fi
