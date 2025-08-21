@@ -54,7 +54,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -71,7 +71,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -88,7 +88,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvshmem-cu12==3.3.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvshmem-cu12==3.3.20; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -314,8 +314,8 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13t on cpu-s390x
             if gpu_arch_type == "cpu-s390x" and python_version == "3.13t":
                 continue
-            # TODO: Enable python 3.14 on non linux OSes
-            if os != "linux" and (
+            # TODO: Enable python 3.14 for rest
+            if os not in ["linux", "linux-aarch64", "macos-arm64", "windows"] and (
                 python_version == "3.14" or python_version == "3.14t"
             ):
                 continue
@@ -356,29 +356,6 @@ def generate_wheels_matrix(
                         ),  # include special case for aarch64 build, remove the -aarch64 postfix
                     }
                 )
-                # Special build building to use on Colab. Python 3.11 for 12.6 CUDA
-                if python_version == "3.11" and arch_version == CUDA_STABLE:
-                    ret.append(
-                        {
-                            "python_version": python_version,
-                            "gpu_arch_type": gpu_arch_type,
-                            "gpu_arch_version": gpu_arch_version,
-                            "desired_cuda": translate_desired_cuda(
-                                gpu_arch_type, gpu_arch_version
-                            ),
-                            "container_image": WHEEL_CONTAINER_IMAGES[
-                                arch_version
-                            ].split(":")[0],
-                            "container_image_tag_prefix": WHEEL_CONTAINER_IMAGES[
-                                arch_version
-                            ].split(":")[1],
-                            "package_type": package_type,
-                            "pytorch_extra_install_requirements": "",
-                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
-                                ".", "_"
-                            ),
-                        }
-                    )
             else:
                 ret.append(
                     {
