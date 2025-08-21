@@ -168,7 +168,7 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang12-onnx)
-    ANACONDA_PYTHON_VERSION=3.9
+    ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     VISION=yes
     ONNX=yes

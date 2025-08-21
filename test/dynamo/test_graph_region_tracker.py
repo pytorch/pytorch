@@ -9,28 +9,6 @@ from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
 
 
-def get_nodes_by_name(graph, names):
-    nodes = []
-    for node in graph.nodes:
-        if node.name in names:
-            nodes.append(node)
-
-    return nodes
-
-
-unique_ind = 0
-
-
-def track_same_nodes(names, graph, region_tracker):
-    global unique_ind
-    unique_ind += 1
-    # find nodes in graph with names and track them
-    # as if they were at the same code location
-    nodes = get_nodes_by_name(graph, names)
-    for node in nodes:
-        region_tracker.track_node("x", unique_ind, node)
-
-
 class GraphRegionTrackerTests(TestCase):
     def setUp(self):
         self.exit_stack = contextlib.ExitStack()

@@ -3400,6 +3400,11 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+      .def(
+          "unsafe_get_ptr",
+          [](const ncclConfig_t& self) {
+            return reinterpret_cast<uintptr_t>(&self);
+          })
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
