@@ -3870,8 +3870,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, *args):
-                # We actually have to unpack?
-                _ = ctx.saved_tensors  # this is necessary
+                _ = ctx.saved_tensors
                 return None
 
         def fn(inp):
