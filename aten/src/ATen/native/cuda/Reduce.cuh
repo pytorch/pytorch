@@ -806,7 +806,7 @@ struct ReduceOp {
       CUDA_KERNEL_ASSERT(num_int_per_val>=1);
       union pnr { std::array<arg_t, output_vec_size> v; int i[num_int_per_val]; } _pnr = {.v = value };
       for (int i=0; i<num_int_per_val; i++)
-        __builtin_nontemporal_store(0, reinterpret_cast<int *>(&reduce_buffer[offset])+i);
+        reinterpret_cast<int *>(&reduce_buffer[offset])[i] = 0;
       for (int i=0; i<num_int_per_val; i++)
         _pnr.i[i] = atomicAdd(reinterpret_cast<int *>(&reduce_buffer[offset])+i, _pnr.i[i]);
       value = _pnr.v;
