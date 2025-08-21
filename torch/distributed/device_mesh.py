@@ -404,7 +404,7 @@ else:
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
         _layouts: tuple[_Layout, ...]
-        _backend: DeviceMeshBackend
+        _backend: Optional[DeviceMeshBackend] = None
 
         def __init__(
             self,
@@ -428,6 +428,9 @@ else:
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             # Internal bookkeeping for the device mesh.
             self._layouts = init_layouts_from_mesh(self.mesh.size(), self.mesh.stride())
+
+            if not _init_backend:
+                return
             self._backend = DeviceMeshBackend(device_type, _init_backend=_init_backend)
             if backend_override is None:
                 backend_override = ((None, None),) * self.mesh.ndim
@@ -479,7 +482,9 @@ else:
                 stride_l.extend(layout.strides)
             layout = _Layout(tuple(zip(size_l, stride_l)))
             pg_ranks_by_dim = layout.layout_to_global_ranks(not_none(get_world_size()))
-            tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(-1, *mesh_size)
+            tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
+                -1, *mesh_size
+            )
             nd_mesh = None
             for ndm in tensor:
                 if cur_rank in ndm:
@@ -528,7 +533,7 @@ else:
                 self._hash = hash(
                     (
                         id(self._backend),
-                        # self._layouts,
+                        self._layouts,
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
@@ -600,6 +605,10 @@ else:
             """
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
+            if not self._backend:
+                raise NotImplementedError(
+                    "Slicing a DeviceMesh without backend initialized is not supported!"
+                )
 
             mesh_dim_names = (
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
@@ -653,10 +662,10 @@ else:
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            if not all(
+            if not self._backend or not all(
                 layout in self._backend.layouts_to_groups for layout in self._layouts
             ):
-                raise RuntimeError("DeviceMesh process backend not initialized!")
+                raise RuntimeError("DeviceMesh backend not initialized!")
 
             if len(self._layouts) > 1 and mesh_dim is None:
                 raise RuntimeError(
@@ -679,9 +688,14 @@ else:
                     raise ValueError(
                         "Cannot get group by name on a DeviceMesh without names"
                     )
-                if mesh_dim not in self.mesh_dim_names:
+                if mesh_dim not in self._backend.names_to_layouts:
                     raise ValueError(
                         f"Invalid named dim {mesh_dim!r} for DeviceMesh with names {self.mesh_dim_names}"
+                    )
+            elif isinstance(mesh_dim, int):
+                if mesh_dim >= len(self._layouts):
+                    raise ValueError(
+                        f"Invalid mesh_dim {mesh_dim} for DeviceMesh with {len(self._layouts)} dimensions"
                     )
 
             if isinstance(mesh_dim, str):
@@ -752,7 +766,7 @@ else:
                     if isinstance(mesh, torch.Tensor)
                     else list(mesh or [])  # type: ignore[arg-type]
                 )
-                if not mesh_list and mesh_list != group_ranks:
+                if mesh_list and mesh_list != group_ranks:
                     raise ValueError(
                         f"Invalid mesh {mesh_list} for ProcessGroup with ranks {group_ranks}"
                     )
@@ -765,7 +779,7 @@ else:
                 raise ValueError("Expects at least one ProcessGroup to be passed")
             if mesh is None:
                 raise ValueError("Must pass mesh if passing multiple ProcessGroups")
-            if mesh_dim_names is None:
+            if mesh_dim_names is None and len(group) > 1:
                 raise ValueError(
                     "Must pass mesh_dim_names if passing multiple ProcessGroups"
                 )
@@ -884,6 +898,14 @@ else:
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
+            if not self._backend:
+                raise NotImplementedError(
+                    "flatten a device mesh without backend initialized is not supported!"
+                )
+
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(not_none(self.mesh_dim_names))
+
             global_override = _mesh_resources.mesh_dim_group_options.get(
                 0, (None, None)
             )
@@ -906,6 +928,7 @@ else:
                     sorted(
                         [ss for l in self._layouts for ss in l.sizes_and_strides],
                         key=lambda x: x[1],
+                        reverse=True,
                     )
                 )
             ).coalesce()
