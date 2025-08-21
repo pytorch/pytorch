@@ -830,7 +830,7 @@ struct ReduceOp {
          for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
           index_t idx = config.staging_memory_offset(input_offset + u*step);
           next[u] = reduce_buffer[idx];
-	 }
+         }
          for (int u = 0; (u < PRFCH) && (input_offset + u*step < config.ctas_per_output); u++) {
           #pragma unroll
           for (int i = 0; i < output_vec_size; i++) {
@@ -845,8 +845,8 @@ struct ReduceOp {
           #pragma unroll
           for (int i = 0; i < output_vec_size; i++) {
             value[i] = ops.combine(value[i], next[i]);
-	  }
-	}
+          }
+        }
 #endif
       }
       value = block_y_reduce<output_vec_size>(value, shared_memory);
