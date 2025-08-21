@@ -1338,6 +1338,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
+        # Test layout_to_global_ranks and layout_to_group_ranks
         pg_layout = _Layout(((2, 4), (2, 2)))
         self.assertEqual(
             pg_layout.layout_to_group_ranks(),
