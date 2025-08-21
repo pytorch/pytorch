@@ -140,8 +140,7 @@ uv pip install --system -r requirements/common.txt
 
 
 # Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+ENV TORCH_CUDA_ARCH_LIST='7.5 8.0+PTX 9.0a'
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 
@@ -152,7 +151,6 @@ RUN pip freeze | grep -E 'ninja'
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
 # sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
-ARG XFORMERS_COMMIT=eb0946a363464da96ea40afd1a7f72a907c25497
 ENV CCACHE_DIR=/root/.cache/ccache
 
 RUN --mount=type=cache,target=/root/.cache/ccache \
@@ -160,7 +158,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     echo 'git clone xformers...' \
     && git clone https://github.com/facebookresearch/xformers.git --recursive \
     && cd xformers \
-    && git checkout ${XFORMERS_COMMIT} \
+    && git checkout v0.0.32 \
     && git submodule update --init --recursive \
     && echo 'finish git clone xformers...' \
     && rm -rf build \
@@ -346,7 +344,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # Build flashinfer from source.
-ARG torch_cuda_arch_list='8.0;8.9;9.0a'
+ARG torch_cuda_arch_list='8.0 8.9 9.0a'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 
@@ -357,12 +355,12 @@ ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 # Build flashinfer for torch nightly from source around 10 mins
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
 # Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
-ARG FLASHINFER_GIT_REF="v0.2.9rc2"
+ARG FLASHINFER_GIT_REF="v0.2.12"
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
         --branch ${FLASHINFER_GIT_REF} \
         ${FLASHINFER_GIT_REPO} flashinfer \
-    && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
+    && echo "Building FlashInfer with AOT for arches: ${TORCH_CUDA_ARCH_LIST}" \
     && cd flashinfer \
     && python3 -m flashinfer.aot \
     && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
