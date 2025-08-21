@@ -253,6 +253,19 @@ def _op_runtime_estimate_mult(snode):
     return 1.0
 
 
+def is_async_collective(snode):
+    if python_kernel_name := getattr(node, "python_kernel_name", None):
+        print(f"XXX KERNEL_NAME:{python_kernel_name}")
+        if "shard_dim_alltoall" in python_kernel_name:
+            return False
+
+    return True
+
+
+def contains_async_collective(snode):
+    return contains_collective(snode, is_async_collective(snode))
+
+
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:

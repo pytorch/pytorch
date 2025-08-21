@@ -406,7 +406,7 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
 reorder_iterative_limit_by_runtime_estimations: bool = True
 sink_waits_iterative_limit_by_runtime_estimations: bool = True
 reorder_sink_runtime_estimations_mm_mult: float = 1.0
-reorder_sink_runtime_estimations_comm_mult: float = 3
+reorder_sink_runtime_estimations_comm_mult: float = 10
 reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
 sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
 
