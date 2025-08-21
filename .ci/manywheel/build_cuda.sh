@@ -170,22 +170,29 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
-            '$ORIGIN/../../nvidia/cublas/lib'
-            '$ORIGIN/../../nvidia/cuda_cupti/lib'
-            '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
-            '$ORIGIN/../../nvidia/cuda_runtime/lib'
             '$ORIGIN/../../nvidia/cudnn/lib'
-            '$ORIGIN/../../nvidia/cufft/lib'
-            '$ORIGIN/../../nvidia/curand/lib'
-            '$ORIGIN/../../nvidia/cusolver/lib'
-            '$ORIGIN/../../nvidia/cusparse/lib'
-            '$ORIGIN/../../nvidia/cusparselt/lib'
-            '$ORIGIN/../../cusparselt/lib'
-            '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvshmem/lib'
-            '$ORIGIN/../../nvidia/nvtx/lib'
-            '$ORIGIN/../../nvidia/cufile/lib'
+            '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/cusparselt/lib'
         )
+        if [[ $CUDA_VERSION == 13* ]]; then
+            CUDA_RPATHS+=('$ORIGIN/../../nvidia/cu13/lib')
+        else
+            CUDA_RPATHS+=(
+                '$ORIGIN/../../nvidia/cublas/lib'
+                '$ORIGIN/../../nvidia/cuda_cupti/lib'
+                '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
+                '$ORIGIN/../../nvidia/cuda_runtime/lib'
+                '$ORIGIN/../../nvidia/cufft/lib'
+                '$ORIGIN/../../nvidia/curand/lib'
+                '$ORIGIN/../../nvidia/cusolver/lib'
+                '$ORIGIN/../../nvidia/cusparse/lib'
+                '$ORIGIN/../../cusparselt/lib'
+                '$ORIGIN/../../nvidia/nvtx/lib'
+                '$ORIGIN/../../nvidia/cufile/lib'
+            )
+        fi
+        
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
