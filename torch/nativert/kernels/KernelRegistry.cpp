@@ -196,8 +196,11 @@ static at::Tensor& mul_out(
   const auto& t_output = output.scalar_type();
   TORCH_CHECK(at::native::result_type(self, other) == t_output);
 
-  auto self_sizes = self.sizes();
-  at::native::resize_(output, self_sizes, std::nullopt);
+  at::native::resize_impl_cpu_(
+      output.unsafeGetTensorImpl(),
+      self.sizes(),
+      self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
+                           : self.strides());
 
   AT_DISPATCH_ALL_TYPES_AND2(
       kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
@@ -1045,6 +1048,17 @@ REGISTER_CPU_KERNEL("torch.ops.aten.where.self", aten_where, {
   at::native::where_self_out(cond, self, other, out);
 })
 
+REGISTER_CPU_KERNEL("torch.ops.fb.scale_gradient.default", fb_scale_gradient, {
+  const auto& in_0 = KernelInput(0).toTensor();
+
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = create_empty_from(in_0);
+  }
+  auto& out = KernelOutput(0).toTensor();
+  out.resize_(in_0.sizes());
+  out.copy_(in_0);
+})
+
 REGISTER_CPU_KERNEL(
     "torch.ops.quantized.embedding_bag_byte_rowwise_offsets.default",
     quantized_embedding_bag_byte_rowwise_offsets,
@@ -1120,6 +1134,25 @@ REGISTER_CPU_KERNEL(
 
       KernelInput(1).toCustomClass<LinearPackedParamsBase>()->apply_dynamic_out(
           in_0, out_0, /* reduce_range= */ false);
+    })
+
+REGISTER_CPU_KERNEL(
+    "torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight.default",
+    _quantized_wrapped_fbgemm_linear_fp16_weight,
+    {
+      const auto& in_0 = KernelInput(0).toTensor();
+      const auto& weight = KernelInput(1).toTensor();
+      auto bias = KernelInput(2).toOptional<at::Tensor>();
+
+      if (auto& out_0 = KernelOutput(0); out_0.isNone()) {
+        out_0 = create_empty_from(in_0, at::kFloat);
+      }
+
+      auto& out_0 = KernelOutput(0).toTensor();
+      fastResizeToZero(out_0);
+
+      at::native::fbgemm_linear_fp16_weight(
+          in_0, weight, bias.value_or(at::Tensor()), out_0);
     })
 
 REGISTER_CPU_KERNEL(
@@ -1235,6 +1268,18 @@ REGISTER_CPU_KERNEL("torch.ops.aten.stack.default", aten_stack, {
   auto& out_t = KernelOutput(0).toTensor();
   fastResizeToZero(out_t);
   at::native::_stack_out_cpu(inputs, dim, out_t);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.fmod.Scalar", aten_fmod_scalar, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto& other = KernelInput(1).toScalar();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::native::fmod(self, other);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
+  at::native::fmod_out(self, other, out);
 })
 
 class OpKernel_aten__to_copy : public C10Kernel {

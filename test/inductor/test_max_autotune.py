@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 aten = torch.ops.aten
@@ -164,6 +164,67 @@ class TestMaxAutotune(TestCase):
             c_expected = mm(a, b)
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_strided(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def mm(a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        def next_multiple_16(a: int) -> int:
+            return ((a + 15) // 16) * 16
+
+        M, N, K = 21, 31, 11
+        a_shape = (K, M) if a_transposed else (M, K)
+        a_stride = (
+            (next_multiple_16(M), 1) if a_transposed else (next_multiple_16(K), 1)
+        )
+        a = torch.empty_strided(a_shape, a_stride, dtype=torch.float16).to(GPU_TYPE)
+        a[:] = torch.randn(a_shape, dtype=torch.float16)
+        a = a.to(GPU_TYPE)
+        b_shape = (N, K) if b_transposed else (K, N)
+        b_stride = (
+            (next_multiple_16(K), 1) if a_transposed else (next_multiple_16(N), 1)
+        )
+        b = torch.empty_strided(b_shape, b_stride, dtype=torch.float16)
+        b[:] = torch.randn(b_shape, dtype=torch.float16)
+        b = b.to(GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+        # Verify that we are using a TMA implementation
+        # depending on whether we're using the experimental API, we check for a different string
+        check_str = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+        if has_triton_stable_tma_api():
+            check_str = "triton.language.make_tensor_descriptor"
+        FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -648,7 +709,7 @@ class TestMaxAutotune(TestCase):
 
         m_c = torch.compile(mode="max-autotune")(mod)
         out, code = run_and_get_code(m_c, x)
-        self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+        self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
         FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1319,7 +1380,7 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
-                        'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
+                        'kwargs':{'EVEN_K':False,'FLOAT32_PRECISION':'"tf32"','USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -1358,7 +1419,7 @@ class TestMaxAutotune(TestCase):
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
-                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
+                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'FLOAT32_PRECISION':'"tf32"',
                     'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import torch
 import torch._custom_ops
 from torch._C import DispatchKey
+from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export
 from torch._higher_order_ops.flat_apply import (
     _ConstantFunction,
     flat_apply,
@@ -186,23 +187,12 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
                 f"tensor subclass. Please look at DTensor.__init__ implementation as an example of proper usage of this API."
             )
         constructor_subclass(*args, **kwargs)
-        if not torch._C._is_torch_function_mode_enabled():
-            return
-        torch_function_mode_stack = torch.overrides._get_current_function_mode_stack()
 
-        pre_dispatch_tf_modes = [
-            mode
-            for mode in torch_function_mode_stack
-            if isinstance(mode, PreDispatchTorchFunctionMode)
-        ]
-        assert len(pre_dispatch_tf_modes) <= 1, (
-            f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
-        )
-
-        if len(pre_dispatch_tf_modes) == 0:
+        mode = _maybe_find_pre_dispatch_tf_mode_for_export()
+        if mode is None:
             return
 
-        mode = pre_dispatch_tf_modes[0]
+        assert isinstance(mode, PreDispatchTorchFunctionMode)
 
         tracer = mode.tracer
         subclass = args[0]

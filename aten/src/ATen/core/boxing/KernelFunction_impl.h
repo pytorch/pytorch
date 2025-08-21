@@ -25,11 +25,33 @@ inline KernelFunction::KernelFunction()
       sym_unboxed_kernel_func_(nullptr) {}
 
 inline KernelFunction::~KernelFunction() {
-  for (auto& weak_token : tokens_) {
-    if (auto token = weak_token.lock()) {
-      token->invalidate();
+  if (tokens_) {
+    for (auto& weak_token : *tokens_) {
+      if (auto token = weak_token.lock()) {
+        token->invalidate();
+      }
     }
   }
+}
+
+inline KernelFunction::KernelFunction(const KernelFunction& other)
+    : boxed_kernel_func_(other.boxed_kernel_func_),
+      unboxed_kernel_func_(other.unboxed_kernel_func_),
+      sym_unboxed_kernel_func_(other.sym_unboxed_kernel_func_) {
+  // tokens_ is intentionally not copied as we only care about invalidating
+  // tokens if the original KernelFunction is destroyed
+}
+
+inline KernelFunction& KernelFunction::operator=(const KernelFunction& other) {
+  if (this != &other) {
+    boxed_kernel_func_ = other.boxed_kernel_func_;
+    unboxed_kernel_func_ = other.unboxed_kernel_func_;
+    sym_unboxed_kernel_func_ = other.sym_unboxed_kernel_func_;
+
+    // tokens_ is intentionally not copied as we only care about invalidating
+    // tokens if the original KernelFunction is destroyed
+  }
+  return *this;
 }
 
 inline KernelFunction::KernelFunction(
@@ -167,7 +189,10 @@ C10_ALWAYS_INLINE Return KernelFunction::call(
 
 inline void KernelFunction::registerToken(
     std::weak_ptr<KernelToken> token) const {
-  tokens_.push_back(std::move(token));
+  if (!tokens_) {
+    tokens_ = std::make_unique<std::vector<std::weak_ptr<KernelToken>>>();
+  }
+  tokens_->push_back(std::move(token));
 }
 
 inline KernelFunction KernelFunction::makeFromBoxedKernel(

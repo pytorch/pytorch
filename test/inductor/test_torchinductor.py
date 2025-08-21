@@ -5717,6 +5717,19 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_complex_from_real_imag(self):
+        def fn(x, y):
+            return aten.complex.default(x, y)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        self.common(
+            fn,
+            (a, a),
+            exact_stride=True,
+            reference_in_float=False,
+        )
+
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -7455,6 +7468,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(
             fn, (torch.randint(0, 999, size=[1, 1, 8, 8], dtype=torch.float32),)
+        )
+
+    def test_constant_pad_2d_strides_nonpositive(self):
+        def fn(a):
+            return torch.constant_pad_nd(a, [0, 0, 0, -2, 0, 0])
+
+        self.common(
+            fn, (torch.empty_strided((2, 4, 5), (20, 1, 4), dtype=torch.float32),)
         )
 
     @skip_if_gpu_halide  # misaligned address
@@ -13745,6 +13766,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
         has_lowered = not re.search(r"repeat_interleave.Tensor", code)
         self.assertEqual(has_lowered, can_lower)
+
+    @staticmethod
+    def _is_triggering_buffer_reuse(fn, *inputs):
+        with config.patch(allow_buffer_reuse=True):
+            _, (code_allowed,) = run_and_get_code(fn, *inputs)
+        with config.patch(allow_buffer_reuse=False):
+            _, (code_disallowed,) = run_and_get_code(fn, *inputs)
+        code_allowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_allowed)
+        code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
+        return code_allowed != code_disallowed
+
+    def test_allow_reuse_disable_if_exceed_peak(self):
+        @torch.compile
+        def fn(inp):  # 1*N^2
+            a = inp.mean(-1)  # 1*N^2 + N
+            b = (inp - a) ** 2  # 2*N^2 + N
+            c = b @ b  # 3*N^2 (!!) since this is the peak, can not reuse across
+            d = c.mean(-1)  # 2*N^2 + N
+            return d  # 1*N^2 + N
+
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertFalse(CommonTemplate._is_triggering_buffer_reuse(fn, inp))
+
+    def test_allow_reuse_active_if_under_peak(self):
+        def g(inp):
+            return (inp - torch.logsumexp(inp, -1)) ** 2
+
+        @torch.compile
+        def fn(m, inp):
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            return inp
+
+        m = torch.randn(100, 100, device=self.device)
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
     # end of class CommonTemplate - add new tests here
 
