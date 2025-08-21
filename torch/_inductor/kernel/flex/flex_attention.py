@@ -34,6 +34,10 @@ from .common import (
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+from .flex_flash_attention import (
+    _use_flex_flash_attention,
+    create_flex_flash_attention_kernel,
+)
 
 
 log = logging.getLogger(__name__)
@@ -166,6 +170,19 @@ def flex_attention(
     )
     if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    if _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
+        return create_flex_flash_attention_kernel(
             query,
             key,
             value,
