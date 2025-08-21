@@ -64,53 +64,14 @@ struct AllocatorState {
   virtual ~AllocatorState() = default;
 };
 
-struct TraceEntry {
-  enum Action {
-    ALLOC, // API made to the caching allocator for new memory
-    FREE_REQUESTED, // API call made to the caching allocator to free memory
-    FREE_COMPLETED, // The allocator might have to delay a free because
-                    // it is still in use on another stream via record_stream
-                    // This event is generated when a free actually completes.
-    SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
-    SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragment or empty_caches)
-    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
-    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
-    SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
-              // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by cuda)
-  };
-  TraceEntry(
-      Action action,
-      c10::DeviceIndex device,
-      size_t addr,
-      size_t size,
-      cudaStream_t stream,
-      MempoolId_t mempool,
-      approx_time_t time,
-      std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "")
-      : action_(action),
-        device_(device),
-        addr_(addr),
-        context_(std::move(context)),
-        stream_(stream),
-        size_(size),
-        mempool_(std::move(mempool)),
-        compile_context_(std::move(compile_context)) {
-    time_.approx_t_ = time;
-  }
-  Action action_;
-  c10::DeviceIndex device_;
-  size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
-  std::shared_ptr<GatheredContext> context_;
-  cudaStream_t stream_{};
-  size_t size_;
-  MempoolId_t mempool_;
-  trace_time_ time_{};
-  std::string compile_context_{};
+template <>
+struct TraceEntryTraits<cuda::CUDAStream> {
+  using StreamHandleT = cudaStream_t;
 };
+
+// Keep for BC reasons
+using TraceEntry =
+    c10::CachingDeviceAllocator::TraceEntryBase<cuda::CUDAStream>;
 
 struct AllocatorConfigInfo {
   double garbage_collection_threshold;

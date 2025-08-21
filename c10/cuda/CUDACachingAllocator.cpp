@@ -886,41 +886,6 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     }
   }
 
-  void record_trace(
-      TraceEntry::Action action,
-      size_t addr,
-      size_t size,
-      cudaStream_t stream,
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      std::shared_ptr<GatheredContext> context) {
-    if (!record_history && trace_trackers_.empty())
-      return;
-    std::string compile_string = "N/A";
-    if (!compile_context.empty()) {
-      compile_string = compile_context.top();
-    }
-    auto te = TraceEntry(
-        action,
-        device,
-        addr,
-        size,
-        stream,
-        mempool_id,
-        getApproximateTime(),
-        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
-        compile_string);
-
-    // Callbacks should not include any Pytorch call
-    for (const auto& cb : trace_trackers_) {
-      cb(te);
-    }
-
-    if (record_history) {
-      alloc_buffer.insertEntries(te);
-    }
-  }
-
   bool checkPoolLiveAllocations(
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) {
@@ -1399,36 +1364,12 @@ static void uncached_delete(void* ptr) {
 }
 
 static void local_raw_delete(void* ptr);
-thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
+using CUDACachingDeviceAllocatorInterface = CachingDeviceAllocatorInterface<c10::kCUDA, local_raw_delete, CUDACachingDeviceAllocatorImpl, CUDAAllocator>;
 
-class NativeCachingAllocator : public CUDAAllocator {
+class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
  private:
   // allows this allocator to be turned on and off programmatically
   bool enable_ = true;
-
-  // Shard allocation region to have independent mutexes to reduce contention.
-  static constexpr size_t kNumMutexShard = 67;
-
-  struct alignas(hardware_destructive_interference_size) AlignedMutex {
-    std::mutex m;
-  };
-
-  std::array<AlignedMutex, kNumMutexShard> mutex;
-
-  // allocated blocks by device pointer
-  std::array<ska::flat_hash_map<void*, Block*>, kNumMutexShard>
-      allocated_blocks;
-
-  static size_t get_mutex_shard_id(void* ptr) {
-    return twang_mix64((size_t)ptr) % kNumMutexShard;
-  }
-
-  void add_allocated_block(Block* block) {
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-    const auto mutex_shard_id = get_mutex_shard_id(block->ptr);
-    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
-    allocated_blocks[mutex_shard_id][block->ptr] = block;
-  }
 
   // Variables by memory snapshot
   c10::ApproximateClockToUnixTimeConverter clock_converter;
@@ -1436,72 +1377,6 @@ class NativeCachingAllocator : public CUDAAllocator {
   RingBuffer<AnnotationEntry> annotation_buffer;
 
  public:
-  std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
-
-  Block* get_allocated_block(void* ptr, bool remove = false) {
-    const auto mutex_shard_id = get_mutex_shard_id(ptr);
-    std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
-    auto it = allocated_blocks[mutex_shard_id].find(ptr);
-    if (it == allocated_blocks[mutex_shard_id].end()) {
-      return nullptr;
-    }
-    Block* block = it->second;
-    if (remove) {
-      allocated_blocks[mutex_shard_id].erase(it);
-    }
-    return block;
-  }
-
-  void init(int device_count) override {
-    const auto size = static_cast<int64_t>(device_allocator.size());
-    if (size < device_count) {
-      device_allocator.resize(device_count);
-      for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
-      }
-    }
-  }
-
-  bool initialized() override {
-    return !device_allocator.empty();
-  }
-
-  /** allocates a block which is safe to use from the provided stream */
-  void malloc(
-      void** devPtr,
-      c10::DeviceIndex device,
-      size_t size,
-      cudaStream_t stream) {
-    TORCH_INTERNAL_ASSERT(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, stream);
-    add_allocated_block(block);
-    *devPtr = (void*)block->ptr;
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_memory_allocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
-    }
-  }
-
-  void free(void* ptr) {
-    if (!ptr) {
-      return;
-    }
-    Block* block = get_allocated_block(ptr, true /* remove */);
-    if (!block) {
-      TORCH_CHECK(false, "invalid device pointer: ", ptr);
-    }
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_memory_deallocation(
-          c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
-    }
-    device_allocator[block->device]->free(block);
-  }
 
   double getMemoryFraction(c10::DeviceIndex device) override {
     TORCH_INTERNAL_ASSERT(
@@ -1607,11 +1482,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
 
-  void emptyCache(MempoolId_t mempool_id) override {
-    for (auto& da : device_allocator)
-      da->emptyCache(mempool_id);
-  }
-
   void enable(bool value) override {
     enable_ = value;
   }
@@ -1634,27 +1504,6 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->shareIpcHandle(block);
-  }
-
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
-    // Empty tensor's storage().data() might be a null ptr. As there is no
-    // blocks associated with those tensors, it is fine to do nothing here.
-    if (!ptr.get()) {
-      return;
-    }
-
-    // If a tensor is not allocated by this instance, simply skip
-    // This usually happens when CUDA tensors are shared across processes,
-    // we have implemented reference counting based sharing mechanism to
-    // guarantee tensors won't be accidentally freed by one process while
-    // they are still being used in another
-    if (ptr.get_deleter() != &local_raw_delete)
-      return;
-
-    Block* block = get_allocated_block(ptr.get());
-    // block must not be null reaching here
-    TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
-    device_allocator[block->device]->recordStream(block, stream);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id) override {
@@ -1779,70 +1628,6 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override {
     device_allocator[device]->cacheInfo(largestBlock);
-  }
-  void assertValidDevice(c10::DeviceIndex device) {
-    const auto device_num = device_allocator.size();
-    TORCH_CHECK(
-        0 <= device && device < static_cast<int64_t>(device_num),
-        "Invalid device argument ",
-        device,
-        ": did you call init?");
-  }
-
-  DeviceStats getDeviceStats(c10::DeviceIndex device) override {
-    assertValidDevice(device);
-    return device_allocator[device]->getStats();
-  }
-
-  void resetAccumulatedStats(c10::DeviceIndex device) override {
-    assertValidDevice(device);
-    device_allocator[device]->resetAccumulatedStats();
-  }
-
-  void resetPeakStats(c10::DeviceIndex device) override {
-    assertValidDevice(device);
-    device_allocator[device]->resetPeakStats();
-  }
-
-  void createOrIncrefPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      CUDAAllocator* allocator) override {
-    assertValidDevice(device);
-    device_allocator[device]->createOrIncrefPool(
-        std::move(mempool_id), allocator);
-  }
-
-  void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) override {
-    assertValidDevice(device);
-    device_allocator[device]->setUseOnOOM(std::move(mempool_id));
-  }
-
-  // CUDAGraph interactions
-  void beginAllocateToPool(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter) override {
-    assertValidDevice(device);
-    device_allocator[device]->beginAllocateToPool(
-        std::move(mempool_id), std::move(filter));
-  }
-
-  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
-      override {
-    assertValidDevice(device);
-    device_allocator[device]->endAllocateToPool(mempool_id);
-  }
-
-  void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
-    assertValidDevice(device);
-    device_allocator[device]->releasePool(std::move(mempool_id));
-  }
-
-  int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id)
-      override {
-    assertValidDevice(device);
-    return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {

@@ -183,8 +183,17 @@ union trace_time_ {
   approx_time_t approx_t_;
 };
 
+// TraceEntry traits to map StreamT to its corresponding HandleT for different
+// backends. This is mainly used to keep BC, otherwise it is better to use void*
+// or c10::Stream as the generic handle.
+template <typename StreamT>
+struct TraceEntryTraits {
+  using StreamHandleT = void*;
+};
+
 // This is a generic trace entry that can be used for any device allocator
-struct GenericTraceEntry {
+template <typename StreamT>
+struct TraceEntryBase {
   enum Action {
     ALLOC, // API made to the caching allocator for new memory
     FREE_REQUESTED, // API call made to the caching allocator to free memory
@@ -201,16 +210,18 @@ struct GenericTraceEntry {
     OOM // The allocator threw an OutOfMemoryError
   };
 
-  GenericTraceEntry(
+  using StreamHandleT = typename TraceEntryTraits<StreamT>::StreamHandleT;
+
+  TraceEntryBase(
       Action action,
       c10::DeviceIndex device,
       size_t addr,
       size_t size,
-      c10::Stream stream,
+      StreamHandleT stream,
       MempoolId_t mempool,
       approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "")
+      std::string compile_context = {})
       : action_(action),
         device_(device),
         addr_(addr),
@@ -226,15 +237,12 @@ struct GenericTraceEntry {
   c10::DeviceIndex device_;
   size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
-  c10::Stream stream_;
+  StreamHandleT stream_;
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
   std::string compile_context_{};
 };
-
-using GenericAllocatorTraceTracker =
-    std::function<void(const GenericTraceEntry&)>;
 
 using CreateContextFnPtr = std::shared_ptr<GatheredContext> (*)();
 
@@ -1031,7 +1039,7 @@ struct CachingDeviceAllocatorImpl {
       std::string proc_info = reportProcessMemoryInfo(device);
 
       record_trace(
-          GenericTraceEntry::OOM,
+          TraceEntryBase<StreamT>::OOM,
           device_free,
           params.size(),
           params.stream(),
@@ -1165,7 +1173,7 @@ struct CachingDeviceAllocatorImpl {
             .current);
 
     record_trace(
-        GenericTraceEntry::FREE_REQUESTED,
+        TraceEntryBase<StreamT>::FREE_REQUESTED,
         int64_t(block->ptr),
         block->requested_size,
         block->stream,
@@ -1665,7 +1673,7 @@ struct CachingDeviceAllocatorImpl {
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     stats.num_device_alloc++;
     record_trace(
-        GenericTraceEntry::SEGMENT_ALLOC,
+        TraceEntryBase<StreamT>::SEGMENT_ALLOC,
         p.block->ptr,
         p.block->size,
         p.stream(),
@@ -1736,7 +1744,7 @@ struct CachingDeviceAllocatorImpl {
 
     block->context_when_allocated = std::move(context);
     record_trace(
-        GenericTraceEntry::ALLOC,
+        TraceEntryBase<StreamT>::ALLOC,
         block->ptr,
         orig_size,
         block->stream,
@@ -1783,7 +1791,7 @@ struct CachingDeviceAllocatorImpl {
         block->stream_uses.empty());
 
     record_trace(
-        GenericTraceEntry::FREE_COMPLETED,
+        TraceEntryBase<StreamT>::FREE_COMPLETED,
         block->ptr,
         block->requested_size,
         block->stream,
@@ -1856,7 +1864,7 @@ struct CachingDeviceAllocatorImpl {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
     stats.num_device_free++;
     record_trace(
-        GenericTraceEntry::SEGMENT_FREE,
+        TraceEntryBase<StreamT>::SEGMENT_FREE,
         block->ptr,
         block->size,
         block->stream,
@@ -2373,7 +2381,7 @@ struct CachingDeviceAllocatorImpl {
 
     stats.num_device_alloc++;
     record_trace(
-        GenericTraceEntry::SEGMENT_MAP,
+        TraceEntryBase<StreamT>::SEGMENT_MAP,
         mapped_range.ptr,
         mapped_range.size,
         to_map->stream,
@@ -2451,7 +2459,7 @@ struct CachingDeviceAllocatorImpl {
 
     stats.num_device_free++;
     record_trace(
-        GenericTraceEntry::SEGMENT_UNMAP,
+        TraceEntryBase<StreamT>::SEGMENT_UNMAP,
         unmapped.ptr,
         unmapped.size,
         block->stream,
@@ -2523,8 +2531,13 @@ struct CachingDeviceAllocatorImpl {
     return context_recorder_.load()();
   }
 
-  void record_trace(
-      GenericTraceEntry::Action action,
+  template <
+      typename TraceEntryT,
+      typename = std::enable_if_t<std::is_base_of_v<
+          TraceEntryBase<typename TraceEntryT::StreamT>,
+          TraceEntryT>>>
+  virtual void record_trace(
+      typename TraceEntryT::Action action,
       size_t addr,
       size_t size,
       c10::Stream stream,
@@ -2537,7 +2550,7 @@ struct CachingDeviceAllocatorImpl {
     if (!compile_context.empty()) {
       compile_string = compile_context.top();
     }
-    auto te = GenericTraceEntry(
+    auto te = TraceEntryT(
         action,
         device,
         addr,
@@ -2613,14 +2626,15 @@ struct CachingDeviceAllocatorImpl {
 
   RecordContext record_context_ = RecordContext::NEVER;
 
-  // Trace buffer for recording GenericAllocatorTraceTracker for call back.
-  std::vector<GenericAllocatorTraceTracker> trace_trackers_;
+  // Trace buffer for recording AllocatorTraceTracker for call back.
+  std::vector<std::function<void(const TraceEntryBase<StreamT>&)>>
+      trace_trackers_;
 
   // Thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
   // Ring buffer for memory snapshot TraceEntry's
-  RingBuffer<GenericTraceEntry> alloc_buffer;
+  RingBuffer<TraceEntryBase<StreamT>> alloc_buffer;
 
   // Tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
