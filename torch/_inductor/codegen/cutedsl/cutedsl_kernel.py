@@ -252,7 +252,10 @@ class CuteDSLTemplateKernel(Kernel):
         """Get the actual argument name for the output buffer."""
         assert self.output_node, "Output node must exist to get output buffer name"
         buf_name = self.output_node.get_name()
-        return self.args.output_buffers.get(buf_name, "OUTPUT")
+        output = self.args.output_buffers.get(buf_name, None)
+        if output is None:
+            raise ValueError(f"Output buffer '{buf_name}' not found in args")
+        return output
 
     def call_kernel(self, name: str, node=None):
         """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""
