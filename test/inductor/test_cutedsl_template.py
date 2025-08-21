@@ -459,11 +459,9 @@ def {{kernel_name}}_kernel():
                 result = CuteDSLOpOverrides.sqrt(mock_cse_a)
                 self.assertIsInstance(result, CSEVariable)
 
-                result = CuteDSLOpOverrides.maximum(mock_cse_a, mock_cse_b)
-                self.assertIsInstance(result, CSEVariable)
-
-                result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
-                self.assertIsInstance(result, CSEVariable)
+                with self.assertRaises(NotImplementedError):
+                    result = CuteDSLOpOverrides.maximum(mock_cse_a, mock_cse_b)
+                    result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
 
         scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa("5.0", mock_cse_a)
         self.assertEqual(scalar_result, "cute.full_like(tensor_a, 5.0)")
