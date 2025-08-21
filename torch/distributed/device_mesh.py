@@ -251,6 +251,30 @@ else:
             ),
             group: Optional[ProcessGroup] = None,
         ) -> None:
+            """
+            Creates or retrieves a process group backend for a given layout and dimension.
+
+            This method manages the mapping between layouts, dimension names, and process groups.
+            It ensures that each layout has a corresponding process group, and each named dimension
+            maps to exactly one layout. If the layout already has a process group, it validates
+            the existing mappings and returns early.
+
+            Args:
+                layout (_Layout): The layout object representing the communication pattern
+                dim (int): The dimension index in the device mesh
+                name (Optional[str]): Optional name for the mesh dimension
+                backend_override (tuple[Optional[str], Optional[C10dBackend.Options]]):
+                    Optional backend type and options to override default settings
+                group (Optional[ProcessGroup]): Optional existing process group to use instead of creating a new one
+
+            Note:
+                - If a layout already has a process group, any backend_override or explicit group will be ignored
+                - If a name is provided, it will be mapped to the layout for future reference
+                - For world-size layouts with no overrides, it will try to use the default process group
+                - For other layouts, it creates appropriate subgroups using either split_group (more efficient and it only
+                available for nccl communicators) or new_group
+                - Because process group itself is not serializable, we only store the group name in the mapping
+            """
             # Every mesh_dim_name will only map to one and only one layout.
             # When the layout has backend initiated, we want to ensure that
             if layout in self.layouts_to_groups:
@@ -478,36 +502,85 @@ else:
             *,
             dim_names: Optional[Union[str, tuple[str, ...]]] = None,
         ) -> "DeviceMesh":
-            # Use the constructor to create a dummy no-op object first.
-            size_l = []
-            stride_l = []
-            mesh_size = []
+            """
+            Creates a DeviceMesh from an existing backend and layouts. This will create a new device mesh
+            from a same backend universe or transformed from (e.g, flatten, etc.). Although CuTe layout makes
+            bookkeeping lot easier, we still need to reconstruct the global DeviceMesh mesh tensor from layouts. Especially
+            for a list of layouts, we need to view it as a single flattened layout and view as size of list of numel of each
+            layout.
+
+            For example, if we have a layouts of ((2,4), (2,2)), we need to view it as a flattened layout of (4,2) and
+            view it as a single mesh tensor of (2,2,2) if the world size is 8 like:
+            [
+               [[0, 2],
+               [1, 3]],
+               [[4, 6],
+                [5, 7]]
+            ]
+            Rank 0 and 2 will get [[0, 2]]
+            Rank 1 and 3 will get [[1, 3]]
+            Rank 4 and 6 will get [[4, 6]]
+            Rank 5 and 7 will get [[5, 7]]
+
+
+            Args:
+                device_type (str): The device type for the mesh (e.g., "cuda", "cpu")
+                backend (_DeviceMeshBackend): Existing backend to use for the new mesh
+                layouts (tuple[_Layout, ...]): Tuple of layout objects defining the mesh structure
+                cur_rank (int): Current global rank to determine which part of the mesh this rank belongs to
+                dim_names (Optional[Union[str, tuple[str, ...]]]): Names for the mesh dimensions
+
+            Returns:
+                DeviceMesh: A new DeviceMesh object with backend and layouts configured
+
+            Note:
+                This is an internal method primarily used for creating submeshes when slicing
+                or transforming an existing DeviceMesh.
+            """
+            # Extract sizes and strides from layouts
+            size_l, stride_l, mesh_size = [], [], []
             for layout in layouts:
                 size_l.extend(layout.sizes)
                 mesh_size.append(layout.numel())
                 stride_l.extend(layout.strides)
+
+            # Create combined layout and get ranks
             layout = _Layout(tuple(zip(size_l, stride_l)))
             pg_ranks_by_dim = layout.layout_to_global_ranks(not_none(get_world_size()))
+
+            # Create tensor representation of the mesh
             tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
                 -1, *mesh_size
             )
+
+            # Find the mesh containing current rank
             nd_mesh = None
             for ndm in tensor:
                 if cur_rank in ndm:
                     nd_mesh = ndm
-            assert nd_mesh is not None
+                    break
+            assert nd_mesh is not None, (
+                f"Could not find the mesh containing the current rank {cur_rank}"
+            )
+
+            # Create device mesh without initializing backend
             device_mesh = DeviceMesh(
                 device_type,
                 nd_mesh,
                 _init_backend=False,
             )
+
+            # Set backend and layouts
             device_mesh._backend = backend
             device_mesh._layouts = layouts
+
+            # Set dimension names if provided, we also need to ensure it is a tuple
+            # so it is hashable
             if dim_names:
-                dim_names = (
+                device_mesh.mesh_dim_names = (
                     (dim_names,) if isinstance(dim_names, str) else tuple(dim_names)
                 )
-                device_mesh.mesh_dim_names = dim_names
+
             return device_mesh
 
         def __enter__(self) -> "DeviceMesh":
@@ -809,7 +882,11 @@ else:
 
             backend = _DeviceMeshBackend(device_type)
             layouts = init_layouts_from_mesh(mesh.size(), mesh.stride())
-            for i, (l, g) in enumerate(zip(layouts, group, strict=True)):
+            if len(layouts) != len(group):
+                raise ValueError(
+                    f"zip arguments must have equal lengths for layouts {layouts} and groups {group}"
+                )
+            for i, (l, g) in enumerate(zip(layouts, group)):
                 name = mesh_dim_names[i] if mesh_dim_names else None
                 backend._maybe_create_backend(l, i, name, group=g)
 
