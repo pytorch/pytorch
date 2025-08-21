@@ -1276,6 +1276,7 @@ class SchedulerNode(BaseSchedulerNode):
                     )
         return buffers_store_as_atomic_add
 
+    @cache_on_self
     def has_side_effects(self) -> bool:
         if (
             self._body is not None
@@ -1553,6 +1554,18 @@ class FusedSchedulerNode(BaseSchedulerNode):
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
         return buf.getrawvalue().rstrip()
+
+    @cache_on_self
+    def has_side_effects(self) -> bool:
+        if self.snodes is not None:
+            return any(
+                isinstance(node, SchedulerNode)
+                and node._body is not None
+                and hasattr(node._body, "has_op")
+                and node._body.has_op("device_assert_async")
+                for node in self.snodes
+            )
+        return super().has_side_effects()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
