@@ -16,7 +16,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_nccl,
 )
@@ -63,7 +63,7 @@ def get_flatten_hook():
     return flatten_hook
 
 
-class StageTest(MultiProcContinousTest):
+class StageTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
@@ -419,6 +419,7 @@ class StageNegativeTest(MultiProcessTestCase):
             self.device,
             dw_builder=lambda: None,
         )
+        stage_with_dw_builder._has_backward = True
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 

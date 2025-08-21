@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -14,12 +15,14 @@ struct AllocationRef : public c10::intrusive_ptr_target {
   HandleType handle;
   size_t block_size;
   int device_idx;
+  bool is_multicast;
 
   AllocationRef(
       void* ptr,
       HandleType handle,
       size_t block_size,
-      int device_idx);
+      int device_idx,
+      bool is_multicast = false);
 
   ~AllocationRef();
 };
@@ -112,7 +115,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
   c10::DeviceType supported_device_type() override;
@@ -123,6 +126,9 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   std::shared_mutex mutex_;
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
+  c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type
+      handle_type_ = c10::cuda::CUDACachingAllocator::
+          Expandable_Segments_Handle_Type::UNSPECIFIED;
 };
 
 } // namespace c10d::symmetric_memory
