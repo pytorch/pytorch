@@ -34,6 +34,8 @@ RUN yum install -y \
   zstd \
   libgomp \
   sudo \
+  zip \
+  openssl \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \

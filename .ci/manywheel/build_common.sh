@@ -18,24 +18,10 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
-PLATFORM=""
-# TODO move this into the Docker images
+IS_MANYLINUX2_28=0
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
-    retry yum install -q -y zip openssl
-    PLATFORM="manylinux_2_28_x86_64"
-elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
-    retry dnf install -q -y zip openssl
-elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-    # TODO: Remove this once nvidia package repos are back online
-    # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-    # shellcheck disable=SC2046
-    sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-    retry apt-get update
-    retry apt-get -y install zip openssl
-else
-    echo "Unknown OS: '$OS_NAME'"
-    exit 1
+    IS_MANYLINUX2_28=1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'
@@ -77,6 +63,20 @@ export CMAKE_INCLUDE_PATH="/opt/intel/include:$CMAKE_INCLUDE_PATH"
 if [[ -e /opt/openssl ]]; then
     export OPENSSL_ROOT_DIR=/opt/openssl
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
+fi
+
+# Set AArch64 variables
+if [[ $GPU_ARCH_TYPE == *"aarch64"* ]]; then
+    export USE_MKLDNN=ON
+    export USE_MKLDNN_ACL=ON
+    export ACL_ROOT_DIR="/acl"
+    if [[ $GPU_ARCH_TYPE == "cuda-aarch64" ]]; then
+        export MAX_JOBS=5
+        export BLAS="NVPL"
+    else
+        export BLAS="OpenBLAS"
+        export OpenBLAS_HOME="/opt/OpenBLAS"
+    fi
 fi
 
 mkdir -p /tmp/$WHEELHOUSE_DIR
@@ -367,9 +367,9 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     done
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+        sed -i -e s#linux_#"manylinux_2_28_"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes
@@ -412,8 +412,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     fi
 
     # Rename wheel for Manylinux 2_28
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
-        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
+    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_#"manylinux_2_28_"#)
         zip -rq $pkg_name $PREIX*
         rm -f $pkg
         mv $pkg_name $(dirname $pkg)/$pkg_name
