@@ -155,13 +155,15 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
-    def remainder(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+    def remainder(a, b):
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} % {b})")
 
     @staticmethod
     def exp(x: CuteDSLArg) -> CuteDSLArg:
         """Exponential using CuteDSL cute.math.exp function."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.exp2({x} * 1.4426950408889634)")
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, "cute.math.exp2({x} * 1.4426950408889634)"
+        )
 
     @staticmethod
     def sqrt(x: CuteDSLArg) -> CuteDSLArg:
@@ -250,9 +252,10 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def abs(x: CuteDSLArg) -> CuteDSLArg:
         """Absolute value using CuteDSL cute.math.abs function."""
+        x_dtype = x.dtype if isinstance(x, CSEVariable) else torch.float32
         abs_op = (
             "mlir_math.absf"
-            if x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+            if x_dtype in (torch.float16, torch.bfloat16, torch.float32)
             else "mlir_math.absi"
         )
         return CuteDSLOpOverrides._apply_unary_op(
@@ -323,10 +326,10 @@ class CuteDSLOpOverrides(OpOverrides):
 
     # Logical operations
     def logical_and(self, x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} & {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} and {b})")
 
     def logical_or(self, x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} | {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} or {b})")
 
     @staticmethod
     def logical_not(a):
@@ -341,20 +344,20 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def ne(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.Boolean(({a} != {b}))")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} != {b})")
 
     @staticmethod
     def lt(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.Boolean(({a} < {b}))")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} < {b})")
 
     @staticmethod
     def le(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.Boolean(({a} <= {b}))")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} <= {b})")
 
     @staticmethod
     def gt(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.Boolean(({a} > {b}))")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} > {b})")
 
     @staticmethod
     def ge(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.Boolean(({a} >= {b}))")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} >= {b})")

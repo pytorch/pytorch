@@ -90,8 +90,6 @@ class CuteDSLTemplateKernel(Kernel):
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.subgraphs = subgraphs
-
-        # Subgraph management for template processing
         self.subgraph_bodies: dict[str, CuteDSLSubgraphInfo] = {}
 
         # Template attributes
@@ -111,7 +109,6 @@ class CuteDSLTemplateKernel(Kernel):
             node_name = getattr(input_node, "name", f"input_{i}")
             self.named_input_nodes[node_name] = input_node
 
-        # Initialize CSE system for common subexpression elimination
         self.cse = CSE(name_prefix="tmp")
 
     def gen_imports(self) -> str:
@@ -216,25 +213,23 @@ class CuteDSLTemplateKernel(Kernel):
         """Define kernel function signature for CuteDSL templates."""
         renames = IndentedBuffer(initial_indent=1)
 
-        # Register all input nodes and create arg names
         for i, input_node in enumerate(self.input_nodes):
             buf_name = input_node.get_name()
             self.args.input(buf_name)
 
-            # Create mapping for template names to arg names
+            # Template aliasing: converts template variables (e.g., "input_a") to function args (e.g., "arg_input_a")
+            # and generates rename statements so template code can use the original names
             if i < len(argnames):
                 template_name = argnames[i]
                 arg_name = f"arg_{template_name}"
                 self.args.input_buffers[buf_name] = arg_name
-                # Generate rename: TEMPLATE_NAME = arg_TEMPLATE_NAME
                 renames.writeline(f"{template_name} = {arg_name}")
 
-            # # Register the output if it exists
-            if self.output_node:
-                self.args.output(self.output_node.get_name())
+        if self.output_node:
+            self.args.output(self.output_node.get_name())
 
         def hook():
-            # python_argdefs() cannot be run until after the rest of the template lazily adds more args
+            # Deferred execution: arg definitions must be collected after template processing adds all args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
@@ -247,19 +242,15 @@ class CuteDSLTemplateKernel(Kernel):
             return code.getvalue()
 
         assert "<DEF_KERNEL>" not in self.render_hooks
+        # Placeholder-based rendering: hook will be called when template encounters "<DEF_KERNEL>"
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
     def get_output(self):
         """Get the actual argument name for the output buffer."""
-        if self.output_node:
-            buf_name = self.output_node.get_name()
-            return self.args.output_buffers.get(buf_name, "OUTPUT")
-        return "OUTPUT"
-
-    def create_cse_var(self, *args: Any, **kwargs: Any) -> CSEVariable:
-        """Create a CSEVariable for CSE operations."""
-        return CSEVariable(*args, **kwargs)
+        assert self.output_node, "Output node must exist to get output buffer name"
+        buf_name = self.output_node.get_name()
+        return self.args.output_buffers.get(buf_name, "OUTPUT")
 
     def call_kernel(self, name: str, node=None):
         """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""
@@ -288,47 +279,61 @@ class CuteDSLTemplateKernel(Kernel):
         **fixed_inputs,
     ) -> str:
         """Generate CuteDSL code for a subgraph modification."""
+        # Find unique name to avoid collisions between multiple modifications of same subgraph
         num = 0
-        out = None
-        scatters: list[Any] = []
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
+
+        # Create isolated body context to prevent modifications from interfering with each other
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapperCuteDSL(
                 self, subgraph_number, fixed_inputs, mask
             )
-            # Set kernel context so CSE operations can access create_cse_var
             with V.set_kernel_handler(self), V.set_ops_handler(modification_handler):
                 assert isinstance(subgraph, (ComputedBuffer, list)), (
-                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                    f"Expected ComputedBuffer or List[ComputedBuffer], got {type(subgraph)}"
                 )
-                # Handle scatter stores
+
                 if isinstance(subgraph, list):
                     raise NotImplementedError(
                         "Scatter graphs are not supported for CuteDSL"
                     )
-                elif isinstance(subgraph.data, InputBuffer):
+
+                # Different buffer types require different code generation approaches
+                if isinstance(subgraph.data, InputBuffer):
+                    # InputBuffer: use make_loader to create accessor function
                     out = subgraph.data.make_loader()(())
                 else:
+                    # ComputedBuffer: directly call the inner compute function
                     out = subgraph.data.inner_fn(())
 
-            # Generate code
+            # Two mutually exclusive output modes
             if output_name is not None:
-                assert isinstance(output_name, str)
-                assert out is not None
+                # Named output: assign result to a variable
+                assert out is not None, (
+                    f"Expected computation result for named output {output_name}"
+                )
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
-                assert out is None
-                for scatter in scatters:
-                    self.body.writeline(str(scatter))
+                # Side-effect only: no output assignment (currently only for scatter operations)
+                assert out is None, (
+                    "Expected no result for side-effect-only modification"
+                )
 
-            body_val = self.body.getvalue()
-            return body_val
+            return self.body.getvalue()
 
 
 class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined]
-    """Handles placeholder substitutions during subgraph processing for CuteDSL."""
+    """
+    Wrapper handler that enables CuteDSL code generation during subgraph modifications.
+
+    This class sits between the PyTorch IR and CuteDSL code generation, providing:
+    1. Operation substitution: converts PyTorch ops to CuteDSL equivalents via CuteDSLOpOverrides
+    2. Placeholder handling: resolves fixed_inputs during template processing
+    3. Limited operation support: currently restricted to pointwise operations
+
+    """
 
     def __init__(
         self,
@@ -337,7 +342,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         fixed_inputs: dict[str, Any],
         mask: Optional[str],
     ):
-        # Initialize with CuteDSL op overrides
         cutedsl_ops = CuteDSLOpOverrides()
         super().__init__(cutedsl_ops)
         self.name = f"CuteDSLPlaceholderSubstitution_{subgraph_number}"
@@ -349,52 +353,32 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         """Get the dtype for an input from the kernel's named_input_nodes."""
         if name in self.kernel.named_input_nodes:
             return self.kernel.named_input_nodes[name].dtype
-        # TODO: I HATE THIS!
-        return torch.float32 if name not in ('b', 'h', 'm', 'n') else torch.int32
+        # TODO: Fallback for common dimension names - should be replaced with proper dtype tracking
+        return torch.float32 if name not in ("b", "h", "m", "n") else torch.int32
 
     def load(self, name: str, index: sympy.Expr):
-        """Handle loading from tensor or fixed input for CuteDSL.
-
-        TODO: Skipping complex load operations for now - only supporting trivial pointwise
-        operations that don't require indirect indexing or complex tensor loading.
-        """
-        # TODO: Implement full load support with tensor indexing once basic pointwise ops are working
+        """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         if name not in self.fixed_inputs:
             raise NotImplementedError(
-                "Load operations not yet supported for CuteDSL - only trivial pointwise ops"
+                "Tensor loading not yet supported for CuteDSL - only fixed input substitution"
             )
-
-        # Wrap the fixed input value as a CSE variable
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
+        # ensure CSE wrapping
         return self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
-        """Convert index variable to symbolic form.
-
-        TODO: Skipping indirect indexing for now - only supporting trivial pointwise
-        operations that don't require complex indexing patterns.
-        """
-        # TODO: Implement indirect indexing once basic pointwise ops are working
-        raise NotImplementedError(
-            "Indirect indexing not yet supported for CuteDSL - only trivial pointwise ops"
-        )
-        # return sympy_index_symbol(str(index_var))
+        """Convert index variable to symbolic form."""
+        raise NotImplementedError("Indirect indexing not supported")
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
-        """Store operation for CuteDSL.
-
-        TODO: Skipping store operations for now - only supporting trivial pointwise
-        operations that don't require complex store patterns or atomic operations.
-        """
-        # TODO: Implement store operations once basic pointwise ops are working
         raise NotImplementedError(
-            "Store operations not yet supported for CuteDSL - only trivial pointwise ops"
+            "Store operations not supported - CuteDSL limited to read-only operations"
         )
 
     def _add_kernel_input(self, name: str):
@@ -407,14 +391,14 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return str(index)  # Simplified for now
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        """Override to provide better error messages for missing operations."""
+        """Fallback handler for operations not explicitly implemented."""
         try:
             return getattr(self._inner, name)(*args, **kwargs)
         except NotImplementedError as e:
             error_msg = (
-                f"\n{'='*80}\n"
+                f"\n{'=' * 80}\n"
                 f"UNSUPPORTED CUTEDSL OPERATION: '{name}'\n"
-                f"{'='*80}\n"
+                f"{'=' * 80}\n"
                 f"This operation is not yet implemented in Inductor.\n\n"
                 f"Please open an issue at: https://github.com/pytorch/pytorch/issues\n"
                 f"with the following information:\n\n"
@@ -422,6 +406,6 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
                 f"  Args: {args}\n"
                 f"  Kwargs: {kwargs}\n\n"
                 f"Title your issue: [CuteDSL] Missing operation: {name}\n"
-                f"{'='*80}\n"
+                f"{'=' * 80}\n"
             )
             raise NotImplementedError(error_msg) from e
