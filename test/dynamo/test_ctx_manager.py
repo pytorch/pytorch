@@ -1245,7 +1245,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_inlining_autocast(self):
         for device in ["cuda", "cpu", "xpu"]:
             if device == "cuda" and not (
-                torch.accelerator.is_available() and torch.get_device_module(device_type).is_bf16_supported()
+                torch.cuda.is_available() and torch.cuda.is_bf16_supported()
             ):
                 continue
             elif device == "xpu" and not (
