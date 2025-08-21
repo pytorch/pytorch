@@ -878,6 +878,7 @@ struct CachingDeviceAllocatorImpl {
   using BlockPoolT = BlockPool<BlockT>;
   using PrivatePoolT = PrivatePool<BlockT>;
   using AllocParamsT = AllocParams<StreamT, BlockT>;
+  using TraceEntryT = TraceEntryBase<StreamT>;
 
   virtual ~CachingDeviceAllocatorImpl() = default;
 
@@ -1059,7 +1060,7 @@ struct CachingDeviceAllocatorImpl {
         block->stream_uses.empty());
 
     record_trace(
-        TraceEntryBase<StreamT>::FREE_COMPLETED,
+        TraceEntryT::FREE_COMPLETED,
         block->ptr,
         block->requested_size,
         block->stream,
@@ -1132,7 +1133,7 @@ struct CachingDeviceAllocatorImpl {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
     stats.num_device_free++;
     record_trace(
-        TraceEntryBase<StreamT>::SEGMENT_FREE,
+        TraceEntryT::SEGMENT_FREE,
         block->ptr,
         block->size,
         block->stream,
@@ -1391,11 +1392,6 @@ struct CachingDeviceAllocatorImpl {
     return context_recorder_.load()();
   }
 
-  template <
-      typename TraceEntryT,
-      typename = std::enable_if_t<std::is_base_of_v<
-          TraceEntryBase<typename TraceEntryT::StreamT>,
-          TraceEntryT>>>
   virtual void record_trace(
       typename TraceEntryT::Action action,
       size_t addr,
@@ -1475,14 +1471,13 @@ struct CachingDeviceAllocatorImpl {
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Trace buffer for recording AllocatorTraceTracker for call back.
-  std::vector<std::function<void(const TraceEntryBase<StreamT>&)>>
-      trace_trackers_;
+  std::vector<std::function<void(const TraceEntryT&)>> trace_trackers_;
 
   // Thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
   // Ring buffer for memory snapshot TraceEntry's
-  RingBuffer<TraceEntryBase<StreamT>> alloc_buffer;
+  RingBuffer<TraceEntryT> alloc_buffer;
 
   // Tracks if we are diverting some allocations to a specific pool. Most of
   // the time it's empty, in which case malloc can avoid calling query
