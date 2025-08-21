@@ -563,6 +563,8 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "wd4067",
             "wd4068",
             "EHsc",
+            # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+            "Zc:__cplusplus",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
