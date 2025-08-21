@@ -405,7 +405,10 @@ def estimate_peak_memory(
     peak_memory, snodes_curr_memory, snodes_allocfree, buf_to_snode_last_use = (
         estimate_peak_memory_allocfree(nodes, name_to_freeable_input_buf, graph_outputs)
     )
-    return peak_memory, [(curr_mem[0] + curr_mem[1]) for curr_mem in snodes_curr_memory]
+    # original estimate_peak_memory returns current_memory of length len(nodes) + 1
+    return peak_memory, [
+        (curr_mem[0] + curr_mem[1]) for curr_mem in snodes_curr_memory
+    ] + [0]
 
 
 @dataclasses.dataclass

@@ -240,6 +240,7 @@ def is_corresponding_collective_wait(collective_snode, wait_snode):
     unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
     return unmet_deps & collective_outs
 
+
 def _op_runtime_estimate_mult(snode):
     # Empirically comparing "benchmark" estimations:
     # mm was underestimated x2-3
@@ -296,7 +297,9 @@ def _reorder_communication_preserving_peak_memory_internal(
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = runtimes[collective_snode]
         compute_time = 0.0
-        collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
+        collective_outs = OrderedSet(
+            o.get_name() for o in collective_snode.get_outputs()
+        )
         for snode in remaining_snodes:
             # We may have some ops without Wait,
             # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
@@ -311,7 +314,7 @@ def _reorder_communication_preserving_peak_memory_internal(
             if contains_collective(snode):
                 # Assumption that all collectives are async.
                 # TODO(ivankobzarev):
-                # It is not true, as we have sync "custom" collectives torch.ops._dtensor.shard_dim_alltoall.default 
+                # It is not true, as we have sync "custom" collectives torch.ops._dtensor.shard_dim_alltoall.default
                 # We also have to count for collective-waits in our range as sync blocks
                 # As applying this will only reduce amount of prefetch/sink - implement it laster,
                 # when we have enough prefetch/sink.

@@ -828,7 +828,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
-        if dtype == torch.half:
+        if dtype == torch.half and not vec_amx.is_amx_fp16_supported():
             self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
@@ -2680,7 +2680,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("bs", (5,))
-    @parametrize("Mdim", (64,))
+    @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
     def test_bmm_self_square(self, bs, Mdim, dtype):
         class M(torch.nn.Module):
