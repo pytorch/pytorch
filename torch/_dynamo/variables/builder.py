@@ -44,6 +44,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -2112,10 +2113,10 @@ class VariableBuilder:
         # then the relevant SubgraphTracer will lift it to being an input of
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
-
-        example_value = wrap_to_fake_tensor_and_record(
-            value, tx=self.tx, is_tensor=True, source=source
-        )
+        with enable_python_dispatcher():
+            example_value = wrap_to_fake_tensor_and_record(
+                value, tx=self.tx, is_tensor=True, source=source
+            )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
