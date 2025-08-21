@@ -281,6 +281,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
         succ_nodes = node_to_succ_nodes[node]
         pred_nodes = node_to_pred_nodes[node]
 
+        # make sure we do not make node a successor or predecessor of itself
         succ_nodes.discard(node)
         pred_nodes.discard(node)
 
@@ -288,7 +289,6 @@ def assign_memory_planning_info_for_scheduler_nodes(
             index=index,
             size=size_alloc,
             pred_buffers=node_to_pred_buffers[node],
-            # make sure we do not make node a successor or predecessor of itslef
             pred_nodes=node_to_pred_nodes[node],
             succ_nodes=succ_nodes,
         )
