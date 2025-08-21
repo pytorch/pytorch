@@ -262,7 +262,7 @@ def reorder_reduce_scatter(
             wait_list.append(node)
             node_user = node_users[node]
             node_user = [n for n in node_user if node_to_type[n] == NodeType.COMPUTE]
-            wait_list.extend(node_user)
+            #wait_list.extend(node_user)
         elif node_type == NodeType.REDUCE_SCATTER:
             if len(wait_list) > 0:
                 # move the i-th wait node before (i+1)-th reduce scatter node

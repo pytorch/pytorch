@@ -432,7 +432,8 @@ def benchmark_extern_node(
         return 0
 
     python_kernel_name = getattr(node, "python_kernel_name", "")
-
+    if python_kernel_name is None:
+        return 0
     if python_kernel_name.startswith("extern_kernels"):
         func = kernel_name_to_comp_op.get(python_kernel_name, None)
     elif python_kernel_name.startswith("torch.ops.aten"):

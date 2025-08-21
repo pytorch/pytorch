@@ -2260,7 +2260,6 @@ class Scheduler:
                     reduce_scatter_plan,
                     non_bucketable_pg,
                 )
-
             print("start reordering")
             if config.simplefsdp.enable_reorder_ir:
                 node_length = len(self.nodes)

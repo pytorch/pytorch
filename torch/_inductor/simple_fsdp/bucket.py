@@ -81,8 +81,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 name_to_buf,
                 name_to_fused_node,
                 allow_weak_dep=False,
-            )
-            # sort nodes by original operation order
+            )            # sort nodes by original operation order
             ag_related_snodes = sorted(
                 ag_related_snode_set, key=lambda x: get_op_idx(x)
             )
@@ -384,12 +383,12 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     rs_snode_to_bucket_id_coarsen = {}
     cur_bucket_id: int = 0
 
-    if reduce_scatter_bucket_plan == [{}]:
-        # generate a dummy plan by bucket every 5 RSs
-        for rs_snode in rs_snode_to_wait_snode.keys():
-            if len(reduce_scatter_bucket_plan[-1]) == 5:
-                reduce_scatter_bucket_plan.append([])
-            reduce_scatter_bucket_plan[-1].append(rs_snode)
+    # if reduce_scatter_bucket_plan == [{}]:
+    #     # generate a dummy plan by bucket every 5 RSs
+    #     for rs_snode in rs_snode_to_wait_snode.keys():
+    #         if len(reduce_scatter_bucket_plan[-1]) == 5:
+    #             reduce_scatter_bucket_plan.append([])
+    #         reduce_scatter_bucket_plan[-1].append(rs_snode)
 
     for reduce_scatter_bucket in reduce_scatter_bucket_plan:
         for reduce_scatter_info, reduce_scatter_list in reduce_scatter_bucket.items():
@@ -429,6 +428,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             _, reduce_op, group_size, group_name = example_rs_fx_node.args
+            print("group_size, group_name ", group_size, group_name )
             rs_input_ir_nodes: list[ir.IRNode] = []
             wait_snodes = []
             wait_snode_recursive_users = OrderedSet()
@@ -527,6 +527,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                         # If there is only one input, we can directly use the input as the output
                         RS_Group_node_list.append(orig_rs_snodes[0])
                         Wait_Group_node_list.append(orig_wait_snodes[0])
+                        Wait_Group_node_list.extend(orig_wait_snode_recursive_users)
                     else:
                         original_length = len(new_order)
                         new_sharded_grads = bucket_reduce_scatters(
@@ -600,18 +601,18 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 RS_Group_node = scheduler.GroupedSchedulerNode.create(
                     RS_Group_node_list
                 )
-                Wait_Group_node = scheduler.GroupedSchedulerNode.create(
-                    Wait_Group_node_list
-                )
-                RS_Group_node.temp_grouping = True
-                Wait_Group_node.temp_grouping = True
                 for (
                     orig_wait_snode_recursive_users
                 ) in all_orig_wait_snode_recursive_users:
                     for user in sorted(
                         orig_wait_snode_recursive_users, key=lambda x: order[x]
                     ):
-                        schedule_snode(user)
+                        Wait_Group_node_list.append(user)
+                Wait_Group_node = scheduler.GroupedSchedulerNode.create(
+                    Wait_Group_node_list
+                )
+                RS_Group_node.temp_grouping = True
+                Wait_Group_node.temp_grouping = True
                 new_order.append(RS_Group_node)
                 new_order.append(Wait_Group_node)
                 bucket_id_is_scheduled[coarsen_bucket_id] = True

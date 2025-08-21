@@ -346,6 +346,8 @@ def get_bucketing_plan(
                     )
                     heuristic_info["last_step_rs_comm"] = current_estimated_rs
                     reduce_scatter_plan.append(current_rs_bucket)
+                    for key, value in reduce_scatter_plan[-1].items():
+                        print("sub info current_rs_bucket", key, len(value), [v.node.get_name() for v in value])
                     heuristic_info["last_step_rs_comm_size"] = 2 * (
                         rs_comm_size_inp + rs_comm_size_out
                     )  # rs copy-in + rs data
@@ -394,6 +396,8 @@ def get_bucketing_plan(
                 heuristic_info["this_step_rs_comm"] = 0
                 reduce_scatter_plan.append(current_rs_bucket)
                 current_rs_bucket = defaultdict(list)
+                for key, value in reduce_scatter_plan[-1].items():
+                    print("sub info current_rs_bucket", key, len(value), [v.node.get_name() for v in value])
         else:
             # [TODO]ruisizhang: for now, we only consider TP and CP, whose comm are AG & RS & All_Reduce
             # For TP and CP, we consider the node as a "COMP" node with exposed communication as Comp time

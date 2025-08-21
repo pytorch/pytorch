@@ -35,7 +35,7 @@ def get_fx_node(
 
 def get_non_bucketable_pg(snodes):
     non_bucketable_pg = set()
-    accept_op_list = ["all_gather_into_tensor", "reduce_scatter_tensor", "convert_element_type", "primals", "sum"]
+    accept_op_list = ["all_gather_into_tensor", "convert_element_type", "primals"]
     def _check_op_in_accept_op_list(inputs_node_origins):
         for op in inputs_node_origins:
             seen_in_accept_op_list = False
@@ -59,9 +59,10 @@ def get_non_bucketable_pg(snodes):
                 expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
             ag_input_fx_nodes = [ag_fx_node.args[0]]
-            print("snode.node.constant_args[1]", snode.node.constant_args[1], "ir_node_origins", ir_node_origins)
-            if not _check_op_in_accept_op_list(ag_input_fx_nodes):
+            if not _check_op_in_accept_op_list(ir_node_origins):
                 non_bucketable_pg.add(snode.node.constant_args[1])
+                print("AG snode.node.constant_args[0]", snode.node.get_name(), snode.node.constant_args[0], snode.node.constant_args[1], "ir_node_origins", ir_node_origins, ag_fx_node, "ag_input_fx_nodes", ag_input_fx_nodes)
+
         elif is_collective(snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
             ir_node = snode.node
             ir_node_origins = list(getattr(ir_node, "origins", None))
@@ -71,10 +72,11 @@ def get_non_bucketable_pg(snodes):
                 snode,
                 expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
-            print("snode.node.constant_args[2]", snode.node.constant_args[2], "ir_node_origins", ir_node_origins)
             rx_input_fx_nodes = [rs_fx_node.args[0]]
-            if not _check_op_in_accept_op_list(rx_input_fx_nodes):
+            if _check_op_in_accept_op_list(ir_node_origins):
                 non_bucketable_pg.add(snode.node.constant_args[2])
+                print("RS snode.node.constant_args[1]", snode.node.get_name(), snode.node.constant_args[1], snode.node.constant_args[2], "ir_node_origins", ir_node_origins, rs_fx_node, "rx_input_fx_nodes", rx_input_fx_nodes)
+
 
     return non_bucketable_pg
 
