@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import itertools
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
@@ -828,17 +829,20 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
     return tuple(a) == tuple(b)
 
 
-def is_cpu_scalar_tensor(a: Any) -> bool:
-    return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
+def _iterate_over_tensors(seq: Iterable[Any]) -> Iterator[TensorLike]:
+    return itertools.filterfalse(lambda s: not isinstance(s, TensorLike), seq)
 
 
-def check_same_device(*args, allow_cpu_scalar_tensors: bool):
+def is_cpu_scalar_tensor(a: TensorLike) -> bool:
+    return a.ndim == 0 and a.device.type == "cpu"
+
+
+def check_same_device(*args: TensorOrNumberLikeType, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same device.
 
-    Raises a RuntimeError when:
-      - args contains an object whose type is not Tensor or Number
-      - two Tensor objects in args have different devices, unless one is a CPU scalar tensor and allow_cpu_scalar_tensors is True
+    Raises a RuntimeError when two Tensor objects in args have different devices, unless
+    one is a CPU scalar tensor and allow_cpu_scalar_tensors is True.
     """
     # Short-circuits if all (one or fewer) arguments are trivially on the same device
     if len(args) <= 1:
@@ -846,21 +850,18 @@ def check_same_device(*args, allow_cpu_scalar_tensors: bool):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
-                continue
-
-            if device is None:
-                device = arg.device
-
-            if device != arg.device:
-                msg = f"Tensor on device {arg.device} is not on the expected device {device}!"
-                raise RuntimeError(msg)
-        elif isinstance(arg, Number):
+    for arg in _iterate_over_tensors(args):
+        if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
             continue
-        else:
-            msg = f"Unexpected type when checking for same device, {type(arg)}!"
+
+        if device is None:
+            device = arg.device
+            continue
+
+        if device != arg.device:
+            msg = (
+                f"Tensor on device {arg.device} is not on the expected device {device}!"
+            )
             raise RuntimeError(msg)
 
 
@@ -875,54 +876,50 @@ def canonicalize_device(device: DeviceLikeType) -> torch.device:
 # Asserts if any of the following are true:
 #   - a non-scalar or non-Tensor is given
 #   - the shape of any tensors is distinct
-def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
+def check_same_shape(*args: TensorOrNumberLikeType, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same shape.
 
-    Raises a RuntimeError when:
-      - args contains an object whose type is not Tensor or Number
-      - two Tensor objects in args have different devices
+    Raises a RuntimeError when two Tensor objects in args have different shapes, unless
+    one is a CPU scalar tensor and allow_cpu_scalar_tensors is True.
     """
+    # Short-circuits if all (one or fewer) arguments are trivially the same shape
+    if len(args) <= 1:
+        return
+
+    # Note: cannot initialize shape to the first arg's shape (it may not have one)
     shape = None
-
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
-                continue
-
-            if shape is None:
-                shape = arg.shape
-
-            if not is_same_shape(shape, arg.shape):
-                msg = f"Shape {arg.shape} is not the expected shape {shape}!"
-                raise RuntimeError(msg)
-        elif isinstance(arg, Number):
+    for arg in _iterate_over_tensors(args):
+        if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
             continue
-        else:
-            msg = f"Unexpected type when checking for same shape, {type(arg)}!"
+
+        if shape is None:
+            shape = arg.shape
+            continue
+
+        if not is_same_shape(shape, arg.shape):
+            msg = f"Shape {arg.shape} is not the expected shape {shape}!"
             raise RuntimeError(msg)
 
 
 # Acquires a common shape, if it exists, from one or more tensor arguments,
 # filtering number arguments
-def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
+def extract_shape(
+    *args: TensorOrNumberLikeType, allow_cpu_scalar_tensors: bool
+) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
-                scalar_shape = arg.shape
-                continue
-
-            if shape is None:
-                shape = arg.shape
-
-            if not is_same_shape(shape, arg.shape):
-                return None
-        elif isinstance(arg, Number):
+    for arg in _iterate_over_tensors(args):
+        if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+            scalar_shape = arg.shape
             continue
-        else:
+
+        if shape is None:
+            shape = arg.shape
+            continue
+
+        if not is_same_shape(shape, arg.shape):
             return None
 
     return shape if shape is not None else scalar_shape
@@ -1346,39 +1343,24 @@ def can_safe_cast_to(*, cast_to: torch.dtype, cast_from: torch.dtype) -> bool:
     raise ValueError(f"Received unknown dtypes {cast_to}, {cast_from}!")
 
 
-def check_same_dtype(*args):
+def check_same_dtype(*args: TensorOrNumberLikeType):
     """
     Checks that all Tensors in args have the same dtype.
 
-    Raises a RuntimeError when:
-      - args contains an object whose type is not Tensor or Number
-      - two Tensors objects in args have different dtypes
-      - two Number objects in args have different types
-      - there are Tensors and Numbers in args, and one of those Tensors corresponding
-          Python types is different from the type of one of those Numbers
+    Raises a RuntimeError when two Tensor objects in args have different dtypes.
     """
+    # Short-circuits if all (one or fewer) arguments are trivially the same dtype
+    if len(args) <= 1:
+        return
+
     full_dtype = None
-    scalar_type = None
-
-    for arg in args:
-        if isinstance(arg, TensorLike):
-            if full_dtype is None:
-                full_dtype = arg.dtype
-            if scalar_type is None:
-                scalar_type = dtype_to_type(arg.dtype)
-
-            if full_dtype is not arg.dtype:
-                msg = f"Tensor with dtype {arg.dtype} is not the expected dtype of {full_dtype}!"
-                raise RuntimeError(msg)
-
-            arg_type = dtype_to_type(arg.dtype)
-            if arg_type is not scalar_type:
-                msg = f"Tensor with corresponding Python type {arg_type} is not the expected type of {scalar_type}!"
-                raise RuntimeError(msg)
-        elif isinstance(arg, Number):
+    for arg in _iterate_over_tensors(args):
+        if full_dtype is None:
+            full_dtype = arg.dtype
             continue
-        else:
-            msg = f"Unexpected type when checking for same dtype, {type(arg)}!"
+
+        if full_dtype is not arg.dtype:
+            msg = f"Tensor with dtype {arg.dtype} is not the expected dtype of {full_dtype}!"
             raise RuntimeError(msg)
 
 

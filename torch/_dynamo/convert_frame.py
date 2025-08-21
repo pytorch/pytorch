@@ -229,13 +229,13 @@ def fx_forward_from_src_skip_result(
 
 def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
+    captured_tb = CapturedTraceback.extract(skip=4 + skip).summary()
+    frames_interned = structured.from_traceback(captured_tb)
     # Extract and filter the stack
     stack = list(
         itertools.takewhile(
             lambda f: f["filename"] != convert_frame_intern,
-            structured.from_traceback(
-                CapturedTraceback.extract(skip=4 + skip).summary()
-            ),
+            frames_interned,
         )
     ) + [
         {
@@ -250,9 +250,13 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
         lambda: {"stack": stack},
     )
 
+    # Capture stack separately without using from_traceback to get the actual filenames
     stack_strings = [
-        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
-        for frame in stack
+        f"Line: {frame.lineno}, Name: {frame.name}, Filename: {frame.filename}"
+        for frame in captured_tb
+        if frame.filename != convert_frame_intern
+    ] + [
+        f"Line: {code.co_firstlineno}, Name: {code.co_name}, Filename: {code.co_filename}"
     ]
     return stack_strings
 

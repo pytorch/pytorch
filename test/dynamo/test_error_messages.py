@@ -489,8 +489,6 @@ Attempted to call function marked as skipped
     @scoped_load_inline
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    # Will fail until https://github.com/pybind/pybind11/issues/5774 is fixed.
-    @unittest.expectedFailure
     def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
