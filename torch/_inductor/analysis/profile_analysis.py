@@ -683,7 +683,9 @@ class JsonProfile:
 
         # Merge device properties, avoiding duplicates
         other_device_props = other.data.get("deviceProperties", [])
-        existing_device_ids = {dev["id"] for dev in combined_data["deviceProperties"]}
+        existing_device_ids = OrderedSet(
+            [dev["id"] for dev in combined_data["deviceProperties"]]
+        )
 
         for device_prop in other_device_props:
             if device_prop["id"] not in existing_device_ids:
@@ -724,7 +726,7 @@ class ParseException(RuntimeError):
 
 def main() -> None:
     """
-    main function
+    Main function for the profile analysis script.
     """
     import argparse
 
