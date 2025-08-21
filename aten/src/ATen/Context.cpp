@@ -698,6 +698,14 @@ bool Context::hasLAPACK() {
 #endif
 }
 
+bool Context::hasZenDNN() {
+#if AT_ZENDNN_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 at::QEngine Context::qEngine() const {
   static auto _quantized_engine = []() {
     at::QEngine qengine = at::kNoQEngine;
