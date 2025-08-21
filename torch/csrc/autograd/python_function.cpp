@@ -801,6 +801,7 @@ static void _get_tensors_to_save(
         }
       }
     }
+    Py_CLEAR(self->to_save);
   }
 }
 // Save any variables that requested by to_save
@@ -808,7 +809,7 @@ static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
-  if (!self->to_save)
+  if (tensors_to_save.size() == 0)
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
@@ -821,8 +822,6 @@ static void _save_variables(
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
-  // Free .to_save
-  Py_CLEAR(self->to_save);
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per
