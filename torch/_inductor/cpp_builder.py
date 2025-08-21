@@ -1397,7 +1397,8 @@ def get_cpp_torch_device_options(
             ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
             if ze_root is None:
                 raise OSError(xpu_error_string)
-            include_dirs = [os.path.join(ze_root, "include")]
+            include_dirs += [os.path.join(ze_root, "include")]
+            libraries_dirs += [os.path.join(ze_root, "lib")]
             libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
