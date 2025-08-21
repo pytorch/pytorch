@@ -24,6 +24,10 @@ lab_attn_bwd(const Tensor& Q, const Tensor& K, const Tensor& V, const Tensor& a,
 }
 
 std::tuple<Tensor,Tensor> lab_attn(const Tensor& Q, const Tensor& K, const Tensor& V) {
+  TORCH_CHECK(Q.dim() == 2, "Q must have exactly 2 dimensions");
+  TORCH_CHECK(K.dim() == 2, "K must have exactly 2 dimensions");
+  TORCH_CHECK(V.dim() == 2, "V must have exactly 2 dimensions");
+
   auto x = Q.matmul(K.t());
   auto a = x.tanh();
   auto o = a.matmul(V);
