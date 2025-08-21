@@ -40,8 +40,7 @@ inline void zendnn_linear_impl(
   matmul_context_t matmul_context;
   tensor_t input_tensor, weight_tensor, output_tensor, bias_tensor;
   create_zendnn_tensor(input_2d, input_tensor, "matmul_input", datatype);
-  create_zendnn_tensor(
-      weight_transposed, weight_tensor, "weights", datatype);
+  create_zendnn_tensor(weight_transposed, weight_tensor, "weights", datatype);
   create_zendnn_tensor(result_2d, output_tensor, "matmul_output", datatype);
   if (bias.defined()) {
     create_zendnn_tensor(bias, bias_tensor, "bias", datatype);
