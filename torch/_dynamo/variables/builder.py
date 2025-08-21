@@ -2985,6 +2985,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.seed,
             operator.mod,
             torch._functorch.vmap._validate_and_get_batch_size,
+            torch._functorch.predispatch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_decrement_nesting,
             # some mac builds are missing torch.distributed.get_rank()
             getattr(torch.distributed, "get_rank", _missing),
             getattr(torch.distributed, "get_world_size", _missing),
@@ -3018,9 +3020,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is call_torchbind
+    elif isinstance(example_value, (int, float, bool)) and (
+        proxy.node.target is call_torchbind
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
