@@ -339,9 +339,8 @@ def _load_global_deps() -> None:
         # and nvrtc. In CUDA-12.4+ cusparse depends on nvjitlink, but does not have rpath when
         # shipped as wheel, which results in OS picking wrong/older version of nvjitlink library
         # if `LD_LIBRARY_PATH` is defined, see https://github.com/pytorch/pytorch/issues/138460
-        # Similar issue exist in cudnn that dynamically loads nvrtc, unaware of its relative path.
+        # Similar issue exists in cudnn that dynamically loads nvrtc, unaware of its relative path.
         # See https://github.com/pytorch/pytorch/issues/145580
-.
         if not _wheel_contains_cudart():
             # If no CUDA runtime is found in a wheel, there are no dependencies to preload.
             return
@@ -351,12 +350,8 @@ def _load_global_deps() -> None:
         _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
         _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
 
-    except Exception:
-        # Never hard-fail.
-        pass
-
     except OSError as err:
-        # Can only happen for wheel with cuda libs as PYPI deps
+        # Can only happen for wheel with CUDA libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
         from torch.version import cuda as cuda_version
 
@@ -383,9 +378,15 @@ def _load_global_deps() -> None:
         ]
         if not is_cuda_lib_err:
             raise err
+
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
+
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+
+    except Exception:
+        # Never hard-fail.
+        pass
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
