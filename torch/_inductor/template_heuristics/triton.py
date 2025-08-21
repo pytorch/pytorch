@@ -1273,6 +1273,27 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
         else:
             return self.get_mm_configs()
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        if op_name in ["addmm", "baddbmm"]:
+            alpha = kernel_inputs.get_scalar("alpha")
+            beta = kernel_inputs.get_scalar("beta")
+            from ..kernel.mm_common import addmm_epilogue
+
+            kwargs.update(
+                dict(
+                    epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                    epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
+                    prefix_args=1,
+                )
+            )
+        return kwargs
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
