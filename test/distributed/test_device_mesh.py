@@ -1369,7 +1369,7 @@ class CuTeLayoutTest(TestCase):
         )
 
     def test_composition(self):
-        # self = ((4,2), (2,1)), B = (2,1)  → A o B = (2,2)
+        # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,2)
         orig_l = _Layout(((4, 2), (2, 1)))
         right_l = _Layout(((2, 1),))
         composed_list = orig_l.composition(right_l)
@@ -1385,7 +1385,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # self = ((4,2), (2,1)), B = ((2,2), (2,1))  → A o B = ((2,4), (2,2))
+        # self = ((4,2), (2,1)), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
         right_l = _Layout(((2, 2), (2, 1)))
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 2)
