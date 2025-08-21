@@ -3028,6 +3028,26 @@ class SubgraphTracer(fx.Tracer):
                     )
                     self.track_unbacked_symbols(s, lazy_proxy)
 
+            storage_offset = example_value.storage_offset()
+            if need_bind(storage_offset):
+                log.debug(
+                    "_track_unbacked_symbols %s for %s.storage_offset() at debug_level %s",
+                    storage_offset,
+                    e_proxy,
+                    tracer.debug_level,
+                )
+                lazy_proxy = LazyProxy(
+                    tracer,
+                    _proxy_with_example_value,
+                    storage_offset,
+                    "call_function",
+                    torch.ops.aten.sym_storage_offset,
+                    (e_proxy,),
+                    {},
+                    type_expr=type(storage_offset),
+                )
+                self.track_unbacked_symbols(storage_offset, lazy_proxy)
+
             if example_value.layout is torch.strided:
                 for i, s in enumerate(example_value.stride()):
                     if need_bind(s):
