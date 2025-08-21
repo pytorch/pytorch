@@ -20,6 +20,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    using_b200,
 )
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
@@ -1485,6 +1486,24 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        from ..kernel.mm_common import scale_mm_epilogue
+
+        kwargs.update(
+            dict(
+                suffix_args=kernel_inputs.count - 2,
+                epilogue_fn=scale_mm_epilogue(),
+                epilogue_fn_hash="scale_mm_epilogue",
+            )
+        )
+        return kwargs
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -1496,7 +1515,6 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
         Handles the remaining logic from mm_common including assertions and SCALING_ROWWISE.
         """
         input_nodes = kernel_inputs.nodes()
-
         # Initial assertion from mm_common.scaled_mm_options
         assert len(input_nodes) >= 4, (
             f"scaled_mm requires at least 4 inputs, got {len(input_nodes)}"
@@ -1524,6 +1542,20 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
         )
 
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            f"{self.__class__.__name__} requires MMKernelInputs"
+        )
+
+        _, _, k = kernel_inputs.mnk_symbolic()
+
+        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+            # Triton crashes however uncommon for real workloads
+            yield from []
+
+        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
+            yield from []
         # Get base template configs from superclass
         for template_kwargs in super().get_template_configs(
             kernel_inputs, layout, op_name
@@ -1561,6 +1593,10 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
         # NOTE: reimplementation of the above, if we end up with more TMA-specific kwargs
         # consider making a common base
         kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        # The TMA version does not need the epilogue stuff
+        kwargs.pop("suffix_args", None)
+        kwargs.pop("epilogue_fn", None)
+        kwargs.pop("epilogue_fn_hash", None)
         kwargs["workspace_arg"] = get_tma_workspace_arg(
             num_tma_descriptors=2,
             device=kernel_inputs.device(),

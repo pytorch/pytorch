@@ -56,6 +56,16 @@ class KernelInputs:
         return [self._input_nodes[i] for i in reorder]
 
     @property
+    def count(self) -> int:
+        """
+        Get the number of input nodes.
+
+        Returns:
+            The number of input nodes
+        """
+        return len(self._input_nodes)
+
+    @property
     def device_type(self) -> Optional[str]:
         """
         Get the device type of the first node.
