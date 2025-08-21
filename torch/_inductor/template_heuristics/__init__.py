@@ -1,13 +1,8 @@
-from . import (
+from . import (  # NOTE: add new template heuristics here, below registry; and base, as those are needed by the template heuristics; themselves; TODO: write a simple glob if there are many heuristics to; auto import them in the right order
     base,
     decompose_k,
     registry,
     triton,
-    # NOTE: add new template heuristics here, below registry
-    # and base, as those are needed by the template heuristics
-    # themselves
-    # TODO: write a simple glob if there are many heuristics to
-    # auto import them in the right order
 )
 
 # expose the entry function

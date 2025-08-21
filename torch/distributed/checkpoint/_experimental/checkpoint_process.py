@@ -185,8 +185,8 @@ class CheckpointProcess:
                     logger.info("Writing checkpoint to %s", path)
 
                     checkpoint_writer.write(
-                        state_dict=request.payload["state_dict"],
                         path=path,
+                        state_dict=request.payload["state_dict"],
                         **request.payload["kwargs"],
                     )
 

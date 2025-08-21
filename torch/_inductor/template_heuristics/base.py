@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from ..ir import Layout
-
-from ..kernel_inputs import KernelInputs
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from ..ir import Layout
+    from ..kernel_inputs import KernelInputs
 
 
 class TemplateConfigHeuristics:
