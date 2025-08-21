@@ -1419,27 +1419,36 @@ class OutputGraph(OutputGraphGuardsState):
             and not self.backward_state
             and not all_stack_locals_metas[-1].stack_null_idxes
             and not all_stack_locals_metas[-1].locals_null_keys
-        ):
+        ):  
+            outs = list(reversed(root_stack_values))
+            n = len(outs)
+            return_map = {
+                "num_leaves": n,
+                "graph":  [(i, i) for i in range(n)],
+                "inputs": [],
+            }
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(
-                    tx, list(reversed(root_stack_values)), root, list(range(len(root_stack_values)))
+                    tx, list(reversed(root_stack_values)), root, return_map
                 )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(root_stack_values))]
             )
         else:
             graph_output_var = self.new_var("graph_out")
             # load stack values in a flat manner for now - will likely change later.
-            stack_values_flat = [
-                val for vals in reversed(all_stack_values) for val in vals
-            ]
+            # stack_values_flat = [
+            #     val for vals in reversed(all_stack_values) for val in vals
+            # ]
+            root_stack_values = all_stack_values[-1]
+            pre_stack_values_flat = [v for vals in reversed(all_stack_values[:-1]) for v in vals]
             pass1 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass1)
+            self.codegen_suffix(tx, pre_stack_values_flat + root_stack_values, pass1)
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
@@ -1456,14 +1465,24 @@ class OutputGraph(OutputGraphGuardsState):
                 graph_output_var,
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
-                record_return_indices=True,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass2)
+            self.codegen_suffix(tx, pre_stack_values_flat, pass2)
+            if root_stack_values:
+                pass2.record_return_map = True
+                pass2._leaf_idx = 0
+                self.codegen_suffix(tx, root_stack_values, pass2)
+                pass2.record_return_map = False
+
+            return_map = {
+                "num_leaves": pass2._leaf_idx,
+                "graph":  pass2.return_graph,   # list[(user_idx, graph_idx)]
+                "inputs": pass2.return_inputs,  # list[(user_idx, arg_idx)]
+            }
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root, pass2.return_graph_indices)
+                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root, return_map)
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1674,7 +1693,7 @@ class OutputGraph(OutputGraphGuardsState):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
-        return_graph_indices: list[int]
+        return_map: dict,
     ) -> list[Instruction]:
         """
         Generate code from self.graph and return the Instruction()s to
@@ -1748,7 +1767,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.dynamo_flat_name_to_original_fqn.copy()
             )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
-            gm.meta["return_graph_indices"] = return_graph_indices
+            gm.meta["return_map"] = return_map
 
             graph_code_log.debug(
                 "%s",

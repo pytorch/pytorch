@@ -58,6 +58,7 @@ if TYPE_CHECKING:
 
     from .symbolic_convert import InstructionTranslatorBase
 
+from contextlib import contextmanager
 
 @dataclasses.dataclass
 class GraphOutputEntry:
@@ -77,7 +78,6 @@ class PyCodegen:
         graph_output_var: Optional[str] = None,
         tempvars: Optional[dict[Union[VariableTracker, Source], Any]] = None,
         overridden_sources: Optional[dict[Source, Source]] = None,
-        record_return_indices: bool = False,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
@@ -101,8 +101,63 @@ class PyCodegen:
         self.overridden_sources: dict[Source, Source] = overridden_sources or {}
         # This is used to record the indices of the graph outputs that show up in
         # original user code.
-        self.record_return_indices: bool = record_return_indices
-        self.return_graph_indices: list[int] = []
+        # --- return recorder (off by default) ---
+        self.record_return_map: bool = False
+        self._leaf_idx: int = 0
+        self.return_graph: list[tuple[int, int]] = []   # (user_idx, graph_idx)
+        self.return_inputs: list[tuple[int, int]] = []  # (user_idx, arg_idx)
+
+        # VT -> graph tuple index (already have something similar; keep it)
+        self._vt_to_graph_out_idx: dict[VariableTracker, int] = {}
+
+        # Source -> original arg index (stable, no ids)
+        self._source_to_argidx = {
+            ga.source: idx
+            for idx, ga in enumerate(self.tx.output.graphargs)
+            if ga.source is not None
+        }
+
+        self._source_to_flat_input_idx: dict[Source, int] = {}
+
+        # Map a placeholder "root" Source (e.g., x) -> all flat leaf indices for that arg, in order
+        self._root_source_to_flat_positions: dict[Source, list[int]] = {}
+
+        # Build both maps from the flattened graph inputs
+        for i, ga in enumerate(self.tx.output.graphargs):
+            src = ga.source
+            if src is None:
+                continue
+            # Full leaf mapping
+            self._source_to_flat_input_idx[src] = i
+            # Root (placeholder) mapping
+            root_src = src
+            while isinstance(root_src, ChainedSource):
+                root_src = root_src.base
+            self._root_source_to_flat_positions.setdefault(root_src, []).append(i)
+        
+        self._suppress_return_leaf: int = 0
+    
+    def _bump_leaf(self) -> None:
+        if self.record_return_map and self._suppress_return_leaf == 0:
+            self._leaf_idx += 1
+
+    def _rec_graph(self, graph_idx: int) -> None:
+        if self.record_return_map:
+            self.return_graph.append((self._leaf_idx, graph_idx))
+            self._leaf_idx += 1
+
+    def _rec_input(self, arg_idx: int) -> None:
+        if self.record_return_map:
+            self.return_inputs.append((self._leaf_idx, arg_idx))
+            self._leaf_idx += 1
+    
+    @contextmanager
+    def suppress_return_leaves(self):
+        self._suppress_return_leaf += 1
+        try:
+            yield
+        finally:
+            self._suppress_return_leaf -= 1
 
     def restore_stack(
         self, stack_values: list[Any], *, value_from_source: bool = True
@@ -203,13 +258,39 @@ class PyCodegen:
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
             assert allow_cache is True, "allow_cache must be True for Source"
+
+            def _record_returned_input_leaves(src: Source) -> None:
+                if not self.record_return_map:
+                    return
+                # Try exact leaf first (e.g., x[2])
+                flat_idx = self._source_to_flat_input_idx.get(src)
+                breakpoint()
+                if flat_idx is not None:
+                    # one returned input leaf
+                    self.return_inputs.append((self._leaf_idx, flat_idx))
+                    self._leaf_idx += 1
+                    return
+                # Otherwise, if this is a root placeholder (e.g., x), expand all its leaves
+                # Root is "not a ChainedSource": collect all flat indices for that arg
+                if not isinstance(src, ChainedSource):
+                    for fi in self._root_source_to_flat_positions.get(src, []):
+                        self.return_inputs.append((self._leaf_idx, fi))
+                        self._leaf_idx += 1
+                else:
+                    # Unknown subpath (no flat input found) — treat as one leaf advance to keep positions aligned
+                    self._leaf_idx += 1
+
             if self.top_of_stack is value:
                 self._output.append(create_dup_top())
+                print("HERERERE", self.record_return_map)
+                _record_returned_input_leaves(source)
                 return
 
             if self.tempvars.get(source) is not None:
                 self._output.append(self.create_load(self.tempvars[source]))
                 self.top_of_stack = source
+                print("TERHERE", self.record_return_map)
+                _record_returned_input_leaves(source)
                 return
 
             self.uses[source] += 1
@@ -226,7 +307,7 @@ class PyCodegen:
                 self._output.append(create_dup_top())
                 self.add_cache(source)
             self.top_of_stack = source
-
+            _record_returned_input_leaves(source)
             return
 
         assert isinstance(value, VariableTracker)
@@ -235,18 +316,16 @@ class PyCodegen:
 
         if allow_cache:
             if self.top_of_stack is value:
-                if self.record_return_indices and isinstance(value, VariableTracker):
-                    idx = self._graph_idx_for_value(value)
-                    if idx is not None:
-                        self.return_graph_indices.append(idx)
+                idx = self._vt_to_graph_out_idx.get(value)
+                if idx is not None:
+                    self._rec_graph(idx)
                 output.append(create_dup_top())
                 return
 
             if self.tempvars.get(value) is not None:
-                if self.record_return_indices and isinstance(value, VariableTracker):
-                    idx = self._graph_idx_for_value(value)
-                    if idx is not None:
-                        self.return_graph_indices.append(idx)
+                idx = self._vt_to_graph_out_idx.get(value)
+                if idx is not None:
+                    self._rec_graph(idx)
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
@@ -290,6 +369,7 @@ class PyCodegen:
 
         if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
             output.append(self.create_load_const(value.as_python_constant()))
+            self._bump_leaf()
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
 
@@ -388,9 +468,11 @@ class PyCodegen:
     def add_graph_output(self, value: VariableTracker) -> int:
         graph_outputs_key = id(value.as_proxy())
         if graph_outputs_key not in self.graph_outputs:
-            self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
+            entry = GraphOutputEntry(
                 len(self.graph_outputs), value
             )
+            self.graph_outputs[graph_outputs_key] = entry
+            self._vt_to_graph_out_idx[value] = entry.index
         return graph_outputs_key
 
     def load_graph_output(self, index: int) -> None:
@@ -399,8 +481,7 @@ class PyCodegen:
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
-        if self.record_return_indices:
-            self.return_graph_indices.append(index)
+        self._rec_graph(index)
 
     def _graph_idx_for_value(self, value: VariableTracker) -> Optional[int]:
         """

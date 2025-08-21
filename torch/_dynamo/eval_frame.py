@@ -1383,16 +1383,26 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     ) -> Any:
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]  # type: ignore[misc]
-        new_results_flat = []
-        for i in range(len(self.flat_results)):
-            if self.matched_output_elements_positions[i] is not None:
-                new_results_flat.append(
-                    lookup[self.matched_output_elements_positions[i]]
-                )
-            else:
+        print(self.matched_output_elements_positions)
+        print(self.flat_results)
+        try:
+            assert self.matched_output_elements_positions["num_leaves"] == len(self.flat_results)
+        except:
+            breakpoint()
+        new_results_flat = [None for i in range(len(self.flat_results))]
+
+        for user_idx, dynamo_idx in self.matched_output_elements_positions["graph"]:
+            new_results_flat[user_idx] = dynamo_result_flat[dynamo_idx] 
+
+        for user_idx, dynamo_graph_arg_idx in self.matched_output_elements_positions["inputs"]:
+            new_results_flat[user_idx] = self.new_args[dynamo_graph_arg_idx]  # type: ignore[index]
+
+        for i in range(len(new_results_flat)):
+            if new_results_flat[i] is None:
                 const_val = self.flat_results[i]
                 assert isinstance(const_val, tuple(common_constant_types))
-                new_results_flat.append(const_val)
+                new_results_flat[i] = const_val
+
         return super().output(target, (new_results_flat,), {})
 
     def run_node(self, n: Node) -> Any:
@@ -1576,7 +1586,7 @@ def rewrite_signature(
     )
 
     assert graph_captured_output is not None
-    matched_output_elements_positions = graph.meta.get("return_graph_indices", [])
+    matched_output_elements_positions = graph.meta.get("return_map", {})
 
     new_graph = FlattenInputOutputSignature(
         graph,
