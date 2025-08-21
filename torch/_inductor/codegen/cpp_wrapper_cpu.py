@@ -1578,14 +1578,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if int_array == "{}":
             #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                if config.cpp.use_constexpr_for_int_array:
+                    writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                else:
+                    writeline(f"static const {ctype} *{var}=nullptr;")
             else:
                 writeline(f"const {ctype} *{var}=nullptr;")
         else:
             if var not in self.declared_int_array_vars:
                 self.declared_int_array_vars.add(var)
                 if known_statically:
-                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    if config.cpp.use_constexpr_for_int_array:
+                        writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    else:
+                        writeline(f"static const {ctype} {var}[] = {int_array};")
                 else:
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var

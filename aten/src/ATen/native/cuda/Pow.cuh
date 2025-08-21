@@ -14,7 +14,7 @@ namespace {
 //   pow(double, int)
 //   pow(float, float)
 //   pow(double, double)
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(_LIBCPP_VERSION)
 // Functions for pow
 // pow for at::Half
 static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
