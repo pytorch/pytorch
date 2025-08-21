@@ -382,8 +382,12 @@ sycl::event woq_matmul_w8a16(
   }
 
   // Prepare args and execute primitive
+  // TODO:
+  int scratchpad_size = primitive_desc.scratchpad_desc().get_size();
+  Tensor scratchpad_tensor = at::empty(
+      {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
   dnnl::memory scratchpad = at::native::onednn::make_onednn_memory(
-      primitive_desc.scratchpad_desc(), engine, nullptr);
+      primitive_desc.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, weight});
