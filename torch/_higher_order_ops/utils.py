@@ -148,9 +148,11 @@ def _maybe_reenter_make_fx(fn):
 
                 fake_mode = detect_fake_mode(args)
                 if fake_mode is None:
-                    # we creaeta a fake_mode here to make sure we could
+                    # we create a fake_mode here to make sure we could
                     # trace the graph with data-dependent calls e.g. .item()
-                    return make_fx(fn, tracing_mode="fake")(*args)
+                    return make_fx(
+                        fn, tracing_mode="fake", _allow_non_fake_inputs=True
+                    )(*args)
                 # Tracing with real if all inputs have been fakfied
                 return make_fx(fn)(*args)
 

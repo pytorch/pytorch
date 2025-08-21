@@ -3311,7 +3311,9 @@ def _rnn_helper(
             params, hidden, i, bidirectional
         )
         dropout = dropout if (train and num_layers < i - 1) else 0.0
-        fwd_inp, fwd_hidden = layer_fn(input.clone(), cur_hidden, cur_params, has_biases)
+        fwd_inp, fwd_hidden = layer_fn(
+            input.clone(), cur_hidden, cur_params, has_biases
+        )
         final_hiddens.append(fwd_hidden)
 
         if bidirectional:
@@ -3511,7 +3513,13 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
         torch._check_is_size(i)
         torch._check_is_size(i, max=precomputed_input.size(0) - 1)
         hx, cx = lstm_cell(
-            precomputed_input[i], hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2
+            precomputed_input.select(0, idx),
+            hx,
+            cx,
+            hh_weight,
+            hh_bias,
+            hr_weight,
+            chunk_dim=2,
         )
         out = out.clone()
         out[i] = hx
