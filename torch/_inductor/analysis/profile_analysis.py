@@ -758,9 +758,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--combine",
-        nargs=3,
-        metavar=("input_file1", "input_file2", "output_file"),
-        help="Combine two profiles into a single profile by merging trace events, specified as <file1> <file2> <output_file>",
+        nargs="+",
+        metavar=("input_files", "output_file"),
+        help="Combine multiple profiles into a single profile by merging trace events. Specify as <input_file1> <input_file2> [input_file3 ...] <output_file>. The last argument is the output file, all preceding arguments are input files to combine.",
     )
     args = parser.parse_args()
 
@@ -788,13 +788,23 @@ def main() -> None:
         p.augment_trace()
         p.dump(args.augment_trace[1])
     if args.combine:
-        p1 = JsonProfile(args.combine[0], dtype=None)
-        p2 = JsonProfile(args.combine[1], dtype=None)
-        combined = p1.combine_with(p2)
-        combined.dump(args.combine[2])
-        print(
-            f"Successfully combined {args.combine[0]} and {args.combine[1]} into {args.combine[2]}"
-        )
+        input_files = args.combine[:-1]  # All arguments except the last one
+        output_file = args.combine[-1]  # Last argument is the output file
+
+        if len(input_files) < 2:
+            print("Error: At least 2 input files are required for combining")
+            return
+
+        # Load the first profile
+        combined = JsonProfile(input_files[0], dtype=None)
+
+        # Iteratively combine with all other profiles
+        for input_file in input_files[1:]:
+            profile = JsonProfile(input_file, dtype=None)
+            combined = combined.combine_with(profile)
+
+        combined.dump(output_file)
+        print(f"Successfully combined {', '.join(input_files)} into {output_file}")
 
 
 if __name__ == "__main__":
