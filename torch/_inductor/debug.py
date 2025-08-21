@@ -25,6 +25,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
+from torch._utils_internal import signpost_event
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -316,7 +317,7 @@ def enable_aot_logging() -> Iterator[None]:
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
 _inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
-_inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
+_inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
@@ -893,10 +894,17 @@ def create_mapping_pre_post_grad_nodes(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_pre_post_grad_nodes",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
         log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
-        log.error(traceback.format_exc())
         return empty_return
 
 
@@ -945,11 +953,18 @@ def create_node_mapping_kernel_to_post_grad(
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_kernel_to_post_grad",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         log.error(
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error(traceback.format_exc())
         return empty_return
 
 
@@ -982,9 +997,57 @@ def dump_inductor_provenance_info(
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        # TODO: log the error to scuba table for better signal
-        log.error("Unexpected error in dump_inductor_provenance_info: %s", e)
-        log.error(traceback.format_exc())
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "dump_inductor_provenance_info",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
+
+
+def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
+    """Create kernel information JSON"""
+    try:
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_kernel_stack_trace
+        global _inductor_triton_kernel_to_post_grad_node_info
+
+        post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
+        all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
+            _inductor_triton_kernel_to_post_grad_node_info.keys()
+        )
+
+        result = {}
+        for kernel_name in all_kernels:
+            post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
+                kernel_name, []
+            )
+
+            pre_grad_nodes: OrderedSet[str] = OrderedSet()
+            for post_node in post_grad_nodes:
+                pre_grad_nodes.update(post_to_pre.get(post_node, []))
+
+            result[kernel_name] = {
+                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+                "post_grad_nodes": post_grad_nodes,
+                "pre_grad_nodes": list(pre_grad_nodes),
+            }
+
+        return result
+    except Exception as e:
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_kernel_information_json",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         return {}
 
 
@@ -998,6 +1061,7 @@ def set_kernel_post_grad_provenance_tracing(
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
+        stack_traces: list[str] = []
         if is_extern:
             assert isinstance(node_schedule, ExternKernelOut)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
@@ -1016,12 +1080,10 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
-            _inductor_kernel_stack_trace[kernel_name] = list(
-                node_schedule.get_stack_traces()
-            )
+            stack_traces = list(node_schedule.get_stack_traces())
         else:
             assert isinstance(node_schedule, list)
-            stack_traces: OrderedSet[str] = OrderedSet()
+            stack_traces_set: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
                 if snode not in (EnableReduction, DisableReduction):
                     if snode.node is not None:
@@ -1030,19 +1092,26 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
-                        stack_traces.update(snode.node.get_stack_traces())
+                        stack_traces_set.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
-            _inductor_kernel_stack_trace[kernel_name] = list(stack_traces)
+            stack_traces = list(stack_traces_set)
+        _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        # TODO: log the error to scuba table for better signal
-        log.error("Unexpected error in set_kernel_post_grad_provenance_tracing: %s", e)
-        log.error(traceback.format_exc())
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "set_kernel_post_grad_provenance_tracing",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:

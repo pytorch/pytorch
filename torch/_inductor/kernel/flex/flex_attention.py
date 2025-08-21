@@ -54,6 +54,8 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 def get_float32_precision():
     if (
         torch.backends.cuda.matmul.fp32_precision == "ieee"
+        if torch.backends.cuda.matmul.fp32_precision != "none"
+        else torch.get_float32_matmul_precision() == "highest"
         or torch.version.hip
         or torch.mtia.is_available()
     ):
@@ -164,7 +166,7 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-    if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
+    if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
             query,
             key,

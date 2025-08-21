@@ -1752,6 +1752,18 @@ class TestPatternMatcher(TestCase):
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
 
+    def test_fwd_only_generate_original_aten_meta(self):
+        def f(x):
+            return torch.ops.aten.sigmoid(x)
+
+        sample_input = torch.randn(3, 5, device=GPU_TYPE)
+        gm_with_meta = fwd_only(f, args=[sample_input])
+        sigmoid_nodes = gm_with_meta.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sigmoid.default
+        )
+        self.assertEqual(len(sigmoid_nodes), 1)
+        self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

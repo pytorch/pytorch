@@ -1373,11 +1373,11 @@ class BuiltinVariable(VariableTracker):
             if (
                 self.fn is tuple
                 and len(args) == 2
-                and args[1].has_unpack_var_sequence(tx)
+                and args[1].has_force_unpack_var_sequence(tx)
                 and not kwargs
             ):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].unpack_var_sequence(tx)
+                    init_args = args[1].force_unpack_var_sequence(tx)
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1477,6 +1477,21 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
+
+    def call_complex(self, tx: "InstructionTranslator", *args, **kwargs):
+        if self.constant_args(*args, **kwargs):
+            try:
+                c = complex(
+                    *(arg.as_python_constant() for arg in args),
+                    **{k: kwargs[k].as_python_constant() for k in kwargs},
+                )
+            except (TypeError, ValueError) as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
+            return ConstantVariable(c)
 
     def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
@@ -2001,10 +2016,7 @@ class BuiltinVariable(VariableTracker):
         if kwargs:
             assert len(kwargs) == 1 and "strict" in kwargs
         strict = kwargs.pop("strict", False)
-        args = [
-            arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
-            for arg in args
-        ]
+        args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             args, strict=strict, mutation_type=ValueMutationNew()
         )

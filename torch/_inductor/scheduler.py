@@ -2073,6 +2073,7 @@ class Scheduler:
         )
 
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
@@ -2159,6 +2160,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2555,7 +2562,7 @@ class Scheduler:
             )
 
         graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-        buf_info_list, _ = compute_memory_timeline(
+        buf_info_list, _, _ = compute_memory_timeline(
             self.nodes,
             name_to_freeable_input_buf,
             graph_outputs,
@@ -4989,6 +4996,7 @@ class Scheduler:
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
 
+            self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():

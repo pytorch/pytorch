@@ -2547,6 +2547,67 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
+    @testing.expectedFailureSerDer  # can't serialize functorch ops
+    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
+    @testing.expectedFailureCppRuntime
+    def test_vmap(self):
+        class Vmap(torch.nn.Module):
+            def forward(self, x, y):
+                f = lambda x, y: (x * y + 1).sum(dim=0)  # noqa: E731
+                vmapped = torch.vmap(f)(x, y)
+                return vmapped.sum(dim=0)
+
+        DYN = torch.export.Dim.DYNAMIC
+        inputs = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
+        dynamic = {"x": {0: DYN}, "y": {0: DYN}}
+        ep = torch.export.export(Vmap(), inputs, {}, dynamic_shapes=dynamic)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %y : [num_users=2] = placeholder[target=y]
+    %sym_size_int_3 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%y, 0), kwargs = {})
+    %lazy_load_decompositions : [num_users=0] = call_function[target=torch._functorch.predispatch.lazy_load_decompositions](args = (), kwargs = {})
+    %_vmap_increment_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_increment_nesting](args = (%sym_size_int_3, error), kwargs = {})
+    %_add_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%x, 0, 1), kwargs = {})
+    %_add_batch_dim_1 : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%y, 0, 1), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%_add_batch_dim, %_add_batch_dim_1), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, 1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%add, [0]), kwargs = {})
+    %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%sum_1, 1, %sym_size_int_3, 0), kwargs = {})
+    %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%_remove_batch_dim, [0]), kwargs = {})
+    return (sum_2,)""",
+        )
+        ep = torch.export.export(
+            Vmap(), inputs, {}, dynamic_shapes=dynamic, strict=True
+        )
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %y : [num_users=2] = placeholder[target=y]
+    %sym_size_int_2 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%y, 0), kwargs = {})
+    %lazy_load_decompositions : [num_users=0] = call_function[target=torch._functorch.predispatch.lazy_load_decompositions](args = (), kwargs = {})
+    %_vmap_increment_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_increment_nesting](args = (%sym_size_int_2, error), kwargs = {})
+    %_add_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%x, 0, 1), kwargs = {})
+    %_add_batch_dim_1 : [num_users=1] = call_function[target=torch._functorch.predispatch._add_batch_dim](args = (%y, 0, 1), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%_add_batch_dim, %_add_batch_dim_1), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, 1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%add, [0]), kwargs = {})
+    %_remove_batch_dim : [num_users=1] = call_function[target=torch._functorch.predispatch._remove_batch_dim](args = (%sum_1, 1, %sym_size_int_2, 0), kwargs = {})
+    %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%_remove_batch_dim, [0]), kwargs = {})
+    return (sum_2,)""",
+        )
+        self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+        ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic).run_decompositions({})
+        self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -3027,6 +3088,32 @@ def forward(self, causal_mask, fill_value):
                     "x": {0: Dim.DYNAMIC(min=32)},
                 },
             )
+
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+
+        # check unbacked bindings
+        # should be 4 symbols: u0, u1, output size, output storage offset
+        bound_unbacked = set()
+        for node in ep.graph.nodes:
+            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
+        self.assertEqual(len(bound_unbacked), 4)
 
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
@@ -4279,6 +4366,80 @@ def forward(self, x):
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
         x = torch.tensor([1, 2])
         self.assertTrue(torch.allclose(mod(x), ep.module()(x)))
+
+    def test_nested_module_fake_tensor_leak(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._tensor_cache = None
+
+            def forward(self, x):
+                if self._tensor_cache is None:
+                    self._tensor_cache = x + 2
+                return self._tensor_cache.sum() + x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self, bar):
+                super().__init__()
+                self.bar = bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        foo = Foo(Bar())
+        _ = export(foo, (torch.ones(4, 4),), strict=False)
+        self.assertTrue(foo.bar._tensor_cache is None)
+
+    def test_export_leak_compile(self):
+        class BaseModule(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                raise NotImplementedError
+
+        class CacheModule(BaseModule):
+            def __init__(self, cache: torch.Tensor):
+                super().__init__()
+                assert cache.ndim == 3
+                self.cache = torch.nn.Parameter(cache, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                n_tokens = x.size(1)
+                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
+                rolled_cache[:, -n_tokens:, :] = x
+                self.cache.data = rolled_cache
+                return self.cache
+
+        class LinearBlock(torch.nn.Module):
+            def __init__(self, in_features, out_features, activation=None):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features)
+                self.activation = activation
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.activation(x) if self.activation else x
+
+        class MyModel(BaseModule):
+            def __init__(self):
+                super().__init__()
+                default_cache = torch.zeros(1, 10, 5)
+                self.cache_layer = CacheModule(default_cache)
+                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
+                self.fc2 = LinearBlock(10, 5)
+
+            def forward(self, x):
+                cached = self.cache_layer(x)
+                out = self.fc1(cached)
+                out = self.fc2(out)
+                return out
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We found a fake tensor in the exported program constant's list. "
+            "This typically means our tracing system encountered an op that we can't trace through. "
+            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
+            "Please file an issue on github.",
+        ):
+            _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
 
     def test_export_for_training_with_container_type(self):
         class Foo(torch.nn.Module):
@@ -5704,7 +5865,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice(self):
+    def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr

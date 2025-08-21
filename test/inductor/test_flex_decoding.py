@@ -1756,6 +1756,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_not_pw_of_two(self, device):
+        query = torch.randn(1, 12, 1, 16, device=device)
+        key = torch.randn(1, 2, 128, 16, device=device)
+        value = torch.randn(1, 2, 128, 16, device=device)
+
+        flex_compiled = torch.compile(flex_attention)
+        flex_compiled(query, key, value, enable_gqa=True)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_logsumexp_only_return(self, device):
         make_q = functools.partial(
             torch.randn,

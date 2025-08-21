@@ -174,26 +174,39 @@ class PartialRender:
     of replacements after the initial render.
     """
 
-    FINALIZED_HOOK: object = object()
+    HookFn = Callable[[], str]
 
-    def __init__(self, code, replacement_hooks) -> None:
+    def __init__(
+        self, code: str, replacement_hooks: dict[str, Optional[HookFn]]
+    ) -> None:
         super().__init__()
-        self._code = code
-        self.replacement_hooks = replacement_hooks
+        self._code: str = code
+        self.replacement_hooks: dict[str, Optional[PartialRender.HookFn]] = (
+            replacement_hooks
+        )
 
     @property
-    def code(self):
+    def code(self) -> str:
+        """
+        The fully rendered code. Will **error** if any hooks have yet to be
+        finalized.
+        """
         remaining_active_hooks = [
-            key
-            for key, fn in self.replacement_hooks.items()
-            if fn is not self.FINALIZED_HOOK
+            key for key, fn in self.replacement_hooks.items() if fn is not None
         ]
         assert len(remaining_active_hooks) == 0, (
             f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
         )
         return self._code
 
-    def finalize_hook(self, hook_key: str, strict=True) -> None:
+    def finalize_hook(self, hook_key: str, strict: bool = True) -> None:
+        """
+        Finalize a hook by name.
+
+        :param strict: If ``True``, raise an error if the hook wasn't found.
+
+        NOTE: Will **error** if the hook has already been finalized.
+        """
         if hook_key not in self.replacement_hooks:
             if strict:
                 raise RuntimeError(
@@ -201,11 +214,12 @@ class PartialRender:
                 )
             else:
                 return
-        assert self.replacement_hooks[hook_key] is not self.FINALIZED_HOOK, (
-            "hook_key can only be called once"
-        )
-        self._code = self._code.replace(hook_key, self.replacement_hooks[hook_key]())
-        self.replacement_hooks[hook_key] = self.FINALIZED_HOOK
+
+        hook = self.replacement_hooks[hook_key]
+        assert hook is not None, f"Hook key {hook_key} can only be called once"
+        self._code = self._code.replace(hook_key, hook())
+
+        self.replacement_hooks[hook_key] = None
 
     def finalize_remaining(self) -> str:
         """
@@ -216,11 +230,17 @@ class PartialRender:
         finalize active hooks.
         """
         for key, fn in self.replacement_hooks.items():
-            if fn is not self.FINALIZED_HOOK:
+            if fn is not None:
                 self.finalize_hook(key)
         return self.code
 
     def finalize_all(self) -> str:
+        """
+        Finalize all active hooks.
+
+        NOTE: unlike ``finalize_remaining``, this method will **error** if any
+        hook has already been finalized.
+        """
         for key in self.replacement_hooks:
             self.finalize_hook(key)
         return self.code
@@ -275,7 +295,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if name not in self.fixed_inputs:
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
-            var_dtype = V.graph.get_buffer(name).dtype
+            buffer = V.graph.get_buffer(name)
+            var_dtype = buffer.dtype
             line = f"tl.load({var} + {index_str})"
 
             if (
@@ -285,11 +306,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
                 line += ".to(tl.float32)"
                 var_dtype = torch.float32
 
-            out = self.kernel.cse.generate(self.kernel.compute, line, dtype=var_dtype)
+            out = self.kernel.cse.generate(
+                self.kernel.compute, line, dtype=var_dtype, shape=()
+            )
             return out
 
         return self.kernel.cse.generate(
-            self.kernel.compute, f"({self.fixed_inputs[name]})", dtype=torch.float32
+            self.kernel.compute,
+            f"({self.fixed_inputs[name]})",
+            dtype=torch.float32,
+            shape=(),
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -439,6 +465,9 @@ class TritonTemplateKernel(TritonKernel):
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
 
+        # Extra functions to be exposed during partial template rendering.
+        self.extra_template_env_fns: list[Callable[..., Any]] = []
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -574,7 +603,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            **TritonKernel.inductor_meta_common(),
+            **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
@@ -610,8 +639,7 @@ class TritonTemplateKernel(TritonKernel):
             arg_defs, *_ = self.args.python_argdefs()
             return f"{', '.join(x.full_name() for x in arg_defs)}"
 
-        self.render_hooks["<ARGDEFS>"] = hook
-        return "<ARGDEFS>"
+        return self._register_hook("<ARGDEFS>", hook, allow_overwriting=True)
 
     def gen_defines(self):
         return self.defines
@@ -689,9 +717,7 @@ class TritonTemplateKernel(TritonKernel):
                 code.splice(renames.getvalue())
             return code.getvalue()
 
-        assert "<DEF_KERNEL>" not in self.render_hooks
-        self.render_hooks["<DEF_KERNEL>"] = hook
-        return "<DEF_KERNEL>"
+        return self._register_hook("<DEF_KERNEL>", hook)
 
     def size(self, name: str, index: int):
         """
@@ -984,9 +1010,7 @@ class TritonTemplateKernel(TritonKernel):
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        assert hook_key not in self.render_hooks
-        self.render_hooks[hook_key] = hook
-        return hook_key
+        return self._register_hook(hook_key, hook)
 
     def store_output(
         self,
@@ -994,6 +1018,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
+        val_shape: Optional[list[str]] = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1044,7 +1069,9 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
+            epilogue_args = [
+                V.kernel.cse.namedvar(val, dtype=acc_dtype, shape=val_shape)
+            ]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1068,9 +1095,50 @@ class TritonTemplateKernel(TritonKernel):
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        assert "<STORE_OUTPUT>" not in self.render_hooks
-        self.render_hooks["<STORE_OUTPUT>"] = hook
-        return "<STORE_OUTPUT>"
+        return self._register_hook("<STORE_OUTPUT>", hook)
+
+    def _register_hook(
+        self,
+        hook_name: str,
+        hook_fn: PartialRender.HookFn,
+        *,
+        allow_overwriting: bool = False,
+    ) -> str:
+        """
+        Register a hook function with a name.
+
+        ``hook_name`` should match the string that will be replaced via
+        ``hook_fn``, and should not already be in use for a hook.
+
+        If ``allow_overwriting`` is ``False``, will assert that there isn't
+        currently a registered hook of the same name before registering the new
+        one.
+        """
+
+        if not allow_overwriting:
+            assert hook_name not in self.render_hooks, (
+                f"Tried to register the hook {hook_name} multiple times. If "
+                "desired, pass allow_overwriting=True to _register_hook"
+            )
+        self.render_hooks[hook_name] = hook_fn
+        return hook_name
+
+    def _register_extra_template_env_fns(self, *fns: Callable[..., Any]):
+        """
+        Register some extra functions to expose when performing the initial
+        template render, so that they're in scope to by used by jinja
+        expressions.
+
+        These can be used to, for example, implement extra replacement hooks,
+        if the given function:
+
+        * Returns the name of their hook, which should also be the string to
+          replace via the hook function. The convention is to use the format
+          <HOOK_NAME>.
+        * Assigns the corresponding entry in ``self.render_hooks`` to a hook
+          function.
+        """
+        self.extra_template_env_fns.extend(fns)
 
     def render(self, template, kwargs, record_input_dependent_tracked_event=False):
         if record_input_dependent_tracked_event:
@@ -1090,6 +1158,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                *self.extra_template_env_fns,
             ]
         }
         return PartialRender(
@@ -1630,7 +1699,7 @@ class TritonTemplate(KernelTemplate):
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
         if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
-            kwargs["ALLOW_TF32"] = "False"
+            kwargs["FLOAT32_PRECISION"] = '"ieee"'
 
         if call_sizes is None:
             call_sizes = layout.size
@@ -1763,7 +1832,7 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
+                "float32_precision": str(kwargs.get("FLOAT32_PRECISION", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
@@ -2395,12 +2464,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 important_keys = [
                     "ACC_TYPE",
-                    "ALLOW_TF32",
                     "BLOCK_K",
                     "BLOCK_M",
                     "BLOCK_N",
                     "EVEN_K",
                     "GROUP_M",
+                    "FLOAT32_PRECISION",
                     "USE_FAST_ACCUM",
                     "num_stages",
                     "num_warps",
