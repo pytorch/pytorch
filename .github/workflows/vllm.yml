@@ -53,7 +53,7 @@ jobs:
           { config: "vllm_lora_280_failure_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "vllm_multi_model_processor_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
           { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: ""linux.aws.h100.4"}
+          { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: "linux.aws.h100.4"},
         ]}
     secrets: inherit
 
