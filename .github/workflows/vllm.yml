@@ -35,7 +35,7 @@ jobs:
       build-external-packages: "vllm"
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
-      cuda-arch-list: '8.9'
+      cuda-arch-list: '8.0;8.9'
       runner: linux.24xlarge.memory
       test-matrix: |
         { include: [
