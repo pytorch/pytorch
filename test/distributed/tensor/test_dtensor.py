@@ -942,7 +942,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         mesh = self.build_device_mesh()
         shard_placement = Shard(0)
 
-        for size in range(8):
+        for size in range(self.world_size):
             tensor = self._create_tensor(size)
             splitted_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor,
