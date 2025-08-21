@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -170,9 +170,9 @@ class cuBLASModule:
     def flags(
         self,
         *,
-        allow_fp16_reduced_precision_reduction: bool | None = None,
-        allow_bf16_reduced_precision_reduction: bool | None = None,
-        allow_fp16_accumulation: bool | None = None,
+        allow_fp16_reduced_precision_reduction: Optional[bool] = None,
+        allow_bf16_reduced_precision_reduction: Optional[bool] = None,
+        allow_fp16_accumulation: Optional[bool] = None,
     ):
         original = (
             self.allow_fp16_reduced_precision_reduction,
