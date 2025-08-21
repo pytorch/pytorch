@@ -33,11 +33,54 @@ def get_fx_node(
     return origins_with_expected_op[0]
 
 
-def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> bool:
+def get_non_bucketable_pg(snodes):
+    non_bucketable_pg = set()
+    accept_op_list = ["all_gather_into_tensor", "reduce_scatter_tensor", "convert_element_type"]
+    def _check_op_in_accept_op_list(inputs_node_origins):
+        for op in inputs_node_origins:
+            seen_in_accept_op_list = False
+            for op_name in accept_op_list:
+                if op_name in str(op):
+                    seen_in_accept_op_list = True
+            if not seen_in_accept_op_list:
+                return False
+        return True
+
+    for snode in snodes:
+        # If the origin has op outside of accept_op_list, it means there will be strong dependency with previous comp
+        # thus, this means it's not bucketable
+        if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default):
+            ir_node = snode.node
+            ir_node_origins = list(getattr(ir_node, "origins", None))
+            if ir_node_origins is None:
+                continue
+            ag_fx_node = get_fx_node(
+                snode,
+                expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
+            )
+            ag_input_fx_nodes = [ag_fx_node.args[0]]
+            if not _check_op_in_accept_op_list(ag_input_fx_nodes):
+                non_bucketable_pg.add(snode.node.constant_args[1])
+        elif is_collective(snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
+            ir_node = snode.node
+            ir_node_origins = list(getattr(ir_node, "origins", None))
+            if ir_node_origins is None:
+                continue
+            rs_fx_node = get_fx_node(
+                snode,
+                expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            )
+            rx_input_fx_nodes = [rs_fx_node.args[0]]
+            if not _check_op_in_accept_op_list(rx_input_fx_nodes):
+                non_bucketable_pg.add(snode.node.constant_args[2])
+
+    return non_bucketable_pg
+
+def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"], non_bucketable_pg) -> bool:
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             return True
     return False
 

@@ -33,18 +33,15 @@ def get_dynamic_memory_threshold(
 ):
     # this function calculates the memory gap from the current step's peak memory
     # to the peak memory criteria
-    if forward:
-        # it calculates how much memory can be filled to meet peak memory criteria
-        current_peak_memory = 0
-        for idx, memory in peak_memory_dict.items():
-            if idx <= current_step:
-                current_peak_memory = max(memory, current_peak_memory)
-    else:
-        # maximum memory from last_release_step -> end in backward pass
-        current_peak_memory = 0
-        for idx, memory in peak_memory_dict.items():
-            if idx >= current_step:
-                current_peak_memory = max(memory, current_peak_memory)
+    # it calculates how much memory can be filled to meet peak memory criteria
+    left_peak_memory = 0
+    right_peak_memory = 0
+    for idx, memory in peak_memory_dict.items():
+        if idx <= current_step:
+            left_peak_memory = max(memory, left_peak_memory)
+        if idx >= current_step:
+            right_peak_memory = max(memory, right_peak_memory)
+    current_peak_memory = min(left_peak_memory, right_peak_memory)
     return peak_memory - current_peak_memory, current_peak_memory
 
 
@@ -145,6 +142,7 @@ def get_bucketing_plan(
     has_reduce_scatter: bool,
     comm_cache,
     comp_cache,
+    non_bucketable_pg,
     verbose: bool = False,
 ) -> list[list["scheduler.BaseSchedulerNode"]]:
     all_gather_plan = []
@@ -185,7 +183,7 @@ def get_bucketing_plan(
     for idx, snode in enumerate(snodes):
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             has_fsdp_comm = True
             pg_info = get_ag_node_pg_info(snode)
             if pg_info is None:
@@ -193,7 +191,7 @@ def get_bucketing_plan(
             fsdp_world_size = pg_info[0]
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             has_fsdp_comm = True
             pg_info = get_rs_node_pg_info(
                 snode, return_reduce_op=True
@@ -208,7 +206,7 @@ def get_bucketing_plan(
         return [[]], [[]]
 
     comp_time_dict, memory_dict, peak_memory_dict = calibrate_with_cache(
-        sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter
+        sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter, non_bucketable_pg
     )
     total_comp_time = sum(comp_time_dict.values())
     peak_memory = 0
@@ -233,7 +231,7 @@ def get_bucketing_plan(
         # we only bucket on FSDP comm
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             fsdp_ag_idx += 1
             seen_new_fsdp_ag = True
             total_comp_time -= comp_time_dict[fsdp_ag_idx]
@@ -325,7 +323,7 @@ def get_bucketing_plan(
                     )
                     print("current_ag_bucket", all_gather_plan[-1])
                     for key, value in all_gather_plan[-1].items():
-                        print("sub info current_ag_bucket", key, len(value))
+                        print("sub info current_ag_bucket", key, len(value), [v.node.get_name() for v in value])
                     print(
                         "current_peak_dynamic",
                         current_peak_dynamic,
@@ -367,7 +365,7 @@ def get_bucketing_plan(
                 ) = 0, 0
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             node_info = get_node_tensor_info(snode)[:-2] + get_rs_node_pg_info(snode)
             current_rs_bucket[node_info].append(snode)
 
@@ -402,7 +400,7 @@ def get_bucketing_plan(
             # the memory is the data fetched by the communication.
             if is_collective(snode.node):
                 current_comm = comm_cache.get_comm_time(
-                    snode.node.inputs[0].data.get_size(),
+                    snode.node.inputs[0].layout.size,
                     snode.node.layout.size,
                     getattr(snode.node, "python_kernel_name", ""),
                     calibrated=True,

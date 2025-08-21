@@ -8,7 +8,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import ir, scheduler
 from ..comms import get_op_idx
 from ..dependencies import StarDep, WeakDep
-from ..utils import is_collective
+from ..utils import is_collective, is_wait
 from ..virtualized import V
 from .bucket_utils import (
     _find_recursive_deps_of_snode,
@@ -30,6 +30,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
     all_gather_bucket_plan: Dict[str, list["scheduler.BaseSchedulerNode"]],
+    non_bucketable_pg,
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out all_gather nodes and bucket them according to `all_gather_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that all_gather nodes are bucketed.
@@ -68,7 +69,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             ag_exists = True
             ag_snode = snode
             ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
@@ -85,12 +86,13 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             ag_related_snodes = sorted(
                 ag_related_snode_set, key=lambda x: get_op_idx(x)
             )
-            assert len(ag_related_snodes) in [1, 2]
-
-            if len(ag_related_snodes) == 2:
-                cast_snode = ag_related_snodes[0]
-                ag_snode = ag_related_snodes[1]
-                ag_snode_to_cast_snode[ag_snode] = cast_snode
+            if len(ag_related_snodes) >= 2:
+                cast_node = ag_related_snodes[-2]
+                for node in ag_related_snodes:
+                    if not is_wait(node.node) and not is_collective(node.node):
+                        cast_node = node
+                ag_snode = snode
+                ag_snode_to_cast_snode[ag_snode] = cast_node
             else:
                 ag_snode = ag_related_snodes[0]
 
@@ -325,6 +327,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
     reduce_scatter_bucket_plan: Dict[str, list["scheduler.BaseSchedulerNode"]],
+    non_bucketable_pg,
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out reduce_scatter nodes and bucket them according to `reduce_scatter_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that reduce_scatter nodes are bucketed.
@@ -359,7 +362,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
             rs_exists = True
             rs_snode = snode
 

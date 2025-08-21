@@ -7,7 +7,7 @@ import torch
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, scheduler
-from ..utils import is_collective
+from ..utils import is_collective, is_wait
 
 
 class NodeType(IntEnum):
@@ -56,29 +56,34 @@ def compute_node_users(
     return inverse_users, node_users
 
 
-def _check_ir_node_fsdp(ir_node: "ir.Operation") -> bool:
+def _check_ir_node_fsdp(ir_node, non_bucketable_pg) -> bool:
     """
     Determine if the AG/RS node is for FSDP or TP
     """
     if config.simplefsdp.simplefsdp_only:
         return True
-
-    is_fsdp = False
     ir_node_origins = list(getattr(ir_node, "origins", None))
 
     if len(ir_node_origins) == 0:
         # bucketed AG and RS doesn't have origins, but they are created by FSDP
-        is_fsdp = True
+        return True
 
-    for n in ir_node_origins:
-        meta_data = n.meta.get("stack_trace", {})
-        # TODO(ruisizhang123): hack to get FSDP node (the SimpleFSDP AG/RS are created with parametrization)
-        if "parametrization" in meta_data:
-            is_fsdp = True
-    return is_fsdp
+    if is_wait(ir_node):
+        ir_node = ir_node.inputs[0]
+
+    if is_collective(ir_node, op=torch.ops._c10d_functional.all_gather_into_tensor.default):
+        pg = ir_node.constant_args[1]
+    elif is_collective(ir_node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
+        pg = ir_node.constant_args[2]
+    else:
+        return False
+
+    if pg in non_bucketable_pg:
+        return False
+    return True
 
 
-def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
+def _get_ir_node_type(ir_node: "ir.Operation", non_bucketable_pg) -> NodeType:
     """
     Determine the type of a ir node
     """
@@ -87,12 +92,12 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
         ir_op_overload = getattr(ir_node.inputs[0], "op_overload", None)
         if (
             ir_op_overload == torch.ops._c10d_functional.all_gather_into_tensor.default
-            and _check_ir_node_fsdp(ir_node.inputs[0])
+            and _check_ir_node_fsdp(ir_node.inputs[0], non_bucketable_pg)
         ):
             return NodeType.AG_WAIT
         elif (
             ir_op_overload == torch.ops._c10d_functional.reduce_scatter_tensor.default
-            and _check_ir_node_fsdp(ir_node.inputs[0])
+            and _check_ir_node_fsdp(ir_node.inputs[0], non_bucketable_pg)
         ):
             return NodeType.RS_WAIT
     if isinstance(ir_node, ir._CollectiveKernel):
@@ -100,18 +105,18 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
         ir_op_overload = getattr(ir_node, "op_overload", None)
         if is_collective(
             ir_node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(ir_node):
+        ) and _check_ir_node_fsdp(ir_node, non_bucketable_pg):
             return NodeType.ALL_GATHER
         elif is_collective(
             ir_node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(ir_node):
+        ) and _check_ir_node_fsdp(ir_node, non_bucketable_pg):
             return NodeType.REDUCE_SCATTER
 
     if isinstance(ir_node, ir.FallbackKernel):
         python_kernel_name = ir_node.python_kernel_name
         if (
             python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
-            and _check_ir_node_fsdp(ir_node)
+            and _check_ir_node_fsdp(ir_node, non_bucketable_pg)
         ):
             inputs_rs_kernel_name1 = (
                 getattr(ir_node.inputs[0], "python_kernel_name", "")
@@ -139,17 +144,17 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
-        ) and _check_ir_node_fsdp(ir_node):
+        ) and _check_ir_node_fsdp(ir_node, non_bucketable_pg):
             return NodeType.REDUCE_SCATTER
         elif (
             python_kernel_name
             == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-        ) and _check_ir_node_fsdp(ir_node):
+        ) and _check_ir_node_fsdp(ir_node, non_bucketable_pg):
             return NodeType.ALL_GATHER
     return NodeType.COMPUTE
 
 
-def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
+def get_node_type(node: "scheduler.BaseSchedulerNode", non_bucketable_pg) -> NodeType:
     """
     Determine the NodeType of a node
     """
@@ -159,7 +164,7 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
 
     if isinstance(node, scheduler.GroupedSchedulerNode):
         # [Only for bucketing]: newly created AG and RS are grouped as GroupedSchedulerNode
-        child_nodes_type = [_get_ir_node_type(n.node) for n in node.snodes]
+        child_nodes_type = [_get_ir_node_type(n.node, non_bucketable_pg) for n in node.snodes]
         if NodeType.AG_WAIT in child_nodes_type:
             return NodeType.AG_WAIT
         elif NodeType.RS_WAIT in child_nodes_type:
@@ -171,11 +176,12 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
         else:
             return NodeType.COMPUTE
 
-    return _get_ir_node_type(node.node)
+    return _get_ir_node_type(node.node, non_bucketable_pg)
 
 
 def reorder_all_gather(
     snodes: List["scheduler.BaseSchedulerNode"],
+    non_bucketable_pg,
     all_gather_before_last_wait: Optional[bool] = True,
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
@@ -189,7 +195,7 @@ def reorder_all_gather(
     inverse_users, node_users = compute_node_users(snodes)
 
     for node in snodes:
-        node_to_type[node] = get_node_type(node)
+        node_to_type[node] = get_node_type(node, non_bucketable_pg)
     snodes.reverse()
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]
@@ -229,7 +235,7 @@ def reorder_all_gather(
 
 def reorder_reduce_scatter(
     snodes: List["scheduler.BaseSchedulerNode"],
-    front_node: Optional["scheduler.BaseSchedulerNode"] = None,
+    non_bucketable_pg,
 ) -> List["scheduler.BaseSchedulerNode"]:
     """
     Reorder Reduce Scatter and Wait in the backward pass
@@ -241,8 +247,8 @@ def reorder_reduce_scatter(
     inverse_users, node_users = compute_node_users(snodes)
     types = []
     for node in snodes:
-        node_to_type[node] = get_node_type(node)
-        types.append(get_node_type(node))
+        node_to_type[node] = get_node_type(node, non_bucketable_pg)
+        types.append(get_node_type(node, non_bucketable_pg))
 
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]

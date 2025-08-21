@@ -2196,7 +2196,10 @@ class Scheduler:
                 "torch._inductor.config.simplefsdp.bucketing_type",
                 torch._inductor.config.simplefsdp.bucketing_type,
             )
-            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes)
+            non_bucketable_pg = bucket_utils.get_non_bucketable_pg(self.nodes)
+            has_reduce_scatter = bucket_utils.has_reduce_scatter_in_nodes(self.nodes, non_bucketable_pg)
+            print("[non_bucketable_pg]", non_bucketable_pg)
+
             assert not config.allow_buffer_reuse, (
                 "bucketing algorithm requires torch._inductor.config.allow_buffer_reuse to be False"
             )
@@ -2229,6 +2232,7 @@ class Scheduler:
                         has_reduce_scatter,
                         comm_cache,
                         comp_cache,
+                        non_bucketable_pg,
                         verbose=True,
                     )
                 )
@@ -2245,6 +2249,7 @@ class Scheduler:
                 self.name_to_buf,
                 self.name_to_fused_node,
                 all_gather_plan,
+                non_bucketable_pg,
             )
             if has_reduce_scatter:
                 self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
@@ -2253,6 +2258,7 @@ class Scheduler:
                     self.name_to_buf,
                     self.name_to_fused_node,
                     reduce_scatter_plan,
+                    non_bucketable_pg,
                 )
 
             print("start reordering")
@@ -2260,17 +2266,18 @@ class Scheduler:
                 node_length = len(self.nodes)
                 self.nodes = reorder.reorder_all_gather(
                     self.nodes,
+                    non_bucketable_pg,
                     all_gather_before_last_wait=True
                     if has_reduce_scatter and config.simplefsdp.bucketing_type != "auto"
                     else False,
                 )
                 assert node_length == len(self.nodes), (
-                    "missed nodes in reordering all gather"
+                    "missed nodes in reordering all gather", node_length, len(self.nodes)
                 )
                 if has_reduce_scatter:
-                    self.nodes = reorder.reorder_reduce_scatter(self.nodes)
+                    self.nodes = reorder.reorder_reduce_scatter(self.nodes, non_bucketable_pg)
                     assert node_length == len(self.nodes), (
-                        "missed nodes in reordering reduce scatter"
+                        "missed nodes in reordering reduce scatter", node_length, len(self.nodes)
                     )
             print("end reordering")
             import gc

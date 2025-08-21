@@ -180,7 +180,7 @@ def benchmark_and_cache_comm_dicts(
 
 
 def calibrate_with_cache(
-    sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter
+    sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter, non_bucketable_pg
 ):
     world_size = c10d.distributed_c10d.get_world_size()
 
@@ -211,7 +211,7 @@ def calibrate_with_cache(
                 continue
             node_info = node_tensor_info[:-2] + node_pg_info
             input_size = node_tensor_info[-2]
-            if _check_ir_node_fsdp(snode.node):
+            if _check_ir_node_fsdp(snode.node, non_bucketable_pg):
                 # For FSDP, we assume they have all have the
                 fsdp_ag_input_size_dict[node_info].append(input_size)
             else:
@@ -225,7 +225,7 @@ def calibrate_with_cache(
                 continue
             node_info = node_tensor_info[:-2] + node_pg_info
             output_size = node_tensor_info[-1]
-            if _check_ir_node_fsdp(snode.node):
+            if _check_ir_node_fsdp(snode.node, non_bucketable_pg):
                 # For FSDP, we assume they have all have the same group size
                 fsdp_rs_output_size_dict[node_info].append(output_size)
             else:
