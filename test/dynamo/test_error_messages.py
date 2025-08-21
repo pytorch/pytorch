@@ -489,8 +489,6 @@ Attempted to call function marked as skipped
     @scoped_load_inline
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    # Will fail until https://github.com/pybind/pybind11/issues/5774 is fixed.
-    @unittest.expectedFailure
     def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
@@ -521,6 +519,13 @@ Attempted to call function marked as skipped
         first_graph_break = next(iter(counters["graph_break"].keys()))
 
         first_graph_break = re.sub(r"mylib(_v\d+)?", "mylib", first_graph_break)
+        # HACK: this patches around the fact that PyBind11 improperly sets the
+        # __qualname__ attribute on functions and methods; see
+        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
+        # that issue is fixed.
+        first_graph_break = re.sub(
+            r"pybind11_detail_function_record_v[^ .]+", "PyCapsule", first_graph_break
+        )
 
         self.assertExpectedInline(
             first_graph_break,
