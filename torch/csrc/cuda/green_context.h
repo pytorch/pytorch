@@ -166,7 +166,7 @@ class GreenContext {
   void popCurrent() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
     // see above note about stream being hardcoded to the default stream
-    CUDAEvent ev;
+    at::cuda::CUDAEvent ev;
     ev.record(c10::cuda::getCurrentCUDAStream());
     CUcontext popped;
     C10_CUDA_DRIVER_CHECK(
