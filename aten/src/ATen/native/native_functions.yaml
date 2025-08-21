@@ -15928,3 +15928,13 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+# autograd lab fn.
+- func: lab_attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
+  variants: function
+    # dispatch:
+    #   CompositeExplicitAutograd: lab_attn
+
+- func: lab_attn_bwd(Tensor Q, Tensor K, Tensor V, Tensor a, Tensor grad_o, Tensor ignore) -> (Tensor, Tensor, Tensor)
+  variants: function
+
