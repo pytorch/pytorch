@@ -978,7 +978,10 @@ class Loops(IRNode):
     ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
+        side_effects = kwargs.pop("side_effects", False)
         r = cls(*args, **kwargs)
+        if isinstance(r, Pointwise):
+            r._post_init_setattr("side_effects", side_effects)
         # Need to explicitly set origin_node here to propagate it down.
         # todo(chilli): I think it would be better for IRNode to directly set
         # origin_node
@@ -1073,6 +1076,9 @@ class Pointwise(Loops):
             return partial(nop_loader_fn, dtype=self.dtype)
 
         return self.inner_fn
+
+    def has_side_effects(self) -> bool:
+        return getattr(self, "side_effects", False)
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []

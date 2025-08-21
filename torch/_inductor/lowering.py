@@ -1341,19 +1341,8 @@ def _assert_async(cond, msg):
         dtype=cond.get_dtype(),
         inner_fn=inner_fn,
         ranges=list(cond.get_size()),
+        side_effects=True,
     )
-
-    def has_side_effects():
-        return True
-
-    assert isinstance(assertion_op, TensorBox), (
-        f"assertion_op must be a TensorBox, got {type(assertion_op).__name__}"
-    )
-    assert isinstance(assertion_op.data, ir.StorageBox), (
-        f"assertion_op must be a ir.StorageBox, got {type(assertion_op).__name__}"
-    )
-    pointwise_node = assertion_op.data.data
-    object.__setattr__(pointwise_node, "has_side_effects", has_side_effects)
 
     assertion_op.realize()
     return assertion_op
