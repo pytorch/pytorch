@@ -244,7 +244,7 @@ git submodule update --init --recursive
 ```bash
 conda install cmake ninja
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section above
-pip install -r requirements.txt
+pip install --group dev
 ```
 
 **On Linux**
