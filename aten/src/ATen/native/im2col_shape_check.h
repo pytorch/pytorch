@@ -57,16 +57,14 @@ inline void col2im_shape_check(
   int64_t n_input_plane = input.size(batch_dim + 1);
   uint64_t prod_kernel_size = 1;
 
-  if (c10::mul_overflows((uint64_t)kernel_width, (uint64_t)kernel_height, &prod_kernel_size)){
-    TORCH_CHECK(false,
-                "Given kernel_width = ",
-                kernel_width,
-                " and kernel_height = ",
-                kernel_height,
-                " the product of kernel_width and kernel_height overflowed.");
-  }
+  TORCH_CHECK(!c10::mul_overflows(static_cast<uint64_t>(kernel_width), static_cast<uint64_t>(kernel_height), &prod_kernel_size),
+            "Given kernel_width = ",
+            kernel_width,
+            " and kernel_height = ",
+            kernel_height,
+            " the product of kernel_width and kernel_height overflowed.");
   
-  if (n_input_plane % prod_kernel_size != 0) {
+  if (n_input_plane % (kernel_width * kernel_height) != 0) {
     TORCH_CHECK(false,
         "Expected size of input's dimension 1 to be divisible by the "
         "product of kernel_size, but got input.size(1)=",
