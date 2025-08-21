@@ -326,10 +326,12 @@ class TestDynamoTimed(TestCase):
     @inductor_config.patch({"force_disable_caches": True})
     def test_exception_stack_trace(self):
         from torch._dynamo.exc import Unsupported
+
         self.warmup()
 
         def forward(ctx, foo):
             return torch.add(foo, foo)
+
         def backward(ctx, grad_output):
             print("graph break!")  # This should trigger a Dynamo error
             return grad_output
@@ -340,11 +342,12 @@ class TestDynamoTimed(TestCase):
             {
                 "forward": staticmethod(forward),
                 "backward": staticmethod(backward),
-            }
+            },
         )
 
         def model(x):
             return CustomFuncBwdPrintGraphBreak.apply(x)
+
         opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         compilation_events = []
@@ -363,7 +366,8 @@ class TestDynamoTimed(TestCase):
         self.assertIn(
             "Dynamo does not know how to trace builtin operator `print`",
             compilation_events[0].exception_stack_trace[0],
-            "exception_stack_trace does not contain the expected string: 'Dynamo does not know how to trace builtin operator `print`'",
+            "exception_stack_trace does not contain the expected string: "
+            "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
     @dynamo_config.patch(
