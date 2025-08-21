@@ -1715,7 +1715,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
             &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {
         expandable_segment_ =
-            ExpandableSegment::fromShared(device, allocator_impl.peers(), ss)
+            ExpandableSegmentT::fromShared(device, allocator_impl.peers(), ss)
                 .release();
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -1747,7 +1747,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
       }
     }
     c10::DeviceIndex device_;
-    ExpandableSegment* expandable_segment_{nullptr};
+    ExpandableSegmentT* expandable_segment_{nullptr};
     void* cuda_ipc_ptr_{nullptr}; // nullptr if expandable_segment_ is not null
     std::weak_ptr<void> wp_;
   };
