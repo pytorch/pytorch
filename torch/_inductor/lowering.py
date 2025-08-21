@@ -1334,12 +1334,11 @@ def _assert_async(cond, msg):
     cond_loader = cond.make_loader()
 
     def inner_fn(index):
-        p = cond_loader(index)
-        return ops.device_assert_async(p, msg)
+        return ops.device_assert_async(cond_loader(index), msg)
 
-    sentinel = Pointwise.create(
+    assertion_op = Pointwise.create(
         device=cond.get_device(),
-        dtype=torch.bool,
+        dtype=cond.get_dtype(),
         inner_fn=inner_fn,
         ranges=list(cond.get_size()),
     )
@@ -1347,12 +1346,17 @@ def _assert_async(cond, msg):
     def has_side_effects():
         return True
 
-    assert hasattr(sentinel, "data")
-    assert hasattr(sentinel.data, "data")
-    pointwise_node = sentinel.data.data
+    assert isinstance(assertion_op, TensorBox), (
+        f"assertion_op must be a TensorBox, got {type(assertion_op).__name__}"
+    )
+    assert isinstance(assertion_op.data, ir.StorageBox), (
+        f"assertion_op must be a ir.StorageBox, got {type(assertion_op).__name__}"
+    )
+    pointwise_node = assertion_op.data.data
     object.__setattr__(pointwise_node, "has_side_effects", has_side_effects)
-    sentinel.realize()
-    return sentinel
+
+    assertion_op.realize()
+    return assertion_op
 
 
 @register_lowering(aten._assert_async.msg)
