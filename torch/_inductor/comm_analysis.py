@@ -15,6 +15,7 @@ class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
+    ALL_TO_ALL = 3
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -49,6 +50,8 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
+    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
+        return NCCL_COLL.ALL_TO_ALL
     else:
         raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
@@ -220,7 +223,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     if coll == NCCL_COLL.ALL_REDUCE:
         nsteps = 2 * (nRanks - 1)
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nsteps = nRanks - 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
@@ -237,7 +240,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
             nInterSteps = 2 * nNodes
         else:
             nInterSteps = 0
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nInterSteps = nNodes - 1
 
     # First compute latency in us; then at the end, convert it to ns

@@ -240,7 +240,6 @@ def is_corresponding_collective_wait(collective_snode, wait_snode):
     unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
     return unmet_deps & collective_outs
 
-
 def _op_runtime_estimate_mult(snode):
     # Empirically comparing "benchmark" estimations:
     # mm was underestimated x2-3
@@ -297,14 +296,26 @@ def _reorder_communication_preserving_peak_memory_internal(
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = runtimes[collective_snode]
         compute_time = 0.0
+        collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
         for snode in remaining_snodes:
-            if contains_collective(snode):
-                continue
+            # We may have some ops without Wait,
+            # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
+            unmet_deps = OrderedSet(
+                d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+            )
 
-            if contains_wait(snode) and is_corresponding_collective_wait(
-                collective_snode, snode
-            ):
+            if unmet_deps & collective_outs:
+                # print(f"XXX EXPOSED: COLLECTIVE->USE coll:{collective_snode.debug_str()} unmet_dep:{snode.debug_str()}")
                 break
+
+            if contains_collective(snode):
+                # Assumption that all collectives are async.
+                # TODO(ivankobzarev):
+                # It is not true, as we have sync "custom" collectives torch.ops._dtensor.shard_dim_alltoall.default 
+                # We also have to count for collective-waits in our range as sync blocks
+                # As applying this will only reduce amount of prefetch/sink - implement it laster,
+                # when we have enough prefetch/sink.
+                continue
 
             def accumulate_time(_snode: BaseSchedulerNode) -> None:
                 nonlocal compute_time
@@ -529,8 +540,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if contains_collective(candidate):
                             return False, "contains_collective"
 
-                        if contains_gemm_like(candidate):
-                            return False, "contains_gemm_like"
+                        # if contains_gemm_like(candidate):
+                        #     return False, "contains_gemm_like"
                         return True, None
 
                     is_groupable_result, grouping_reason = is_groupable(candidate)
@@ -1038,7 +1049,8 @@ def _sink_waits_iterative_internal(
 
         for n in [candidate, *gns]:
             post_alloc = _post_alloc_update[n]
-            snodes_allocfree[n].size_free += _size_free_delta_update[n]
+            # TODO(ivankobzarev): Debug why n can be missing
+            snodes_allocfree[n].size_free += _size_free_delta_update.get(n, 0)
             _curr_memory[n] = (
                 post_alloc,
                 post_alloc - snodes_allocfree[n].size_free,
