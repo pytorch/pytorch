@@ -21077,6 +21077,7 @@ op_db: list[OpInfo] = [
             # NOTE: Only run on MPS
             DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
             DecorateInfo(unittest.skip('Skipped!'), device_type='cuda'),
+            DecorateInfo(unittest.skip('Skipped!'), device_type='xpu'),
             DecorateInfo(unittest.skip('Skipped!'), device_type='meta'),
         ),),
     OpInfo(
