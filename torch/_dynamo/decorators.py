@@ -585,7 +585,6 @@ def mark_dynamic(
     t: Any,
     index: Union[int, list[Any], tuple[Any]],
     *,
-    hint_override: Optional[int] = None,
     min: Optional[int] = None,
     max: Optional[int] = None,
     specialize_on: Optional[list[Any]] = None,
@@ -638,13 +637,10 @@ def mark_dynamic(
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
-            t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
             t._specialize_on = {}
 
-        if hint_override:
-            t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
