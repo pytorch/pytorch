@@ -244,7 +244,7 @@ Muon.__doc__ = (
     Moonshot's implementation also focuses on matching :math:`RMS` of AdamW. The adjustment is computed as:
     :math:`\gamma \leftarrow {0.2}\gamma\,\sqrt{\max\!\left({A}, {B}\right)}`
     The method is adopted from `Muon is Scalable for LLM Training`_. Research
-    result shows that with this adjustment Muon can directly reuse the learning rate
+    results show that with this adjustment Muon can directly reuse the learning rate
     and weight decay tuned for AdamW.
 
     We provide two options for the learning rate adjustment: "default" and "match_rms_adamw", allowing users to
@@ -255,8 +255,8 @@ Muon.__doc__ = (
     """
     + rf"""
     Args:
-        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. for other
-            parameters such as bias, and embedding, should beoptimized by a standard method such as AdamW.
+        {_params_doc}. Note that Muon is an optimizer for 2D parameters of neural network hidden layers. Other
+            parameters, such as bias, and embedding, should be optimized by a standard method such as AdamW.
         lr (float, Tensor, optional): learning rate (default: 1e-3).
         weight_decay (float, optional): weight decay (L2 penalty). (default: 0.1)
         momentum (float, optional): momentum factor (default: 0.95)
