@@ -266,6 +266,16 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, (x,))
 
+    class SelectWithInputIdx(torch.nn.Module):
+        def forward(self, p, x, idx):
+            u0 = idx.item()
+            x0 = x.select(0, u0)
+
+            def fn():
+                return x0.sin()
+
+            return torch.cond(x0.sum() > 0, fn, fn)
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -284,9 +294,13 @@ class CondTests(TestCase):
         if dynamic:
             larger_inputs = []
             for inp in inputs:
-                # tile every first dim 5x
-                tiling = [5] + [1] * (inp.ndim - 1)
-                larger_inputs.append(torch.tile(inp, tiling))
+                # only tile non-scalar tensor inputs
+                if inp.ndim > 0:
+                    # tile every first dim 5x
+                    tiling = [5] + [1] * (inp.ndim - 1)
+                    larger_inputs.append(torch.tile(inp, tiling))
+                else:
+                    larger_inputs.append(inp)
             input_sets.append(larger_inputs)
             for inputs in input_sets:
                 for inp in inputs:
@@ -738,6 +752,18 @@ class CondTests(TestCase):
         self._run_test(
             model=CondModels.FunctionalCall(),
             inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu"])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_cond_select_with_input_idx(self, device, dynamic):
+        self._run_test(
+            model=CondModels.SelectWithInputIdx(),
+            inputs=(torch.randn(10, 20), torch.tensor(0, dtype=torch.int64)),
             device=device,
             dynamic=dynamic,
         )
