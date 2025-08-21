@@ -172,24 +172,27 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMeshBackend:
+    class _DeviceMeshBackend:
         def __init__(
             self,
             device_type: str,
-            _init_backend: bool = True,
         ) -> None:
+            """
+            _DeviceMeshBackend acts as a class which handles all the mechanical bookkeepings
+            for the backend initialization of the DeviceMesh and all the following transformations.
+
+            Also we only use a singleton for one DeviceMesh universe, which means all the DeviceMesh
+            objects share the same backend initialization if they are transformed from the same device mesh.
+            If users initialize a new DeviceMesh object from scratch, we will create a new singleton.
+            """
             self.device_type = device_type
             self.layouts_to_groups: dict[_Layout, str] = {}
             self.names_to_layouts: dict[str, _Layout] = {}
 
-            # Skip process group initialization if xla device or init backend is False
-            # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if device_type != "xla":
-                # always try to create default (world) pg, even if it is not initialized
-                # already. The world pg is used for device mesh identity (rank) on each
-                # process (we need to know if the current global rank is in the mesh or not).
-                if _init_backend:
-                    self._setup_world_group_and_device()
+            # always try to create default (world) pg, even if it is not initialized
+            # already. The world pg is used for device mesh identity (rank) on each
+            # process (we need to know if the current global rank is in the mesh or not).
+            self._setup_world_group_and_device()
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
@@ -252,8 +255,12 @@ else:
             # When the layout has backend initiated, we want to ensure that
             if layout in self.layouts_to_groups:
                 if name is not None:
-                    assert name in self.names_to_layouts
-                    assert self.names_to_layouts[name] == layout
+                    assert name in self.names_to_layouts, (
+                        f"dim_name {name} has not been mapped to any layout"
+                    )
+                    assert self.names_to_layouts[name] == layout, (
+                        f"dim_name {name} has been mapped to another layout"
+                    )
                 if backend_override != (None, None):
                     warnings.warn(
                         f"Group for {layout} ({name=}) already exists, ignoring backend override"
@@ -404,7 +411,7 @@ else:
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
         _layouts: tuple[_Layout, ...]
-        _backend: Optional[DeviceMeshBackend] = None
+        _backend: Optional[_DeviceMeshBackend] = None
 
         def __init__(
             self,
@@ -429,9 +436,17 @@ else:
             # Internal bookkeeping for the device mesh.
             self._layouts = init_layouts_from_mesh(self.mesh.size(), self.mesh.stride())
 
-            if not _init_backend:
+            # Skip process group initialization if xla device or init backend is False
+            # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
+            if not _init_backend or device_type == "xla":
                 return
-            self._backend = DeviceMeshBackend(device_type, _init_backend=_init_backend)
+
+            world_size = get_world_size()
+            if self.mesh.numel() > world_size:
+                raise RuntimeError(
+                    f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
+                )
+            self._backend = _DeviceMeshBackend(device_type)
             if backend_override is None:
                 backend_override = ((None, None),) * self.mesh.ndim
 
@@ -454,19 +469,10 @@ else:
                     backend_override=backend_override_,
                 )
 
-            # TODO: need to make sure the following is covered.
-            # self._thread_id = None
-
-            # # Skip process group initialization if xla device or init backend is False
-            # # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            # if device_type != "xla":
-            #     if is_initialized() and get_backend() == "threaded":
-            #         self._thread_id = threading.get_ident()
-
         @staticmethod
         def _from_backend(
             device_type: str,
-            backend: DeviceMeshBackend,
+            backend: _DeviceMeshBackend,
             layouts: tuple[_Layout, ...],
             cur_rank: int,
             *,
@@ -537,7 +543,6 @@ else:
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
-                        # self._thread_id,
                     )
                 )
             return self._hash
@@ -554,7 +559,6 @@ else:
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
-                    # and self._thread_id == other._thread_id
                 )
 
         def __getitem__(
@@ -625,25 +629,35 @@ else:
                 layouts_sliced = [
                     self._backend.names_to_layouts[n] for n in mesh_dim_names
                 ]
-                # When users sliced dim_names outside from current mesh, we will check whether
-                # there is layout overlap. Eventually we will just directly throw error here because
-                # we will deprecate the slicing of flattened dim_name from root mesh.
-                if set(self._layouts) < set(layouts_sliced):
-                    sizes = tuple(x for l in layouts_sliced for x in l.sizes)
-                    strides = tuple(x for l in layouts_sliced for x in l.strides)
-                    base = torch.empty(sizes, dtype=torch.uint8)
-                    t = torch.as_strided(base, size=sizes, stride=strides)
-                    if torch._debug_has_internal_overlap(t):
-                        raise RuntimeError(
-                            f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
-                        )
-                res_mesh = DeviceMesh._from_backend(
-                    self.device_type,
-                    self._backend,
-                    tuple(layouts_sliced),
-                    self.get_rank(),
-                    dim_names=mesh_dim_names,
-                )
+                # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
+                # fail as it will require a real tensor to manipulate.
+                # `unset_fake_temporarily()` will allow us to materialize the tensors
+                # within `_mesh_resources`, which should not affect modling.
+                #
+                # Note that this should be orthogonal to torch.compile(). But whether
+                # we can compile device_mesh `slicing` (no graph break) is not verified
+                # yet and need a follow-up,
+                # TODO: compiler + device_mesh slicing.
+                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                    # When users sliced dim_names outside from current mesh, we will check whether
+                    # there is layout overlap. Eventually we will just directly throw error here because
+                    # we will deprecate the slicing of flattened dim_name from root mesh.
+                    if set(self._layouts) < set(layouts_sliced):
+                        sizes = tuple(x for l in layouts_sliced for x in l.sizes)
+                        strides = tuple(x for l in layouts_sliced for x in l.strides)
+                        base = torch.empty(sizes, dtype=torch.uint8)
+                        t = torch.as_strided(base, size=sizes, stride=strides)
+                        if torch._debug_has_internal_overlap(t):
+                            raise RuntimeError(
+                                f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
+                            )
+                    res_mesh = DeviceMesh._from_backend(
+                        self.device_type,
+                        self._backend,
+                        tuple(layouts_sliced),
+                        self.get_rank(),
+                        dim_names=mesh_dim_names,
+                    )
                 _mesh_resources.child_to_root_mapping[res_mesh] = (
                     _mesh_resources.get_root_mesh(self)
                 )
@@ -667,16 +681,16 @@ else:
             ):
                 raise RuntimeError("DeviceMesh backend not initialized!")
 
-            if len(self._layouts) > 1 and mesh_dim is None:
+            if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
-                    f"Found the DeviceMesh have {len(self._layouts)} dimensions",
+                    f"Found the DeviceMesh have {self.ndim} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                     "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
                     "please use `get_all_groups()` instead.",
                 )
 
             # Quick return if the current device_mesh is a 1D mesh.
-            if len(self._layouts) == 1 and mesh_dim is None:
+            if self.ndim == 1 and mesh_dim is None:
                 return not_none(
                     _resolve_process_group(
                         self._backend.layouts_to_groups[self._layouts[0]]
@@ -693,9 +707,9 @@ else:
                         f"Invalid named dim {mesh_dim!r} for DeviceMesh with names {self.mesh_dim_names}"
                     )
             elif isinstance(mesh_dim, int):
-                if mesh_dim >= len(self._layouts):
+                if mesh_dim >= self.ndim:
                     raise ValueError(
-                        f"Invalid mesh_dim {mesh_dim} for DeviceMesh with {len(self._layouts)} dimensions"
+                        f"Invalid mesh_dim {mesh_dim} for DeviceMesh with {self.ndim} dimensions"
                     )
 
             if isinstance(mesh_dim, str):
@@ -714,7 +728,7 @@ else:
             Returns:
                 A list of :class:`ProcessGroup` object.
             """
-            return [self.get_group(i) for i in range(len(self._layouts))]
+            return [self.get_group(i) for i in range(self.ndim)]
 
         @staticmethod
         def from_group(
@@ -774,7 +788,6 @@ else:
                 group = [group]
 
             # nD scenario
-            # groups = list(group)
             if len(group) == 0:
                 raise ValueError("Expects at least one ProcessGroup to be passed")
             if mesh is None:
@@ -794,7 +807,7 @@ else:
                     f"mesh {mesh.tolist()} and {len(group)} ProcessGroups"
                 )
 
-            backend = DeviceMeshBackend(device_type, _init_backend=False)
+            backend = _DeviceMeshBackend(device_type)
             layouts = init_layouts_from_mesh(mesh.size(), mesh.stride())
             for i, (l, g) in enumerate(zip(layouts, group, strict=True)):
                 name = mesh_dim_names[i] if mesh_dim_names else None
@@ -852,9 +865,9 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if len(self._layouts) > 1 and mesh_dim is None:
+            if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
-                    f"Found the DeviceMesh have {len(self._layouts)} dimensions",
+                    f"Found the DeviceMesh have {self.ndim} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                 )
             elif mesh_dim is None:
