@@ -693,9 +693,6 @@ class VariableBuilder:
                 type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__
                 or is_traceable_wrapper_subclass(value)
             ):
-                # If it's either tensor or subclass with default torch_dispatch
-                # (they might override torch_function), we can always trace into them.
-                # For non-default torch_dispatch, we have more requirements.
                 return self.wrap_tensor(value)
 
         if is_namedtuple(value):
