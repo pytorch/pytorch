@@ -40,6 +40,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.common_device_type import (
+    skipGPUIf,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 # Defines all the kernels for tests
@@ -1171,7 +1174,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return b.type(m.type())
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @unittest.skipGPUIf(not torch.cuda.is_available() and "HalfTensor" in dir(torch.get_device_module(device_type)),
+    @skipGPUIf(not torch.cuda.is_available() and "HalfTensor" in dir(torch.get_device_module(device_type)),
                         "requires cuda or support HalfTensor" )
     @make_test
     def test_tensor_type5(a, b):
