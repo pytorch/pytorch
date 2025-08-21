@@ -108,10 +108,8 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
         def test_cur_sdpa_kernel_backends():
             return _cur_sdpa_kernel_backends()
         
-        # This should not raise an "Unsupported: torch.* op returned non-Tensor" error
         result = test_cur_sdpa_kernel_backends()
         
-        # Verify correct return type and no graph breaks
         self.assertIsInstance(result, list)
         self.assertEqual(counter.frame_count, 1)
 
