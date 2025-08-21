@@ -5,6 +5,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 from torch.backends.cuda import SDPAParams
+from torch.nn.attention import _cur_sdpa_kernel_backends
 
 
 @contextlib.contextmanager
@@ -98,7 +99,21 @@ class TestSDPA(torch._dynamo.test_case.TestCase):
             expected = SDPAParams(q, k, v, m, 0.1, True, False)
             self.assert_ref_equals_params(o, expected)
             self.assertEqual(counter.frame_count, 1)
-
+    
+    def test_sdpa_c_functions_no_graph_break(self):
+        
+        counter = CompileCounter()
+        
+        @torch.compile(fullgraph=True, backend=counter)
+        def test_cur_sdpa_kernel_backends():
+            return _cur_sdpa_kernel_backends()
+        
+        # This should not raise an "Unsupported: torch.* op returned non-Tensor" error
+        result = test_cur_sdpa_kernel_backends()
+        
+        # Verify correct return type and no graph breaks
+        self.assertIsInstance(result, list)
+        self.assertEqual(counter.frame_count, 1)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

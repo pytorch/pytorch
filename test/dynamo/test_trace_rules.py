@@ -28,9 +28,6 @@ from torch._dynamo.variables import (
     UserFunctionVariable,
 )
 from torch.testing._internal.common_utils import skipIfWindows
-from torch._dynamo.testing import CompileCounter
-from torch.nn.attention import _cur_sdpa_kernel_backends
-
 
 try:
     from .utils import create_dummy_module_and_function
@@ -498,21 +495,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AttributeError):
             w.__name__
         self.assertEqual(lookup_inner(w, name=None, reasons=o), SkipFunctionVariable)
-
-    def test_sdpa_c_functions_no_graph_break(self):
-        
-        counter = CompileCounter()
-        
-        @torch.compile(fullgraph=True, backend=counter)
-        def test_cur_sdpa_kernel_backends():
-            return _cur_sdpa_kernel_backends()
-        
-        # This should not raise an "Unsupported: torch.* op returned non-Tensor" error
-        result = test_cur_sdpa_kernel_backends()
-        
-        # Verify correct return type and no graph breaks
-        self.assertIsInstance(result, list)
-        self.assertEqual(counter.frame_count, 1)
 
 
 class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
