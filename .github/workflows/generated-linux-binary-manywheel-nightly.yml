@@ -119,7 +119,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -142,7 +142,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -165,7 +165,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -185,7 +185,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -208,7 +208,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -231,7 +231,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -251,7 +251,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -274,7 +274,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -297,7 +297,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -317,7 +317,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -340,7 +340,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -363,7 +363,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -383,7 +383,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -406,7 +406,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -474,7 +474,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -494,7 +494,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -517,7 +517,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -585,7 +585,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -777,7 +777,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -800,7 +800,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -823,7 +823,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -843,7 +843,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -866,7 +866,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -889,7 +889,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -909,7 +909,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -932,7 +932,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -955,7 +955,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -975,7 +975,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -998,7 +998,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -1021,7 +1021,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -1041,7 +1041,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -1064,7 +1064,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -1132,7 +1132,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -1152,7 +1152,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -1175,7 +1175,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -1243,7 +1243,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -1435,7 +1435,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -1458,7 +1458,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -1481,7 +1481,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -1501,7 +1501,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -1524,7 +1524,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -1547,7 +1547,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -1567,7 +1567,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -1590,7 +1590,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -1613,7 +1613,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -1633,7 +1633,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -1656,7 +1656,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -1679,7 +1679,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -1699,7 +1699,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -1722,7 +1722,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -1790,7 +1790,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -1810,7 +1810,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -1833,7 +1833,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -1901,7 +1901,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -2093,7 +2093,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2116,7 +2116,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2139,7 +2139,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2159,7 +2159,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2182,7 +2182,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2205,7 +2205,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2225,7 +2225,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2248,7 +2248,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2271,7 +2271,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2291,7 +2291,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -2314,7 +2314,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -2337,7 +2337,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -2357,7 +2357,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -2380,7 +2380,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -2448,7 +2448,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -2468,7 +2468,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -2491,7 +2491,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -2559,7 +2559,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -2751,7 +2751,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2774,7 +2774,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2797,7 +2797,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -2817,7 +2817,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2840,7 +2840,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2863,7 +2863,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -2883,7 +2883,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2906,7 +2906,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2929,7 +2929,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -2949,7 +2949,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -2972,7 +2972,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -2995,7 +2995,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -3015,7 +3015,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -3038,7 +3038,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -3106,7 +3106,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -3126,7 +3126,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -3149,7 +3149,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -3217,7 +3217,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -3409,7 +3409,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -3432,7 +3432,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -3455,7 +3455,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -3475,7 +3475,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -3498,7 +3498,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -3521,7 +3521,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -3541,7 +3541,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -3564,7 +3564,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -3587,7 +3587,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -3607,7 +3607,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -3630,7 +3630,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -3653,7 +3653,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -3673,7 +3673,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -3696,7 +3696,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -3764,7 +3764,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -3784,7 +3784,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -3807,7 +3807,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -3875,7 +3875,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -4067,7 +4067,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4090,7 +4090,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4113,7 +4113,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4133,7 +4133,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4156,7 +4156,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4179,7 +4179,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4199,7 +4199,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4222,7 +4222,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4245,7 +4245,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4265,7 +4265,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4288,7 +4288,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4311,7 +4311,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4331,7 +4331,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -4354,7 +4354,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -4422,7 +4422,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -4442,7 +4442,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -4465,7 +4465,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -4533,7 +4533,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -4725,7 +4725,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4748,7 +4748,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4771,7 +4771,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.6
@@ -4791,7 +4791,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4814,7 +4814,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4837,7 +4837,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -4857,7 +4857,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4880,7 +4880,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4903,7 +4903,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.9
@@ -4923,7 +4923,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4946,7 +4946,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4969,7 +4969,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu130
-      GPU_ARCH_VERSION: 13.0
+      GPU_ARCH_VERSION: "13.0"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda13.0
@@ -4989,7 +4989,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -5012,7 +5012,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -5080,7 +5080,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.3
-      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_VERSION: "6.3"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.3
@@ -5100,7 +5100,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
@@ -5123,7 +5123,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: manylinux2_28-builder
@@ -5191,7 +5191,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: rocm6.4
-      GPU_ARCH_VERSION: 6.4
+      GPU_ARCH_VERSION: "6.4"
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
