@@ -327,37 +327,17 @@ class TestDynamoTimed(TestCase):
     def test_exception_stack_trace(self):
         from torch._dynamo.exc import Unsupported
 
-        self.warmup()
-
-        def forward(ctx, foo):
-            return torch.add(foo, foo)
-
-        def backward(ctx, grad_output):
+        def backward(grad_output):
             print("graph break!")  # This should trigger a Dynamo error
             return grad_output
 
-        CustomFuncBwdPrintGraphBreak = type(
-            "CustomFuncBwdPrintGraphBreak",
-            (torch.autograd.Function,),
-            {
-                "forward": staticmethod(forward),
-                "backward": staticmethod(backward),
-            },
-        )
-
-        def model(x):
-            return CustomFuncBwdPrintGraphBreak.apply(x)
-
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        compilation_events = []
+        compiled_backward = torch.compile(backward, backend="eager", fullgraph=True)
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             with self.assertRaisesRegex(
                 Unsupported,
                 "Dynamo does not know how to trace builtin operator `print`",
             ):
-                opt_model(x)
-                compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+                compiled_backward(torch.ones(3))
 
         compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
