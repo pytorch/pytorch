@@ -689,12 +689,13 @@ class VariableBuilder:
             )
             and type(value) not in config.nontraceable_tensor_subclasses
         ):
-            if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
-                # This case it's either tensor or subclass with default
+            if (
+                type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__ or
+                is_traceable_wrapper_subclass(value)
+            ):
+                # If it's either tensor or subclass with default
                 # torch_dispatch (they might override torch_function or not),
                 # and we can always trace into them.
-                return self.wrap_tensor(value)
-            elif is_traceable_wrapper_subclass(value):
                 # For non-default torch_dispatch, we have more requirements.
                 return self.wrap_tensor(value)
 
