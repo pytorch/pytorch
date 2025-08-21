@@ -158,20 +158,6 @@ def _embedding_dense_backward(
     )
 
 
-# This decomposition is commented out to disable the default
-# python assert decomposition inside Inductor.
-# @register_decomposition([aten._assert_async.msg])
-# def assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-#     return
-
-
-# This decomposition is commented out to disable the default
-# python assert decomposition inside Inductor.
-# @register_decomposition([aten._functional_assert_async.msg])
-# def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-#     return
-
-
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(
     symbol: torch.SymInt,

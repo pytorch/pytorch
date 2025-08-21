@@ -1281,7 +1281,6 @@ class SchedulerNode(BaseSchedulerNode):
             self.node is not None
             and hasattr(self.node, "data")
             and hasattr(self.node.data, "has_side_effects")
-            and callable(self.node.data.has_side_effects)
         ):
             return self.node.data.has_side_effects()
         return super().has_side_effects()
@@ -3884,7 +3883,6 @@ class Scheduler:
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
         """
-
         if node1 is node2:
             return False
 
@@ -3988,7 +3986,6 @@ class Scheduler:
         ):
             why("fusion for buffer explicit disabled")
             return False
-
         device = node1.get_device()
         device2 = node2.get_device()
         if device != device2:

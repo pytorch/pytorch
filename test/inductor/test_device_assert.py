@@ -5,6 +5,7 @@ import sys
 
 import torch
 import torch._inductor.config
+from torch._inductor import metrics
 from torch._inductor.compiler_bisector import BisectionResult, CompilerBisector
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -111,6 +112,23 @@ class TestTorchDeviceAssertTrigger(TestCase):
         self._run_assert_inline_expression_should_not_throw(device)
 
     if HAS_CUDA_AND_TRITON:
+
+        @torch._inductor.config.patch(force_disable_caches=True)
+        def test_assert_fusion(self):
+            torch._logging.set_logs(inductor_metrics=True)
+
+            def func():
+                a = torch.tensor([1.0, 2.0], device="cuda")
+                result = torch.all(a > 0)
+                assert result, "should throw"
+
+            torch._dynamo.reset()
+            f_c = torch.compile(func, backend="inductor")
+            metrics.reset()
+            self.assertEqual(metrics.generated_kernel_count, 0)
+            f_c()
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            torch._logging.set_logs()
 
         @torch._inductor.config.patch(force_disable_caches=True)
         def test_run_assert_triton(self):
