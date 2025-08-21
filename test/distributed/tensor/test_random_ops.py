@@ -33,6 +33,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+def get_generator_seed_for_device_type(device_type: str) -> int:
+    device_module = torch.get_device_module(device_type)
+    return device_module.get_rng_state()[:8].view(torch.int64).item()
+
+
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
@@ -306,7 +311,12 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # seed synchronization only happens after `manual_seed` or the first DTensor
         # random op call
         dt.uniform_(0, 1)
-        self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
+
+        # We do not maintain the copy of the seed in dtensor, but we do mutate the global rng state
+        # since we now always pull it fresh from the local device generator
+        self.assertEqual(
+            seed_from_rank_0, get_generator_seed_for_device_type(self.device_type)
+        )
 
     @with_comms
     @skip_unless_torch_gpu
@@ -325,11 +335,13 @@ class DistTensorRandomOpTest(DTensorTestBase):
             manual_seed(self.rank, device_mesh)
             # RNG tracker should already be initialized
             self.assertTrue(random._rng_tracker is not None)
-            self.assertEqual(self.rank, random._rng_tracker.get_seed("parallel-rng"))
+            self.assertEqual(
+                self.rank, get_generator_seed_for_device_type(self.device_type)
+            )
 
             # Test 2: set same seed on different ranks
             manual_seed(1234, device_mesh)
-            self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
+            self.assertEqual(1234, get_generator_seed_for_device_type(self.device_type))
 
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
@@ -362,7 +374,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         # set the seed for each pipeline stage to 123 + pp_rank
         manual_seed(123 + pp_rank, spmd_mesh)
-        self.assertEqual(123 + pp_rank, random._rng_tracker.get_seed("parallel-rng"))
+        # dtensor no longer stores a copy of the seed, but it mutates the device's generator so we can check that
+        self.assertEqual(
+            123 + pp_rank, get_generator_seed_for_device_type(self.device_type)
+        )
 
         # mimic initializing a model weight sharded on the SPMD mesh
         spmd_dtensor = torch.distributed.tensor.ones(
@@ -447,14 +462,15 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self_slice = slice(4 * self.rank, 4 * self.rank + 4)
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    # other rank should have an identical local tensor
+                    # other rank should have a different local tensor for shard placement
                     other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                     self.assertNotEqual(
                         local_tensor[self_slice, :],
                         local_tensor[other_slice, :],
                     )
 
-            torch.manual_seed(self.rank)
+            # we should set manual seed to the same value on all SPMD ranks
+            torch.manual_seed(0)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
             local_tensor = funcol.all_gather_tensor(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
@@ -464,7 +480,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self_slice = slice(4 * self.rank, 4 * self.rank + 4)
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    # other rank should have an identical local tensor
+                    # other rank should have an identical local tensor for replicate placement
                     other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                     self.assertEqual(
                         local_tensor[self_slice, :],

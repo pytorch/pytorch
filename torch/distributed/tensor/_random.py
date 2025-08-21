@@ -77,21 +77,30 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         )
         return
 
+    # TODO: deprecate this API, but also need to ensure we disable broadcast for PP case, and that's currently
+    # bundled together with this API.  See torchtitan/distributed/utils.py:set_determinism
+    # warnings.warn(
+    #     "DTensor manual_seed() is deprecated, since DTensor no longer maintains a separate copy of generator state. "
+    #     "Use `torch.manual_seed` instead"
+    # )
+    # Note: we still need to ensure setting `run_state_sync=False` to support the the pp case
+
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     global _rng_tracker
     if not _rng_tracker:
         _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
-    # the current rank is in mesh
-    if device_mesh.get_coordinate() is not None:
-        _rng_tracker._manual_seed(seed)
-    else:
+    if device_mesh.get_coordinate() is None:
         raise RuntimeError(
             "manual_seed requires the current rank to be a part of the device mesh "
             "otherwise DTensor RNG state on the rank will not be initialized and "
             "the behavior of DTensor random ops is undefined."
         )
+
+    # DTensor no longer maintains a copy of rng state. manual seed on dtensor is the same thing
+    # as manual seed on torch.
+    torch.manual_seed(seed)
 
 
 class _RNGStateTracker:
@@ -204,9 +213,12 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         return rng_state
 
     def _set_device_state(self, state: torch.Tensor):
+        # It seems that the underlying generator wants a cpu tensor but the dtensor code expects `_get_device_state`
+        # to convert to a 'device' tensor, probably because we may use it with our backend comms for sync/debug
+        # for now, we just convert back to cpu here to make sure it always works.
         if self._device.type == "hpu":
             self._device_handle.set_rng_ctx("philox")
-        self._device_handle.set_rng_state(state)
+        self._device_handle.set_rng_state(state.to("cpu"))
         if self._device.type == "hpu":
             self._device_handle.unset_rng_ctx("philox")
 
