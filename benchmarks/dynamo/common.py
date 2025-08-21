@@ -1492,10 +1492,12 @@ class JitTracedCache:
         if key not in cls.cache:
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
             if example_args:
-                jit_traced_module = torch.jit.trace(model, example_inputs=example_args)
+                jit_traced_module = torch.jit.trace(
+                    model, example_inputs=example_args, strict=False
+                )
             else:
                 jit_traced_module = torch.jit.trace(
-                    model, example_kwarg_inputs=example_kwargs
+                    model, example_kwarg_inputs=example_kwargs, strict=False
                 )
 
             cls.cache[key] = jit_traced_module
