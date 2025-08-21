@@ -167,6 +167,30 @@ def my_zero_(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
 
 
+def my_amax(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax.default(t)
+
+
+def my_amax_vec(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
+
+
 def fill_infinity(t) -> Tensor:
     """
     Fills the tensor with inf.
@@ -259,3 +283,15 @@ def test_get_current_device_index() -> int:
     Returns: Current device index as an integer
     """
     return torch.ops.libtorch_agnostic.test_get_current_device_index.default()
+
+
+def my_new_empty_dtype_variant(t) -> Tensor:
+    """
+    Returns a new empty tensor with shape [2, 5] and dtype bfloat16
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New empty tensor with shape [2, 5] and dtype bfloat16
+    """
+    return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
