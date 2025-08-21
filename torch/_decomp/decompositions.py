@@ -3311,7 +3311,7 @@ def _rnn_helper(
             params, hidden, i, bidirectional
         )
         dropout = dropout if (train and num_layers < i - 1) else 0.0
-        fwd_inp, fwd_hidden = layer_fn(input, cur_hidden, cur_params, has_biases)
+        fwd_inp, fwd_hidden = layer_fn(input.clone(), cur_hidden, cur_params, has_biases)
         final_hiddens.append(fwd_hidden)
 
         if bidirectional:
@@ -3484,8 +3484,8 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     """
     from torch._higher_order_ops import while_loop
 
-    ih_weight = params[0]
-    hh_weight = params[1]
+    ih_weight = params[0].clone()  # Clone to avoid aliasing
+    hh_weight = params[1].clone()  # Clone to avoid aliasing
     ih_bias = params[2] if has_biases else None
     hh_bias = params[3] if has_biases else None
     hr_weight = (
@@ -3517,8 +3517,8 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
         out[i] = hx
         return idx + 1, out, hx, cx  # this clone to avoid aliasing is annoying
 
-    cnt = torch.full((), 0, dtype=torch.int64)
-    _, out, _, _ = while_loop(cond_fn, body_fn, [cnt, step_output, hx, cx])
+    cnt = torch.full((), 0, dtype=torch.int64, device=step_output.device)
+    _, out, hx, cx = while_loop(cond_fn, body_fn, [cnt, step_output, hx, cx])
     if reverse:
         out = out.flip(0)
     return out, (hx.squeeze(1), cx.squeeze(1))
@@ -3659,7 +3659,7 @@ def select_one_layer_lstm_function(input, hx, params):
 
     # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
     # will expand over the seq_len dim
-    if use_mkldnn(input, hx, params):
+    if False:
         return mkldnn_one_layer_lstm
     else:
         return one_layer_while_loop_lstm
