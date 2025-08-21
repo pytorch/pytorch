@@ -386,6 +386,7 @@ class PyCodegen:
         output.append(self.create_load(self.graph_output_var))
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
+        self.tx.output.program_output_to_dynamo_graph_output_matching.append(index)
 
     def add_cache(self, value: Union[VariableTracker, Source]) -> None:
         var = self.new_var()

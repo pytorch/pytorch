@@ -588,6 +588,15 @@ class OutputGraph(OutputGraphGuardsState):
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
 
+        # This contains the sequence in which the dynamo fx graph outputs are
+        # accessed to construct the program outputs. This is useful for strict
+        # export which does not have access to bytecode but can rely on this
+        # information to build the dynamo fx graph to program output mapping.
+        # For strict export, this post-graph bytecode is equivalnet of
+        # tree_unflatten, so we don't have to worry about the non list
+        # datastructures in the output.
+        self.program_output_to_dynamo_graph_output_matching = []
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -1450,6 +1459,7 @@ class OutputGraph(OutputGraphGuardsState):
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
                     tempvars[val] = None
+            self.program_output_to_dynamo_graph_output_matching.clear()
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
