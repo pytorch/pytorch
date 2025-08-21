@@ -840,7 +840,13 @@ class DynamoOutput:
     bytecode: types.CodeType
     last_attempt_start_time: Optional[float]
 
-    def build_guards(self, code, hooks=None, save=False, cache_entry=None):
+    def build_guards(
+        self,
+        code: types.CodeType,
+        hooks: Optional[Hooks] = None,
+        save: bool = False,
+        cache_entry: Optional[CacheEntry] = None,
+    ) -> CheckFunctionManager:
         assert self.tracer_output.output_graph is not None
         return CheckFunctionManager(
             code,
@@ -879,9 +885,13 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
 
     backend_input: Optional[BackendInput] = None
 
-    def fullgraph_compiler(gm, example_inputs):
+    def fullgraph_compiler(
+        gm: torch.fx.GraphModule, example_inputs: tuple[Any, ...]
+    ) -> torch.fx.GraphModule:
         nonlocal backend_input
-        backend_input = BackendInput(gm, example_inputs, TracingContext.get().fake_mode)
+        fake_mode = TracingContext.get().fake_mode
+        assert fake_mode is not None
+        backend_input = BackendInput(gm, example_inputs, fake_mode)
         return gm
 
     dynamo_output = compile_frame(
@@ -894,6 +904,7 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         one_graph=True,
         restart_reasons=set(),
     )
+    assert backend_input is not None
     return CaptureOutput(dynamo_output, backend_input)
 
 
