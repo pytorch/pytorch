@@ -69,18 +69,16 @@ def _zeropower_via_newtonschulz(
     return ortho_grad
 
 
-def _adjust_lr(lr: float, adjust_lr_fn: str, param_shape: torch.Size) -> float:
-    """Default learning rate adjustment used by Muon. Method reported in the tech report https://arxiv.org/pdf/2502.16982.
-
-    From Moonshot's experiments, with this adjustment Muon can directly reuse the learning rate and
-    weight decay tuned for AdamW.
-    """
+def _adjust_lr(
+    lr: float, adjust_lr_fn: Optional[str], param_shape: torch.Size
+) -> float:
+    """Default learning rate adjustment used by Muon."""
     A, B = param_shape[:2]
 
-    if adjust_lr_fn == "match_rms_adamw":
-        adjusted_ratio = 0.2 * math.sqrt(max(A, B))
-    elif adjust_lr_fn == "default":
+    if adjust_lr_fn is None or adjust_lr_fn == "original":
         adjusted_ratio = math.sqrt(max(1, A / B))
+    elif adjust_lr_fn == "match_rms_adamw":
+        adjusted_ratio = 0.2 * math.sqrt(max(A, B))
     else:
         raise ValueError(
             f"Adjust learning rate function {adjust_lr_fn} is not supported"
@@ -99,7 +97,7 @@ class Muon(Optimizer):
         ns_coefficients: tuple[float, float, float] = (DEFAULT_A, DEFAULT_B, DEFAULT_C),
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
-        adjust_lr_fn: str = "default",
+        adjust_lr_fn: Optional[str] = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -247,8 +245,9 @@ Muon.__doc__ = (
     results show that with this adjustment Muon can directly reuse the learning rate
     and weight decay tuned for AdamW.
 
-    We provide two options for the learning rate adjustment: "default" and "match_rms_adamw", allowing users to
-    choose between two implementations.
+    We provide two options for the learning rate adjustment: "original", which follows Keller's
+    implementation, and "match_rms_adamw", which refers to Moonshot's implementation. This gives users the
+    flexibility to choose between the two. If `adjust_lr_fn` is not specified, the default is "original".
 
     For further details regarding the algorithm we refer to `Muon: An optimizer for hidden layers in neural networks`_
     and `Muon is Scalable for LLM Training`_.
@@ -266,7 +265,8 @@ Muon.__doc__ = (
             Newton–Schulz orthogonalization polynomial (default: ({DEFAULT_A}, {DEFAULT_B}, {DEFAULT_C}))
         eps (float, optional): term added to the denominator for numerical stability. (default: {EPS})
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
-        adjust_lr_fn (str, optional): function to adjust learning rate. One of "default" and "match_rms_adamw" (default: "default")
+        adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
+            If not specified, we will default to use "original". (default: None)
 
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
@@ -289,7 +289,7 @@ def _single_tensor_muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: str,
+    adjust_lr_fn: Optional[str],
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -330,7 +330,7 @@ def muon(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    adjust_lr_fn: str,
+    adjust_lr_fn: Optional[str],
     has_complex: bool,
 ):
     r"""Functional API that performs Muon algorithm computation.
