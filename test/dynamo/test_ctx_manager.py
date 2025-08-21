@@ -741,10 +741,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
                 torch._dynamo.graph_break()
-                d_float32 = torch.rand((8, 8), device=device_type)
+                d_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                     e_float16 = torch.mm(a_float32, b_float32)
@@ -791,8 +791,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 return torch.mm(x, y)
 
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                     torch._dynamo.graph_break()
@@ -859,12 +859,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                     )
                 return f_float16, g_float32
 
-        module = MyModule(bias=torch.rand((8, 8), device=device_type, dtype=torch.bfloat16))
+        module = MyModule(bias=torch.rand((8, 8), device="cpu", dtype=torch.bfloat16))
 
         with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
             # Autocast doesn't work on addition, so we need the bias to be `bfloat16`
-            res = torch.rand((8, 8), device=device_type, dtype=torch.float32) + torch.rand(
-                (8, 8), device=device_type, dtype=torch.bfloat16
+            res = torch.rand((8, 8), device="cpu", dtype=torch.float32) + torch.rand(
+                (8, 8), device="cpu", dtype=torch.bfloat16
             )
             self.assertEqual(res.dtype, torch.float32)
 
