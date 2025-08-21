@@ -13,6 +13,7 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
   TORCH_CHECK(false, "zendnn_linear: ATen is not compiled with ZenDNN support");
 }
@@ -26,6 +27,7 @@ inline void zendnn_linear_impl(
     const at::Tensor& weight,
     const at::Tensor& bias,
     at::Tensor& result,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
@@ -41,7 +43,11 @@ inline void zendnn_linear_impl(
   tensor_t input_tensor, weight_tensor, output_tensor, bias_tensor;
   create_zendnn_tensor(input_2d, input_tensor, "matmul_input", datatype);
   create_zendnn_tensor(
-      weight_transposed, weight_tensor, "weights", datatype);
+      weight_transposed,
+      weight_tensor,
+      "weights",
+      datatype,
+      is_weight_prepacked);
   create_zendnn_tensor(result_2d, output_tensor, "matmul_output", datatype);
   if (bias.defined()) {
     create_zendnn_tensor(bias, bias_tensor, "bias", datatype);
@@ -69,6 +75,7 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
   c10::MaybeOwned<at::Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias);
@@ -76,7 +83,8 @@ at::Tensor zendnn_linear(
   // Create output tensor with appropriate size and strides
   at::Tensor result = create_linear_output_tensor(input, weight);
   // Perform ZENDNN linear operation
-  zendnn_linear_impl(input, weight, bias_t, result, zendnn_op_name);
+  zendnn_linear_impl(
+      input, weight, bias_t, result, is_weight_prepacked, zendnn_op_name);
   return result;
 }
 } // namespace at::native
