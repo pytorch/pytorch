@@ -15932,9 +15932,9 @@
 # autograd lab fn.
 - func: lab_attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
   variants: function
-    # dispatch:
-    #   CompositeExplicitAutograd: lab_attn
+  dispatch:
+    CompositeExplicitAutograd: lab_attn
 
-- func: lab_attn_bwd(Tensor Q, Tensor K, Tensor V, Tensor a, Tensor grad_o, Tensor ignore) -> (Tensor, Tensor, Tensor)
+- func: lab_attn_bwd(Tensor Q, Tensor K, Tensor V, Tensor a, Tensor grad_o) -> (Tensor, Tensor, Tensor)
   variants: function
 
