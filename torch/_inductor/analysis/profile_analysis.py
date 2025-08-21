@@ -723,6 +723,9 @@ class ParseException(RuntimeError):
 
 
 def main() -> None:
+    """
+    main function
+    """
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -760,7 +763,9 @@ def main() -> None:
         "--combine",
         nargs="+",
         metavar=("input_files", "output_file"),
-        help="Combine multiple profiles into a single profile by merging trace events. Specify as <input_file1> <input_file2> [input_file3 ...] <output_file>. The last argument is the output file, all preceding arguments are input files to combine.",
+        help="Combine multiple profiles into a single profile by merging trace events. Specify as <input_file1> \
+<input_file2> [input_file3 ...] <output_file>. The last argument is the output file, all preceding arguments are \
+input files to combine.",
     )
     args = parser.parse_args()
 
