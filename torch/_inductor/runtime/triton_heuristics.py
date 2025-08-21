@@ -2560,7 +2560,6 @@ def _reduction_configs(
             register_intensive=register_intensive,
         )
 
-
     contiguous_config = make_config(
         1,
         min(rnumel, MAX_R0_BLOCK),
