@@ -7,7 +7,7 @@ template kernels, particularly for flex attention modifications.
 """
 
 import math
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
@@ -33,6 +33,23 @@ class CuteDSLOpOverrides(OpOverrides):
     and math functions (cute.math.exp, cute.math.sqrt, etc.)
     """
 
+    TORCH_TO_CUTE_DTYPE = {
+        torch.float16: "cutlass.Float16",
+        torch.bfloat16: "cutlass.BFloat16",
+        torch.float32: "cutlass.Float32",
+        torch.float64: "cutlass.Float64",
+        torch.int8: "cutlass.Int8",
+        torch.int16: "cutlass.Int16",
+        torch.int32: "cutlass.Int32",
+        torch.int64: "cutlass.Int64",
+        torch.bool: "cutlass.Boolean",
+        torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
+        torch.float8_e5m2: "cutlass.Float8E5M2",
+    }
+
+    # Math constants
+    LOG2_E = 1.4426950408889634  # 1/ln(2) for converting natural exp to base-2 exp
+
     @staticmethod
     def _ensure_tensor_ssa(arg: CuteDSLArg, template_tensor: CuteDSLArg) -> str:
         """
@@ -55,6 +72,16 @@ class CuteDSLOpOverrides(OpOverrides):
             return f"cute.full_like({template_tensor}, {arg})"
 
         return str(arg)
+
+    @staticmethod
+    def _extract_dtype_and_bounds(
+        *args: CuteDSLArg,
+    ) -> tuple[Optional[torch.dtype], ValueRanges]:
+        """Extract dtype and bounds from CSEVariable arguments."""
+        for arg in args:
+            if isinstance(arg, CSEVariable):
+                return arg.dtype, arg.bounds
+        return None, ValueRanges.unknown()
 
     @staticmethod
     def _apply_binary_op(a: CuteDSLArg, b: CuteDSLArg, op_format: str) -> CuteDSLArg:
@@ -85,16 +112,7 @@ class CuteDSLOpOverrides(OpOverrides):
             b_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(b, tensor_arg)
             result_expr = op_format.format(a=a_ssa, b=b_ssa)
 
-            # Extract dtype and bounds from CSEVariable inputs
-            dtype = None
-            bounds = ValueRanges.unknown()
-
-            if isinstance(a, CSEVariable):
-                dtype = a.dtype
-                bounds = a.bounds
-            elif isinstance(b, CSEVariable):
-                dtype = b.dtype
-                bounds = b.bounds
+            dtype, bounds = CuteDSLOpOverrides._extract_dtype_and_bounds(a, b)
 
             # Create and return CSEVariable using CSE generation for caching
             return V.kernel.cse.generate(
@@ -162,7 +180,7 @@ class CuteDSLOpOverrides(OpOverrides):
     def exp(x: CuteDSLArg) -> CuteDSLArg:
         """Exponential using CuteDSL cute.math.exp function."""
         return CuteDSLOpOverrides._apply_unary_op(
-            x, "cute.math.exp2({x} * 1.4426950408889634)"
+            x, f"cute.math.exp2({{x}} * {CuteDSLOpOverrides.LOG2_E})"
         )
 
     @staticmethod
@@ -222,22 +240,11 @@ class CuteDSLOpOverrides(OpOverrides):
         if tensor_arg is not None:
             a_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(a, tensor_arg)
             b_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(b, tensor_arg)
-            # result_expr = f"cute.where(cute.Boolean({condition}), {a_ssa}, {b_ssa})"
             result_expr = f"cute.where({condition}, {a_ssa}, {b_ssa})"
 
-            # Extract dtype and bounds from CSEVariable inputs
-            dtype = None
-            bounds = ValueRanges.unknown()
-
-            if isinstance(a, CSEVariable):
-                dtype = a.dtype
-                bounds = a.bounds
-            elif isinstance(b, CSEVariable):
-                dtype = b.dtype
-                bounds = b.bounds
-            elif isinstance(condition, CSEVariable):
-                dtype = condition.dtype
-                bounds = condition.bounds
+            dtype, bounds = CuteDSLOpOverrides._extract_dtype_and_bounds(
+                a, b, condition
+            )
 
             return V.kernel.cse.generate(
                 V.kernel.body, result_expr, bounds=bounds, dtype=dtype
@@ -252,14 +259,20 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def abs(x: CuteDSLArg) -> CuteDSLArg:
         """Absolute value using CuteDSL cute.math.abs function."""
-        x_dtype = x.dtype if isinstance(x, CSEVariable) else torch.float32
+        if isinstance(x, CSEVariable):
+            x_dtype = x.dtype
+        elif isinstance(x, OpsValue) and isinstance(x.value, CSEVariable):
+            x_dtype = x.value.dtype
+        else:
+            x_dtype = torch.float32
+
         abs_op = (
             "mlir_math.absf"
             if x_dtype in (torch.float16, torch.bfloat16, torch.float32)
             else "mlir_math.absi"
         )
         return CuteDSLOpOverrides._apply_unary_op(
-            x, f"cute.TensorSSA({abs_op}({x}), {x}.shape, {x}.dtype)"
+            x, f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)"
         )
 
     @staticmethod
@@ -280,22 +293,8 @@ class CuteDSLOpOverrides(OpOverrides):
         """
         # Always convert up from bf16 and fp16 TODO on configuring
         dtype = upcast_compute_type(dtype)
-        # Map torch dtypes to CuteDSL type strings
-        torch2cute_dtype_map = {
-            torch.float16: "cutlass.Float16",
-            torch.bfloat16: "cutlass.BFloat16",
-            torch.float32: "cutlass.Float32",
-            torch.float64: "cutlass.Float64",
-            torch.int8: "cutlass.Int8",
-            torch.int16: "cutlass.Int16",
-            torch.int32: "cutlass.Int32",
-            torch.int64: "cutlass.Int64",
-            torch.bool: "cutlass.Boolean",
-            torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
-            torch.float8_e5m2: "cutlass.Float8E5M2",
-        }
 
-        cute_type = torch2cute_dtype_map.get(dtype)
+        cute_type = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dtype)
         if cute_type is None:
             raise NotImplementedError(
                 f"CuteDSL dtype cast not implemented for torch dtype: {dtype}"
@@ -320,15 +319,18 @@ class CuteDSLOpOverrides(OpOverrides):
         """ReLU activation function."""
         return CuteDSLOpOverrides.maximum(x, "0.0")
 
-    def tanh(self, x0: CuteDSLArg) -> CuteDSLArg:
+    @staticmethod
+    def tanh(x0: CuteDSLArg) -> CuteDSLArg:
         """Hyperbolic tangent using CuteDSL cute.math.tanh function."""
         return CuteDSLOpOverrides._apply_unary_op(x0, "cute.math.tanh({x})")
 
     # Logical operations
-    def logical_and(self, x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
+    @staticmethod
+    def logical_and(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} and {b})")
 
-    def logical_or(self, x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
+    @staticmethod
+    def logical_or(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} or {b})")
 
     @staticmethod
