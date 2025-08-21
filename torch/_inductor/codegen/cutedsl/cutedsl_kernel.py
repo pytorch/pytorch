@@ -122,6 +122,7 @@ class CuteDSLTemplateKernel(Kernel):
             from cutlass.cute.runtime import from_dlpack
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
+            import operator
             """
         )
         return imports.getvalue()
