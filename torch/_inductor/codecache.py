@@ -144,6 +144,7 @@ _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
 
 
@@ -2413,6 +2414,15 @@ end
                     generated_files.append(output_so)
 
         if config.aot_inductor.package:
+            if config.trace.provenance_tracking_level != 0:
+                kernel_info = torch._inductor.debug.create_kernel_information_json()
+                kernel_info_json = os.path.join(
+                    wrapper_path_operator.parent, "kernel_information.json"
+                )
+                with open(kernel_info_json, "w") as f:
+                    f.write(json.dumps(kernel_info, indent=4))
+                generated_files.append(kernel_info_json)
+
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -3736,7 +3746,10 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    log.debug("CUDA command: %s", res)
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("CUDA command: %s", res)
+    else:
+        autotuning_log.debug("CUDA command: %s", res)
     return res
 
 

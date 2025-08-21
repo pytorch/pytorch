@@ -19,7 +19,7 @@ from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -91,7 +91,7 @@ def loss_fn(y, target, scale=1e-4):
     return torch.nn.functional.cross_entropy(y, target) * scale
 
 
-class ComposabilityTest(MultiProcContinousTest):
+class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
