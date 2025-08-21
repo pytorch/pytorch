@@ -34,13 +34,11 @@ from tempfile import TemporaryFile
 from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
-from torch.utils._triton import has_triton
 
-
-if has_triton():
+try:
     from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
-else:
+except ImportError:
 
     class Autotuner:  # type: ignore[no-redef]
         pass
@@ -367,42 +365,46 @@ isolate_fails_code_str = None
     for id in kernel_side_table.id_to_kernel:
         kernel = kernel_side_table.get_kernel(id)
 
-        if isinstance(kernel, Autotuner):
-            if isinstance(kernel.fn, Heuristics):
-                model_str += "ERROR: Repro will not work as intended, "
-                model_str += (
-                    "triton.runtime.autotuner.Heuristics is not currently supported\n"
+        try:
+            if isinstance(kernel, Autotuner):
+                if isinstance(kernel.fn, Heuristics):
+                    model_str += "ERROR: Repro will not work as intended, "
+                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+                    break
+
+                config_strs = []
+                for kernel_config in kernel.configs:
+                    config_strs.append(f"""triton.Config(
+                            {str(kernel_config.kwargs)},
+                            num_warps={kernel_config.num_warps},
+                            num_stages={kernel_config.num_stages},
+                        )""")
+
+                config_str = ",".join(config_strs)
+                model_str += textwrap.dedent(f"""
+                @triton.autotune(
+                    configs=[
+                        {config_str}
+                    ],
+                    key=[]
                 )
-                break
+                """).strip()
 
-            config_strs = []
-            for kernel_config in kernel.configs:
-                config_strs.append(f"""triton.Config(
-                        {str(kernel_config.kwargs)},
-                        num_warps={kernel_config.num_warps},
-                        num_stages={kernel_config.num_stages},
-                    )""")
-
-            config_str = ",".join(config_strs)
-            model_str += textwrap.dedent(f"""
-            @triton.autotune(
-                configs=[
-                    {config_str}
-                ],
-                key=[]
+            model_str += "\n@triton.jit\n"
+            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+            fn_name = (
+                kernel._fn_name
+                if isinstance(kernel, JITFunction)
+                else kernel.fn._fn_name
             )
-            """).strip()
+            fn_name = fn_name.split(".")[-1]
 
-        model_str += "\n@triton.jit\n"
-        src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-        fn_name = (
-            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
-        )
-        fn_name = fn_name.split(".")[-1]
-
-        model_str += src_code
-        model_str += "\n"
-        model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+            model_str += src_code
+            model_str += "\n"
+            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+        except AttributeError as e:
+            model_str += "ERROR: Repro will not work as intended, "
+            model_str += f"User defined triton kernel exception: {e}\n"
 
     if len(kernel_side_table.constant_args) > 0:
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"

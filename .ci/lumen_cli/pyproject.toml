@@ -1,0 +1,22 @@
+[project]
+name = "lumen-ci"
+version = "0.1.0"
+dependencies = [
+    "pyyaml==6.0.2",
+    "GitPython==3.1.45",
+    "docker==7.1.0",
+    "pytest==7.3.2",
+]
+
+[tool.setuptools]
+packages = ["cli"]
+
+[tool.setuptools.package-dir]
+cli = "cli"
+
+[tool.ruff.lint]
+# Enable preview mode for linting
+preview = true
+
+# Now you can select your preview rules, like RUF048
+extend-select = ["RUF048"]

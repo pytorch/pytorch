@@ -47,9 +47,7 @@ __all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
 
 class HuggingFaceStorageWriter(FileSystemWriter):
     """
-    A writer that writes to a huggingface repository in the huggingface format.
-    Uses Fsspec back-end to communicate with back-end storage.
-    Fsspec registration of the storage solution is required.
+    A writer that writes to storage in the huggingface safetensors format.
     """
 
     def __init__(
@@ -146,11 +144,17 @@ class HuggingFaceStorageWriter(FileSystemWriter):
             logger.info("Not consolidating sharded checkpoint in finish step.")
             return
         if self.save_distributed:
+            fqn_to_index_mapping: dict[str, int] = (
+                self.fqn_to_index_mapping
+                if self.fqn_to_index_mapping is not None
+                else dict.fromkeys(metadata.state_dict_metadata.keys(), 1)
+            )
+
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
                 num_threads=self.thread_count_consolidation,
-                fqn_to_index_mapping=self.fqn_to_index_mapping,
+                fqn_to_index_mapping=fqn_to_index_mapping,
             )
 
         # writing a model.index.safetensors.json file with fqn to file mapping
@@ -196,9 +200,7 @@ class HuggingFaceStorageWriter(FileSystemWriter):
 
 class HuggingFaceStorageReader(FileSystemReader):
     """
-    A reader that reads from a huggingface repository in the huggingface format.
-    Uses in Fsspec back-end to communicate with storage.
-    Fsspec registration of the storage solution is required.
+    A reader that reads a checkpoint in the huggingface safetensors format.
     """
 
     def __init__(self, path: str) -> None:

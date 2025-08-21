@@ -24,6 +24,7 @@ __all__ = [
     "compress",
     "cycle",
     "dropwhile",
+    "filterfalse",
     "islice",
     "tee",
     "zip_longest",
@@ -121,6 +122,15 @@ def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[
             break
 
     yield from iterator
+
+
+@substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]
+def filterfalse(function: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    it = iter(iterable)
+    if function is None:
+        return filter(operator.not_, it)
+    else:
+        return filter(lambda x: not function(x), it)
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
