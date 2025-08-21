@@ -9,6 +9,8 @@ template kernels, particularly for flex attention modifications.
 import math
 from typing import Optional, Union
 
+import sympy
+
 import torch
 from torch._inductor.codegen.common import CSEVariable, OpOverrides
 from torch._inductor.virtualized import OpsValue, V
@@ -76,7 +78,7 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def _extract_dtype_and_bounds(
         *args: CuteDSLArg,
-    ) -> tuple[Optional[torch.dtype], ValueRanges]:
+    ) -> tuple[Optional[torch.dtype], ValueRanges[sympy.Expr]]:
         """Extract dtype and bounds from CSEVariable arguments."""
         for arg in args:
             if isinstance(arg, CSEVariable):
