@@ -465,22 +465,38 @@ else:
             device_type: str,
             backend: DeviceMeshBackend,
             layouts: tuple[_Layout, ...],
+            cur_rank: int,
             *,
-            dim_names: Optional[tuple[str, ...]] = None,
+            dim_names: Optional[Union[str, tuple[str, ...]]] = None,
         ) -> "DeviceMesh":
             # Use the constructor to create a dummy no-op object first.
+            size_l = []
+            stride_l = []
+            mesh_size = []
+            for layout in layouts:
+                size_l.extend(layout.sizes)
+                mesh_size.append(layout.numel())
+                stride_l.extend(layout.strides)
+            layout = _Layout(tuple(zip(size_l, stride_l)))
+            pg_ranks_by_dim = layout.layout_to_global_ranks(not_none(get_world_size()))
+            tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(-1, *mesh_size)
+            nd_mesh = None
+            for ndm in tensor:
+                if cur_rank in ndm:
+                    nd_mesh = ndm
+            assert nd_mesh is not None
             device_mesh = DeviceMesh(
                 device_type,
-                torch.tensor(
-                    [layout.numel() for layout in layouts],
-                    dtype=torch.int,
-                    device="cpu",
-                ),
+                nd_mesh,
                 _init_backend=False,
             )
             device_mesh._backend = backend
             device_mesh._layouts = layouts
-            device_mesh.mesh_dim_names = dim_names
+            if dim_names:
+                dim_names = (
+                    (dim_names,) if isinstance(dim_names, str) else tuple(dim_names)
+                )
+                device_mesh.mesh_dim_names = dim_names
             return device_mesh
 
         def __enter__(self) -> "DeviceMesh":
@@ -512,7 +528,7 @@ else:
                 self._hash = hash(
                     (
                         id(self._backend),
-                        self._layouts,
+                        # self._layouts,
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
@@ -592,6 +608,11 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
+                if not set(mesh_dim_names) <= self._backend.names_to_layouts.keys():
+                    raise KeyError(
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified."
+                    )
+
                 layouts_sliced = [
                     self._backend.names_to_layouts[n] for n in mesh_dim_names
                 ]
@@ -611,6 +632,7 @@ else:
                     self.device_type,
                     self._backend,
                     tuple(layouts_sliced),
+                    self.get_rank(),
                     dim_names=mesh_dim_names,
                 )
                 _mesh_resources.child_to_root_mapping[res_mesh] = (
@@ -765,7 +787,7 @@ else:
                 backend._maybe_create_backend(l, i, name, group=g)
 
             return DeviceMesh._from_backend(
-                device_type, backend, layouts, dim_names=mesh_dim_names
+                device_type, backend, layouts, get_rank(), dim_names=mesh_dim_names
             )
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
@@ -899,6 +921,7 @@ else:
                 self.device_type,
                 self._backend,
                 (flattened_layout,),
+                self.get_rank(),
                 dim_names=(mesh_dim_name,) if mesh_dim_name else None,
             )
 

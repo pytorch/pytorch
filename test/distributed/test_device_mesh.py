@@ -818,11 +818,14 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
         self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
 
-        with self.assertRaisesRegex(
-            KeyError,
-            "Invalid mesh_dim_names",
-        ):
-            mesh_3d["cp", "dp"]
+        # Support transpose slicing.
+        cp_dp_mesh = mesh_3d["cp", "dp"]
+        expected_mesh_tensor = (
+            torch.tensor([[0, 4], [1, 5]], dtype=torch.int)
+            if self.rank in (0, 1, 4, 5)
+            else torch.tensor([[2, 6], [3, 7]], dtype=torch.int)
+        )
+        self.assertEqual(cp_dp_mesh.mesh, expected_mesh_tensor)
 
     @with_comms
     def test_flatten_mesh_3d(self):
@@ -835,6 +838,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Test flatten contiguous dims
         dp_cp_mesh = mesh_3d["dp", "cp"]
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
+        print(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
