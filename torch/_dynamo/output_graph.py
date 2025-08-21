@@ -2966,7 +2966,7 @@ class SubgraphTracer(fx.Tracer):
 
     # See NOTE: [Auto lift basic free symbols when create_graph_input] for overall design
     # You MUST call this API every time when creating a proxy in wrap_fx_proxy for a call
-    # that produced unbacked symints or tensors with unbacked symint shapes.
+    # that produced symints or tensors with unbacked symint shapes.
     # This function is used to track the unbacked symints with its proxies created during
     # dynamo tracing so that subgraph knows how to bind a symbol input with parent's proxy.
     # LazyProxy are created for tensor shapes that're unbacked so that we don't create proxies
@@ -2996,7 +2996,6 @@ class SubgraphTracer(fx.Tracer):
             return (
                 is_symbolic(s)
                 and isinstance(s.node.expr, sympy.Symbol)
-                and s.node.shape_env.is_unbacked_symint(s.node.expr)
                 and s.node.expr not in self.bound_symbols
             )
 
