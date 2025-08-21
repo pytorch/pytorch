@@ -8,7 +8,7 @@ from torch._dynamo.callback import callback_handler, CallbackArgs, CallbackTrigg
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._guards import CompileId
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
-from torch.testing._internal.triton_utils import requires_gpu, HAS_CUDA_AND_TRITON, HAS_XPU_AND_TRITON
+from torch.testing._internal.triton_utils import requires_gpu, HAS_CUDA_AND_TRITON
 
 
 device_type = (

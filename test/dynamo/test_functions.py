@@ -48,7 +48,9 @@ from torch.testing._internal.triton_utils import *  # noqa: F403
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-T = TypeVar("T"
+
+T = TypeVar("T")
+
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
