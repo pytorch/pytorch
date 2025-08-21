@@ -903,9 +903,12 @@ class TestIndexing(TestCase):
         # Generate a list of lists, containing overlapping window indices
         indices = [range(i, i + W) for i in range(0, N - W)]
 
-        for i in [len(indices), 100, 32, 31]:
+        for i in [len(indices), 100, 32]:
             windowed_data = t[indices[:i]]
             self.assertEqual(windowed_data.shape, (i, W))
+
+        with self.assertRaisesRegex(IndexError, "too many indices"):
+            windowed_data = t[indices[:31]]
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
