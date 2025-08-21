@@ -2055,32 +2055,8 @@ class VariableBuilder:
             return self.tx.output.input_source_to_var[source]
 
         options = {}
-        if type(value) in (
-            torch.Tensor,
-            torch.nn.Parameter,
-            torch._subclasses.fake_tensor.FakeTensor,
-            torch._subclasses.functional_tensor.FunctionalTensor,
-        ) or is_traceable_wrapper_subclass(value):
-            # Ordinarily, we would fakeify a tensor so that it can get dynamic
-            # shapes and be computed on without triggering actual operations.
-            # However, how can we fakeify a tensor subclass?  Ordinary
-            # inheritance (nor multiple inheritance) won't work work.
-            #
-            # Instead, our plan is to *manually simulate* the tensor subclass
-            # inheriting from a fake tensor with dynamo.  This means our
-            # data representation for a tensor subclass will be a fake tensor
-            # + tensor subclass type + any extra data the subclass may have
-            # been storing on the tensor.  Because all Python accesses are
-            # mediated through TensorWithTFOverrideVariable, we can ensure
-            # that we dispatch differently, e.g., according to
-            # __torch_function__
-            #
-            # To simplify things for now, the __dict__ tracking bits haven't
-            # been implemented yet, but they can be added into this design at
-            # a later point in time.
-            subclass_type = None
-        else:
-            subclass_type = type(value)
+        subclass_type = infer_subclass_type(value)
+        if subclass_type is not None:
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
@@ -3038,6 +3014,55 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         )
 
 
+def infer_subclass_type(value):
+    if type(value) in (
+        torch.Tensor,
+        torch.nn.Parameter,
+        torch._subclasses.fake_tensor.FakeTensor,
+        torch._subclasses.functional_tensor.FunctionalTensor,
+    ) or is_traceable_wrapper_subclass(value):
+        # Ordinarily, we would fakeify a tensor so that it can get dynamic
+        # shapes and be computed on without triggering actual operations.
+        # However, how can we fakeify a tensor subclass?  Ordinary
+        # inheritance (nor multiple inheritance) won't work work.
+        #
+        # Instead, our plan is to *manually simulate* the tensor subclass
+        # inheriting from a fake tensor with dynamo.  This means our
+        # data representation for a tensor subclass will be a fake tensor
+        # + tensor subclass type + any extra data the subclass may have
+        # been storing on the tensor.  Because all Python accesses are
+        # mediated through TensorWithTFOverrideVariable, we can ensure
+        # that we dispatch differently, e.g., according to
+        # __torch_function__
+        #
+        # To simplify things for now, the __dict__ tracking bits haven't
+        # been implemented yet, but they can be added into this design at
+        # a later point in time.
+        return None
+    else:
+        return type(value)
+
+
+def get_specialized_props(target_cls, tx, example_value, subclass_type):
+    specialized_props = target_cls.specialize(example_value)
+    # TODO: not sure about this fake mode test
+    if (
+        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+        and example_value.fake_mode is tx.fake_mode
+    ):
+        if subclass_type:
+            tensor_type = subclass_type
+        elif isinstance(example_value, torch.nn.Parameter):
+            tensor_type = torch.nn.Parameter
+        elif isinstance(example_value, torch.nn.Buffer):
+            tensor_type = torch.nn.Buffer
+        else:
+            tensor_type = torch.Tensor
+        specialized_props["class_type"] = tensor_type
+
+    return specialized_props
+
+
 def construct_tensor_variable(
     target_cls, tx, proxy, example_value, subclass_type, options
 ):
@@ -3055,23 +3080,7 @@ def construct_tensor_variable(
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
     tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
-    specialized_props = target_cls.specialize(example_value)
-    # TODO: not sure about this fake mode test
-    if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
-    ):
-        if subclass_type:
-            tensor_type = subclass_type
-        elif isinstance(example_value, torch.nn.Parameter):
-            tensor_type = torch.nn.Parameter
-        elif isinstance(example_value, torch.nn.Buffer):
-            tensor_type = torch.nn.Buffer
-        else:
-            tensor_type = torch.Tensor
-        specialized_props["class_type"] = tensor_type
-
-    options.update(specialized_props)
+    options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
     return target_cls(proxy, **options)
 
 
