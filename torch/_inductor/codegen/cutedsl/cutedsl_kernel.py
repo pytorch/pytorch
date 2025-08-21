@@ -16,7 +16,6 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer
 from torch._inductor.ops_handler import StoreMode
-from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
@@ -135,6 +134,8 @@ class CuteDSLTemplateKernel(Kernel):
         return params.getvalue()
 
     def render(self, template, **kwargs):
+        from torch._inductor.select_algorithm import PartialRender
+
         """Render the kernel using the template, returning PartialRender object with hooks."""
         # Available {{}} hooks for jinja rendering
         template_env = {
