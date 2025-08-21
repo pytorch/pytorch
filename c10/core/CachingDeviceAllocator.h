@@ -913,6 +913,7 @@ struct CachingDeviceAllocatorImpl {
   using BlockPoolT = BlockPool<BlockT>;
   using PrivatePoolT = PrivatePool<BlockT>;
   using AllocParamsT = AllocParams<StreamT, BlockT>;
+  using TraceEntryT = TraceEntryBase<StreamT>;
 
   virtual ~CachingDeviceAllocatorImpl() = default;
 
@@ -1030,7 +1031,7 @@ struct CachingDeviceAllocatorImpl {
       std::string proc_info = reportProcessMemoryInfo(device);
 
       record_trace(
-          TraceEntryBase<StreamT>::OOM,
+          TraceEntryT::OOM,
           device_free,
           params.size(),
           params.stream(),
@@ -1164,7 +1165,7 @@ struct CachingDeviceAllocatorImpl {
             .current);
 
     record_trace(
-        TraceEntryBase<StreamT>::FREE_REQUESTED,
+        TraceEntryT::FREE_REQUESTED,
         int64_t(block->ptr),
         block->requested_size,
         block->stream,
@@ -1664,7 +1665,7 @@ struct CachingDeviceAllocatorImpl {
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     stats.num_device_alloc++;
     record_trace(
-        TraceEntryBase<StreamT>::SEGMENT_ALLOC,
+        TraceEntryT::SEGMENT_ALLOC,
         p.block->ptr,
         p.block->size,
         p.stream(),
@@ -1735,7 +1736,7 @@ struct CachingDeviceAllocatorImpl {
 
     block->context_when_allocated = std::move(context);
     record_trace(
-        TraceEntryBase<StreamT>::ALLOC,
+        TraceEntryT::ALLOC,
         block->ptr,
         orig_size,
         block->stream,
@@ -1782,7 +1783,7 @@ struct CachingDeviceAllocatorImpl {
         block->stream_uses.empty());
 
     record_trace(
-        TraceEntryBase<StreamT>::FREE_COMPLETED,
+        TraceEntryT::FREE_COMPLETED,
         block->ptr,
         block->requested_size,
         block->stream,
@@ -1855,7 +1856,7 @@ struct CachingDeviceAllocatorImpl {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
     stats.num_device_free++;
     record_trace(
-        TraceEntryBase<StreamT>::SEGMENT_FREE,
+        TraceEntryT::SEGMENT_FREE,
         block->ptr,
         block->size,
         block->stream,
@@ -2372,7 +2373,7 @@ struct CachingDeviceAllocatorImpl {
 
     stats.num_device_alloc++;
     record_trace(
-        TraceEntryBase<StreamT>::SEGMENT_MAP,
+        TraceEntryT::SEGMENT_MAP,
         mapped_range.ptr,
         mapped_range.size,
         to_map->stream,
@@ -2450,7 +2451,7 @@ struct CachingDeviceAllocatorImpl {
 
     stats.num_device_free++;
     record_trace(
-        TraceEntryBase<StreamT>::SEGMENT_UNMAP,
+        TraceEntryT::SEGMENT_UNMAP,
         unmapped.ptr,
         unmapped.size,
         block->stream,
@@ -2522,11 +2523,6 @@ struct CachingDeviceAllocatorImpl {
     return context_recorder_.load()();
   }
 
-  template <
-      typename TraceEntryT,
-      typename = std::enable_if_t<std::is_base_of_v<
-          TraceEntryBase<typename TraceEntryT::StreamT>,
-          TraceEntryT>>>
   virtual void record_trace(
       typename TraceEntryT::Action action,
       size_t addr,
@@ -2618,14 +2614,13 @@ struct CachingDeviceAllocatorImpl {
   RecordContext record_context_ = RecordContext::NEVER;
 
   // Trace buffer for recording AllocatorTraceTracker for call back.
-  std::vector<std::function<void(const TraceEntryBase<StreamT>&)>>
-      trace_trackers_;
+  std::vector<std::function<void(const TraceEntryT&)>> trace_trackers_;
 
   // Thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
   // Ring buffer for memory snapshot TraceEntry's
-  RingBuffer<TraceEntryBase<StreamT>> alloc_buffer;
+  RingBuffer<TraceEntryT> alloc_buffer;
 
   // Tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
