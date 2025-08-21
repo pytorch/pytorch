@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import logging
+import textwrap
 from typing import Any, Callable, Optional
 
 import sympy
@@ -396,21 +397,24 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         return str(index)  # Simplified for now
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        """Fallback handler for operations not explicitly implemented."""
         try:
             return getattr(self._inner, name)(*args, **kwargs)
         except NotImplementedError as e:
-            error_msg = (
-                f"\n{'=' * 80}\n"
-                f"UNSUPPORTED CUTEDSL OPERATION: '{name}'\n"
-                f"{'=' * 80}\n"
-                f"This operation is not yet implemented in Inductor.\n\n"
-                f"Please open an issue at: https://github.com/pytorch/pytorch/issues\n"
-                f"with the following information:\n\n"
-                f"  Operation: {name}\n"
-                f"  Args: {args}\n"
-                f"  Kwargs: {kwargs}\n\n"
-                f"Title your issue: [CuteDSL] Missing operation: {name}\n"
-                f"{'=' * 80}\n"
-            )
-            raise NotImplementedError(error_msg) from e
+            bar = "=" * 80
+            msg = textwrap.dedent(f"""
+                {bar}
+                UNSUPPORTED CUTEDSL OPERATION: '{name}'
+                {bar}
+                This operation is not yet implemented in Inductor.
+
+                Please open an issue at: https://github.com/pytorch/pytorch/issues
+                with the following information:
+
+                Operation: {name}
+                Args: {args!r}
+                Kwargs: {kwargs!r}
+
+                Title your issue: [CuteDSL] Missing operation: {name}
+                {bar}
+            """).strip()
+            raise NotImplementedError(msg) from e
