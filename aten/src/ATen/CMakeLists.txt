@@ -393,6 +393,9 @@ if(USE_CUDA)
     ${native_transformers_cuda_cu}
     ${cuda_generated_sources}
   )
+  list(REMOVE_ITEM ATen_CUDA_CU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/RowwiseScaledMM.cu")
+  list(REMOVE_ITEM ATen_CUDA_CU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/ScaledGroupMM.cu")
+  list(REMOVE_ITEM ATen_CUDA_CU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/GroupMM.cu")
   list(APPEND ATen_CUDA_CPP_SRCS
     ${cuda_cpp}
     ${native_cuda_cpp}

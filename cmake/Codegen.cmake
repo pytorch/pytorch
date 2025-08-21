@@ -87,10 +87,14 @@ if(INTERN_BUILD_ATEN_OPS)
     # for example, it will enable building for SM 90a in case PyTorch
     # built for SM 90, etc.  For examples of how to use the function,
     # see below the function itself.
-    function(_BUILD_FOR_ADDITIONAL_ARCHS file archs)
+    function(_BUILD_FOR_ADDITIONAL_ARCHS file archs output_file_obj)
       torch_cuda_get_nvcc_gencode_flag(_existing_arch_flags)
 
-      set(_file_compile_flags "")
+      set(_file_compile_flags "${CMAKE_CUDA_FLAGS}")
+      foreach(_existing_arch_flag ${_existing_arch_flags})
+        string(REPLACE ${_existing_arch_flag} "" _file_compile_flags ${_file_compile_flags})
+      endforeach()
+
       foreach(_arch ${archs})
         if("${_arch}" STREQUAL "89")
           if(_existing_arch_flags MATCHES ".*compute_86.*")
@@ -107,26 +111,73 @@ if(INTERN_BUILD_ATEN_OPS)
             list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
           endif()
         endif()
+        if("${_arch}" STREQUAL "100f")
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_100f,code=sm_100f")
+          endif()
+        endif()
         if("${_arch}" STREQUAL "120a")
           if(_existing_arch_flags MATCHES ".*compute_120.*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_120a,code=sm_120a")
           endif()
         endif()
+        if("${_arch}" STREQUAL "120f")
+          if(_existing_arch_flags MATCHES ".*compute_120.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_120f,code=sm_120f")
+          endif()
+        endif()
       endforeach()
       list(JOIN _file_compile_flags " " _file_compile_flags)
-
-      set_source_files_properties(${file} PROPERTIES COMPILE_FLAGS "${_file_compile_flags}")
+      get_filename_component(file_we ${file} NAME_WE)
+      set(file_obj "${CMAKE_BINARY_DIR}/caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/cuda/${file_we}.cu.o")
+      set(custom_compile_command "")
+      set(custom_compile_command "${CMAKE_CUDA_COMPILER} -forward-unknown-to-host-compiler -fPIC")
+      list(APPEND custom_compile_command "-O2 --expt-relaxed-constexpr -DNDEBUG")
+      list(APPEND custom_compile_command "-I${CMAKE_BINARY_DIR} -I${CMAKE_BINARY_DIR}/aten/src -I${CMAKE_SOURCE_DIR}/aten/src")
+      list(APPEND custom_compile_command "-I${CMAKE_SOURCE_DIR} -I${CMAKE_SOURCE_DIR}/c10 -I${CMAKE_SOURCE_DIR}/c10/cuda")
+      list(APPEND custom_compile_command "-I${CMAKE_SOURCE_DIR}/third_party/cutlass/include -I${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include")
+      list(APPEND custom_compile_command "${_file_compile_flags} -std=c++${CMAKE_CXX_STANDARD}")
+      list(APPEND custom_compile_command "-x cu -c ${file} -o ${file_obj}")
+      list(JOIN custom_compile_command " " custom_compile_command)
+      add_custom_command(
+        OUTPUT ${file_obj}
+        COMMAND bash -c ${custom_compile_command}
+        DEPENDS ${file}
+        VERBATIM
+      )
+      add_custom_target(${file_we} ALL DEPENDS ${file_obj} SOURCES ${file})
+      set(${output_file_obj} ${file_obj} PARENT_SCOPE)
     endfunction()
-
-    _BUILD_FOR_ADDITIONAL_ARCHS(
-      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a;120a")
-    _BUILD_FOR_ADDITIONAL_ARCHS(
-      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
-      "90a")
-    _BUILD_FOR_ADDITIONAL_ARCHS(
-      "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a;100a")
+    set(ATEN_CUDA_MATMUL_LIB)
+    set(file_obj)
+    if(CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
+        "89;90a;100f;120f" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
+        "90a" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
+        "90a;100f" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+    else()
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
+        "89;90a;100a;120a" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
+        "90a" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+      _BUILD_FOR_ADDITIONAL_ARCHS(
+        "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
+        "90a;100a" file_obj)
+      list(APPEND ATEN_CUDA_MATMUL_LIB ${file_obj})
+    endif()
+    set(ATEN_CUDA_MATMUL_LIB ${ATEN_CUDA_MATMUL_LIB} PARENT_SCOPE)
 
   endif()
 
