@@ -246,12 +246,10 @@ def _op_runtime_estimate_mult(snode):
     # mm was underestimated x2-3
     # collectives were overestimated x3-4
     # TODO(ivankobzarev): Tune estimations to be more reliable,
-    # In favor of doing at least enough prefetching and sinking,
-    # just correcting linearly.
     if contains_collective(snode):
-        return 0.5
+        return config.reorder_sink_runtime_estimations_comm_mult
     elif is_gemm_like(snode):
-        return 2.0
+        return config.reorder_sink_runtime_estimations_mm_mult
     return 1.0
 
 
@@ -299,9 +297,6 @@ def _reorder_communication_preserving_peak_memory_internal(
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = runtimes[collective_snode]
         compute_time = 0.0
-        collective_outs = OrderedSet(
-            o.get_name() for o in collective_snode.get_outputs()
-        )
         for snode in remaining_snodes:
             if contains_collective(snode):
                 continue
@@ -461,14 +456,14 @@ def _reorder_communication_preserving_peak_memory_internal(
     )
 
     num_processed_collectives: int = 0
-    curr = _head
+    curr: Optional[BaseSchedulerNode] = _head
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
     iterative_recompute_error = False
     # TODO(ivankobzarev): Replace this heuristic with reliable runtime estimations.
     num_swapped_gemm_like_limit = config.reorder_iterative_swapped_gemm_like_limit
 
-    while _next[curr] is not None:
-        _next_curr = _next[curr]  # type: ignore[assignment]
+    while curr is not None and _next[curr] is not None:
+        _next_curr = _next[curr]
         if iterative_recompute_error:
             break
         if contains_collective(curr):
@@ -490,8 +485,11 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             num_swapped_gemm_like = 0
             while candidate is not None:
-                if info.final_exposed <= 0:
-                    info.limiting_factor = "unexposed"
+                if (
+                    config.reorder_iterative_limit_by_runtime_estimations
+                    and info.final_exposed <= 0
+                ):
+                    info.limiting_factor = "unexposed by runtime estimations"
                     break
 
                 if (
@@ -1074,7 +1072,7 @@ def _sink_waits_iterative_internal(
 
         return max(0, comm_time - compute_time)
 
-    curr = snodes[-1]
+    curr: Optional[BaseSchedulerNode] = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
@@ -1084,8 +1082,8 @@ def _sink_waits_iterative_internal(
 
     iterative_recompute_error = False
     num_swapped_gemm_like_limit = config.sink_waits_iterative_swapped_gemm_like_limit
-    while _prev[curr] is not None:
-        _prev_curr = _prev[curr]  # type: ignore[assignment]
+    while curr is not None and _prev[curr] is not None:
+        _prev_curr = _prev[curr]
         if iterative_recompute_error:
             break
         if (
@@ -1120,8 +1118,11 @@ def _sink_waits_iterative_internal(
 
             num_swapped_gemm_like = 0
             while candidate is not None:
-                if info.final_exposed <= 0:
-                    info.limiting_factor = "unexposed"
+                if (
+                    config.sink_waits_iterative_limit_by_runtime_estimations
+                    and info.final_exposed <= 0
+                ):
+                    info.limiting_factor = "unexposed by runtime estimations"
                     break
                 gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
                 group = GroupedSchedulerNode(
