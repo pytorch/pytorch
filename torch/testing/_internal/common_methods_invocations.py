@@ -1141,6 +1141,21 @@ def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((2,)))
     yield SampleInput(make_arg(()))
 
+def lab_attn_ref(q, k, v):
+    x = torch.matmul(q, k.t())
+    a = torch.tanh(x)
+    o = torch.matmul(a, v)
+
+    return o, x
+
+def sample_inputs_lab_attn(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = ((S, S), (S, S), (S, S)),
+
+    for (qs, ks, vs) in shapes:
+        yield SampleInput(make_arg(qs), make_arg(ks), make_arg(vs))
+
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11912,6 +11927,13 @@ op_db: list[OpInfo] = [
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
+    OpInfo('lab_attn',
+           ref=lab_attn_ref,
+           dtypes=(torch.float, torch.double),
+           supports_out=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_lab_attn,
+           ),
     OpInfo('item',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.item, inp, *args, **kwargs),
            ref=np.ndarray.item,

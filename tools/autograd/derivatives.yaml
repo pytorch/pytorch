@@ -3245,3 +3245,8 @@
 - name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+# Autograd lab
+# - name: lab_attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
+#   output_differentiability: [True, False]
+#   Q, K, V: lab_attn_bwd(Q, K, V, result1, grads[0], grads[1])
