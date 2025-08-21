@@ -717,6 +717,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
       c10::DeviceIndex device,
       size_t& free_bytes,
       size_t& total_bytes) override {
+    c10::cuda::CUDAGuard device_guard(device);
     C10_CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
   }
 
@@ -1317,10 +1318,6 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
   bool hasAllocatedExpandableSegments() const {
     return !expandable_segments_.empty();
   }
-
-  RingBuffer<TraceEntry> cuda_alloc_buffer;
-
-  std::vector<AllocatorTraceTracker> cuda_trace_trackers_;
 };
 
 // Returns whether to force all allocations to bypass the caching allocator and
@@ -1364,7 +1361,11 @@ static void uncached_delete(void* ptr) {
 }
 
 static void local_raw_delete(void* ptr);
-using CUDACachingDeviceAllocatorInterface = CachingDeviceAllocatorInterface<c10::kCUDA, local_raw_delete, CUDACachingDeviceAllocatorImpl, CUDAAllocator>;
+using CUDACachingDeviceAllocatorInterface = CachingDeviceAllocatorInterface<
+    c10::kCUDA,
+    local_raw_delete,
+    CUDACachingDeviceAllocatorImpl,
+    CUDAAllocator>;
 
 class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
  private:
@@ -1377,32 +1378,6 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
   RingBuffer<AnnotationEntry> annotation_buffer;
 
  public:
-
-  double getMemoryFraction(c10::DeviceIndex device) override {
-    TORCH_INTERNAL_ASSERT(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
-    return device_allocator[device]->getMemoryFraction();
-  }
-
-  void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
-    TORCH_CHECK(
-        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
-        "Allocator not initialized for device ",
-        device,
-        ": did you call init?");
-    TORCH_CHECK(
-        0 <= fraction && fraction <= 1,
-        "invalid fraction:",
-        fraction,
-        ". Please set within [0, 1].");
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
-    device_allocator[device]->setMemoryFraction(fraction);
-  }
-
   void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
@@ -1412,8 +1387,8 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
     annotation_buffer.clear();
-    for (auto& allocator : device_allocator) {
-      allocator->recordHistory(
+    for (auto& impl : impls_) {
+      impl->recordHistory(
           enabled,
           context_recorder,
           alloc_buffer_max_entries,
@@ -1444,7 +1419,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     }
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->pushCompileContext(md);
+    impls_[device]->pushCompileContext(md);
   }
 
   void popCompileContext() override {
@@ -1453,33 +1428,21 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     }
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->popCompileContext();
+    impls_[device]->popCompileContext();
   }
 
   bool isHistoryEnabled() override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    return device_allocator[device]->isHistoryEnabled();
+    return impls_[device]->isHistoryEnabled();
   }
 
   bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       const std::unordered_set<void*>& expected_live_allocations) override {
-    return device_allocator[device]->checkPoolLiveAllocations(
+    return impls_[device]->checkPoolLiveAllocations(
         mempool_id, expected_live_allocations);
-  }
-
-  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
-    for (auto& allocator : device_allocator) {
-      allocator->attachOutOfMemoryObserver(observer);
-    }
-  }
-
-  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
-    for (auto& allocator : device_allocator) {
-      allocator->attachAllocatorTraceTracker(tracker);
-    }
   }
 
   void enable(bool value) override {
@@ -1495,7 +1458,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
-    return device_allocator[block->device]->getBaseAllocation(block, outSize);
+    return impls_[block->device]->getBaseAllocation(block, outSize);
   }
 
   ShareableHandle shareIpcHandle(void* ptr) override {
@@ -1503,7 +1466,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
-    return device_allocator[block->device]->shareIpcHandle(block);
+    return impls_[block->device]->shareIpcHandle(block);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id) override {
@@ -1522,9 +1485,9 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     }
 
     // Get the device_traces' TraceEntry lists.
-    for (auto& da : device_allocator) {
-      result.device_traces.emplace_back(da->trace(tsc_to_us));
-      auto snap = da->snapshot(mempool_id);
+    for (auto& impl : impls_) {
+      result.device_traces.emplace_back(impl->trace(tsc_to_us));
+      auto snap = impl->snapshot(mempool_id);
       result.segments.insert(result.segments.end(), snap.begin(), snap.end());
     }
 
@@ -1550,7 +1513,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
   std::shared_ptr<AllocatorState> getCheckpointState(
       c10::DeviceIndex device,
       MempoolId_t id) override {
-    return device_allocator[device]->getCheckpointState(id);
+    return impls_[device]->getCheckpointState(id);
   }
 
   /**
@@ -1573,7 +1536,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
 
     TORCH_CHECK(pps, "Expected PrivatePoolState");
 
-    auto rr = device_allocator[device]->setCheckpointPoolState(*pps);
+    auto rr = impls_[device]->setCheckpointPoolState(*pps);
 
     CheckpointDelta cpd;
     for (void* ptr : rr.allocations_freed) {
@@ -1627,7 +1590,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     }
   }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override {
-    device_allocator[device]->cacheInfo(largestBlock);
+    impls_[device]->cacheInfo(largestBlock);
   }
 
   void* raw_alloc(size_t nbytes) override {
@@ -1670,7 +1633,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     } else {
       C10_CUDA_CHECK(err);
     }
-    device_allocator[dev_to_access]->addPeerAccess(dev);
+    impls_[dev_to_access]->addPeerAccess(dev);
     std::lock_guard<std::mutex> lock(IpcMutex);
     for (auto& entry : ipcMemHandle_to_devptr) {
       if (entry.second.device_ == dev_to_access &&
@@ -1691,8 +1654,8 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     if (p2p_enabled || // memcpy ok because memory is mapped in both devices
         srcDevice == dstDevice || // memcpy ok on a single device
         // memcpy ok because both dst and src must have come from cudaMalloc
-        (!device_allocator[dstDevice]->hasAllocatedExpandableSegments() &&
-         !device_allocator[srcDevice]->hasAllocatedExpandableSegments())) {
+        (!impls_[dstDevice]->hasAllocatedExpandableSegments() &&
+         !impls_[srcDevice]->hasAllocatedExpandableSegments())) {
       return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
     }
     // when p2p is not enabled, only cudaMemcpyPeerAsync correctly handles
@@ -1733,7 +1696,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     MemHandleCacheEntry(
         c10::DeviceIndex device,
         std::string& handle,
-        const DeviceCachingAllocator& allocator)
+        const CUDACachingDeviceAllocatorImpl& allocator_impl)
         : device_(device) {
       int type = SHAREABLE_CUDA_MALLOC;
       std::istringstream ss(handle);
@@ -1752,7 +1715,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
             &cuda_ipc_ptr_, cuda_handle, cudaIpcMemLazyEnablePeerAccess));
       } else if (type == SHAREABLE_CUDA_EXPANDABLE_SEGMENT) {
         expandable_segment_ =
-            ExpandableSegment::fromShared(device, allocator.peers(), ss)
+            ExpandableSegment::fromShared(device, allocator_impl.peers(), ss)
                 .release();
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -1807,8 +1770,7 @@ class NativeCachingAllocator : public CUDACachingDeviceAllocatorInterface {
     auto inserted = ipcMemHandle_to_devptr.insert(
         iter,
         {handle,
-         MemHandleCacheEntry(
-             curr_device, handle, *device_allocator[curr_device])});
+         MemHandleCacheEntry(curr_device, handle, *impls_[curr_device])});
     auto sp = std::shared_ptr<void>(
         inserted->second.ptr(), [handle, this](void* ptr) {
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
