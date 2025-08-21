@@ -6044,6 +6044,9 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
+        assert bias.grad, "No gradient computed for bias"
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
+
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
