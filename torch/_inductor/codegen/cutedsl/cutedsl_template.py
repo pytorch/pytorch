@@ -99,6 +99,13 @@ class CuteDSLTemplate(KernelTemplate):
             )
 
             def make_kernel_render(out_node, hint_override: Optional[int] = None):
+                """
+                Factory function that creates a kernel renderer for the final output.
+
+                This closure captures the current template and parameters, but allows
+                the output node to be specified later. This is used during the final
+                kernel selection phase when the actual output buffer is available.
+                """
                 render_kernel = self.kernel_type(
                     kernel_name=str(Placeholder.KERNEL_NAME),
                     input_nodes=input_nodes,
