@@ -567,7 +567,7 @@ fractional_max_pool2d = boolean_dispatch(
 )
 
 
-@_wrap_torch_function_variadic
+@_wrap_torch_function_unary
 def fractional_max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -673,7 +673,7 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
-@_wrap_torch_function_variadic
+@_wrap_torch_function_unary
 def max_pool1d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList1[int],
@@ -752,7 +752,7 @@ max_pool1d = boolean_dispatch(
 )
 
 
-@_wrap_torch_function_variadic
+@_wrap_torch_function_unary
 def max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
@@ -831,7 +831,7 @@ max_pool2d = boolean_dispatch(
 )
 
 
-@_wrap_torch_function_variadic
+@_wrap_torch_function_unary
 def max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
@@ -1105,7 +1105,6 @@ def lp_pool1d(
     )
 
 
-@_wrap_torch_function_unary
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: BroadcastingList1[int],
@@ -1123,6 +1122,14 @@ def adaptive_max_pool1d_with_indices(
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            adaptive_max_pool1d_with_indices,
+            (input,),
+            input,
+            output_size,
+            return_indices=return_indices,
+        )
     return torch.adaptive_max_pool1d(input, output_size)
 
 
@@ -2264,7 +2271,6 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.mish(input)
 
 
-@_wrap_torch_function_unary
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     r"""Apply hardswish function, element-wise.
 
@@ -2283,6 +2289,8 @@ def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
+    if has_torch_function_unary(input):
+        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
     if inplace:
         return torch._C._nn.hardswish_(input)
     return torch._C._nn.hardswish(input)
