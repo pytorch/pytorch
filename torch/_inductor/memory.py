@@ -286,6 +286,11 @@ def assign_memory_planning_info_for_scheduler_nodes(
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
         succ_nodes = node_to_succ_nodes[node]
+        pred_nodes = node_to_pred_nodes[node]
+
+        # make sure we do not make node a successor or predecessor of itself
+        succ_nodes.discard(node)
+        pred_nodes.discard(node)
 
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
@@ -684,6 +689,7 @@ def validate_graph_acyclic(nodes: list[BaseSchedulerNode]) -> None:
         path.append(node)
 
         for pred_node in node.mpi_node.pred_nodes:
+            assert pred_node != node
             dfs_visit(pred_node)
 
         path.pop()
