@@ -317,7 +317,7 @@ def enable_aot_logging() -> Iterator[None]:
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
 _inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
-_inductor_triton_kernel_to_post_grad_node_info: dict[str, Any] = {}
+_inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
@@ -1009,6 +1009,48 @@ def dump_inductor_provenance_info(
         return {}
 
 
+def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
+    """Create kernel information JSON"""
+    try:
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_kernel_stack_trace
+        global _inductor_triton_kernel_to_post_grad_node_info
+
+        post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
+        all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
+            _inductor_triton_kernel_to_post_grad_node_info.keys()
+        )
+
+        result = {}
+        for kernel_name in all_kernels:
+            post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
+                kernel_name, []
+            )
+
+            pre_grad_nodes: OrderedSet[str] = OrderedSet()
+            for post_node in post_grad_nodes:
+                pre_grad_nodes.update(post_to_pre.get(post_node, []))
+
+            result[kernel_name] = {
+                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+                "post_grad_nodes": post_grad_nodes,
+                "pre_grad_nodes": list(pre_grad_nodes),
+            }
+
+        return result
+    except Exception as e:
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_kernel_information_json",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
+
+
 def set_kernel_post_grad_provenance_tracing(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernelOut],
     kernel_name: str,
@@ -1019,6 +1061,7 @@ def set_kernel_post_grad_provenance_tracing(
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
+        stack_traces: list[str] = []
         if is_extern:
             assert isinstance(node_schedule, ExternKernelOut)
             curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
@@ -1037,12 +1080,10 @@ def set_kernel_post_grad_provenance_tracing(
                     for origin in node_schedule.origins
                     if origin.name not in curr_node_info
                 )
-            _inductor_kernel_stack_trace[kernel_name] = list(
-                node_schedule.get_stack_traces()
-            )
+            stack_traces = list(node_schedule.get_stack_traces())
         else:
             assert isinstance(node_schedule, list)
-            stack_traces: OrderedSet[str] = OrderedSet()
+            stack_traces_set: OrderedSet[str] = OrderedSet()
             for snode in node_schedule:
                 if snode not in (EnableReduction, DisableReduction):
                     if snode.node is not None:
@@ -1051,13 +1092,14 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
-                        stack_traces.update(snode.node.get_stack_traces())
+                        stack_traces_set.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
-            _inductor_kernel_stack_trace[kernel_name] = list(stack_traces)
+            stack_traces = list(stack_traces_set)
+        _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
