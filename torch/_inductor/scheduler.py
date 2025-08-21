@@ -1277,7 +1277,11 @@ class SchedulerNode(BaseSchedulerNode):
         return buffers_store_as_atomic_add
 
     def has_side_effects(self) -> bool:
-        if self._body.has_op("device_assert_async"):
+        if (
+            self._body is not None
+            and hasattr(self._body, "has_op")
+            and self._body.has_op("device_assert_async")
+        ):
             return True
         return super().has_side_effects()
 
