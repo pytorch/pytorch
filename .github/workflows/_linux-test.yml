@@ -165,11 +165,22 @@ jobs:
         id: check_container_runner
         run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
+      - name: Get nvidia driver version
+        id: nvidia-driver-version
+        run: |
+          if [ {{ matrix.config == 'legacy_nvidia_driver' }} ]; then
+            echo "driver-version=525.105.17" >> "$GITHUB_OUTPUT"
+          elif [ {{ matrix.config == 'prototype_nvidia_driver' }} ]; then
+            echo "driver-version=580.65.06" >> "$GITHUB_OUTPUT"
+          else
+            echo "driver-version=570.133.07" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         with:
-          driver-version: ${{ matrix.config == 'legacy_nvidia_driver' && '525.105.17' || '570.133.07' }}
+          driver-version: ${{ steps.nvidia-driver-version.outputs.driver-version }}
         if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && !contains(matrix.runner, 'b200') }}
 
       - name: Setup GPU_FLAG for docker run
