@@ -9148,7 +9148,7 @@ def ___make_guard_fn():
         x = torch.rand((BATCH, MAX), dtype=torch.float64)
         eager = jacfunc(x, idxs)
 
-        compiled = torch.compile(jacfunc, dynamic=True)
+        compiled = torch.compile(jacfunc, backend="eager", dynamic=True)
         out_comp = compiled(x, idxs)
         self.assertEqual(eager[0], out_comp[0])
 
