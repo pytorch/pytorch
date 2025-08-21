@@ -934,6 +934,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
         from torch._inductor.ir import FixedLayout, FlexibleLayout
+
         if isinstance(layout, FixedLayout):
             aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
