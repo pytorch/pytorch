@@ -75,6 +75,8 @@ class KernelFactory {
   static void registerHandler(
       const std::string& name,
       KernelFactoryHandler handler);
+
+  static bool isHandlerRegistered(const std::string& handler);
 };
 
 } // namespace torch::nativert

@@ -229,13 +229,13 @@ def fx_forward_from_src_skip_result(
 
 def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     convert_frame_intern = structured.intern_string(__file__)
+    captured_tb = CapturedTraceback.extract(skip=4 + skip).summary()
+    frames_interned = structured.from_traceback(captured_tb)
     # Extract and filter the stack
     stack = list(
         itertools.takewhile(
             lambda f: f["filename"] != convert_frame_intern,
-            structured.from_traceback(
-                CapturedTraceback.extract(skip=4 + skip).summary()
-            ),
+            frames_interned,
         )
     ) + [
         {
@@ -250,9 +250,13 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
         lambda: {"stack": stack},
     )
 
+    # Capture stack separately without using from_traceback to get the actual filenames
     stack_strings = [
-        f"Line: {frame['line']}, Name: {frame['name']}, Filename: {frame['filename']}"
-        for frame in stack
+        f"Line: {frame.lineno}, Name: {frame.name}, Filename: {frame.filename}"
+        for frame in captured_tb
+        if frame.filename != convert_frame_intern
+    ] + [
+        f"Line: {code.co_firstlineno}, Name: {code.co_name}, Filename: {code.co_filename}"
     ]
     return stack_strings
 
@@ -836,6 +840,61 @@ class DynamoOutput:
     bytecode: types.CodeType
     last_attempt_start_time: Optional[float]
 
+    def build_guards(self, code, hooks=None, save=False, cache_entry=None):
+        assert self.tracer_output.output_graph is not None
+        return CheckFunctionManager(
+            code,
+            self.tracer_output.output_graph,
+            cache_entry,
+            hooks.guard_fail_fn if hooks else None,
+            hooks.guard_filter_fn if hooks else None,
+            save_guards=save,
+        )
+
+
+@dataclass
+class BackendInput:
+    graph_module: torch.fx.GraphModule
+    example_inputs: Any
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+
+
+@dataclass
+class CaptureOutput:
+    dynamo_output: DynamoOutput
+    backend_input: BackendInput
+
+
+@dataclass
+class FrameInfo:
+    code: types.CodeType
+    globals: dict[str, object]
+    locals: dict[str, object]
+    builtins: dict[str, object]
+    closure: tuple[CellType]
+
+
+def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
+    from torch._guards import TracingContext
+    backend_input: Optional[BackendInput] = None
+
+    def fullgraph_compiler(gm, example_inputs):
+        nonlocal backend_input
+        backend_input = BackendInput(gm, example_inputs, TracingContext.get().fake_mode)
+        return gm
+
+    dynamo_output = compile_frame(
+        frame.code,
+        frame.globals,
+        frame.locals,
+        frame.builtins,
+        frame.closure,
+        compiler_fn=fullgraph_compiler,
+        one_graph=True,
+        restart_reasons=set(),
+    )
+    return CaptureOutput(dynamo_output, backend_input)
+
 
 def compile_frame(  # type: ignore[return]
     code: types.CodeType,
@@ -1111,13 +1170,11 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         with dynamo_timed("build_guards", log_pt2_compile_event=True):
-            check_fn = CheckFunctionManager(
+            check_fn = dynamo_output.build_guards(
                 code,
-                output,
-                cache_entry,
-                hooks.guard_fail_fn if hooks else None,
-                hooks.guard_filter_fn if hooks else None,
-                guards_serialization_mode="save" if package else None,
+                hooks=hooks,
+                save=package is not None,
+                cache_entry=cache_entry,
             )
 
         if package is not None:
@@ -1663,6 +1720,7 @@ class CatchErrorsWrapper:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
+
         input_codes.add(frame.f_code)
 
         is_skipfile = trace_rules.check(frame.f_code)
