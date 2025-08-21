@@ -1105,6 +1105,9 @@ class TensorVariable(VariableTracker):
             example_value = self.proxy.node.meta.get("example_value")
             from .builder import get_specialized_props, infer_subclass_type
 
+            if isinstance(value, variables.lazy.LazyVariableTracker):
+                value = variables.lazy.LazyVariableTracker.realize_all(value)
+
             specialized_props = get_specialized_props(
                 type(value), tx, example_value, infer_subclass_type(example_value)
             )
