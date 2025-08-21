@@ -21,7 +21,6 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // The MetaBit check was intended to catch Fake Tensor as well; explicitly
     // include Fake dispatch key to be robust under dynamo/functorch tracing.
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
-            self.key_set().has_all(DispatchKeySet(DispatchKey::Fake)) ||
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
         // functional version that torch.compiles better and works with dynamic shapes
         if (num_classes == -1) {
