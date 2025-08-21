@@ -1334,6 +1334,36 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
+        # Test layout_to_global_ranks and layout_to_group_ranks
+        pg_layout = _Layout(((2, 4), (2, 2)))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+        pg_layout = _Layout(((4, 2),))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+
     def test_composition(self):
         # self = ((4,2), (2,1)), B = (2,1)  → A o B = (2,2)
         orig_l = _Layout(((4, 2), (2, 1)))
