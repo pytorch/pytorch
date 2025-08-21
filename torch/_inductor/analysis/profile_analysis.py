@@ -670,6 +670,53 @@ class JsonProfile:
         with open(out, "w") as f:
             json.dump(self.data, f)
 
+    def combine_with(self, other: "JsonProfile") -> "JsonProfile":
+        """
+        Combine this profile with another profile by merging their trace events.
+        Returns a new JsonProfile object with combined data.
+        """
+        # Create a new combined data structure
+        combined_data = {
+            "traceEvents": self.data["traceEvents"] + other.data["traceEvents"],
+            "deviceProperties": self.data.get("deviceProperties", []),
+        }
+
+        # Merge device properties, avoiding duplicates
+        other_device_props = other.data.get("deviceProperties", [])
+        existing_device_ids = {dev["id"] for dev in combined_data["deviceProperties"]}
+
+        for device_prop in other_device_props:
+            if device_prop["id"] not in existing_device_ids:
+                combined_data["deviceProperties"].append(device_prop)
+
+        # Copy any other top-level properties from the first profile
+        for key, value in self.data.items():
+            if key not in combined_data:
+                combined_data[key] = value
+
+        import os
+
+        # Create a temporary file to write the combined data
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            json.dump(combined_data, tmp_file)
+            tmp_path = tmp_file.name
+
+        try:
+            # Create new JsonProfile from the combined data
+            combined_profile = JsonProfile(
+                tmp_path,
+                benchmark_name=f"{self.benchmark_name or 'Profile1'}_+_{other.benchmark_name or 'Profile2'}",
+                dtype=self.dtype or other.dtype,
+            )
+            return combined_profile
+        finally:
+            # Clean up temporary file
+            os.unlink(tmp_path)
+
 
 class ParseException(RuntimeError):
     pass
@@ -709,6 +756,12 @@ def main() -> None:
         metavar=("input_file", "dtype"),
         help="Run analysis on a single trace, specified as <file> <dtype>",
     )
+    parser.add_argument(
+        "--combine",
+        nargs=3,
+        metavar=("input_file1", "input_file2", "output_file"),
+        help="Combine two profiles into a single profile by merging trace events, specified as <file1> <file2> <output_file>",
+    )
     args = parser.parse_args()
 
     if args.diff:
@@ -734,6 +787,14 @@ def main() -> None:
         p = JsonProfile(args.augment_trace[0], dtype=args.augment_trace[2])
         p.augment_trace()
         p.dump(args.augment_trace[1])
+    if args.combine:
+        p1 = JsonProfile(args.combine[0], dtype=None)
+        p2 = JsonProfile(args.combine[1], dtype=None)
+        combined = p1.combine_with(p2)
+        combined.dump(args.combine[2])
+        print(
+            f"Successfully combined {args.combine[0]} and {args.combine[1]} into {args.combine[2]}"
+        )
 
 
 if __name__ == "__main__":
