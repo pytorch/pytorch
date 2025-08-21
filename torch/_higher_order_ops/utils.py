@@ -1138,9 +1138,11 @@ def materialize_as_graph(
 
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
-        with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
+        with (
+            suspend_functionalization(),
+            torch.utils._python_dispatch._disable_current_modes(),
+        ):
+            unfunc_t = [_from_fun(arg) for arg in args]
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
