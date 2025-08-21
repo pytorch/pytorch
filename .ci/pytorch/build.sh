@@ -196,7 +196,7 @@ fi
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 24"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
