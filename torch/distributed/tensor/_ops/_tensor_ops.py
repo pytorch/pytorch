@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence, Sized
+from threading import enumerate
 from typing import cast, Optional
 
 import torch
@@ -27,7 +28,6 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
     register_op_strategy,
     register_prop_rule,
-    replicate_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -47,9 +47,9 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
     # for each strategy that the input supports, we create a corresponding strategy.
     # Note: this may be a complete waste of work, because it should be equivalent to
     # `return first_input_strategy` (unless creating a deep copy is important for some reason)
-    assert len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1, (
-        "propagate_single_input_strategy only works for single-tensor-input ops"
-    )
+    assert (
+        len([s for s in op_schema.args_schema if isinstance(s, OpStrategy)]) == 1
+    ), "propagate_single_input_strategy only works for single-tensor-input ops"
     first_input_strategy = op_schema.args_schema[0]
     assert isinstance(first_input_strategy, OpStrategy)
     return OpStrategy(
@@ -566,19 +566,11 @@ def replica_only_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 @register_op_strategy(
-    [aten.sort.stable, aten.sort.default], schema_info=RuntimeSchemaInfo(1)
-)
-def sort_strategy(op_schema: OpSchema):
-    return cast(TupleStrategy, replicate_op_strategy(op_schema))
-
-
-@register_op_strategy(
     [
         aten.scatter_.value,
         aten.scatter.value,
         aten.scatter_.src,
         aten.scatter.src,
-        aten.scatter_add.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
@@ -605,11 +597,44 @@ def scatter_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_op_strategy(aten.gather.default)
+@register_op_strategy(aten.scatter_add.default, schema_info=RuntimeSchemaInfo(1))
+def scatter_add_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = op_schema.args_schema[0]
+    dim = op_schema.args_schema[1]
+    index_strategy = op_schema.args_schema[2]
+
+    assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(index_strategy, OpStrategy)
+    assert isinstance(dim, int)
+    dim = normalize_dim(dim, input_strategy.ndim)
+    mesh = input_strategy.mesh
+    input_shape = input_strategy.shape
+    index_shape = index_strategy.shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    all_replicate: PlacementList = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim and input_shape[d] == index_shape[d]:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+    )
+
+
+@register_op_strategy(aten.gather.default, schema_info=RuntimeSchemaInfo(1))
 def gather_strategy(op_schema: OpSchema) -> StrategyType:
     mesh = op_schema.get_mesh_from_args()
     input_strategy = cast(OpStrategy, op_schema.args_schema[0])
     dim = cast(int, op_schema.args_schema[1])
+    dim = normalize_dim(dim, input_strategy.ndim)
     index_strategy = cast(OpStrategy, op_schema.args_schema[2])
 
     input_shape = input_strategy.shape
@@ -625,7 +650,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # input sharding, input sharded, index accepts mask partial, output follows index
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
-    if index_shape[dim] == 1:
+    if dim < len(index_shape) and index_shape[dim] == 1:
         index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
@@ -638,6 +663,12 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the sharding dimension is the gather dimension
     index_sharding: PlacementList = [Shard(dim), Replicate(), Shard(dim)]
     single_mesh_dim_strategies.append(index_sharding)
+
+    if len(input_shape) == len(index_shape):
+        for d in range(len(input_shape)):
+            if d != dim:
+                sharding: PlacementList = [Shard(d), Shard(d), Shard(d)]
+                single_mesh_dim_strategies.append(sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=1
@@ -791,9 +822,9 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     for this_strategy in input_tuple_strategy.children:
         # check strategy of each tensor to be concatenated
         assert isinstance(this_strategy, OpStrategy)
-        assert this_strategy.mesh == mesh, (
-            "cat op doesn't support cross mesh concatenation"
-        )
+        assert (
+            this_strategy.mesh == mesh
+        ), "cat op doesn't support cross mesh concatenation"
         for op_spec in this_strategy.strategies:
             # Check each OpSpec of the tensor, the placement in this OpSpec
             # is used as the exemplar strategy that other tensors and output
@@ -982,18 +1013,113 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
 )
 def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
     """
-    NOTE: the sharding strategy for index.Tensor is not fully exploited yet.
-    We only acceptable the sharding where the ``self`` tensor and ``indices`` tensor
-    list are both replicated.
+    In ``aten.index.Tensor(self, indices)``, the ``self`` tensor's dimensions can
+    be categorized into:
+    - free dimensions: the dimensions that are not indexed by any ``indices`` tensor.
+    - removed dimensions: the dimensions that are indexed by a scalar ``index`` tensor.
+    - selected dimensions: the dimensions that are indexed by a non-scalar ``index`` tensor.
+
+    For a free dimension in ``self``, it's accepted to be of any placement.
+    For a removed dimension, its placement can be ``Replicate()`` or ``Partial()``.
+    For a selected dimension, its placement can be ``Replicate()`` or ``Partial()``
+    (supported), but also ``Shard()`` if the corresponding ``index`` tensor is
+    replicated (not supported yet, need index rewrite).
+
+    The ``indices`` must be ``Replicate()`` except for one case: if a select dimension
+    is not sharded in ``self``, the corresponding ``index`` can be ``Shard()`` too.
+
+    As for the output tensor, its free dimensions should follow the placements. Regarding
+    the selected dimensions, the first selected dimensions should follow the placement, and
+    the other selected ones are removed from the output's dimensions.
     """
     # NOTE: somehow `op_schema.args_strategy` is not a good fit because it flattens
     # and filters out the `None` values. So we use `op_schema.args_schema` instead.
     self_strategy, indices_tuple_strategy = op_schema.args_schema
     assert isinstance(self_strategy, OpStrategy)
+    # TODO: change it to something else
     assert isinstance(indices_tuple_strategy, TupleStrategy)
-    # `indices_tuple_strategy` only includes non-tailing `None`s?
+    # `indices_tuple_strategy` only includes non-tailing `None`s
     assert len(indices_tuple_strategy.children) <= self_strategy.ndim
 
+    # find free/select/remove dimensions
+    free_dims, select_dims, remove_dims = [], [], []
+    for i, strat in enumerate(indices_tuple_strategy.children):
+        if strat is None:
+            free_dims.append(i)
+        else:
+            assert isinstance(strat, OpStrategy)
+            if strat.ndim == 0:
+                remove_dims.append(i)
+            else:
+                select_dims.append(i)
+
+    for i in range(len(indices_tuple_strategy.children), self_strategy.ndim):
+        free_dims.append(i)
+
+    # enumerate all possible input_specs
+    self_input_specs: list[DTensorSpec] = [
+        strat.output_specs for strat in self_strategy.strategies
+    ]
+    non_empty_indices_input_specs_dict: dict[int, list[DTensorSpec]] = {}
+    for i, index_strategy in enumerate(indices_tuple_strategy.childs):
+        if index_strategy is not None:
+            non_empty_indices_input_specs_dict[i] = [
+                strat.output_specs for strat in index_strategy.strategies
+            ]
+
+    non_empty_index_idx_to_dim = list(non_empty_indices_input_specs_dict.keys())
+    non_empty_indices_input_specs = list(non_empty_indices_input_specs_dict.values())
+    all_input_specs_comb = itertools.product(
+        (self_input_specs, *non_empty_indices_input_specs)
+    )
+
+    # enumerate all acceptable input_specs
+    acceptable_input_specs_collection = {}  # use set to dedup
+    output_spec_collection = {}
+    for input_specs_comb in all_input_specs_comb:
+        self_input_spec: DTensorSpec = input_specs_comb[0]
+        indices_input_specs: list[DTensorSpec] = input_specs_comb[1:]
+
+        # first, if `indices`` are sharded, they have to be sharded consistently.
+        # Besides, `indices`` can broadcast. Therefore we leverage the `pointwise_rule`
+        # to produce acceptable `indices_input_specs`.
+        if_indices_comply_pointwise_rule = pointwise_rule(
+            OpSchema(
+                op=op_schema.op,
+                args_schema=tuple(indices_input_specs),
+                kwargs_schema={},
+            )
+        )
+        need_reshard_on_indices = if_indices_comply_pointwise_rule.output_spec is None
+        if need_reshard_on_indices:
+            assert if_indices_comply_pointwise_rule.redistribute_schema is not None
+            valid_indices_suggestion = (
+                if_indices_comply_pointwise_rule.redistribute_schema
+            )
+            # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
+            # use that to compute our ideal values_spec
+            indices_reshard_tgt_spec = pointwise_rule(
+                valid_indices_suggestion
+            ).output_spec
+            assert isinstance(indices_reshard_tgt_spec, DTensorSpec)
+            indices_input_specs = indices_reshard_tgt_spec
+
+        # second, check `self` spec (i.e. placements)
+        self_input_tgt_placements: list[Placement] = []
+        for placement in self_input_spec.placements:
+            if placement.is_shard():
+                placement = cast(Shard, placement)
+                dim = placement.dim
+                if not dim in free_dims:
+                    self_input_tgt_placements.append(Replicate())
+            else:
+                self_input_tgt_placements.append(placement)
+
+        self_input_spec = self_input_tgt_placements
+        # last, create the output_spec from self_input_spec and indices_input_specs
+        output_placements = []
+
+    """
     indices_acceptable_shardings: list[Optional[Placement]] = [
         Replicate() if index_strategy is not None else None
         for index_strategy in indices_tuple_strategy.children
@@ -1008,6 +1134,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
         op_schema=op_schema,
         single_mesh_dim_strategies=[single_mesh_acceptable_input_shardings],
     )
+    """
 
 
 @register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))

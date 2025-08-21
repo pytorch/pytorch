@@ -1780,9 +1780,9 @@ def _fused_rms_norm_backward(
 
     N = prod(inner_dims)  # type: ignore[arg-type]
     M = prod(outer_dims)  # type: ignore[arg-type]
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
+    if guard_or_false(M == 0) or guard_or_false(N == 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
@@ -3987,9 +3987,9 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(x.numel() == 0):
+    if guard_or_false(x.numel() == 0):
         meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
         return x.new_full(meta_result.shape, fill)
 
@@ -4461,7 +4461,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
@@ -4469,7 +4469,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_size_oblivious(t1.numel() == 0):
+    if guard_or_false(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4481,7 +4481,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])
     return all(
-        guard_size_oblivious(size == 1) or left == right
+        guard_or_false(size == 1) or guard_or_false(left == right)
         for left, right, size in zip(
             t1_stride, list(reversed(expected_stride)), t1_shape
         )

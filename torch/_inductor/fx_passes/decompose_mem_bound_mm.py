@@ -70,9 +70,13 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
-        if (mat1.shape[1] < max_other_dimension_decomposition) + (
-            mat1.shape[2] < max_other_dimension_decomposition
-        ) + (mat2.shape[2] < max_other_dimension_decomposition) < 2:
+        # use bool() to deal with BooleanAtom type
+        if (
+            bool(mat1.shape[1] < max_other_dimension_decomposition)
+            + bool(mat1.shape[2] < max_other_dimension_decomposition)
+            + bool(mat2.shape[2] < max_other_dimension_decomposition)
+            < 2
+        ):
             return False
         return True
     elif check_device(mat1, mat2, device="cpu"):

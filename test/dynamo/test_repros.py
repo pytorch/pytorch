@@ -42,6 +42,7 @@ import torch.distributed as dist
 import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
+from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     CompileCounter,
@@ -65,6 +66,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
 )
@@ -7139,6 +7141,30 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
         self.assertEqual(out_ref, out_res)
 
+    def test_nn_parameter_ctor_graph_breaks(self):
+        def fn():
+            param = torch.nn.Parameter(torch.ones(10))
+            return param * 2
+
+        self.maxDiff = None
+        eb = ExplainWithBackend("eager")
+        optimized_fn = torch.compile(fn, backend=eb)
+        _ = optimized_fn()
+        explain_output = eb.output()
+        self.assertEqual(explain_output.graph_break_count, 1)
+        expected_msg = (
+            "Attempted to use `torch.nn.Parameter()` constructor with Dynamo\n"
+            "  Explanation: Dynamo does not support this\n"
+            "  Hint: Try to construct `torch.nn.Parameter()` outside the compiled region.\n"
+            "  Hint: If this is not possible, turn `graph_break_on_nn_param_ctor` off\n"
+            "  Hint: It may be possible to write Dynamo tracing rules for this code. "
+            "Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.\n\n"
+            "  Developer debug context: \n\n"
+            " For more details about this graph break, please visit: "
+            "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0264.html"
+        )
+        self.assertEqual(explain_output.break_reasons[0].reason, expected_msg)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -7380,6 +7406,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
     @requires_cuda
     def test_partitioner_saves_weights_for_bw(self):
@@ -7647,6 +7674,31 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out1 = model(input.clone())
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
+
+    @requires_cuda
+    def test_zero_dim_param_mixed_device_grad(self):
+        # cpu 0-dim params with cuda grads
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        model = RegressionModel()
+        model.forward = torch.compile(
+            model.forward, backend="aot_eager", fullgraph=True
+        )
+        inputs = torch.randn(4, 10).to("cuda")
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
 
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)

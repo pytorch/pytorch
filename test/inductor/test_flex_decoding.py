@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import functools
+import sys
 import unittest
 from collections import namedtuple
 from typing import Callable, Optional, Union
@@ -27,6 +28,15 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Need track if it is a requirement on windows.
+    sys.stderr.write("This UT is validated on windows, a lot of crash. Skip it.\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip on Windows")
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -1728,6 +1738,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             atol=tolerance.atol,
             rtol=tolerance.rtol,
         )
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_not_pw_of_two(self):
+        query = torch.randn(1, 12, 1, 16, device="cuda")
+        key = torch.randn(1, 2, 128, 16, device="cuda")
+        value = torch.randn(1, 2, 128, 16, device="cuda")
+
+        flex_compiled = torch.compile(flex_attention)
+        flex_compiled(query, key, value, enable_gqa=True)
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")

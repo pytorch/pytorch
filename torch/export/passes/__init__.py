@@ -52,19 +52,30 @@ def move_to_device_pass(
         if isinstance(v, torch.Tensor):
             ep._constants[k] = v.to(_get_new_device(v.device, location))
 
-    for node in ep.graph.nodes:
-        # move all the nodes kwargs with burnt-in device
-        if "device" in node.kwargs:
-            kwargs = node.kwargs.copy()
-            kwargs["device"] = _get_new_device(kwargs["device"], location)
-            node.kwargs = kwargs
-        # move all the tensor metadata
-        node.meta["val"] = pytree.tree_map(
-            lambda v: v.to(_get_new_device(v.device, location))
-            if isinstance(v, torch.Tensor)
-            else v,
-            node.meta.get("val"),
-        )
+    for m in ep.graph_module.modules():
+        if isinstance(m, torch.fx.GraphModule):
+            for node in m.graph.nodes:
+                # move all the nodes kwargs with burnt-in device
+                if "device" in node.kwargs:
+                    kwargs = node.kwargs.copy()
+                    kwargs["device"] = _get_new_device(kwargs["device"], location)
+                    node.kwargs = kwargs
+
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.aten.to.device
+                ):
+                    args = list(node.args)
+                    args[1] = _get_new_device(args[1], location)
+                    node.args = tuple(args)
+
+                # move all the tensor metadata
+                node.meta["val"] = pytree.tree_map(
+                    lambda v: v.to(_get_new_device(v.device, location))
+                    if isinstance(v, torch.Tensor)
+                    else v,
+                    node.meta.get("val"),
+                )
 
     ep.validate()
     return ep
