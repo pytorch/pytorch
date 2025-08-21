@@ -1382,7 +1382,7 @@ def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     q_group_size = kwargs.get("q_group_size", None)
     assert q_group_size is not None
     if (
-        q_group_size < 32
+        q_group_size not in [32, 64, 128]
         or k % q_group_size != 0
         or config.register_blocking.block_k > q_group_size
     ):
@@ -1528,9 +1528,7 @@ inline void {{kernel_name}}_kernel(
   auto load_scale_and_zeros = [&](int i, int _kb) {
     // load 2x bfloat16 vector
     __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
-    if (_kb + PREFETCH_SIZE_KB < KB) {
-      _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
-    }
+    _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
 
     // convert to 2x f32 vector
     __m512 a, b;
@@ -1564,9 +1562,7 @@ inline void {{kernel_name}}_kernel(
 
     if constexpr (col == 0) {
       float aa = static_cast<float>(A[row * lda + k]);
-      if (k + PREFETCH_SIZE_K < K) {
-        _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
-      }
+      _mm_prefetch(A + row * lda + k + PREFETCH_SIZE_K, _MM_HINT_T0);
       va = _mm512_set1_ps(aa);
     }
 
@@ -1576,9 +1572,7 @@ inline void {{kernel_name}}_kernel(
         // to reduce de-quantize overhead.
         if constexpr (col == 0) {
           __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
-          if (k + PREFETCH_SIZE_K < K) {
-            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
-          }
+          _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
 
           __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
           vb[0] = _mm512_permutexvar_ps(b32, lut);
@@ -1670,7 +1664,8 @@ class CppMicroGemmWoQInt4Amx(CppMicroGemmAMX):
 
     TEMPLATE_ENTRY = r"""
 inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_size) {
-  return (k_start + index) % group_size == 0;
+  // check if (k_start + index) % group_size == 0, assuming group_size = 32/64/128
+  return ((k_start + index) & (group_size - 1)) == 0;
 }
 
 {{declare_kernel}} {
@@ -1754,9 +1749,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     auto load_scale_and_zeros = [&](int i, int _kb) {
         // load 2x bfloat16 vector
         __m512i t = _mm512_loadu_si512((__m512i*)(ScaleAndZeros + _kb * lds + 32 * i));
-        if (_kb + PREFETCH_SIZE_KB < KB) {
-            _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
-        }
+        _mm_prefetch(ScaleAndZeros + (_kb + PREFETCH_SIZE_KB) * lds + 32 * i, _MM_HINT_T0);
 
         // convert to 2x f32 vector
         __m512 a, b;
@@ -1785,11 +1778,9 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
                 c10::ForcedUnroll<COLS>{}(load_scale_and_zeros, kb++);
             }
 
-            // load 256 bits = 64 elements in int4
-            if (k + PREFETCH_SIZE_K < K) {
-                _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
-            }
+            _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
 
+            // load 256 bits = 64 elements in int4
             __m128i b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + k * ldb_int4));
             b32[0] = _mm512_cvtepu8_epi32(b4);
             b32[1] = _mm512_srli_epi32(b32[0], 4);
@@ -1798,8 +1789,8 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             vb[1] = _mm512_permutexvar_ps(b32[1], lut);
             vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
 
-            b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + (k + 1) * ldb_int4));
-            b32[0 + COLS] = _mm512_cvtepu8_epi32(b4);
+            __m128i b4_2 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + (k + 1) * ldb_int4));
+            b32[0 + COLS] = _mm512_cvtepu8_epi32(b4_2);
             b32[1 + COLS] = _mm512_srli_epi32(b32[0 + COLS], 4);
             vb[0 + COLS] = _mm512_permutexvar_ps(b32[0 + COLS] , lut);
             vb[0 + COLS] = _mm512_fmadd_ps(vb[0 + COLS], scale[0], zero[0]);
