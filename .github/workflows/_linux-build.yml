@@ -128,7 +128,7 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
-    timeout-minutes: 240
+    timeout-minutes: 480
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
