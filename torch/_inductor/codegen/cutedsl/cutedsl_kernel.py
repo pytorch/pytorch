@@ -306,9 +306,10 @@ class CuteDSLTemplateKernel(Kernel):
                     )
 
                 if isinstance(subgraph.data, InputBuffer):
+                    # grad_score_mod can be InputBuffers
                     out = subgraph.data.make_loader()(())
                 else:
-                    # ComputedBuffer: Inline a pointwise lowering into the template
+                    # Inline a pointwise lowering into the template
                     out = subgraph.data.inner_fn(())
 
             if output_name is not None:
