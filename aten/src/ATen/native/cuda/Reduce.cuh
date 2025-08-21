@@ -796,10 +796,22 @@ struct ReduceOp {
     bool should_store = config.should_store(output_idx);
     if (should_store) {
       index_t offset = config.staging_memory_offset(blockIdx.y);
+#ifndef USE_ROCM
       reduce_buffer[offset] = value;
+#else
+      int constexpr num_int_per_val = sizeof(value)/sizeof(int); // TODO: Handle smaller that int values
+      union pnr { std::array<arg_t, output_vec_size> v; int i[num_int_per_val]; } _pnr = {.v = value };
+      for (int i=0; i<num_int_per_val; i++)
+        __builtin_nontemporal_store(0, reinterpret_cast<int *>(&reduce_buffer[offset])+i);
+      for (int i=0; i<num_int_per_val; i++)
+        _pnr.i[i] = atomicAdd(reinterpret_cast<int *>(&reduce_buffer[offset])+i, _pnr.i[i]);
+      value = _pnr.v;
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence(); // make sure writes are globally visible
+#endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
