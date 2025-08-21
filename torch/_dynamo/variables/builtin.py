@@ -308,6 +308,7 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
+            complex,
             divmod,
             float,
             getattr,
@@ -1477,21 +1478,6 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
-
-    def call_complex(self, tx: "InstructionTranslator", *args, **kwargs):
-        if self.constant_args(*args, **kwargs):
-            try:
-                c = complex(
-                    *(arg.as_python_constant() for arg in args),
-                    **{k: kwargs[k].as_python_constant() for k in kwargs},
-                )
-            except (TypeError, ValueError) as exc:
-                raise_observed_exception(
-                    type(exc),
-                    tx,
-                    args=list(map(ConstantVariable.create, exc.args)),
-                )
-            return ConstantVariable(c)
 
     def call_bool(self, tx: "InstructionTranslator", arg):
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
