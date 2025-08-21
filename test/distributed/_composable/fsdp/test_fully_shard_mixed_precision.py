@@ -13,7 +13,7 @@ from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
-from torch.distributed.tensor import Shard
+from torch.distributed.tensor import DeviceMesh, init_device_mesh, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -47,6 +47,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         use_shard_placement_fn,
     ):
         torch.manual_seed(42)
+
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
@@ -65,11 +66,17 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             param_dtype=param_dtype, reduce_dtype=reduce_dtype
         )
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
+        device = torch._C._get_accelerator()
+        device_mesh = init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )
+
         fully_shard_fn = functools.partial(
             fully_shard,
             reshard_after_forward=reshard_after_forward,
             mp_policy=mp_policy,
             shard_placement_fn=shard_placement_fn,
+            mesh=device_mesh,
         )
         for mlp in model:
             fully_shard_fn(mlp)
@@ -123,8 +130,22 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
-            self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
+        default_pg = dist.distributed_c10d._get_default_group()
+        device = torch._C._get_accelerator()
+        device_mesh = init_device_mesh(
+            device.type,
+            mesh_shape=(self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        # Extract the all_reduce_group from the device_mesh
+        all_reduce_group = device_mesh.get_group("replicate")
+        reduce_scatter_group = device_mesh.get_group("shard")
+        predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op = (
+            _get_gradient_divide_factors(
+                reduce_scatter_group,
+                all_reduce_group=all_reduce_group,
+                reduce_dtype=param_dtype,
+            )
         )
 
         torch.manual_seed(42 + self.rank + 1)
@@ -140,16 +161,23 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_loss = ref_model_bf16(inp.to(param_dtype)).sum()
             ref_loss.backward()
             for param in ref_model_bf16.parameters():
-                # Use reduce-scatter -> all-gather as all-reduce because for
-                # world size >=4, NCCL all-reduce shows numeric differences
-                # compared with NCCL reduce-scatter
+
                 if predivide_factor is not None and predivide_factor > 1:
                     param.grad.div_(predivide_factor)
                 elif predivide_factor is None:
                     param.grad.div_(self.world_size)
-                output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
-                dist.reduce_scatter_tensor(output, param.grad)
-                dist.all_gather_into_tensor(param.grad, output)
+
+                shard_group_size = reduce_scatter_group.size()
+                output = torch.zeros_like(torch.chunk(param.grad, shard_group_size)[0])
+
+                dist.reduce_scatter_tensor(
+                    output, param.grad, op=reduce_scatter_op, group=reduce_scatter_group
+                )
+                dist.all_reduce(output, op=all_reduce_op, group=all_reduce_group)
+                dist.all_gather_into_tensor(
+                    param.grad, output, group=reduce_scatter_group
+                )
+
                 if postdivide_factor is not None and postdivide_factor > 1:
                     param.grad.div_(postdivide_factor)
             for param_fp32, param_bf16 in zip(
@@ -284,7 +312,9 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 )  # bf16 reduction
                 param.grad = funcol.all_gather_tensor(
                     sharded_grad, gather_dim=0, group=group
-                ).to(param.dtype)  # upcast to fp32
+                ).to(
+                    param.dtype
+                )  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
