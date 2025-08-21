@@ -10,7 +10,7 @@
 namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor>
-lab_attn_bwd(const Tensor& Q, const Tensor& K, const Tensor& V, const Tensor& a, const Tensor& grad_o, const Tensor&) {
+lab_attn_bwd(const Tensor& Q, const Tensor& K, const Tensor& V, const Tensor& a, const Tensor& grad_o) {
   auto grad_v = a.t().matmul(grad_o);
   auto grad_a = grad_o.matmul(V.t());
 

@@ -3247,6 +3247,6 @@
   result: norm_jvp(self_p, self_t, ord, result[i])
 
 # Autograd lab
-# - name: lab_attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
-#   output_differentiability: [True, False]
-#   Q, K, V: lab_attn_bwd(Q, K, V, result1, grads[0], grads[1])
+- name: lab_attn(Tensor Q, Tensor K, Tensor V) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  Q, K, V: lab_attn_bwd(Q, K, V, result1, grad)
