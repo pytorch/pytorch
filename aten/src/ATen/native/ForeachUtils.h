@@ -22,7 +22,7 @@ namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
 inline bool has_integral_tensor(TensorList tensors, const bool includeBool) {
   return std::any_of(
-      tensors.begin(), tensors.end(), [&includeBool](const auto& t) {
+      tensors.begin(), tensors.end(), [includeBool](const auto& t) {
         return at::isIntegralType(t.scalar_type(), includeBool);
       });
 }
