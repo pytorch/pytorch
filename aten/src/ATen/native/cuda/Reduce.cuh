@@ -798,8 +798,12 @@ struct ReduceOp {
       index_t offset = config.staging_memory_offset(blockIdx.y);
 #ifndef USE_ROCM
       reduce_buffer[offset] = value;
-#else
-      int constexpr num_int_per_val = sizeof(value)/sizeof(int); // TODO: Handle smaller that int values
+#else // [CMTSTRS]
+      // In architectures with split caches, global fences are costly.
+      // Here we preempt need for fences by committing stores to global memory.
+      // We do so by converting the stores to atomics with a return.
+      int constexpr num_int_per_val = sizeof(value)/sizeof(int);
+      CUDA_KERNEL_ASSERT(num_int_per_val>=1);
       union pnr { std::array<arg_t, output_vec_size> v; int i[num_int_per_val]; } _pnr = {.v = value };
       for (int i=0; i<num_int_per_val; i++)
         __builtin_nontemporal_store(0, reinterpret_cast<int *>(&reduce_buffer[offset])+i);
@@ -809,14 +813,16 @@ struct ReduceOp {
 #endif
     }
 
-#ifndef USE_ROCM
+#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS] 
     __threadfence(); // make sure writes are globally visible
 #endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+#ifndef USE_ROCM // skip fence if store are committed [CMTSTRS] 
       __threadfence(); // complete the acquire pattern after atomic
+#endif
       for (auto &v : value) {
         v = ident;
       }
