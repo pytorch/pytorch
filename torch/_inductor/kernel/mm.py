@@ -927,45 +927,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
+    aten_layout = layout
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
         from torch._inductor.ir import FixedLayout, FlexibleLayout
-
         if isinstance(layout, FixedLayout):
-            layout = FlexibleLayout(
+            aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
-        choices = (
-            [
-                aten_addmm.bind(
-                    # TODO(coconutruben): replace with kernel_inputs.nodes()
-                    # once that supports the unexpanded nodes as well
-                    [inp, mat1, mat2],
-                    layout,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
-        )
-        return autotune_select_algorithm(
-            # TODO(coconutruben): replace with kernel_inputs.nodes()
-            # once that supports the unexpanded nodes as well
-            "addmm",
-            choices,
-            [inp, mat1, mat2],
-            layout,
-        )
 
     choices = (
         [
             aten_addmm.bind(
                 kernel_inputs.nodes(),
-                layout,
+                aten_layout,
                 alpha=alpha,
                 beta=beta,
             )
