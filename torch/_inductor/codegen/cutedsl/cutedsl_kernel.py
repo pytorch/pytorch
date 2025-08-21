@@ -290,7 +290,6 @@ class CuteDSLTemplateKernel(Kernel):
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
 
-        # Create isolated body context to prevent modifications from interfering with each other
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapperCuteDSL(
@@ -306,25 +305,21 @@ class CuteDSLTemplateKernel(Kernel):
                         "Scatter graphs are not supported for CuteDSL"
                     )
 
-                # Different buffer types require different code generation approaches
                 if isinstance(subgraph.data, InputBuffer):
-                    # InputBuffer: use make_loader to create accessor function
                     out = subgraph.data.make_loader()(())
                 else:
-                    # ComputedBuffer: directly call the inner compute function
+                    # ComputedBuffer: Inline a pointwise lowering into the template
                     out = subgraph.data.inner_fn(())
 
-            # Two mutually exclusive output modes
             if output_name is not None:
-                # Named output: assign result to a variable
                 assert out is not None, (
                     f"Expected computation result for named output {output_name}"
                 )
                 self.body.writeline(f"{output_name} = {out.value}")
             else:
                 # Side-effect only: no output assignment (currently only for scatter operations)
-                assert out is None, (
-                    "Expected no result for side-effect-only modification"
+                raise NotImplementedError(
+                    "Side-effect only modifications not yet supported for CuteDSL"
                 )
 
             return self.body.getvalue()
