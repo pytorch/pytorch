@@ -3999,8 +3999,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         looped_red = V.kernel.features.is_reduction() and not self.persistent_reduction
         tiling_scores = self.tiling_scores
         two_d_red = (
-            len(self.tiling) == 2 and
-            tiling_scores is not None
+            len(self.tiling) == 2
+            and tiling_scores is not None
             and "x" in self.tiling_scores
         )
         if looped_red and two_d_red:
@@ -4018,8 +4018,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # check that we save significant memory by doing persistent
             saved_bytes_ratio = V.graph.sizevars.size_hint(
                 looped_mem, fallback=config.unbacked_symint_fallback
-            ) / V.graph.sizevars.size_hint(
-                persistent_mem, fallback=config.unbacked_symint_fallback
+            ) / max(
+                V.graph.sizevars.size_hint(
+                    persistent_mem, fallback=config.unbacked_symint_fallback
+                ),
+                1,
             )
 
             # TODO - rnumel should be reasonably close to power of 2
@@ -4035,7 +4038,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 and mem_ops_per_thread <= 10
             ):
-                # pass
                 inductor_meta["add_persistent_rblock"] = True
 
         if self.tiling_scores:

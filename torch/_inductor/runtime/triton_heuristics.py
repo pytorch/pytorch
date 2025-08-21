@@ -1010,7 +1010,7 @@ class CachingAutotuner(KernelInterface):
             launcher.n_spills,
             launcher.shared,
         )
-            
+
         if self.save_cache_hook:
             self.save_cache_hook(
                 launcher.config,
@@ -2279,7 +2279,12 @@ def triton_config_reduction(
     cfg = _get_config({"x": x, **rnumels})
     check_max_block(cfg)
     check_config(cfg, xnumel=size_hints["x"])
-    return InductorConfig(cfg, num_warps=num_warps, num_stages=num_stages, dynamic_scale_rblock=dynamic_scale_rblock)
+    return InductorConfig(
+        cfg,
+        num_warps=num_warps,
+        num_stages=num_stages,
+        dynamic_scale_rblock=dynamic_scale_rblock,
+    )
 
 
 def _get_config(numels: dict[str, int]) -> dict[str, int]:
@@ -2477,11 +2482,10 @@ def _reduction_configs(
 
     register_intensive = False
     MAX_R0_BLOCK = 2048
-    loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
-    if (
-        size_hints["x"] >= 1024
-        and loads_and_red >= 10
-    ):
+    loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_reduction", 0
+    )
+    if size_hints["x"] >= 1024 and loads_and_red >= 10:
         # A heuristics to reduce R0_BLOCK if a kernel potentially need many registers.
         # Consider load and reduction since load need move data into registers and
         # reduction needs an accumulator.
@@ -2497,7 +2501,14 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    def make_config(x, r, num_warps=None, num_stages=1, register_intensive=False, dynamic_scale_rblock=True):
+    def make_config(
+        x,
+        r,
+        num_warps=None,
+        num_stages=1,
+        register_intensive=False,
+        dynamic_scale_rblock=True,
+    ):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
             assert "tiling_scores" in inductor_meta
@@ -2537,8 +2548,13 @@ def _reduction_configs(
     configs = []
 
     if inductor_meta.get("add_persistent_rblock") and loads_and_red <= 8:
-        xnumel = max(2048 // rnumel, 1)
-        c = make_config(xnumel, rnumel, register_intensive=register_intensive, dynamic_scale_rblock=False)
+        xnumel = max(4096 // rnumel, 1)
+        c = make_config(
+            xnumel,
+            rnumel,
+            register_intensive=register_intensive,
+            dynamic_scale_rblock=False,
+        )
         configs.append(c)
 
     # For 3d tiling, default to more autotuning initially
@@ -2556,7 +2572,7 @@ def _reduction_configs(
         return configs + [tiny_config]
     if disable_pointwise_autotuning(inductor_meta):
         return configs + [make_config(32, 128)]
-    
+
     return configs + [
         contiguous_config,
         outer_config,
