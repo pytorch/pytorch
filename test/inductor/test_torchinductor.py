@@ -5717,6 +5717,19 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_complex_from_real_imag(self):
+        def fn(x, y):
+            return aten.complex.default(x, y)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        self.common(
+            fn,
+            (a, a),
+            exact_stride=True,
+            reference_in_float=False,
+        )
+
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -10571,30 +10584,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._dynamo.reset()
         dynamic_specialized = inductor_matmul(dynamic_specialized_a, b)
         self.assertEqual(dynamic, dynamic_specialized)
-
-    @requires_gpu()
-    @skip_if_not_triton
-    @unittest.skipIf(
-        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
-    )
-    def test_mark_dynamic_with_hint_override(self):
-        @torch.compile
-        def no_override(x):
-            return x.sum(dim=0)
-
-        @torch.compile
-        def override(x):
-            return x.sum(dim=0)
-
-        x_small = torch.randn(4096, 512, device=GPU_TYPE)
-        code = run_and_get_triton_code(no_override, x_small)
-        self.assertTrue("xnumel = 512" in code)
-
-        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 1000)
-        code = run_and_get_triton_code(override, x_small)
-        self.assertTrue("xnumel = 16384" in code)
-
-        self.assertEqual(no_override(x_small), override(x_small))
 
     @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):

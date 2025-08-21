@@ -164,7 +164,7 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-    if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
+    if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
             query,
             key,
