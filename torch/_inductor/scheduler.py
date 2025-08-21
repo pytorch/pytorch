@@ -2160,6 +2160,12 @@ class Scheduler:
                 OrderedSet(V.graph.get_output_names()),
             )
         if config.reorder_for_compute_comm_overlap:
+            if not config.reorder_for_peak_memory:
+                from .memory import assign_memory_planning_info_for_scheduler_buffers
+
+                assign_memory_planning_info_for_scheduler_buffers(
+                    self.nodes, self.name_to_buf
+                )
             from torch._logging import trace_structured
 
             trace_structured(
@@ -2556,7 +2562,7 @@ class Scheduler:
             )
 
         graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
-        buf_info_list, _ = compute_memory_timeline(
+        buf_info_list, _, _ = compute_memory_timeline(
             self.nodes,
             name_to_freeable_input_buf,
             graph_outputs,
