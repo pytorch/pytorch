@@ -577,11 +577,10 @@ def enable_zendnn_optimization() -> bool:
         return False
 
     # Use if explicitly enabled or auto-enabled on AMD CPU with AVX512
-    return (
-        config.enable_zendnn or
-        (config.enable_zendnn is None and
-         torch._C._cpu._is_amd_cpu() and
-         torch._C._cpu._is_avx512_supported())
+    return config.enable_zendnn or (
+        config.enable_zendnn is None
+        and torch._C._cpu._is_amd_cpu()
+        and torch._C._cpu._is_avx512_supported()
     )
 
 

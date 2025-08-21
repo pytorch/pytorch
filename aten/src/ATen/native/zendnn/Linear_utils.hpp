@@ -1,6 +1,11 @@
 #pragma once
 #include <ATen/native/zendnn/ZenDNN_utils.hpp>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/empty.h>
+#endif
 #include <c10/util/Logging.h>
 #include <cstdint>
 #include <functional> // For std::reference_wrapper, std::ref, std::cref
