@@ -339,25 +339,24 @@ class CuteDSLOpOverrides(OpOverrides):
     # Comparison operations
     @staticmethod
     def eq(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        # TODO: Why is the dsl behvaing  inconsistently...
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} == {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.eq({a}, {b})")
 
     @staticmethod
     def ne(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} != {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.ne({a}, {b})")
 
     @staticmethod
     def lt(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} < {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.lt({a}, {b})")
 
     @staticmethod
     def le(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} <= {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.le({a}, {b})")
 
     @staticmethod
     def gt(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} > {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.gt({a}, {b})")
 
     @staticmethod
     def ge(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} >= {b})")
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "operator.ge({a}, {b})")
