@@ -822,13 +822,20 @@ struct ReduceOp {
       } else {
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
-        for (; input_offset < config.ctas_per_output; input_offset += step) {
-          index_t idx = config.staging_memory_offset(input_offset);
-          arg_vec_t next = reduce_buffer[idx];
+        #define UNRL 4
+        for (; input_offset < config.ctas_per_output; input_offset += step*UNRL) {
+         arg_vec_t next[UNRL];
+         #pragma unroll
+         for (int u = 0; (u < UNRL) && (input_offset + u*step < config.ctas_per_output); u++) {
+          index_t idx = config.staging_memory_offset(input_offset + u*step);
+          next[u] = reduce_buffer[idx];
+	 }
+         for (int u = 0; (u < UNRL) && (input_offset + u*step < config.ctas_per_output); u++) {
           #pragma unroll
           for (int i = 0; i < output_vec_size; i++) {
-            value[i] = ops.combine(value[i], next[i]);
+            value[i] = ops.combine(value[i], next[u][i]);
           }
+         }
         }
       }
       value = block_y_reduce<output_vec_size>(value, shared_memory);
