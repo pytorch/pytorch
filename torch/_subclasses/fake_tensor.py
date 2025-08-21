@@ -15,6 +15,7 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
@@ -145,6 +146,17 @@ fake_tensor_tls = FakeTensorTLS()
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
     return dict.fromkeys(items, True)
+
+
+# list of ops which can have args(tensor/tensorList) in mixed device
+_MIXED_DEVICE_FNS = ordered_set(
+    aten._foreach_copy.default,
+)
+
+# list of ops not using zero dim cpu tensor logic to align with the eager mode.
+_BYPASS_ZERO_DIM_CPU_TENSOR_CHECK_FNS = ordered_set(
+    aten.nextafter.default,
+)
 
 
 @contextlib.contextmanager
@@ -582,23 +594,26 @@ class SymNumberMemoDescriptor:
     def __set_name__(self, owner: str, name: str) -> None:
         self._name = name
 
-    def _memo(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo(self) -> str:
         return f"_{self._name}"
 
-    def _memo_vc(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo_vc(self) -> str:
         return f"_{self._name}_vc"
 
     # When we retrace, we need to invalidate all the memos so that we can
     # accurately identify the first time unbacked SymInts are allocated.
     # This is only relevant for inputs; for intermediates, they will get fresh
     # fake tensors so you won't have a memo anyway
-    def _memo_epoch(self, obj: FakeTensor) -> str:
+    @cached_property
+    def _memo_epoch(self) -> str:
         return f"_{self._name}_epoch"
 
     def __get__(
         self, obj: FakeTensor, objtype: Optional[type[FakeTensor]] = None
     ) -> Optional[Union[torch.SymInt, torch.SymFloat]]:
-        if (r := getattr(obj, self._memo(obj))) is None:
+        if (r := getattr(obj, self._memo)) is None:
             return None
 
         # If backed, it's ok to preserve memo since we know it won't renumber.
@@ -608,12 +623,12 @@ class SymNumberMemoDescriptor:
         # Version counter based tracking isn't 100% sound but it's close
         # enough
         if (
-            not self._is_nested_int and getattr(obj, self._memo_vc(obj)) != obj._version
+            not self._is_nested_int and getattr(obj, self._memo_vc) != obj._version
         ) or (
             not self._is_nested_int
-            and getattr(obj, self._memo_epoch(obj)) != obj.fake_mode.epoch
+            and getattr(obj, self._memo_epoch) != obj.fake_mode.epoch
         ):
-            setattr(obj, self._memo(obj), None)
+            setattr(obj, self._memo, None)
             return None
         return r
 
@@ -621,14 +636,14 @@ class SymNumberMemoDescriptor:
         self, obj: FakeTensor, value: Optional[Union[torch.SymInt, torch.SymFloat]]
     ) -> None:
         if value is None:
-            setattr(obj, self._memo(obj), None)
-            setattr(obj, self._memo_vc(obj), None)
-            setattr(obj, self._memo_epoch(obj), None)
+            setattr(obj, self._memo, None)
+            setattr(obj, self._memo_vc, None)
+            setattr(obj, self._memo_epoch, None)
         elif not obj.is_inference() or self._is_nested_int:
-            setattr(obj, self._memo(obj), value)
+            setattr(obj, self._memo, value)
             if not self._is_nested_int:
-                setattr(obj, self._memo_vc(obj), obj._version)
-            setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
+                setattr(obj, self._memo_vc, obj._version)
+            setattr(obj, self._memo_epoch, obj.fake_mode.epoch)
 
 
 class FakeTensor(Tensor):
@@ -740,12 +755,12 @@ class FakeTensor(Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize device.
-        if device.type in ["cuda", "xpu"]:
+        if device.type in {"cuda", "xpu"}:
             init_gpu_context(device)
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
+            in {"cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()}
             and device.index is None
         ):
             if device.type != "mps" and getattr(torch, device.type).is_initialized():
@@ -884,16 +899,6 @@ class FakeTensor(Tensor):
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
-        # list of ops which can have args(tensor/tensorList) in mixed device
-        mixed_device_fns = ordered_set(
-            aten._foreach_copy.default,
-        )
-
-        # list of ops not using zero dim cpu tensor logic to align with the eager mode.
-        bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
-            aten.nextafter.default,
-        )
-
         def check_cpu_device(device: torch.device) -> bool:
             return device.type == "cpu"
 
@@ -918,7 +923,7 @@ class FakeTensor(Tensor):
                 return
 
             is_bypass_zero_dim_cpu_tensor_check_op = (
-                func in bypass_zero_dim_cpu_tensor_check_ops
+                func in _BYPASS_ZERO_DIM_CPU_TENSOR_CHECK_FNS
             )
 
             # mismatching devices !
@@ -936,7 +941,7 @@ class FakeTensor(Tensor):
             # on different devices for ex. _foreach_copy, and one of the
             # device must be cpu in this case we will return from here without
             # throwing an error
-            if func in mixed_device_fns:
+            if func in _MIXED_DEVICE_FNS:
                 if any(map(check_cpu_device, (common_device, t.device))):
                     return
 
@@ -1343,7 +1348,7 @@ class FakeTensorMode(TorchDispatchMode):
     # - We change the torch.tensor ctor contract to never materialize
     #   tensors on device
     #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
-    @property
+    @cached_property
     def avoid_device_init(self) -> bool:
         if torch.xpu._is_compiled():
             assert not torch.cuda._is_compiled()
@@ -1380,8 +1385,6 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self) -> Self:
-        import torch.nested._internal.nested_tensor
-
         prev_only_lift_cpu_tensors = None
         if self.avoid_device_init:
             # See NOTE: [torch.tensor, lift_fresh, and device movement]

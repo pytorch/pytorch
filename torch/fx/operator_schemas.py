@@ -405,15 +405,19 @@ def normalize_function(
     else:
         assert callable(target)
         torch_op_schemas = get_signature_for_torch_op(target)
-        matched_schemas = []
+        matched_schemas: list[tuple[inspect.Signature, inspect.BoundArguments]] = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    candidate_signature.bind(*args, **kwargs)
-                    matched_schemas.append(candidate_signature)
+                    assert isinstance(candidate_signature, inspect.Signature), type(
+                        candidate_signature
+                    )
+                    matched_schemas.append(
+                        (candidate_signature, candidate_signature.bind(*args, **kwargs))
+                    )
                 except TypeError:
                     continue
 
@@ -422,14 +426,19 @@ def normalize_function(
                 pass
             elif len(matched_schemas) == 1:
                 # Matched exactly one schema, unambiguous
+                sig, bound_args = matched_schemas[0]
                 new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
-                    matched_schemas[0], args, kwargs, normalize_to_only_use_kwargs
+                    sig,
+                    args,
+                    kwargs,
+                    normalize_to_only_use_kwargs,
+                    bound_args=bound_args,
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
                     arg_types = arg_types if arg_types else cast(tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
-                    for candidate_signature in torch_op_schemas:
+                    for candidate_signature, bound_args in matched_schemas:
                         sig_matches = True
                         try:
                             bound_types = candidate_signature.bind(
@@ -442,6 +451,7 @@ def normalize_function(
                                 )
                         except TypeError:
                             sig_matches = False
+
                         if sig_matches:
                             new_args_and_kwargs = (
                                 _args_kwargs_to_normalized_args_kwargs(
@@ -449,6 +459,7 @@ def normalize_function(
                                     args,
                                     kwargs,
                                     normalize_to_only_use_kwargs,
+                                    bound_args=bound_args,
                                 )
                             )
                             break
@@ -519,6 +530,8 @@ def _args_kwargs_to_normalized_args_kwargs(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
+    *,
+    bound_args: Optional[inspect.BoundArguments] = None,
 ) -> Optional[ArgsKwargsPair]:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
@@ -552,7 +565,8 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = sig.bind(*args, **kwargs)
+    if not bound_args:
+        bound_args = sig.bind(*args, **kwargs)
     bound_args.apply_defaults()
 
     new_kwargs: dict[str, Any] = {}
