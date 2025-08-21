@@ -15,7 +15,12 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
 from ..kernel_inputs import KernelInputs, MMKernelInputs
-from ..utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
+from ..utils import (
+    get_backend_num_stages,
+    get_num_sms,
+    get_tma_workspace_arg,
+    TMA_DESCRIPTOR_SIZE,
+)
 from ..virtualized import V
 from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
@@ -25,6 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from triton import Config as TritonConfig
+
+    from ..ir import Layout
 
 
 # Gemm Configs
@@ -1397,6 +1404,19 @@ class TMAConfigMixin(MMTemplateConfigMixin):
         configs = [c for c in configs if c.num_warps != 2]
         return super()._filter_configs(configs)
 
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs["workspace_arg"] = get_tma_workspace_arg(
+            num_tma_descriptors=2,
+            device=kernel_inputs.device(),
+        )
+        return kwargs
+
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
@@ -1510,6 +1530,21 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
         """
         configs = [c for c in configs if c.num_warps != 2]
         return super()._filter_configs(configs)
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        # NOTE: reimplementation of the above, if we end up with more TMA-specific kwargs
+        # consider making a common base
+        kwargs = super().get_extra_kwargs(kernel_inputs, layout, op_name)
+        kwargs["workspace_arg"] = get_tma_workspace_arg(
+            num_tma_descriptors=2,
+            device=kernel_inputs.device(),
+        )
+        return kwargs
 
     def get_template_configs(
         self,
