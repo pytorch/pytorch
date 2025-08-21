@@ -212,11 +212,11 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def maximum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.math.maximum({a}, {b})")
+        raise NotImplementedError("TODO: maximum is not supported yet for TensorSSA")
 
     @staticmethod
     def minimum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.math.minimum({a}, {b})")
+        raise NotImplementedError("TODO: minimum is not supported yet for TensorSSA")
 
     @staticmethod
     def where(
@@ -312,11 +312,6 @@ class CuteDSLOpOverrides(OpOverrides):
             )
 
         return f"{x}.to({cute_type})"
-
-    @staticmethod
-    def relu(x):
-        """ReLU activation function."""
-        return CuteDSLOpOverrides.maximum(x, "0.0")
 
     @staticmethod
     def tanh(x0: CuteDSLArg) -> CuteDSLArg:
