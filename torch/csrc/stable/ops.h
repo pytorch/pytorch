@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 using torch::stable::Tensor;
 
@@ -51,6 +52,44 @@ inline Tensor narrow(Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return Tensor(ret0);
 }
 
+// We expect this to be a stable version of the new_empty op that takes in
+// only dtype information.
+inline Tensor new_empty(
+    const Tensor& self,
+    std::vector<int64_t> size,
+    std::optional<c10::ScalarType> dtype = std::nullopt) {
+  int32_t device_type;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
+
+  int32_t device_index;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_get_device_index(self.get(), &device_index));
+
+  int32_t target_dtype;
+  if (dtype.has_value()) {
+    target_dtype = to<int32_t>(from(dtype.value()));
+  } else {
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(self.get(), &target_dtype));
+  }
+
+  int32_t layout;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(self.get(), &layout));
+
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      &target_dtype,
+      &layout,
+      &device_type,
+      device_index,
+      nullptr, // pin_memory (nullptr for default)
+      &ret0));
+
+  return Tensor(ret0);
+}
+
 // We expect this to be the stable version of the pad.default op.
 // pad.default takes in a SymInt[] as the pad argument however pad is typed as
 // use std::vector<int64_t> because
@@ -66,6 +105,41 @@ inline Tensor pad(
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_pad(
       self.get(), pad.data(), pad.size(), mode.c_str(), &value, &ret0));
   return Tensor(ret0);
+}
+
+// We expect the following two functions to be stable versions of the
+// amax.default op with identical semantics to the existing amax.default op. If
+// `keepdim` is true, the result will have the same number of dimensions as
+// `self`, with the specified dimension having size 1. Otherwise, the result
+// will have one fewer dimension than `self`, with the specified dimension
+// removed.
+
+// This function is an overload to compute the maximum value along each slice of
+// `self` along a single dimension `dim`.
+inline Tensor amax(Tensor& self, int64_t dim, bool keepdim = false) {
+  AtenTensorHandle ret = nullptr;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_amax(self.get(), &dim, 1, keepdim, &ret));
+  return Tensor(ret);
+}
+
+// This function is an overload to compute the maximum value along each slice of
+// `self` reducing over all the dimensions in the vector `dims`. The
+// amax.default op takes in a SymInt[] as the dims argument, however dims is
+// typed as use std::vector<int64_t> here because (1) IntArrayRef is not yet
+// header-only (2) SymInt is not yet header-only
+inline Tensor amax(
+    Tensor& self,
+    std::vector<int64_t> dims,
+    bool keepdim = false) {
+  AtenTensorHandle ret = nullptr;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_amax(
+      self.get(),
+      dims.data(),
+      static_cast<int64_t>(dims.size()),
+      keepdim,
+      &ret));
+  return Tensor(ret);
 }
 
 // We expect this to be the stable version of the transpose op with identical
