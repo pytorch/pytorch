@@ -192,7 +192,7 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
                 '$ORIGIN/../../nvidia/cufile/lib'
             )
         fi
-        
+
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
