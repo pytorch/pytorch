@@ -819,7 +819,9 @@ def _are_we_tracing() -> bool:
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
-    if torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.PythonDispatcher):
+    if torch._C._dispatch_tls_is_dispatch_key_included(
+        torch._C.DispatchKey.PythonDispatcher
+    ):
         return True
     if torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace:
         return True
