@@ -43,6 +43,11 @@ on:
         required: false
         type: boolean
         default: false
+      freezing:
+        description: Run freezing?
+        required: false
+        type: boolean
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -75,7 +80,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11-build
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
       test-matrix: |
         { include: [
@@ -101,8 +106,8 @@ jobs:
     needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
       docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -117,10 +122,9 @@ jobs:
     name: linux-jammy-zen-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-zen-cpu-py3_9-gcc11-inductor-build
-    if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}
+      build-environment: linux-jammy-zen-py3.9-gcc11-build
+      dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
       docker-image: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-zen-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       timeout-minutes: 720
