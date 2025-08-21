@@ -52,13 +52,13 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
         stream=stream
     )
 
-{{def_kernel("input_a", "input_b", "output_c")}}
+{{def_kernel("input_a", "input_b")}}
     cute_a = from_dlpack(input_a)
     cute_b = from_dlpack(input_b)
-    cute_c = from_dlpack(output_c)
+    cute_c = from_dlpack({{get_output()}})
 
     {{kernel_name}}_jit(cute_a, cute_b, cute_c, cuda.CUstream(stream))
-    return output_c
+    return {{get_output()}}
 """
 
 
@@ -82,7 +82,7 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIsInstance(imports, str)
 
         lines = imports.strip().split("\n")
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(len(lines), 7)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
