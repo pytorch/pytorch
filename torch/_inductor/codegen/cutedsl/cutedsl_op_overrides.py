@@ -280,7 +280,10 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def neg(x: CuteDSLArg) -> CuteDSLArg:
         """Negation using CuteDSL TensorSSA __neg__ operator."""
-        return CuteDSLOpOverrides._apply_unary_op(x, "(-{x})")
+        # TODO: See https://github.com/NVIDIA/cutlass/issues/2584
+        return CuteDSLOpOverrides._apply_unary_op(
+            x, "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)"
+        )
 
     @staticmethod
     def to_dtype(
@@ -309,12 +312,6 @@ class CuteDSLOpOverrides(OpOverrides):
             )
 
         return f"{x}.to({cute_type})"
-
-    @staticmethod
-    def sigmoid(x):
-        """Sigmoid activation function."""
-        # Could use cute.math.sigmoid if available, or implement as 1/(1+exp(-x))
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sigmoid({x})")
 
     @staticmethod
     def relu(x):
