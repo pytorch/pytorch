@@ -876,6 +876,7 @@ class FrameInfo:
 
 def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
     from torch._guards import TracingContext
+
     backend_input: Optional[BackendInput] = None
 
     def fullgraph_compiler(gm, example_inputs):
