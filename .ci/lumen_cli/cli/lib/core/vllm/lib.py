@@ -70,6 +70,45 @@ def sample_vllm_test_library():
                 "pytest -v -s test_regression.py",
             ],
         },
+        "vllm_lora_tp_test_distributed": {
+            "title": "LoRA TP Test (Distributed)",
+            "id": "vllm_lora_tp_test_distributed",
+            "num_gpus": 4,
+            "steps": [
+                "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
+                "pytest -v -s -x lora/test_chatglm3_tp.py",
+                "pytest -v -s -x lora/test_llama_tp.py",
+                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
+            ],
+        },
+        "vllm_lora_280_failure_test": {
+            "title": "LoRA 280 failure test",
+            "id": "vllm_lora_280_failure_test",
+            "steps": ["pytest -v lora/test_quant_model.py"],
+        },
+        "vllm_multi_model_processor_test": {
+            "title": "Multi-Modal Processor Test",
+            "id": "vllm_multi_model_processor_test",
+            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
+            "steps": [
+                "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
+                "pytest -v -s models/multimodal/processing/test_tensor_schema.py",
+            ],
+        },
+        "vllm_pytorch_compilation_unit_tests": {
+            "title": "PyTorch Compilation Unit Tests",
+            "id": "vllm_pytorch_compilation_unit_tests",
+            "steps": [
+                "pytest -v -s compile/test_pass_manager.py",
+                "pytest -v -s compile/test_fusion.py",
+                "pytest -v -s compile/test_fusion_attn.py",
+                "pytest -v -s compile/test_silu_mul_quant_fusion.py",
+                "pytest -v -s compile/test_sequence_parallelism.py",
+                "pytest -v -s compile/test_async_tp.py",
+                "pytest -v -s compile/test_fusion_all_reduce.py",
+                "pytest -v -s compile/test_decorator.py",
+            ],
+        },
     }
 
 
