@@ -716,9 +716,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
-                d_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+                d_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                     e_float16 = torch.mm(a_float32, b_float32)
@@ -844,8 +844,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 return torch.mm(x, y) + self.bias
 
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device=device_type)
-                b_float32 = torch.rand((8, 8), device=device_type)
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
 
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                     with torch.autocast(
