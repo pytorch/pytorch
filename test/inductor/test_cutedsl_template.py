@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import OrderedSet
+from torch._inductor.virtualized import V
 
 
 try:
@@ -18,6 +21,26 @@ if HAS_CUTLASS:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
     from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.select_algorithm import PartialRender
+
+
+class MockGraphHandler(GraphLowering):
+    """Minimal mock graph handler for testing virtualized context."""
+
+    def __init__(self):
+        import torch._inductor.sizevars
+
+        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
+        self.name_to_buffer = {}
+        self.graph_inputs = {}
+        self.mutated_buffers = OrderedSet()
+        self.removed_buffers = OrderedSet()
+        self.constants = {}
+        self.scheduler = None
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:
+        """Return default dtype for any buffer (for testing)."""
+        return torch.float32
+
 
 CUTEDSL_ADD_TEMPLATE = r"""
 {{gen_defines()}}
@@ -52,13 +75,13 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
         stream=stream
     )
 
-{{def_kernel("input_a", "input_b", "output_c")}}
+{{def_kernel("input_a", "input_b")}}
     cute_a = from_dlpack(input_a)
     cute_b = from_dlpack(input_b)
-    cute_c = from_dlpack(output_c)
+    cute_c = from_dlpack({{get_output()}})
 
     {{kernel_name}}_jit(cute_a, cute_b, cute_c, cuda.CUstream(stream))
-    return output_c
+    return {{get_output()}}
 """
 
 
@@ -82,7 +105,7 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIsInstance(imports, str)
 
         lines = imports.strip().split("\n")
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(len(lines), 7)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel
@@ -308,9 +331,163 @@ def {{kernel_name}}_kernel():
         for expected_line in expected_lines:
             self.assertIn(expected_line, params)
 
-        # Test float parameters
         params_float = kernel.gen_defines(SCALE_FACTOR=1.5)
         self.assertIn("SCALE_FACTOR: cutlass.Constexpr = 1.5", params_float)
+
+    def test_template_aliasing(self):
+        """Test that template variables are correctly aliased to function arguments."""
+        from torch._inductor.ir import Buffer
+
+        mock_input1 = MagicMock(spec=Buffer)
+        mock_input1.get_name.return_value = "buf_input1"
+
+        mock_input2 = MagicMock(spec=Buffer)
+        mock_input2.get_name.return_value = "buf_input2"
+
+        mock_output = MagicMock(spec=Buffer)
+        mock_output.get_name.return_value = "buf_output"
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_aliasing",
+                input_nodes=[mock_input1, mock_input2],
+                output_node=mock_output,
+            )
+
+            def_kernel_hook = kernel.def_kernel("custom_a", "custom_b")
+            self.assertEqual(def_kernel_hook, "<DEF_KERNEL>")
+
+            self.assertIn("<DEF_KERNEL>", kernel.render_hooks)
+
+            hook_fn = kernel.render_hooks["<DEF_KERNEL>"]
+            generated_code = hook_fn()
+
+            self.assertIn("custom_a = arg_custom_a", generated_code)
+            self.assertIn("custom_b = arg_custom_b", generated_code)
+
+    def test_get_output_hook(self):
+        """Test the get_output() template hook."""
+        from torch._inductor.ir import Buffer
+
+        mock_output = MagicMock(spec=Buffer)
+        mock_output.get_name.return_value = "buf_test_output"
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_output",
+                input_nodes=[],
+                output_node=mock_output,
+            )
+
+            with self.assertRaises(ValueError):
+                # error if no output buffer
+                result = kernel.get_output()
+
+            kernel.args.output_buffers["buf_test_output"] = "arg_buf_test_output"
+            result = kernel.get_output()
+            self.assertEqual(result, "arg_buf_test_output")
+
+    def test_modification_subgraph(self):
+        """Test the modification() method and subgraph processing."""
+
+        from torch._inductor.ir import Buffer
+
+        mock_subgraph1 = MagicMock(spec=Buffer)
+        mock_subgraph2 = MagicMock(spec=Buffer)
+        subgraphs = [mock_subgraph1, mock_subgraph2]
+
+        mock_output = MagicMock(spec=Buffer)
+        mock_output.get_name.return_value = "buf_output"
+
+        kernel = CuteDSLTemplateKernel(
+            kernel_name="test_modification",
+            input_nodes=[],
+            output_node=mock_output,
+            subgraphs=subgraphs,
+        )
+
+        result = kernel._get_subgraph(0)
+        self.assertEqual(result, mock_subgraph1)
+
+        result = kernel._get_subgraph(1)
+        self.assertEqual(result, mock_subgraph2)
+
+        with self.assertRaises(AssertionError):
+            kernel._get_subgraph(2)
+
+    def test_cutedsl_op_overrides(self):
+        """Test the new CuteDSLOpOverrides class."""
+        import torch
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        mock_cse_a = MagicMock(spec=CSEVariable)
+        mock_cse_a.__str__.return_value = "tensor_a"
+        mock_cse_a.dtype = torch.float32
+        mock_cse_a.bounds = ValueRanges.unknown()
+
+        mock_cse_b = MagicMock(spec=CSEVariable)
+        mock_cse_b.__str__.return_value = "tensor_b"
+        mock_cse_b.dtype = torch.float32
+        mock_cse_b.bounds = ValueRanges.unknown()
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_ops",
+                input_nodes=[],
+                output_node=None,
+            )
+            with V.set_kernel_handler(kernel):
+                result = CuteDSLOpOverrides.add(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.mul(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.truediv(mock_cse_a, mock_cse_b)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.exp(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                result = CuteDSLOpOverrides.sqrt(mock_cse_a)
+                self.assertIsInstance(result, CSEVariable)
+
+                with self.assertRaises(NotImplementedError):
+                    result = CuteDSLOpOverrides.maximum(mock_cse_a, mock_cse_b)
+                    result = CuteDSLOpOverrides.minimum(mock_cse_a, mock_cse_b)
+
+        scalar_result = CuteDSLOpOverrides._ensure_tensor_ssa("5.0", mock_cse_a)
+        self.assertEqual(scalar_result, "cute.full_like(tensor_a, 5.0)")
+
+        tensor_result = CuteDSLOpOverrides._ensure_tensor_ssa(mock_cse_a, mock_cse_b)
+        self.assertEqual(tensor_result, "tensor_a")
+
+    def test_cse_integration(self):
+        """Test CSE (Common Subexpression Elimination) integration."""
+        from torch._inductor.codegen.common import CSE
+
+        mock_graph = MockGraphHandler()
+        with V.set_graph_handler(mock_graph):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_cse",
+                input_nodes=[],
+                output_node=None,
+            )
+
+            self.assertIsInstance(kernel.cse, CSE)
+            self.assertEqual(kernel.cse.name_prefix, "tmp")
+
+            with V.set_kernel_handler(kernel):
+                test_expr = "x"
+                var = kernel.cse.generate(kernel.body, test_expr, dtype=None)
+                self.assertTrue(str(var).startswith("tmp"))
 
 
 if __name__ == "__main__":
