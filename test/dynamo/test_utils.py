@@ -322,6 +322,50 @@ class TestDynamoTimed(TestCase):
         # Since the remaining logs are env specific, we just check if they are present instead of checking the exact string
         self.assertGreater(len(stack_strings), 1)
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_exception_stack_trace(self):
+        from torch._dynamo.exc import Unsupported
+        self.warmup()
+
+        def forward(ctx, foo):
+            return torch.add(foo, foo)
+        def backward(ctx, grad_output):
+            print("graph break!")  # This should trigger a Dynamo error
+            return grad_output
+
+        CustomFuncBwdPrintGraphBreak = type(
+            "CustomFuncBwdPrintGraphBreak",
+            (torch.autograd.Function,),
+            {
+                "forward": staticmethod(forward),
+                "backward": staticmethod(backward),
+            }
+        )
+
+        def model(x):
+            return CustomFuncBwdPrintGraphBreak.apply(x)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            with self.assertRaisesRegex(
+                Unsupported,
+                "Dynamo does not know how to trace builtin operator `print`",
+            ):
+                opt_model(x)
+                compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        self.assertGreater(len(compilation_events), 0)
+        self.assertGreater(len(compilation_events[0].exception_stack_trace), 0)
+        self.assertIn(
+            "Dynamo does not know how to trace builtin operator `print`",
+            compilation_events[0].exception_stack_trace[0],
+            "exception_stack_trace does not contain the expected string: 'Dynamo does not know how to trace builtin operator `print`'",
+        )
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
