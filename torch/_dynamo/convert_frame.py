@@ -886,7 +886,7 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
     backend_input: Optional[BackendInput] = None
 
     def fullgraph_compiler(
-        gm: torch.fx.GraphModule, example_inputs: tuple[Any, ...]
+        gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
     ) -> torch.fx.GraphModule:
         nonlocal backend_input
         fake_mode = TracingContext.get().fake_mode
