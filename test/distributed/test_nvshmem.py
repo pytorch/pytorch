@@ -66,6 +66,21 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_alloc_without_device_context(self) -> None:
+        # NOTE: required for nvshmem allocation
+        torch.empty(1, device=self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
     def test_rendezvous_slice(self) -> None:
         # Rendezvous a slice of a tensor
         self._init_device()

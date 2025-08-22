@@ -357,6 +357,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         group_name == std::nullopt,
         "NVSHMEMSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
+    c10::cuda::CUDAGuard guard(device_idx);
 
     auto group_info = get_group_info("0");
     auto store = group_info.store;
