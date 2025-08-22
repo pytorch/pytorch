@@ -671,7 +671,7 @@ Tensor linear_cross_entropy_loss_symint(
     c10::SymInt ignore_index,
     double label_smoothing) {
   auto linear = ::at::native::linear(input, linear_weight, bias);
-  return cross_entropy_loss_symint(linear, target, cross_entropy_weight, reduction, ignore_index, label_smoothing);
+  return ::at::native::cross_entropy_loss_symint(linear, target, cross_entropy_weight, reduction, ignore_index, label_smoothing);
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
