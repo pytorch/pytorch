@@ -312,7 +312,7 @@ class OpSchema:
     order preserved). It is mainly used by the DTensor's dispatching logic to perform various
     actions (i.e. sharding propagation, caching sharding decisions, redistribute, etc.)
 
-    NOTE: this should be used as a read only data class
+    NOTE: this must be used as a read only data class
     TODO: make this a frozen dataclass
 
     Args:
@@ -328,6 +328,8 @@ class OpSchema:
     kwargs_schema: KwargsType
 
     schema_info: Optional[RuntimeSchemaInfo] = None
+
+    _comparison_key: Optional[tuple[object, ...]] = None
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
@@ -391,6 +393,7 @@ class OpSchema:
                     has_symints = True
                     break
         self.has_symints = has_symints
+        self._recompute_comparison_key()
 
     def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:
         is_tensor = isinstance(arg, DTensorSpec)
@@ -479,8 +482,7 @@ class OpSchema:
             for a in self.op._schema.arguments
         )
 
-    def __hash__(self) -> int:
-        # Only hash args and kwargs that op indicates to hash
+    def _recompute_comparison_key(self):
         if not self.schema_info:
             static_argnum = len(self.args_schema)
             static_kwargkey = None
@@ -497,9 +499,12 @@ class OpSchema:
             kwargs_to_hash = tuple(
                 self.kwargs_schema.get(k, None) for k in static_kwargkey
             )
-            return hash((self.op, args_to_hash, kwargs_to_hash))
+            self._comparison_key = (self.op, args_to_hash, kwargs_to_hash)
         else:
-            return hash((self.op, args_to_hash))
+            self._comparison_key = (self.op, args_to_hash)
+
+    def __hash__(self) -> int:
+        return hash(self._comparison_key)
 
     def __eq__(self, other: object) -> bool:
         # early return checks
@@ -512,34 +517,7 @@ class OpSchema:
         if len(self.args_schema) != len(other.args_schema):
             return False
 
-        # compare each element and early return if any of them is different
-        if not self.schema_info:
-            static_argnum = len(self.args_schema)
-            static_kwargkey = None
-        else:
-            static_argnum = self.schema_info.static_argnum
-            static_kwargkey = self.schema_info.static_kwargkey
-
-        for i, (self_arg, other_arg) in enumerate(
-            zip(self.args_schema, other.args_schema)
-        ):
-            if (
-                self.arg_type_tensor_or_tensor_list_like(self_arg)
-                and self_arg != other_arg
-            ):
-                return False
-            elif i >= static_argnum and self_arg != other_arg:
-                return False
-
-        # check kwarg equality when there's a static kwarg key
-        if static_kwargkey:
-            for key in static_kwargkey:
-                if self.kwargs_schema.get(key, None) != other.kwargs_schema.get(
-                    key, None
-                ):
-                    return False
-
-        return True
+        return self._comparison_key == other._comparison_key
 
     def gen_fake_args(self) -> ArgsType:
         """
@@ -586,6 +564,7 @@ class OpSchema:
                 new_arg_schema.append(arg)
         self.args_schema = tuple(new_arg_schema)
         self.kwargs_schema = origin_schema.kwargs_schema
+        self._recompute_comparison_key()
 
 
 @dataclass
