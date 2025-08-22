@@ -315,7 +315,7 @@ def bucketize_binary_search(
         mid = (high + low) // 2
         mask = (
             (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
-        ) & (mid < BOUNDARIES_SIZE)
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None
