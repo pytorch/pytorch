@@ -3,11 +3,8 @@ from typing import Any, Callable, Union
 from sympy import Expr
 
 import torch._inductor.config as config
-from torch._inductor.ir import (
-    ComputedBuffer,
-    InputBuffer,
-    is_contiguous_strides_for_shape,
-)
+from torch._inductor.ir import ComputedBuffer, InputBuffer
+from torch._prims_common import check_contiguous_sizes_strides
 from torch.utils._ordered_set import OrderedSet
 
 from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
@@ -75,8 +72,8 @@ if try_import_cutlass():
             shape = tuple(size_hint_fn(x) for x in shape)
             stride = tuple(size_hint_fn(x) for x in stride)
 
-            is_row_major = is_contiguous_strides_for_shape(stride, shape)
-            is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
+            is_row_major = check_contiguous_sizes_strides(shape, stride)
+            is_column_major = check_contiguous_sizes_strides(shape[::-1], stride[::-1])
 
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
