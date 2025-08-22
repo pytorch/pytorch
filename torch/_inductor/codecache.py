@@ -2400,11 +2400,36 @@ end
                 if use_mmap_weights:
 
                     def get_page_size() -> int:
-                        # Don't use resource.getpagesize(), as it is a Unix specific package
+                        # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
                         # as seen in https://docs.python.org/2/library/resource.html
-                        page_size = os.sysconf("SC_PAGE_SIZE")
+                        if _IS_WINDOWS:
+                            from ctypes import byref, Structure, windll
+                            from ctypes.wintypes import DWORD, LPVOID, WORD
 
-                        return page_size
+                            class SYSTEM_INFO(Structure):
+                                _fields_ = [
+                                    ("wProcessorArchitecture", WORD),
+                                    ("wReserved", WORD),
+                                    ("dwPageSize", DWORD),
+                                    ("lpMinimumApplicationAddress", LPVOID),
+                                    ("lpMaximumApplicationAddress", LPVOID),
+                                    ("dwActiveProcessorMask", DWORD),
+                                    ("dwNumberOfProcessors", DWORD),
+                                    ("dwProcessorType", DWORD),
+                                    ("dwAllocationGranularity", DWORD),
+                                    ("wProcessorLevel", WORD),
+                                    ("wProcessorRevision", WORD),
+                                ]
+
+                            si = SYSTEM_INFO()
+                            windll.kernel32.GetSystemInfo(byref(si))
+                            sys_page_size = si.dwPageSize
+                        else:
+                            import resource
+
+                            sys_page_size = resource.getpagesize()
+
+                        return sys_page_size
 
                     page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
