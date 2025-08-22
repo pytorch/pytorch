@@ -4361,10 +4361,12 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.9")
-        nccl_version = t["nccl_version"]
-        torch_nccl_version = torch.cuda.nccl.version()
-        self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
+        self.assertEqual(ver, "2.10")
+        comm_lib_version = t["comm_lib_version"]
+        torch_comm_lib_version = torch.cuda.nccl.version()
+        self.assertEqual(
+            comm_lib_version, ".".join(str(v) for v in torch_comm_lib_version)
+        )
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
