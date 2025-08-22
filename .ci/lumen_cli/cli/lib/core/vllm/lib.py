@@ -129,7 +129,7 @@ def check_parallelism(tests: Any, title: str, shard_id: int = 0, num_shards: int
     """
     a method to check if the test plan is parallelism or not.
     """
-    parallelism = int(tests.get("parallelism", 0))
+    parallelism = int(tests.get("parallelism", "0"))
     is_parallel = parallelism and parallelism > 1
 
     if not is_parallel:
