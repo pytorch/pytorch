@@ -5,6 +5,9 @@ on:
     tags:
       - ciflow/vllm/*
   workflow_dispatch:
+  schedule:
+    # Every 12 hours starting at 00:00 UTC (00:00 and 12:00)
+    - cron: '0 0,12 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

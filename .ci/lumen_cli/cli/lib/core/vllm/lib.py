@@ -75,7 +75,6 @@ def sample_vllm_test_library():
             "id": "vllm_lora_tp_test_distributed",
             "num_gpus": 4,
             "steps": [
-                "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_chatglm3_tp.py",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_llama_tp.py",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_multi_loras_with_tp.py",
@@ -108,6 +107,7 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
+        # TODO(elainewy):need to add g6 with 4 gpus to run this test
         "vllm_lora_test": {
             "title": "LoRA Test %N",
             "id": "lora_test",
