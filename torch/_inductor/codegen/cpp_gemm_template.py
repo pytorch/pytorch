@@ -193,7 +193,7 @@ extern "C" {{export_declaration}}
 GEMM_TEMPLATE = r"""
 {{ template.codegen_gemm_stub_def() }}
 {
-    {{ kernel.maybe_codegen_profile() }}
+    {{ kernel.maybe_codegen_profile(template.get_kernel_prefix_name()) }}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
     ) }}
@@ -1573,6 +1573,9 @@ class CppGemmTemplate(CppTemplate):
             and X.get_dtype() is torch.bfloat16
             and W.get_dtype() is torch.int8
         )
+
+    def get_kernel_prefix_name(self) -> str:
+        return f"m{self.m}" + f"_n{self.n}" + f"_k{self.k}"
 
     def render(  # type: ignore[override, return]
         self,

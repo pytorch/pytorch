@@ -40,7 +40,7 @@ GEMM_TEMPLATE = r"""
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs=Y_list, aliases=aliases)}}
 {
-    {{kernel.maybe_codegen_profile()}}
+    {{kernel.maybe_codegen_profile(template.get_kernel_prefix_name())}}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
@@ -343,6 +343,11 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         )
         template.maybe_append_choice(choices)
         return template
+
+    def get_kernel_prefix_name(self) -> str:
+        return (
+            f"g{self.gemm_grouped_num}_" + f"m{self.m}" + f"_n{self.n}" + f"_k{self.k}"
+        )
 
     def render(  # type: ignore[override,return,no-untyped-def]
         self,
