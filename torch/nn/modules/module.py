@@ -931,17 +931,23 @@ class Module:
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
-                # If the new tensor has compatible tensor type as the existing tensor,
-                # the current behavior is to change the tensor in-place using `.data =`,
-                # and the future behavior is to overwrite the existing tensor. However,
-                # changing the current behavior is a BC-breaking change, and we want it
-                # to happen in future releases. So for now we introduce the
-                # `torch.__future__.get_overwrite_module_params_on_conversion()`
-                # global flag to let the user control whether they want the future
-                # behavior of overwriting the existing tensor or not.
-                return not torch.__future__.get_overwrite_module_params_on_conversion()
-            else:
-                return False
+                from torch._subclasses.fake_tensor import FakeTensor
+
+                if not isinstance(tensor, FakeTensor) and not isinstance(
+                    tensor_applied, FakeTensor
+                ):
+                    # If the new tensor has compatible tensor type as the existing tensor,
+                    # the current behavior is to change the tensor in-place using `.data =`,
+                    # and the future behavior is to overwrite the existing tensor. However,
+                    # changing the current behavior is a BC-breaking change, and we want it
+                    # to happen in future releases. So for now we introduce the
+                    # `torch.__future__.get_overwrite_module_params_on_conversion()`
+                    # global flag to let the user control whether they want the future
+                    # behavior of overwriting the existing tensor or not.
+                    return (
+                        not torch.__future__.get_overwrite_module_params_on_conversion()
+                    )
+            return False
 
         should_use_swap_tensors = (
             torch.__future__.get_swap_module_params_on_conversion()
@@ -957,13 +963,9 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            from torch._subclasses.fake_tensor import FakeTensor
-
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors
-                or is_traceable_wrapper_subclass(param_applied)
-                or isinstance(param, FakeTensor)
+                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
             )
 
             param_grad = param.grad
