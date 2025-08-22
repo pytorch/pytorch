@@ -1318,6 +1318,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         example_fake_inputs: list[torch.Tensor],
         flat_args_dynamic_dims: list[set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
+        graph_output_metadata: Optional[dict] = None,
     ) -> None:
         super().__init__(m)
 
@@ -1358,8 +1359,9 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
 
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
-        self.matched_output_elements_positions = list(range(len(matched_output_elements_positions)))
+        self.matched_output_elements_positions = matched_output_elements_positions
         self.flat_results = flat_results
+        self.graph_output_metadata = graph_output_metadata
 
     def placeholder(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
@@ -1383,16 +1385,35 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     ) -> Any:
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]  # type: ignore[misc]
-        new_results_flat = []
-        for i in range(len(self.flat_results)):
-            if self.matched_output_elements_positions[i] is not None:
-                new_results_flat.append(
-                    lookup[self.matched_output_elements_positions[i]]
-                )
-            else:
+        if not self.graph_output_metadata:
+            assert dynamo_result_flat is None or len(dynamo_result_flat) == 0  # type: ignore[misc]
+            new_results_flat = []
+            for i in range(len(self.flat_results)):
+                if self.matched_output_elements_positions[i] is not None:
+                    new_results_flat.append(
+                        lookup[self.matched_output_elements_positions[i]]
+                    )
+                else:
+                    assert isinstance(self.flat_results[i], tuple(common_constant_types))
+                    new_results_flat.append(self.flat_results[i])
+            return super().output(target, (new_results_flat,), {})
+        
+        breakpoint()
+        assert self.graph_output_metadata["num_leaves"] == len(self.flat_results)
+        new_results_flat = [None for i in range(len(self.flat_results))]
+
+        for user_idx, dynamo_idx in self.graph_output_metadata["graph"]:
+            new_results_flat[user_idx] = dynamo_result_flat[dynamo_idx]  # type: ignore[index]
+
+        for user_idx, dynamo_graph_arg_idx in self.graph_output_metadata["inputs"]:
+            new_results_flat[user_idx] = self.new_args[dynamo_graph_arg_idx]  # type: ignore[index]
+
+        for i in range(len(new_results_flat)):
+            if new_results_flat[i] is None:
                 const_val = self.flat_results[i]
                 assert isinstance(const_val, tuple(common_constant_types))
-                new_results_flat.append(const_val)
+                new_results_flat[i] = const_val
+
         return super().output(target, (new_results_flat,), {})
 
     def run_node(self, n: Node) -> Any:
@@ -1574,11 +1595,18 @@ def rewrite_signature(
     matched_input_elements_positions = produce_matching(
         "inputs", flat_args, graph_captured_input
     )
-
+    
+    matched_output_elements_positions = []
     assert graph_captured_output is not None
-    matched_output_elements_positions = produce_matching(
-        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
-    )
+    graph_output_metadata = graph.meta.get("return_map", None)
+    # In annoying edge case where there is empty graph, dynamo
+    # bails out earlier, so there is no way to recover tx.output 
+    # easily.
+    if graph_output_metadata is None:
+        matched_output_elements_positions = produce_matching(
+            "outputs", flat_args, flat_results_traced
+        )
+        
 
     new_graph = FlattenInputOutputSignature(
         graph,
@@ -1589,6 +1617,7 @@ def rewrite_signature(
         example_fake_inputs,
         flat_args_dynamic_dims,
         fake_mode,
+        graph_output_metadata,
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
@@ -2044,6 +2073,8 @@ def export(
         ]
 
         if aten_graph:
+            gm_metadata = graph.meta.copy()
+
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args: Any) -> Any:
                 with torch.fx.traceback.preserve_node_meta():
@@ -2059,6 +2090,7 @@ def export(
                         pre_dispatch=pre_dispatch,
                         _allow_fake_constant=False,
                     )(*example_fake_inputs)
+                    graph.meta = gm_metadata
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
                     raise UserError(  # noqa: B904

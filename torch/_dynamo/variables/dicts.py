@@ -316,7 +316,10 @@ class ConstDictVariable(VariableTracker):
             # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
             if self.is_new_item(item, value) or self.should_reconstruct_all:
-                codegen(key.vt)
+                # When we reconstruct return values to dict, key is always the context 
+                # so it is never returned. But we do need to codegen it.
+                with codegen.disable_record_return_leaves():
+                    codegen(key.vt)
                 codegen(value)
                 num_args += 1
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))

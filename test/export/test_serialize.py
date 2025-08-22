@@ -309,7 +309,7 @@ def forward(self, x):
                 # Along with tensor output, return Nonetype
                 # and constant. Although these outputs aren't
                 # very useful, they do show up in graphs.
-                return x + 1, None, 1024
+                return None, x + 1, 1024
 
         # Check that module can be roundtripped, thereby confirming proper deserialization.
         inp = (torch.ones(10),)
