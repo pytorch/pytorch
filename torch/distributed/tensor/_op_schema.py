@@ -392,8 +392,7 @@ class OpSchema:
                     break
         self.has_symints = has_symints
 
-    def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
-        arg = self.args_schema[arg_idx]
+    def arg_type_tensor_or_tensor_list_like(self, arg: object) -> bool:
         is_tensor = isinstance(arg, DTensorSpec)
         if is_tensor:
             return True
@@ -492,7 +491,7 @@ class OpSchema:
         args_to_hash = tuple(
             tuple(e) if isinstance(e, list) else e
             for i, e in enumerate(self.args_schema)
-            if self.arg_type_tensor_or_tensor_list_like(i) or i >= static_argnum
+            if self.arg_type_tensor_or_tensor_list_like(e) or i >= static_argnum
         )
         if static_kwargkey is not None:
             kwargs_to_hash = tuple(
@@ -524,7 +523,10 @@ class OpSchema:
         for i, (self_arg, other_arg) in enumerate(
             zip(self.args_schema, other.args_schema)
         ):
-            if isinstance(self_arg, DTensorSpec) and self_arg != other_arg:
+            if (
+                self.arg_type_tensor_or_tensor_list_like(self_arg)
+                and self_arg != other_arg
+            ):
                 return False
             elif i >= static_argnum and self_arg != other_arg:
                 return False
