@@ -1916,6 +1916,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "dict_vt must be constructed by builder.py when source is present"
             )
+            user_cls = (
+                collections.OrderedDict
+                if isinstance(value, collections.OrderedDict)
+                else dict
+            )
             self._dict_vt = variables.ConstDictVariable(
                 {}, type(value), mutation_type=ValueMutationNew()
             )
