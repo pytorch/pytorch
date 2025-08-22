@@ -77,29 +77,9 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
     wheelname = os.path.basename(wheel_path)
     os.mkdir(f"{folder}/tmp")
     os.system(f"unzip {wheel_path} -d {folder}/tmp")
-    libs_to_copy = [
-        "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
-        "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
-        "/usr/local/cuda/lib64/libcudnn.so.9",
-        "/usr/local/cuda/lib64/libcublas.so.12",
-        "/usr/local/cuda/lib64/libcublasLt.so.12",
-        "/usr/local/cuda/lib64/libcudart.so.12",
-        "/usr/local/cuda/lib64/libcufft.so.11",
-        "/usr/local/cuda/lib64/libcusparse.so.12",
-        "/usr/local/cuda/lib64/libcusparseLt.so.0",
-        "/usr/local/cuda/lib64/libcusolver.so.11",
-        "/usr/local/cuda/lib64/libcurand.so.10",
-        "/usr/local/cuda/lib64/libnccl.so.2",
-        "/usr/local/cuda/lib64/libnvJitLink.so.12",
-        "/usr/local/cuda/lib64/libnvrtc.so.12",
-        "/usr/local/cuda/lib64/libnvshmem_host.so.3",
-        "/usr/local/cuda/lib64/libcudnn_adv.so.9",
-        "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
-        "/usr/local/cuda/lib64/libcudnn_graph.so.9",
-        "/usr/local/cuda/lib64/libcudnn_ops.so.9",
-        "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
-        "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
-        "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
+    # Common libraries for all CUDA versions
+    common_libs = [
+        # Non-NVIDIA system libraries
         "/lib64/libgomp.so.1",
         "/usr/lib64/libgfortran.so.5",
         "/acl/build/libarm_compute.so",
@@ -108,14 +88,56 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
         "/usr/local/lib/libnvpl_lapack_core.so.0",
         "/usr/local/lib/libnvpl_blas_core.so.0",
+        # Common CUDA libraries (same for all versions)
+        "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
+        "/usr/local/cuda/lib64/libcudnn.so.9",
+        "/usr/local/cuda/lib64/libcusparseLt.so.0",
+        "/usr/local/cuda/lib64/libcurand.so.10",
+        "/usr/local/cuda/lib64/libnccl.so.2",
+        "/usr/local/cuda/lib64/libnvshmem_host.so.3",
+        "/usr/local/cuda/lib64/libcudnn_adv.so.9",
+        "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
+        "/usr/local/cuda/lib64/libcudnn_graph.so.9",
+        "/usr/local/cuda/lib64/libcudnn_ops.so.9",
+        "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
+        "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
+        "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
     ]
 
-    if "129" in desired_cuda:
-        libs_to_copy += [
+    # CUDA version-specific libraries
+    if "130" in desired_cuda:
+        version_specific_libs = [
+            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.13",
+            "/usr/local/cuda/lib64/libcublas.so.13",
+            "/usr/local/cuda/lib64/libcublasLt.so.13",
+            "/usr/local/cuda/lib64/libcudart.so.13",
+            "/usr/local/cuda/lib64/libcufft.so.12",
+            "/usr/local/cuda/lib64/libcusparse.so.12",
+            "/usr/local/cuda/lib64/libcusolver.so.12",
+            "/usr/local/cuda/lib64/libnvJitLink.so.13",
+            "/usr/local/cuda/lib64/libnvrtc.so.13",
+            "/usr/local/cuda/lib64/libnvrtc-builtins.so.13.0",
+            "/usr/local/cuda/lib64/libcufile.so.1",
+            "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+        ]
+    elif "129" in desired_cuda:
+        version_specific_libs = [
+            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
+            "/usr/local/cuda/lib64/libcublas.so.12",
+            "/usr/local/cuda/lib64/libcublasLt.so.12",
+            "/usr/local/cuda/lib64/libcudart.so.12",
+            "/usr/local/cuda/lib64/libcufft.so.11",
+            "/usr/local/cuda/lib64/libcusparse.so.12",
+            "/usr/local/cuda/lib64/libcusolver.so.11",
+            "/usr/local/cuda/lib64/libnvJitLink.so.12",
+            "/usr/local/cuda/lib64/libnvrtc.so.12",
             "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
             "/usr/local/cuda/lib64/libcufile.so.0",
             "/usr/local/cuda/lib64/libcufile_rdma.so.1",
         ]
+
+    # Combine all libraries
+    libs_to_copy = common_libs + version_specific_libs
 
     # Copy libraries to unzipped_folder/a/lib
     for lib_path in libs_to_copy:
