@@ -171,7 +171,7 @@ def run_test_plan(
     if is_parallel:
         title = title.replace("%N", f"{shard_id}/{num_shards}")
 
-    logger.info("Running tests: %s", tests["title"])
+    logger.info("Running tests: %s", title)
     if pkgs:
         logger.info("Installing packages: %s", pkgs)
         pip_install_packages(packages=pkgs, prefer_uv=True)
