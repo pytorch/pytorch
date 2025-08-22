@@ -832,12 +832,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 } // namespace
 
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
-    void* ptr,  // data_ptr() of the tensor
+    const at::Tensor& tensor,
     const std::optional<std::string>& group_name) {
-  // Today this would still find the ptr in the map because one allocation
-  // matches one tensor. But will break once we enable MemPool.
-  // TODO: implement a customized `find` that searches for the allocation that
-  // contains ptr.
+  // CUDA SymmMem backend uses storage ptr as key to find the block
+  auto ptr = tensor.storage().data_ptr().get();
+
   auto block = find_block(ptr);
   if (block == nullptr) {
     return nullptr;
