@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._cute_layout import _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -26,7 +27,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -1246,6 +1247,169 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
+
+
+class CuTeLayoutTest(TestCase):
+    def test_coalesce(self):
+        # ((3,2),(2,1)) -> (6,1)
+        l = _Layout(((3, 2), (2, 1)))
+        l = l.coalesce()
+        print(l.sizes_and_strides)
+        self.assertEqual(l.sizes_and_strides, ((6, 1),))
+
+        # ((2,12),(3,4),(4,1)) -> (24,1)
+        l = _Layout(((2, 12), (3, 4), (4, 1)))
+        l = l.coalesce()
+        self.assertEqual(l.sizes_and_strides, ((24, 1),))
+
+    def test_coalesce_non_coalescible(self):
+        # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
+        l = _Layout(((3, 4), (2, 1)))
+        l = l.coalesce()
+        self.assertEqual(l.sizes_and_strides, ((3, 4), (2, 1)))
+
+    def test_complement_n_group_layout(self):
+        # complement((4,2), 8) = (2,1); together form (8,1)
+        pg_layout = _Layout(((4, 2),))
+        outer = pg_layout.complement(world_size=8)
+        self.assertEqual(outer.sizes_and_strides, ((2, 1),))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 2, 4, 6],
+        )
+        groups = [
+            [o + i for i in pg_layout.layout_to_group_ranks()]
+            for o in outer.layout_to_group_ranks()
+        ]
+        self.assertEqual(
+            groups,
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+            ],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(8),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+            ],
+        )
+        # complement((4,2), 16) = ((2,8), (2,1)); together form (16,1)
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(outer.sizes_and_strides, ((2, 8), (2, 1)))
+        self.assertEqual(
+            outer.layout_to_group_ranks(),
+            [0, 1, 8, 9],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+
+        # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
+        pg_layout = _Layout(((2, 4), (2, 1)))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 1, 4, 5],
+        )
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(outer.sizes_and_strides, ((2, 8), (2, 2)))
+        self.assertEqual(
+            outer.layout_to_group_ranks(),
+            [0, 2, 8, 10],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 1, 4, 5],
+                [2, 3, 6, 7],
+                [8, 9, 12, 13],
+                [10, 11, 14, 15],
+            ],
+        )
+
+        # Test layout_to_global_ranks and layout_to_group_ranks
+        pg_layout = _Layout(((2, 4), (2, 2)))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+        pg_layout = _Layout(((4, 2),))
+        self.assertEqual(
+            pg_layout.layout_to_group_ranks(),
+            [0, 2, 4, 6],
+        )
+        self.assertEqual(
+            pg_layout.layout_to_global_ranks(16),
+            [
+                [0, 2, 4, 6],
+                [1, 3, 5, 7],
+                [8, 10, 12, 14],
+                [9, 11, 13, 15],
+            ],
+        )
+
+    def test_composition(self):
+        # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,2)
+        orig_l = _Layout(((4, 2), (2, 1)))
+        right_l = _Layout(((2, 1),))
+        composed_list = orig_l.composition(right_l)
+        self.assertEqual(len(composed_list), 1)
+        self.assertEqual(composed_list[0].sizes_and_strides, [(2, 2)])
+        self.assertEqual(
+            composed_list[0].layout_to_global_ranks(8),
+            [
+                [0, 2],
+                [1, 3],
+                [4, 6],
+                [5, 7],
+            ],
+        )
+
+        # self = ((4,2), (2,1)), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
+        right_l = _Layout(((2, 2), (2, 1)))
+        composed_list = orig_l.composition(right_l)
+        self.assertEqual(len(composed_list), 2)
+        self.assertEqual(composed_list[0].sizes_and_strides, ((2, 4),))
+        self.assertEqual(
+            composed_list[0].layout_to_global_ranks(8),
+            [
+                [0, 4],
+                [1, 5],
+                [2, 6],
+                [3, 7],
+            ],
+        )
+
+        # Error case.
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Layouts do not meet stride divisibility condition",
+        ):
+            right_l = _Layout(((2, 3),))
+            composed_list = orig_l.composition(right_l)
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Layouts do not meet shape divisibility condition",
+        ):
+            right_l = _Layout(((3, 2),))
+            composed_list = orig_l.composition(right_l)
 
 
 if __name__ == "__main__":
