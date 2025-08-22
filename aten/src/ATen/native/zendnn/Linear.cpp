@@ -16,8 +16,7 @@ namespace at::native {
 at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const std::optional<at::Tensor>& bias,
-    std::string_view zendnn_op_name) {
+    const std::optional<at::Tensor>& bias) {
   TORCH_CHECK(false, "zendnn_linear: ATen not compiled with ZenDNN support");
 }
 } // namespace at::native
@@ -29,8 +28,7 @@ namespace at::native {
 at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const std::optional<at::Tensor>& bias,
-    std::string_view zendnn_op_name) {
+    const std::optional<at::Tensor>& bias) {
   at::Tensor result;
   return result;
 }
