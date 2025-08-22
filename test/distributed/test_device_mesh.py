@@ -848,7 +848,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ]
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
-        # Calling flatten again should not create a new pg.
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
