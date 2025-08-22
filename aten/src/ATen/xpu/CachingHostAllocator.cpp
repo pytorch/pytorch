@@ -32,8 +32,8 @@ struct XPUCachingHostAllocatorImpl
   }
 
   bool pinned_use_background_threads() override {
-    // Background threads for XPU currently hang on Windows.
-    // This will be enabled once the underlying issue is fixed.
+    // Using background threads for XPU causes a hang on Windows during program
+    // exit. Will be enabled once the issue is resolved.
     return false;
   }
 };
