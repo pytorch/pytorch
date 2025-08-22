@@ -545,6 +545,18 @@ class FxirTestCase(InductorTestCase):
         if use_dynamic_shapes:
             self.assertEqual(type(shape[0]), torch.fx.Node)
 
+    def test_output_slice_view(self):
+        """
+        Test when the output is a view of the input.
+        The sliced strides create a TensorBox in the output IR.
+        """
+
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        args = [torch.rand([4, 4, 4, 4], device=self.device)]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
 
 class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
