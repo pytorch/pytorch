@@ -550,7 +550,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "popitem" and self.is_mutable():
             if (
                 issubclass(self.user_cls, dict)
-                and self.user_cls is not collections.OrderedDict
+                and not issubclass(self.user_cls, collections.OrderedDict)
                 and len(args)
             ):
                 raise_args_mismatch(tx, name)
