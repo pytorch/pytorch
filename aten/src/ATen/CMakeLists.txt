@@ -256,19 +256,56 @@ IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
 endif()
 
 # FBGEMM GenAI
+# For build issues please contact fbgemm_dev
 IF(USE_FBGEMM_GENAI)
+  # Use the FBGEMM version of CUTLASS/CK as it may be different than the one in torch
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_DIR ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
-
-  if(USE_ROCM)
-    # Only include the kernels we want to build to avoid increasing binary size.
+  # Currently we only add in GEMM kernels, hence the quantize directory
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  if(USE_CUDA)
+    add_library(fbgemm_genai OBJECT)
+    set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    # To avoid increasing the build time/binary size unneccesarily, use an allow-list of kernels to build.
+    # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
+    # NEED TO EXPOSE in fbgemm
+    # set(FBGEMM_CUTLASS_KERNELS_REGEX
+    #   ".*(mx8mx8bf16).*"
+    # )
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
+    list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
+    # set(fbgemm_genai_native_cuda_cuh
+    #   "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+    # )
+    file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
+      "${FBGEMM_GENAI_SRCS}/common/*.cpp"
+      # For the torch integration, we cannot reuse the op definitions, as we only expose certain ops.
+      "${FBGEMM_GENAI_SRCS}/quantize_defs_torch.cpp"
+      "${FBGEMM_GENAI_SRCS}/quantize_torch.cpp"
+    )
+    set(fbgemm_genai_native_cuda_h
+      "${FBGEMM_GENAI_SRCS}/common/include/"
+    )
+    target_include_directories(fbgemm_genai PUBLIC
+      ${FBGEMM_THIRD_PARTY}/cutlass/include
+      ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
+      ${fbgemm_genai_native_cuda_cuh}
+      ${fbgemm_genai_native_cuda_h}
+      ${FBGEMM_GENAI_SRCS}/include/
+    )
+    target_sources(fbgemm_genai PRIVATE
+      ${fbgemm_genai_native_cuda_cu}
+      ${fbgemm_genai_native_cuda_cpp}
+    )
+  else()
+    # Only include the kernels we want to build with torch
     file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-      "${FBGEMM_GENAI_DIR}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+      "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+      "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
     set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
     # Add additional HIPCC compiler flags for performance
-    set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
+    set(fbgemm_extra_hipcc_flags
       -mllvm
       -amdgpu-coerce-illegal-types=1
       -mllvm
@@ -276,20 +313,18 @@ IF(USE_FBGEMM_GENAI)
       -mllvm
       -greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
-
     hip_add_library(
       fbgemm_genai STATIC
       ${fbgemm_genai_native_rocm_hip}
-      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${FBGEMM_GENAI_EXTRA_HIPCC_FLAGS})
+      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${fbgemm_extra_hipcc_flags})
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
-
+    set(fbgemm_genai_native_rocm_h "${FBGEMM_GENAI_SRCS}/include/")
     target_include_directories(fbgemm_genai PUBLIC
-      # FBGEMM version of Composable Kernel is used due to some customizations
+      # FBGEMM version of CK is required
       ${FBGEMM_THIRD_PARTY}/composable_kernel/include
       ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
-      ${FBGEMM_GENAI_DIR}/include/
-      ${FBGEMM_GENAI_DIR}/common/include/
+      ${fbgemm_genai_native_rocm_h}
     )
   endif()
 endif()
