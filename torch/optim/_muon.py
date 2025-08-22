@@ -105,7 +105,10 @@ class Muon(Optimizer):
             raise ValueError(f"momentum should be >= 0 but is: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"weight decay should be >= 0 but is: {weight_decay}")
-        if adjust_lr_fn is not None and adjust_lr_fn not in ["original", "match_rms_adamw"]:
+        if adjust_lr_fn is not None and adjust_lr_fn not in [
+            "original",
+            "match_rms_adamw",
+        ]:
             raise ValueError(
                 f"Adjust learning rate function {adjust_lr_fn} is not supported"
             )
