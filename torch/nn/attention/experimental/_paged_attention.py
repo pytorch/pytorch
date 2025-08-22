@@ -55,7 +55,9 @@ class PagedAttention:
         # capacity: batch_idx -> allocated sequence length
         self.capacity = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
 
-        self.seq_lens: torch.Tensor = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
+        self.seq_lens: torch.Tensor = torch.zeros(
+            max_batch_size, dtype=torch.int64, device=device
+        )
 
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
@@ -307,9 +309,7 @@ class PagedAttention:
             within_lower_bound = logical_kv_idx >= 0
             is_valid = live_block & within_upper_bound & within_lower_bound
 
-            return torch.where(
-                is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False
-            )
+            return torch.where(is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False)
 
         return new_mask_mod
 
