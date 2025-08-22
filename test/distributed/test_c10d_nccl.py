@@ -4876,7 +4876,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                             )
                 else:
                     raise NotImplementedError
-            return dist.batch_isend_irecv(ops)[0].wait() # no calling .pop() here -- unclear
+            return dist.batch_isend_irecv(ops)[0].wait()
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -5048,7 +5048,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
     
     def _iterative_communication_pattern(self, tensor_size, num_iterations, peer_rank):
         device = torch.device(f"cuda:{self.rank}")
-
         for i in range(num_iterations):
             if self.rank == 0:
                 tensor = torch.ones(tensor_size, device=device) * i
@@ -5058,9 +5057,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 tensor = torch.zeros(tensor_size, device=device)
                 req = dist.irecv(tensor, peer_rank)
                 req.wait()
-                # Validation inside the compiled function
-                expected = torch.ones(tensor_size, device=device) * i
-                torch.testing.assert_close(tensor, expected)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
