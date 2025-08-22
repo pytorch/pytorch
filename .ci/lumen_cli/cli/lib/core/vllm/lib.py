@@ -178,12 +178,14 @@ def run_test_plan(
     with working_directory(tests.get("working_directory", "tests")):
         failures = []
         for step in tests["steps"]:
+            logger.info("Running step: %s", step)
             if is_parallel:
                 step = replace_buildkite_placeholders(step, shard_id, num_shards)
-                logger.info("Running prallel step: %s", step)
+                logger.info("Running parallel step: %s", step)
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)
+            logger.info("Finish running step: %s", step)
         if failures:
             logger.error("Failed tests: %s", failures)
             raise RuntimeError(f"{len(failures)} pytest runs failed: {failures}")
