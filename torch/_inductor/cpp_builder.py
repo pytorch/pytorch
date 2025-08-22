@@ -229,7 +229,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
     if lang_id != 1033:
         # MSVC English language id is 0x0409, and the DEC value is 1033.
         raise RuntimeError(
-            "Torch.compile() is not support MSVC with English language pack,"
+            "Torch.compile() is only support MSVC with English language pack,"
             "Please reinstall its language pack to English."
         )
 
