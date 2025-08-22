@@ -2398,9 +2398,18 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
-                    import resource
 
-                    page_size_ = resource.getpagesize()
+                    def get_page_size():
+                        # Don't use resource.getpagesize(), as it is a Unix specific package
+                        # as seen in https://docs.python.org/2/library/resource.html
+                        import psutil
+
+                        try:
+                            return psutil.virtual_memory().page_size
+                        except:
+                            return 4096  # Default valuevalue
+
+                    page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
 
                     with open(output_so, "a+b") as f_so:
