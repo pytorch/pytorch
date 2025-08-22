@@ -84,11 +84,11 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/lib64/libgfortran.so.5",
         "/acl/build/libarm_compute.so",
         "/acl/build/libarm_compute_graph.so",
+        # Common CUDA libraries (same for all versions)
         "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0",
         "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0",
         "/usr/local/lib/libnvpl_lapack_core.so.0",
         "/usr/local/lib/libnvpl_blas_core.so.0",
-        # Common CUDA libraries (same for all versions)
         "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so",
         "/usr/local/cuda/lib64/libcudnn.so.9",
         "/usr/local/cuda/lib64/libcusparseLt.so.0",
