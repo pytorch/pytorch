@@ -3329,9 +3329,11 @@ def get_fake_value(
         id_to_initial_version = {}
 
     nnmodule = None
+    fake_mode = tx.fake_mode
+    assert fake_mode is not None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
-        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+        args = (deepcopy_to_fake_tensor(args[0], fake_mode),) + tuple(args[1:])
 
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
@@ -3344,7 +3346,7 @@ def get_fake_value(
             nnmodule._infer_parameters(nnmodule, args)
 
         # no matter it's lazy module or not, we should copy to fake mode.
-        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, fake_mode)
 
     if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
         isinstance(a, complex) for a in args
@@ -3360,7 +3362,7 @@ def get_fake_value(
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
