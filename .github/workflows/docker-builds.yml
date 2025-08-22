@@ -74,7 +74,8 @@ jobs:
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter,
           # Executorch pin needs update
           # pytorch-linux-jammy-py3-clang12-executorch,
-          pytorch-linux-jammy-py3.12-triton-cpu
+          pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11

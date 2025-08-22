@@ -48,6 +48,7 @@ per-file-ignores =
     torch/__init__.py: F401,TOR901
     torch/_custom_op/impl.py: TOR901
     torch/_export/serde/upgrade.py: TOR901
+    torch/_functorch/predispatch.py: TOR901
     torch/_functorch/vmap.py: TOR901
     torch/_inductor/test_operators.py: TOR901
     torch/_library/abstract_impl.py: TOR901

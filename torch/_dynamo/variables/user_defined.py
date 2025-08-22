@@ -52,6 +52,9 @@ from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
+    ObservedKeyError,
+    ObservedTypeError,
+    ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented_v2,
 )
@@ -69,7 +72,6 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -79,7 +81,6 @@ from ..utils import (
     is_frozen_dataclass,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
-    is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
@@ -91,7 +92,12 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import DefaultDictVariable
 from .lists import SizeVariable
 
@@ -470,7 +476,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import here to avoid circular dependency
             from .ctx_manager import NullContextVariable
 
-            return NullContextVariable()
+            return NullContextVariable(*args, **kwargs)
         elif self.value is collections.OrderedDict:
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.construct_dict),
@@ -588,6 +594,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
+            from . import TorchCtxManagerClassVariable
             from .functions import (
                 BaseUserFunctionVariable,
                 FunctionDecoratedByContextlibContextManagerVariable,
@@ -619,7 +626,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
 
             if self.value is contextlib._GeneratorContextManager and isinstance(
-                args[0], BaseUserFunctionVariable
+                args[0], (BaseUserFunctionVariable, TorchCtxManagerClassVariable)
             ):
                 if not torch._dynamo.config.enable_trace_contextlib:
                     unimplemented_v2(
@@ -630,6 +637,29 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "Set torch._dynamo.config.enable_trace_contextlib = True",
                         ],
                     )
+
+                # Special treatments for certain context managers created via
+                # contextlib, because
+                # 1. we (pytorch) own their impls
+                # 2. it's tedious to trace through them, so we effectively
+                #    "allow in graph" them without sacrificing soundness.
+                #
+                # We would typically reach here via either
+                # 1. the instance construction in `with ctx_manager(...):`:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L301
+                # 2. calling a function decorated with a context manager:
+                #    https://github.com/python/cpython/blob/3.12/Lib/contextlib.py#L122
+                #
+                # So we basically trace through the surface part of the
+                # contextlib code, and then special case the shared remaining
+                # logic (the actual context manager instance construction and
+                # usage later on).
+                if isinstance(args[0], TorchCtxManagerClassVariable):
+                    fn_var = args[0]
+                    args_list = args[1].items
+                    kwargs_dict = args[2].keys_as_python_constant()
+                    return fn_var.call_function(tx, args_list, kwargs_dict)
+
                 # Wrap UserFunctionVariable in FunctionDecoratedByContextlibContextManagerVariable
                 # if the function is annotated with @contextlib.contextmanager
                 # This shouldn't be necessary once generator functions are fully
@@ -1092,6 +1122,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        try:
+            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            return True
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            return False
+
+    def force_unpack_var_sequence(self, tx):
+        result = []
+        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+
+        while True:
+            try:
+                r = iter_.next_variable(tx)
+                result.append(r)
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
+
     def next_variable(self, tx):
         return self.call_method(tx, "__next__", [], {})
 
@@ -1280,7 +1331,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        from .. import trace_rules
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
@@ -1526,14 +1576,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func, self, source_fn=source_fn, source=source
                 )
             elif inspect.isfunction(dynamic_subobj):
-                if is_utils_checkpoint(func):
-                    return build_checkpoint_variable(source=source)
-                elif source is not None:
-                    return trace_rules.lookup(func).create_with_source(
-                        func, source=source
-                    )
-                else:
-                    return trace_rules.lookup(func)(func)
+                return VariableTracker.build(tx, func, source)
 
         if (
             # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
@@ -1885,7 +1928,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
         if method in self._dict_methods:
-            return self._dict_vt.call_method(tx, name, args, kwargs)
+            # Dict subclasses can override __missing__ to provide fallback
+            # behavior instead of raising a KeyError. This is used, for example,
+            # by collections.Counter.
+            try:
+                return self._dict_vt.call_method(tx, name, args, kwargs)
+            except ObservedKeyError:
+                if (
+                    name == "__getitem__"
+                    and issubclass(self.python_type(), dict)
+                    and self._maybe_get_baseclass_method("__missing__")
+                ):
+                    return self.call_method(tx, "__missing__", args, kwargs)
+                else:
+                    raise
         return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
@@ -2053,7 +2109,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
-            elems = init_args[0].unpack_var_sequence(tx)
+            elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
@@ -2084,7 +2140,9 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
-        self.mutation_type = AttributeMutationExisting()
+        self.mutation_type = (
+            AttributeMutationExisting() if self.source else AttributeMutationNew()
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to

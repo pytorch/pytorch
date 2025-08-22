@@ -206,7 +206,7 @@ def _test_pg_transport_with_sharded_tensor(self, device) -> None:
     torch.testing.assert_close(expected_local_tensor, received_local_tensor)
 
 
-class PgTransportCPU(MultiProcContinousTest):
+class PgTransportCPU(MultiProcContinuousTest):
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
 
