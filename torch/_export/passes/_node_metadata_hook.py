@@ -3,6 +3,9 @@ import contextlib
 from typing import Any, Optional
 
 import torch
+import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.graph_module import GraphModule
 
 
@@ -10,7 +13,9 @@ _EMPTY_NN_MODULE_STACK_KEY = "_empty_nn_module_stack_from_metadata_hook"
 
 
 def _node_metadata_hook(
-    node: torch.fx.Node, metadata: Optional[dict[str, Any]] = None
+    node: torch.fx.Node,
+    metadata: Optional[dict[str, Any]] = None,
+    fake_mode: Optional[FakeTensorMode] = None,
 ) -> None:
     """
     Hook for adding the appropriate metadata to nodes that are created during a
@@ -27,11 +32,11 @@ def _node_metadata_hook(
     that nodes being added are only call_function nodes, and copies over the
     first argument node's nn_module_stack.
     """
-    assert node.op == "call_function" and callable(node.target)
+    fake_mode = fake_mode or contextlib.nullcontext()
 
-    arg_meta = [arg.meta for arg in node.args if isinstance(arg, torch.fx.Node)]
-    assert len(arg_meta) >= 1
-    arg_meta = arg_meta[0]
+    assert node.op == "call_function" and callable(node.target), (
+        f"node: {node}, target: {node.target}"
+    )
 
     if (
         isinstance(node.target, torch._ops.OpOverload)
@@ -39,33 +44,47 @@ def _node_metadata_hook(
     ):
         node.meta["val"] = None
     else:
-        fake_args = [
-            arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-            for arg in node.args
-        ]
-        fake_res = node.target(*fake_args)
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node, lambda arg: arg.meta["val"], (node.args, node.kwargs)
+        )
+        with fake_mode, enable_python_dispatcher():
+            fake_res = node.target(*fake_args, **fake_kwargs)
         node.meta["val"] = fake_res
 
-    node.meta["nn_module_stack"] = arg_meta.get(
-        "nn_module_stack",
-        {
-            _EMPTY_NN_MODULE_STACK_KEY: (
-                _EMPTY_NN_MODULE_STACK_KEY,
-                _EMPTY_NN_MODULE_STACK_KEY,
-            )
-        },
-    )
-
-    node.meta["torch_fn"] = (
-        f"{node.target.__name__}_0",
-        f"{node.target.__class__.__name__}.{node.target.__name__}",
-    )
-
-    # Hook specified metadata takes precedence over all previously set
-    # metadata, so this goes last
     if metadata is not None:
         for k, v in metadata.items():
             node.meta[k] = v
+
+    # Copy over metadata from argument nodes
+    arg_meta = [
+        arg.meta
+        for arg in pytree.tree_flatten((node.args, node.kwargs))[0]
+        if isinstance(arg, torch.fx.Node)
+    ]
+    if len(arg_meta) == 0:
+        return
+    arg_meta = arg_meta[0]
+
+    node.meta["nn_module_stack"] = node.meta.get(
+        "nn_module_stack",
+        arg_meta.get(
+            "nn_module_stack",
+            {
+                _EMPTY_NN_MODULE_STACK_KEY: (
+                    _EMPTY_NN_MODULE_STACK_KEY,
+                    _EMPTY_NN_MODULE_STACK_KEY,
+                )
+            },
+        ),
+    )
+
+    node.meta["torch_fn"] = node.meta.get(
+        "torch_fn",
+        (
+            f"{node.target.__name__}_0",
+            f"{node.target.__class__.__name__}.{node.target.__name__}",
+        ),
+    )
 
 
 @contextlib.contextmanager

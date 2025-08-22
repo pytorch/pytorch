@@ -698,14 +698,6 @@ bool Context::hasLAPACK() {
 #endif
 }
 
-bool Context::hasEigenSparse() {
-#if AT_USE_EIGEN_SPARSE()
-  return true;
-#else
-  return false;
-#endif
-}
-
 at::QEngine Context::qEngine() const {
   static auto _quantized_engine = []() {
     at::QEngine qengine = at::kNoQEngine;
