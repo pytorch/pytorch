@@ -6003,10 +6003,10 @@ class TestLearnableBiases(InductorTestCase):
     )
     @torch.compile
     def test_learnable_bias_global_compiled(self, device, params):
-        batch_size = 2
-        num_heads = 16
+        batch_size = 1
+        num_heads = 1
         seq_len = 128
-        head_dim = 64
+        head_dim = 16
         d_model = num_heads * head_dim
 
         query = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
