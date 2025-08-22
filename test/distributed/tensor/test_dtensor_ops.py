@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import run_tests, suppress_warnings, parametrize
+from torch.testing._internal.common_utils import run_tests, suppress_warnings
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -519,7 +519,7 @@ class TestDTensorOps(DTensorOpTestBase):
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_eager)
     def test_dtensor_op_db_eager(self, dtype, op):
         return self._test_dtensor_op_db(dtype, op, False, False)
-      
+
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_compile)
@@ -623,12 +623,14 @@ class TestDTensorOps(DTensorOpTestBase):
                                 func,
                                 backend="aot_eager",
                                 dynamic=use_dynamic,
-                                fullgraph=True
+                                fullgraph=True,
                             )
                             # The barrier is needed on certain hardware (e.g. A100)
                             # Not sure why it's hardware dependant, but it is
                             torch.distributed.barrier()
-                        dtensor_rs = maybe_compiled_func(*dtensor_args, **dtensor_kwargs)
+                        dtensor_rs = maybe_compiled_func(
+                            *dtensor_args, **dtensor_kwargs
+                        )
 
                         # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/PiPPy/issues/470
