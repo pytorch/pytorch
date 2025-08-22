@@ -588,15 +588,6 @@ class OutputGraph(OutputGraphGuardsState):
             self.maybe_install_saved_tensors_hooks_subgraphs()
         )
 
-        # This contains the sequence in which the dynamo fx graph outputs are
-        # accessed to construct the program outputs. This is useful for strict
-        # export which does not have access to bytecode but can rely on this
-        # information to build the dynamo fx graph to program output mapping.
-        # For strict export, this post-graph bytecode is equivalnet of
-        # tree_unflatten, so we don't have to worry about the non list
-        # datastructures in the output.
-        self.program_output_to_dynamo_graph_output_matching = []
-
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -1459,7 +1450,6 @@ class OutputGraph(OutputGraphGuardsState):
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
                     tempvars[val] = None
-            self.program_output_to_dynamo_graph_output_matching.clear()
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
@@ -1468,6 +1458,24 @@ class OutputGraph(OutputGraphGuardsState):
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
+
+            export_tracing = True
+            # This is some flag that will make life simpler. Can be a ctx manager as well.
+            if export_tracing:
+                assert len(stack_values_flat) == 1
+                assert isinstance(stack_values_flat[0], variables.ListVariable)
+                fx_graph_outputs = pass2.graph_outputs
+                proxy_ids = list(fx_graph_outputs.keys())
+                for idx, out_vt in enumerate(stack_values_flat[0].items):
+                    assert isinstance(out_vt, variables.TensorVariable)
+                    if out_vt.source is not None:
+                        # Must be an input
+                        print("-----> Output", idx, out_vt.source.name())
+                    elif id(out_vt.proxy) in proxy_ids:
+                        print("-----> Output", idx, proxy_ids.index(id(out_vt.proxy)))
+                    else:
+                        raise NotImplementedError("Where is this output coming from?")
+
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -1923,6 +1931,13 @@ class OutputGraph(OutputGraphGuardsState):
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
+
+
+            # At this time the graphargs are fully generated
+
+            for idx, grapharg in enumerate(self.graphargs):
+                print("---> Input: ", idx, grapharg.source.name())
+
             cg.make_call_generated_code(name)
             return cg.get_instructions()
 
