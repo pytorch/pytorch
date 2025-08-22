@@ -1967,8 +1967,9 @@ void scaled_gemm(
   #endif
   }
 #else
-  // rowwise isn't supported using cublaslt or older hipblaslt
-  TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
+  #if CUDA_VERSION < 12090 && !defined(USE_ROCM)
+    TORCH_INTERNAL_ASSERT(use_rowwise == false, "scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
+  #endif
 #endif  // if defined(USE_ROCM) && !defined(HIPBLASLT_OUTER_VEC) && defined(HIPBLASLT_VEC_EXT)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
