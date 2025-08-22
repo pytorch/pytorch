@@ -501,7 +501,7 @@ and output of type {type(ret)}. But expected types to match."""
 
     def is_read_only_alias_match(arg, ret):
         shared_aliases = arg.alias_set & ret.alias_set
-        return len(shared_aliases) > 0 and not arg.is_write
+        return shared_aliases and not arg.is_write
 
     num_args = len(func._schema.arguments)
     num_returns = len(func._schema.returns)
