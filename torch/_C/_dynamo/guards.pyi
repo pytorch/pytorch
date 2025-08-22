@@ -1,11 +1,12 @@
+import enum
 from typing import Any, Callable, Optional
 from typing_extensions import TypeAlias
-import enum
+
 import torch
 
 # TODO: We should move the `GuardManagerType`
-# defined in `guards.py` here and update other 
-# imports 
+# defined in `guards.py` here and update other
+# imports
 GuardManagerType: TypeAlias = enum.Enum
 
 class GlobalStateGuard:
@@ -220,8 +221,12 @@ class GuardManager:
         guard_manager_enum: GuardManagerType,
     ) -> GuardManager: ...
     # Leaf guards
-    def add_lambda_guard(self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]) -> None: ...
-    def add_id_match_guard(self, id_val: int, verbose_code_parts: list[str]) -> None: ...
+    def add_lambda_guard(
+        self, user_lambda: Callable[..., Any], verbose_code_parts: list[str]
+    ) -> None: ...
+    def add_id_match_guard(
+        self, id_val: int, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_equals_match_guard(
         self,
         equals_val: Any,
@@ -233,11 +238,15 @@ class GuardManager:
     def add_torch_function_mode_stack_guard(
         self, initial_stack: list[Any], verbose_code_parts: list[str]
     ) -> None: ...
-    def add_mapping_keys_guard(self, value: Any, verbose_code_parts: list[str]) -> None: ...
+    def add_mapping_keys_guard(
+        self, value: Any, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_dict_length_check_guard(
         self, value: int, verbose_code_parts: list[str]
     ) -> None: ...
-    def add_length_check_guard(self, value: int, verbose_code_parts: list[str]) -> None: ...
+    def add_length_check_guard(
+        self, value: int, verbose_code_parts: list[str]
+    ) -> None: ...
     def add_true_match_guard(
         self,
         verbose_code_parts: list[str],
@@ -406,7 +415,9 @@ class TensorGuards:
         dynamic_dims_strides: list[torch.SymInt | None] | None = None,
     ) -> None: ...
     def check(self, *args: Any) -> bool: ...
-    def check_verbose(self, *args: Any, tensor_check_names: Optional[list[str]]=None) -> bool | str: ...
+    def check_verbose(
+        self, *args: Any, tensor_check_names: Optional[list[str]] = None
+    ) -> bool | str: ...
 
 def assert_size_stride(
     item: torch.Tensor,
