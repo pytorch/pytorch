@@ -108,10 +108,53 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
+        "vllm_lora_test": {
+            "title": "LoRA Test %N",
+            "id": "lora_test",
+            "parallelism": 4,
+            "steps": [
+                " ".join(
+                    [
+                        "pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB",
+                        "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
+                        "--ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py",
+                    ]
+                ),
+            ],
+        },
     }
 
 
-def run_test_plan(test_plan: str, test_target: str, tests_map: dict[str, Any]):
+def check_parallelism(tests: Any, title: str, shard_id: int = 0, num_shards: int = 0):
+    """
+    a method to check if the test plan is parallelism or not.
+    """
+    parallelism = int(tests.get("parallelism", 0))
+    is_parallel = parallelism and parallelism > 1
+
+    if not is_parallel:
+        return False
+
+    if shard_id > num_shards:
+        raise RuntimeError(
+            f"Test {title} expects {num_shards} shards, but invalid {shard_id} is provided"
+        )
+
+    if num_shards != parallelism:
+        raise RuntimeError(
+            f"Test {title} expects {parallelism} shards, but invalid {num_shards} is provided"
+        )
+
+    return True
+
+
+def run_test_plan(
+    test_plan: str,
+    test_target: str,
+    tests_map: dict[str, Any],
+    shard_id: int = 0,
+    num_shards: int = 0,
+):
     """
     a method to run list of tests based on the test plan.
     """
@@ -121,14 +164,24 @@ def run_test_plan(test_plan: str, test_target: str, tests_map: dict[str, Any]):
             f"test {test_plan} not found, please add it to test plan pool"
         )
     tests = tests_map[test_plan]
-    logger.info("Running tests: %s", tests["title"])
     pkgs = tests.get("package_install", [])
+    title = tests.get("title", "unknown test")
+
+    is_parallel = check_parallelism(tests, title, shard_id, num_shards)
+    if is_parallel:
+        title = title.replace("%N", f"{shard_id}/{num_shards}")
+
+    logger.info("Running tests: %s", tests["title"])
     if pkgs:
         logger.info("Installing packages: %s", pkgs)
         pip_install_packages(packages=pkgs, prefer_uv=True)
     with working_directory(tests.get("working_directory", "tests")):
         failures = []
         for step in tests["steps"]:
+            if is_parallel:
+                step = step.replace("$$BUILDKITE_PARALLEL_JOB", str(shard_id)).replace(
+                    "$$BUILDKITE_PARALLEL_JOB_COUNT", str(num_shards)
+                )
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)
