@@ -275,6 +275,11 @@ COMMON_HIPCC_FLAGS = [
     '-DHIP_ENABLE_WARP_SYNC_BUILTINS=1'
 ]
 
+if IS_WINDOWS:
+    # Compatibility flags, similar to those set in cmake/Dependencies.cmake.
+    COMMON_HIPCC_FLAGS.append('-fms-extensions')
+    # Suppress warnings about dllexport.
+    COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
 def _get_sycl_arch_list():

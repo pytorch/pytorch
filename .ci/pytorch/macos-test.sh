@@ -174,17 +174,15 @@ checkout_install_torchbench() {
     # to install and test other models
     python install.py --continue_on_fail
   fi
+  popd
 
-  # soxr comes from https://github.com/huggingface/transformers/pull/39429
-  pip install transformers==4.54.0 soxr==0.5.0
-
+  pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
   # https://github.com/pytorch/pytorch/issues/160689 to remove torchao because
   # its current version 0.12.0 doesn't work with transformers 4.54.0
   pip uninstall -y torchao
 
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
-  popd
 }
 
 torchbench_setup_macos() {

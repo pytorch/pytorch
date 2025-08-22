@@ -7,7 +7,7 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch.testing._internal.common_distributed import MultiProcContinousTest
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -33,7 +33,7 @@ device_module = torch.get_device_module(device_type)
 
 @requires_nvshmem()
 @requires_cuda_p2p_access()
-class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
+class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
@@ -64,6 +64,17 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
         symm_mem.rendezvous(out, group=group_name)
+
+    @skipIfRocm
+    def test_rendezvous_slice(self) -> None:
+        # Rendezvous a slice of a tensor
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        x = symm_mem.empty((2, 1024), device=self.device)
+        y = x[1]
+        symm_mem.rendezvous(y, group=group_name)
 
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
@@ -117,7 +128,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
 @instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
-class NVSHMEMAll2AllTest(MultiProcContinousTest):
+class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
