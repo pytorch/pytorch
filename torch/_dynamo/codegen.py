@@ -178,8 +178,12 @@ class PyCodegen:
             for val in stack_values:
                 if val is return_vt:
                     with self.enable_record_return_leaves():
+                        if "UserDefined" in str(val):
+                            breakpoint()
                         self(val)
                 else:
+                    if "UserDefined" in str(val):
+                        breakpoint()
                     self(val)
         finally:
             self.value_from_source = prev
@@ -277,6 +281,8 @@ class PyCodegen:
             def _record_returned_input_leaves(src: Source) -> None:
                 if not self.record_return_map:
                     return
+
+                breakpoint()
 
                 # THIS LOGIC MIGHT GET SIMPLIFIED
                 # Try exact leaf first (e.g., x[2])
@@ -437,6 +443,7 @@ class PyCodegen:
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
                 output.extend(create_call_function(1, False))
             elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+                print("UnspecializedPythonVariable")
 
                 def gen_fn() -> None:
                     self.load_graph_output(graph_outputs[graph_outputs_key].index)
@@ -457,6 +464,8 @@ class PyCodegen:
             for part in parts:
                 output.append(self.create_load_attr(part))
         else:
+            if self.record_return_map:
+                breakpoint()
             self.uses[value] += 1
             try:
                 self.call_reconstruct(value)
@@ -526,6 +535,8 @@ class PyCodegen:
 
     def foreach(self, items: Iterable[Union[VariableTracker, Source]]) -> None:
         for i in items:
+            if "UserDefined" in str(i):
+                breakpoint()
             self(i)
 
     def create_binary_subscr(self) -> Instruction:
@@ -803,13 +814,14 @@ class PyCodegen:
         return create_instruction("IMPORT_NAME", argval=module_name)
 
     def load_import_from(self, module_name: str, object_name: str) -> None:
-        source = AttrSource(self.tx.import_source(module_name), object_name)
-        # Note: This approach is somewhat aggressive because typically, a source is marked
-        # as a tempvar only when it is used more than once. In this case, we're marking it
-        # as a tempvar without performing that analysis. However, this is a simple solution,
-        # and in many cases, load imports are reused multiple times.
-        self.mark_source_temp(source)
-        self(source)
+        with self.disable_record_return_leaves():
+            source = AttrSource(self.tx.import_source(module_name), object_name)
+            # Note: This approach is somewhat aggressive because typically, a source is marked
+            # as a tempvar only when it is used more than once. In this case, we're marking it
+            # as a tempvar without performing that analysis. However, this is a simple solution,
+            # and in many cases, load imports are reused multiple times.
+            self.mark_source_temp(source)
+            self(source)
 
     def create_call_function_kw(
         self, nargs: int, kw_names: Iterable[str], push_null: bool

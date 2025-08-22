@@ -1210,6 +1210,8 @@ class OutputGraph(OutputGraphGuardsState):
             variables.LazyVariableTracker.realize_all(value)
             # ignore top `stack_pops` values on the stack
             if len(tx.stack) - i <= stack_pops:
+                if "UserFunction" in str(value):
+                    breakpoint()
                 stack_values.append(value)
                 continue
             if isinstance(value, NullVariable):
@@ -1263,6 +1265,7 @@ class OutputGraph(OutputGraphGuardsState):
                 val_to_names[v] = []
             val_to_names[v].append(k)
         for v in val_to_names.keys():
+            print("VVV", v)
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 
@@ -1470,6 +1473,23 @@ class OutputGraph(OutputGraphGuardsState):
                 self.codegen_suffix(tx, pre_stack_values_flat + root_stack_values, pass2, return_vt=root_stack_values[0])
             else:
                 self.codegen_suffix(tx, pre_stack_values_flat + root_stack_values, pass2)
+
+            breakpoint()
+
+            # assert len(root_stack_values) == 1
+            # fx_graph_outputs = pass2.graph_outputs
+            # breakpoint()
+            # proxy_ids = list(fx_graph_outputs.keys())
+            # for idx, out_vt in enumerate(root_stack_values[0].items):
+            #     if out_vt.source is not None:
+            #         # Must be an input
+            #         print("-----> Output", idx, out_vt.source.name())
+            #     elif isinstance(out_vt, variables.TensorVariable) and id(out_vt.proxy) in proxy_ids:
+            #         print("-----> Output", idx, proxy_ids.index(id(out_vt.proxy)))
+            #     elif isinstance(out_vt, variables.ConstantVariable):
+            #         print("-----> Output", idx, " constant value", out_vt.value)
+            #     else:
+            #         raise NotImplementedError("Where is this output coming from?")
 
             return_map = {
                 "num_leaves": pass2._leaf_idx,

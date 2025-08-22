@@ -1397,7 +1397,8 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
                     assert isinstance(self.flat_results[i], tuple(common_constant_types))
                     new_results_flat.append(self.flat_results[i])
             return super().output(target, (new_results_flat,), {})
-
+        
+        breakpoint()
         assert self.graph_output_metadata["num_leaves"] == len(self.flat_results)
         new_results_flat = [None for i in range(len(self.flat_results))]
 

@@ -1462,6 +1462,8 @@ class InstructionTranslatorBase(
         assert val is None or isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
+        if "UserFunction" in str(val):
+            breakpoint()
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]) -> None:
