@@ -6,7 +6,7 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-BERT_pytorch,fail_to_run,0
+BERT_pytorch,pass,0
 
 
 
@@ -46,7 +46,7 @@ dcgan,pass,0
 
 
 
-demucs,fail_to_run,0
+demucs,pass,0
 
 
 
