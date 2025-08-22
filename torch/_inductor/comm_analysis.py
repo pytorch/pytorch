@@ -15,6 +15,7 @@ class NCCL_COLL(IntEnum):
     ALL_REDUCE = 0
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
+    ALL_TO_ALL = 3
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -49,6 +50,8 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
+    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
+        return NCCL_COLL.ALL_TO_ALL
     else:
         raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
@@ -158,6 +161,119 @@ llMaxBws = [
 ]
 
 
+def _tensor(size, dtype, device) -> torch.Tensor:
+    # Use meta device?
+    return torch.empty(size, dtype=dtype, device=device)
+
+
+def _tensor_from_layout(layout):
+    return _tensor(layout.size, layout.dtype, layout.device)
+
+
+def _get_collective_fn_kwargs(snode, tensor_arg_from_layout):
+    kernel = snode.node
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    constant_args = kernel.constant_args
+    pg_name = constant_args[-1]
+    pg = _resolve_process_group(pg_name)
+    rank: int = torch.distributed.get_rank(pg)
+    pg_size = pg.size()
+    device = torch.device(f"meta:{rank}")
+    input_layout = kernel.inputs[0].layout
+    in_t = tensor_arg_from_layout(input_layout)
+
+    name = getattr(kernel, "python_kernel_name", "")
+
+    # schemes are defined torch/csrc/distributed/c10d/Functional.cpp
+    if name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
+        fn = torch.ops._c10d_functional.all_gather_into_tensor
+        return fn, {
+            "input": in_t,
+            "group_size": pg_size,
+            "group_name": pg_name,
+        }
+    elif name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+        # TODO: use all_gather_into_tensor_out
+        fn = torch.ops._c10d_functional.all_gather_into_tensor
+        return fn, {
+            "input": in_t,
+            "group_size": pg_size,
+            "group_name": pg_name,
+        }
+    elif name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+        fn = torch.ops._c10d_functional.reduce_scatter_tensor
+        reduce_op = constant_args[0]
+        return fn, {
+            "input": in_t,
+            "reduce_op": reduce_op,
+            "group_size": pg_size,
+            "group_name": pg_name,
+        }
+    elif name == "torch.ops._c10d_functional.all_reduce_.default":
+        fn = torch.ops._c10d_functional.all_reduce
+        reduce_op = constant_args[0]
+        return fn, {
+            "input": in_t,
+            "reduce_op": reduce_op,
+            "group_name": pg_name,
+        }
+    elif name == "torch.ops._c10d_functional.all_to_all_single.default":
+        fn = torch.ops._c10d_functional.all_to_all_single
+        print(f"XXX A2A constant_args:{constant_args}")
+        split_sizes = [in_t.size(0) // pg_size] * pg_size
+        print(f" output_split_sizes:{split_sizes}")
+        print(f" input_split_sizes:{split_sizes}")
+        return fn, {
+            "input": in_t,
+            "output_split_sizes": split_sizes,
+            "input_split_sizes": split_sizes,
+            "group_name": pg_name,
+        }
+    elif name == "torch.ops._dtensor.shard_dim_alltoall.default":
+        # fn = torch.ops._dtensor.shard_dim_alltoall
+        print(f"XXX SHARD_DIM_A2A constant_args:{constant_args}")
+        fn = torch.ops._c10d_functional.all_to_all_single
+        gather_dim = constant_args[0]
+        shard_dim = constant_args[1]
+        in_t_ = in_t.movedim(shard_dim, 0).contiguous()
+        split_sizes = [in_t_.size(0) // pg_size] * pg_size
+        print(f" output_split_sizes:{split_sizes}")
+        print(f" input_split_sizes:{split_sizes}")
+        return fn, {
+            "input": in_t_,
+            "output_split_sizes": split_sizes,
+            "input_split_sizes": split_sizes,
+            "group_name": pg_name,
+        }
+
+    assert False, f"Unsupported collective:{name}"
+
+
+def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float:
+    kernel = snode.node
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    pg_name = kernel.constant_args[-1]
+    pg = _resolve_process_group(pg_name)
+    rank: int = torch.distributed.get_rank(pg)
+    # TODO(ivankobzarev): Figure out how we can use time estimations,
+    # without cuda allocations.
+    device = torch.device(f"cuda:{rank}")
+
+    fn, kwargs = _get_collective_fn_kwargs(snode, _tensor_from_layout)
+
+    with torch.distributed._time_estimator(group=pg, device=device) as time_estimator:
+        w = fn(**kwargs)
+        torch.ops._c10d_functional.wait_tensor.default(w)
+
+    est_time_us = time_estimator.estimated_time
+    est_time_ns = est_time_us * 1e3
+    py_kernel_name = getattr(kernel, "python_kernel_name", "")
+    print(f"XXX C10D_NCCL_TIME_ESTIMATOR:{snode.get_name()} {py_kernel_name} -> {est_time_ns}")
+    return est_time_ns
+
+
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
@@ -220,7 +336,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
     if coll == NCCL_COLL.ALL_REDUCE:
         nsteps = 2 * (nRanks - 1)
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nsteps = nRanks - 1
 
     # Convert bus BW to algorithm BW (tensor bytes / algoBW = actual execution time)
@@ -237,7 +353,7 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
             nInterSteps = 2 * nNodes
         else:
             nInterSteps = 0
-    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER):
+    elif coll in (NCCL_COLL.REDUCE_SCATTER, NCCL_COLL.ALL_GATHER, NCCL_COLL.ALL_TO_ALL):
         nInterSteps = nNodes - 1
 
     # First compute latency in us; then at the end, convert it to ns
