@@ -548,14 +548,33 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
-            if len(args):
+            if (
+                issubclass(self.user_cls, dict)
+                and not issubclass(self.user_cls, collections.OrderedDict)
+                and len(args)
+            ):
                 raise_args_mismatch(tx, name)
+
             if not self.items:
                 msg = ConstantVariable.create("popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
+
+            if self.user_cls is collections.OrderedDict and (
+                len(args) == 1 or "last" in kwargs
+            ):
+                if len(args) == 1 and isinstance(args[0], ConstantVariable):
+                    last = args[0].value
+                elif (v := kwargs.get("last")) and isinstance(v, ConstantVariable):
+                    last = v.value
+                else:
+                    raise_args_mismatch(tx, name)
+                k, v = self.items.popitem(last=last)
+            else:
+                k, v = self.items.popitem()
+
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
-            k, v = self.items.popitem()
+
             return variables.TupleVariable([k.vt, v])
         elif name == "clear":
             if args or kwargs:

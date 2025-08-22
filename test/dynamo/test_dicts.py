@@ -1467,7 +1467,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(value, 1)
 
         # Test invalid usage
-        if self.thetype != OrderedDict:
+        if self.thetype is not OrderedDict:
             # OrderedDict accepts a keyword arg
             self.assertRaises(TypeError, d.popitem, 1)
 
@@ -1538,6 +1538,17 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(d, self.thetype)
         self.assertIs(type(d), self.thetype)
 
+    @make_dynamo_test
+    def test_dict_type_comparison(self):
+        types = (dict, OrderedDict, defaultdict)
+        self.assertEqual(self.thetype, self.thetype)
+        self.assertTrue(self.thetype is self.thetype)
+        for other in types:
+            if self.thetype == other:
+                continue
+            self.assertNotEqual(self.thetype, other)
+            self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
@@ -1598,6 +1609,18 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
+
+    @make_dynamo_test
+    def test_popitem_kwarg(self):
+        d = self.thetype.fromkeys("abcdf")
+        self.assertEqual(d.popitem(last=True), ("f", None))
+        self.assertEqual(list(d), list("abcd"))
+        self.assertEqual(d.popitem(last=False), ("a", None))
+        self.assertEqual(list(d), list("bcd"))
+        self.assertEqual(d.popitem(False), ("b", None))
+        self.assertEqual(list(d), list("cd"))
+        self.assertEqual(d.popitem(True), ("d", None))
+        self.assertEqual(list(d), list("c"))
 
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
