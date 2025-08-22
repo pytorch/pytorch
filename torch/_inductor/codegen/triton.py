@@ -4042,6 +4042,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 and V.graph.sizevars.statically_known_leq(
                     self.features.reduction_numel, 32768
                 )
+                # We will already generate a persistent config in this case
+                and V.graph.sizevars.statically_known_gt(
+                    self.features.reduction_numel, 2048
+                )
                 and mem_ops_per_thread <= 10
             ):
                 inductor_meta["add_persistent_rblock"] = True
