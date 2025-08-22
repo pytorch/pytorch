@@ -2565,7 +2565,12 @@ def _reduction_configs(
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_outer_config()
+    default_outer_config = make_config(
+        64,
+        8,
+        register_intensive=register_intensive
+    )
+    outer_heuristic_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2581,14 +2586,14 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.INNER:
         return [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
-        return [outer_config]
+        return [outer_heuristic_config, default_outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
     if disable_pointwise_autotuning(inductor_meta):
         return [make_config(32, 128)]
     return [
         contiguous_config,
-        outer_config,
+        default_outer_config,
         tiny_config,
         make_config(64, 64),
         make_config(8, 512),
