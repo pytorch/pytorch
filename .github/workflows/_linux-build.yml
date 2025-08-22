@@ -96,6 +96,13 @@ on:
         required: false
         type: string
         default: ""
+      build-external-packages:
+        description: |
+          If set, the build external packages and saves their wheels as artifacts
+          use command separated list of packages to build ex: 'vllm,transformers'.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -287,10 +294,36 @@ jobs:
           # comes from https://github.com/pytorch/test-infra/pull/6058
           TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
+          if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
+            # EC2 specific setup for RISC-V emulation
+            # Ensure binfmt_misc is available
+            echo "Mounting binfmt_misc filesystem"
+            sudo mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+
+            echo "QEMU registration: multiarch/qemu-user-static"
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
+
+            # Final verification
+            echo "Checking binfmt_misc status:"
+            ls -la /proc/sys/fs/binfmt_misc/ 2>/dev/null || echo "Cannot access binfmt_misc directory"
+
+            if [ -f /proc/sys/fs/binfmt_misc/qemu-riscv64 ]; then
+              echo "qemu-riscv64 registration successful"
+            else
+              echo "qemu-riscv64 registration failed - proceeding without emulation"
+              echo "This may cause RISC-V builds to fail"
+            fi
+
+            RISCV_DOCKER_ARGS="--privileged"
+          else
+            RISCV_DOCKER_ARGS=
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
           container_name=$(docker run \
+            ${RISCV_DOCKER_ARGS} \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e PR_NUMBER \
@@ -306,7 +339,6 @@ jobs:
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
-            -e USE_SPLIT_BUILD \
             -e BUILD_ADDITIONAL_PACKAGES \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
@@ -330,6 +362,26 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+
+      - name: Build external packages
+        id: build-external-packages
+        if: inputs.build-external-packages != '' &&  steps.build.outcome != 'skipped'
+        uses: ./.github/actions/build-external-packages
+        with:
+          build-targets: ${{ inputs.build-external-packages }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          cuda-arch-list: ${{ inputs.cuda-arch-list }}
+          output-dir: external
+
+      - name: Move external packages to dist
+        if: steps.build-external-packages.outputs.output_dir != '' && steps.build-external-packages.outcome != 'skipped'
+        shell: bash
+        run: |
+          src="${{ steps.build-external-packages.outputs.output_dir }}"
+          if [ -d "$src" ]; then
+            mkdir -p "dist/$(dirname "$src")"
+            mv "$src" "dist/$(dirname "$src")/"
+          fi
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}

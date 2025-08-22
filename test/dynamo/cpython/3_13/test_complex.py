@@ -617,12 +617,13 @@ class ComplexTest(__TestCase):
         self.assertRaises(TypeError, complex, WithComplex(1), object())
         self.assertRaises(TypeError, complex, WithComplex(None), object())
 
-        class EvilExc(Exception):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class EvilExc(Exception):
+                pass
 
-        class evilcomplex:
-            def __complex__(self):
-                raise EvilExc
+            class evilcomplex:
+                def __complex__(self):
+                    raise EvilExc
 
         self.assertRaises(EvilExc, complex, evilcomplex())
 
@@ -646,31 +647,33 @@ class ComplexTest(__TestCase):
         self.assertRaises(TypeError, complex, WithIndex(None), 1.5)
         self.assertRaises(TypeError, complex, 1.5, WithIndex(None))
 
-        class MyInt:
-            def __int__(self):
-                return 42
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class MyInt:
+                def __int__(self):
+                    return 42
 
         self.assertRaises(TypeError, complex, MyInt())
         self.assertRaises(TypeError, complex, MyInt(), 1.5)
         self.assertRaises(TypeError, complex, 1.5, MyInt())
 
-        class complex0(complex):
-            """Test usage of __complex__() when inheriting from 'complex'"""
-            def __complex__(self):
-                return 42j
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class complex0(complex):
+                """Test usage of __complex__() when inheriting from 'complex'"""
+                def __complex__(self):
+                    return 42j
 
-        class complex1(complex):
-            """Test usage of __complex__() with a __new__() method"""
-            def __new__(self, value=0j):
-                return complex.__new__(self, 2*value)
-            def __complex__(self):
-                return self
+            class complex1(complex):
+                """Test usage of __complex__() with a __new__() method"""
+                def __new__(self, value=0j):
+                    return complex.__new__(self, 2*value)
+                def __complex__(self):
+                    return self
 
-        class complex2(complex):
-            """Make sure that __complex__() calls fail if anything other than a
-            complex is returned"""
-            def __complex__(self):
-                return None
+            class complex2(complex):
+                """Make sure that __complex__() calls fail if anything other than a
+                complex is returned"""
+                def __complex__(self):
+                    return None
 
         check(complex(complex0(1j)), 0.0, 42.0)
         with self.assertWarns(DeprecationWarning):

@@ -134,6 +134,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
             "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            "/usr/local/cuda/lib64/libnvshmem_host.so.3"
             "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12"
             "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
         )
@@ -152,6 +153,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libcudart.so.12"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libnvshmem_host.so.3"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
             "libcupti.so.12"

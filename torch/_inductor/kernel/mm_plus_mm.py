@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 
+import logging
+
 import torch
 
-from .. import ir
+from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -11,8 +13,10 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import mm_args, mm_grid, mm_options
+from .mm_common import mm_args, mm_grid
 
+
+log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
@@ -86,7 +90,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k1, other=0.)
             b = tl.load(B, mask=rk[:, None] < k1, other=0.)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -99,7 +103,7 @@ mm_plus_mm_template = TritonTemplate(
         else:
             c = tl.load(C, mask=rk[None, :] < k2, other=0.)
             d = tl.load(D, mask=rk[:, None] < k2, other=0.)
-        acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(c, d, input_precision=FLOAT32_PRECISION)
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
 
@@ -119,9 +123,9 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
     """
+    # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
-    device_type = ir.get_device_type(mat1)
 
     # Optimization is optional, because we can always just not do the fusion
     if (
@@ -140,27 +144,34 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
         )
 
+    # Create MMKernelInputs for MM Plus MM (matrices are at indices 0, 1 for first pair)
+    # Note: This is a special case with 4 matrices, but we use the first pair for M, N, K extraction
+    kernel_inputs = MMKernelInputs([mat1, mat2, mat3, mat4], mat1_idx=0, mat2_idx=1)
+
     assert layout1 == layout2
     # options to tune from
     choices = (
-        [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+        [aten_mm_plus_mm.bind(kernel_inputs.nodes(), layout1)]
         if use_aten_gemm_kernels()
         else []
     )
 
-    mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
     if use_triton_template(layout1):
-        for config in mm_configs():
+        # Get template params using the new unified function
+        for kwargs in V.choices.get_mm_configs(
+            kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
+        ):
+            # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
+            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
                 mm_plus_mm_template.maybe_append_choice(
                     choices,
-                    input_nodes=(mat1, mat2, mat3, mat4),
+                    input_nodes=kernel_inputs.nodes(),
                     layout=layout1,
-                    **mm_options(config, m1, n1, k1, layout1),
+                    **kwargs,
                 )
 
     return autotune_select_algorithm(
-        "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout1
+        "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
     )

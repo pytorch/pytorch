@@ -69,13 +69,13 @@ else:
     TRITON_HAS_CPU = False
 
 
-HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
-HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
 
 GPU_TYPE = get_gpu_type()
 
@@ -163,16 +163,16 @@ skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
 IS_A100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 166912
 )
 
 IS_H100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_CUDA_AND_TRITON
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA_AND_TRITON and is_big_gpu())
 
 def dummy_graph() -> GraphLowering:
     """
