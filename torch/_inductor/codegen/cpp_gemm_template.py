@@ -1094,6 +1094,18 @@ class CppGemmTemplate(CppTemplate):
         new_size = [padded_n // block_n, k, block_n]
         return new_size, padded_n
 
+    @staticmethod
+    def _maybe_remove_storage_offset(node: ir.IRNode):
+        if node.get_layout().offset == 0:
+            return node
+        # node may be contiguous but still have a non-zero storage offset.
+        # GEMM_TEMPLATE emits code like:
+        #   W.data_ptr[node.offset + ...]
+        # but runtime W.data_ptr (after normalize_shapes()) already includes this offset.
+        # To avoid double-offsetting, we remove the offset in the node also in the generated code.
+        #   W.data_ptr[...]
+        return ir.ExternKernel.copy_input(node)
+
     @classmethod
     def prep_weight(
         cls,
@@ -1149,6 +1161,7 @@ class CppGemmTemplate(CppTemplate):
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
+            new_inputs[1] = cls._maybe_remove_storage_offset(W)
 
         if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None

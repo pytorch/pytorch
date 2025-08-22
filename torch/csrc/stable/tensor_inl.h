@@ -5,9 +5,8 @@
 // implementations of the Tensor methods can depend on APIs in library.h
 // without circular dependencies.
 
-#pragma once
 #include <torch/csrc/stable/stableivalue_conversions.h>
-#include <torch/csrc/stable/tensor.h>
+#include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/shim_utils.h>
 
