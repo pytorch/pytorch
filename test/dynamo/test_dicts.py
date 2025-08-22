@@ -1471,7 +1471,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(value, 1)
 
         # Test invalid usage
-        if self.thetype != OrderedDict:
+        if self.thetype is not OrderedDict:
             # OrderedDict accepts a keyword arg
             self.assertRaises(TypeError, d.popitem, 1)
 
@@ -1543,6 +1543,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIs(type(d), self.thetype)
 
     @make_dynamo_test
+    def test_dict_type_comparison(self):
+        types = (dict, OrderedDict, defaultdict)
+        self.assertEqual(self.thetype, self.thetype)
+        self.assertTrue(self.thetype is self.thetype)
+        for other in types:
+            if self.thetype == other:
+                continue
+            self.assertNotEqual(self.thetype, other)
+            self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
+
     def test_bool(self):
         p = self.thetype()
         q = self.thetype({"a": 1, "b": 2})
