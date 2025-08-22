@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import gc
 import re
 import subprocess
 import sys
@@ -520,6 +521,42 @@ if __name__ == "__main__":
         )
         del a
 
+    def test_memory_stats(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        torch.xpu.reset_peak_memory_stats()
+        torch.xpu.reset_accumulated_memory_stats()
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertEqual(prev_allocated, prev_max_allocated)
+        self.assertEqual(prev_reserved, prev_max_reserved)
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
     @skipXPUIf(
         int(torch.version.xpu) < 20250000,
         "Test requires SYCL compiler version 2025.0.0 or newer.",
@@ -569,6 +606,17 @@ if __name__ == "__main__":
             z = torch.from_dlpack(torch.to_dlpack(x))
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
+
+    def test_background_thread_for_pin_memory(self):
+        # Just ensure no crash
+        torch._C._accelerator_setAllocatorSettings("pinned_use_background_threads:True")
+        cpu_tensor = torch.randn(100)
+        pin_tensor = cpu_tensor.pin_memory()
+        xpu_tensor = pin_tensor.to(device="xpu", non_blocking=True)
+        torch.xpu.synchronize()
+        del pin_tensor
+        gc.collect()
+        self.assertEqual(xpu_tensor.cpu(), cpu_tensor)
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)

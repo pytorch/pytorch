@@ -1172,9 +1172,130 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+    """
+    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
+    if the indices are unbacked and appropriate semantics aren't known.
+    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
+    """
+
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    size = x.get_size()[dim]
+    step = sympy.expand(step)
+    assert isinstance(step, sympy.Expr) or step > 0, step
+
+    # maybe apply slice optimization
+    try:
+        if (
+            start == 0
+            and V.graph.sizevars.statically_known_leq(size, end)
+            and step == 1
+        ):
+            return x
+    except TypeError:
+        pass
+
+    # try to avoid dynamic slice
+    def handle_negative_index(idx, size, default):
+        if idx is None:
+            return default
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
+        if V.graph.sizevars.guard_or_false(idx >= 0):
+            return idx
+        elif V.graph.sizevars.guard_or_false(idx < 0):
+            return size + idx
+        return None
+
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = handle_negative_index(start, size, 0)
+        end_index = handle_negative_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
+    # ambiguous_slice=False means we know what semantics this slice call follows,
+    # and don't need to generate an extern kernel to represent the output size.
+    # This is assumed True for clamp=False
+    # (meant to follow standard indexing semantics: 0 <= index < size)
+    if not ambiguous_slice:
+        return TensorBox(
+            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
+        )  # go to SliceView/ReinterpretView
+
+    # unbacked territory: create DynamicSlice ExternKernel
+    # clamp is True, unbacked start / end
+    assert clamp
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) <= 2, unbacked_bindings
+    sym_size, sym_storage = None, None
+    for sym, keypath in unbacked_bindings.items():
+        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+            sym_size = sym
+        elif keypath == (CallMethodKey("storage_offset"),):
+            sym_storage = sym
+
+    def compute_slice_index(index, size):
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
+
+        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+            return index
+        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+            return -index
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        return None
+
+    start_index = compute_slice_index(start, size)
+    end_index = compute_slice_index(end, size)
+    if start_index is not None and end_index is not None:
+        # we shouldn't have allocated size symbol, if output size was determinable from input indices
+        assert sym_size is None
+        new_size = sympy.Max(0, end_index - start_index)
+    else:
+        b_size = ir.DynamicSliceSize(
+            sym_size,
+            start,
+            end,
+            x.get_size()[dim],
+        )
+        b_size.name = V.graph.register_buffer(b_size)
+        V.graph.register_operation(b_size)
+        new_size = sym_size
+
+    if start_index is not None:
+        # we shouldn't have allocated storage offset symbol if start index was determinable
+        assert sym_storage is None
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+    else:
+        b_storage = ir.DynamicSelectStorageOffset(
+            sym_storage,
+            start,
+            x.get_layout().offset,
+            x.get_stride()[dim],
+            x.get_size()[dim],
+            clamp=True,
+        )
+        b_storage.name = V.graph.register_buffer(b_storage)
+        V.graph.register_operation(b_storage)
+        new_storage_offset = sym_storage
+
+    new_sizes = list(x.get_size())
+    new_strides = list(x.get_stride())
+    new_sizes[dim] = new_size
+    new_strides[dim] *= step
+    return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1800,6 +1921,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -2879,6 +3001,7 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
+make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 
 # Register with type_promotion_kind None.
@@ -2990,6 +3113,8 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
+    start = ir.SliceView.handle_negative_index(start, dim_size)
+    end = ir.SliceView.handle_negative_index(end, dim_size)
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
@@ -6840,7 +6965,9 @@ def sym_size(a, dim):
     # int, but you KNOW that int must always be a constant,
     # then you do not need trace that call at all (and just
     # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6848,7 +6975,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6931,17 +7060,17 @@ def resize(x, size, *, memory_format=None):
         and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
     ):
         if is_float_dtype(dtype):
-            uninitalized_val = float("nan")
+            uninitialized_val = float("nan")
         elif is_integer_dtype(dtype):
-            uninitalized_val = torch.iinfo(dtype).max
+            uninitialized_val = torch.iinfo(dtype).max
         else:
-            uninitalized_val = True
+            uninitialized_val = True
     else:
         # using zero as that is what empty does
-        uninitalized_val = 0.0
+        uninitialized_val = 0.0
 
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
-        return full(size, uninitalized_val, dtype=dtype, device=device)
+        return full(size, uninitialized_val, dtype=dtype, device=device)
 
     x_flat = as_strided(
         x,
@@ -6961,7 +7090,7 @@ def resize(x, size, *, memory_format=None):
         flat_index_expr = ops.index_expr(flat_index, torch.int64)
         limit = ops.index_expr(old_numel, torch.int64)
         mask = ops.lt(flat_index_expr, limit)
-        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitialized_val)
 
     out = Pointwise.create(
         device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
