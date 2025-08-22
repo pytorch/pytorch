@@ -3853,7 +3853,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         return inductor_meta
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name=None) -> str:
+        """
+        Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
+        metadata, and benchmarking infra.
+        """
+
         code = IndentedBuffer()
 
         size_hints = {}
@@ -4001,16 +4006,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         two_d_red = (
             len(self.tiling) == 2
             and tiling_scores is not None
-            and "x" in self.tiling_scores
+            and "x" in tiling_scores
         )
         if looped_red and two_d_red:
+            assert tiling_scores is not None
             memory_stats = self.features.memory_stats(self.tiling)
             dim_stats = memory_stats.persistent.memory.dim[0]
             mem_ops_per_thread = dim_stats.count_per_thread
 
             # check if majority of reads are coalesced by the rblock
-            r_coalesce_ratio = self.tiling_scores["r0_"] / max(
-                self.tiling_scores["x"], 1
+            r_coalesce_ratio = tiling_scores["r0_"] / max(
+                tiling_scores["x"], 1
             )
 
             looped_mem = memory_stats.looped.memory.bytes
