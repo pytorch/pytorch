@@ -9,6 +9,7 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
+from torch.utils._typing_utils import not_none
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -765,7 +766,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         assert group.ndim == 1, (
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
-        return group._dim_group_names[0]
+        return not_none(group._backend).layouts_to_groups[group._layouts[0]]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -774,7 +775,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         ):
             dmesh = group[0]
             dim = group[1]
-            return dmesh._dim_group_names[dim]
+            return not_none(dmesh._backend).layouts_to_groups[dmesh._layouts[dim]]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):
