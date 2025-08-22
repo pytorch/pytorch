@@ -26,6 +26,7 @@ import copy
 import dataclasses
 import enum
 import functools
+import heapq
 import inspect
 import itertools
 import logging
@@ -198,6 +199,7 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
+    PolyfilledFunctionVariable,
     SysFunctionVariable,
     TracebackVariable,
     TritonKernelVariable,
@@ -1232,6 +1234,24 @@ class VariableBuilder:
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
             )
+        elif (
+            is_function(value)
+            and inspect.isbuiltin(value)
+            and value.__module__ == "_heapq"
+        ):
+            # _heapq is a C module, so we don't have a source for it.
+            # Some heapq functions (e.g., heapify) may not match the id of
+            # their Python heapq counterparts. We manually reroute these to our
+            # heapq polyfill implementation:
+            #
+            # (Pdb+) value
+            # <built-in function heapify>
+            # (Pdb+) id(value)
+            # 127380947722192
+            # (Pdb+) id(heapq.heapify)
+            # 127381880136272
+
+            return PolyfilledFunctionVariable(getattr(heapq, value.__name__))
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
