@@ -62,10 +62,6 @@ static_assert(
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-#define NCCL_HAS_COMM_WINDOW_REGISTER
-#endif
-
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_MEM_ALLOC
 #endif
@@ -347,10 +343,9 @@ class NCCLComm {
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
-      bool errorOnRereg = true,
-      bool window = false);
+      bool errorOnRereg = true);
 
-  ncclResult_t deregisterSegment(void* ptr, bool window = false);
+  ncclResult_t deregisterSegment(void* ptr);
 
   std::string repr() const;
 

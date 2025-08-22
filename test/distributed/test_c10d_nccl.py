@@ -3099,7 +3099,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
 
-class NcclRegistrationTest(MultiProcessTestCase):
+class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -3110,7 +3110,7 @@ class NcclRegistrationTest(MultiProcessTestCase):
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
         if torch.cuda.nccl.version() >= (2, 24, 3):
-            os.environ["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+            os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
         self._spawn_processes()
 
