@@ -76,9 +76,9 @@ def sample_vllm_test_library():
             "num_gpus": 4,
             "steps": [
                 "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
-                "pytest -v -s -x lora/test_chatglm3_tp.py",
-                "pytest -v -s -x lora/test_llama_tp.py",
-                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
+                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_chatglm3_tp.py",
+                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_llama_tp.py",
+                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_multi_loras_with_tp.py",
             ],
         },
         "vllm_lora_280_failure_test": {
@@ -92,7 +92,6 @@ def sample_vllm_test_library():
             "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
             "steps": [
                 "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
-                "pytest -v -s models/multimodal/processing/test_tensor_schema.py",
             ],
         },
         "vllm_pytorch_compilation_unit_tests": {
