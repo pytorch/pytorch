@@ -40,17 +40,20 @@ struct NCCLAllocation {
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
  NCCLSymmetricMemory(
-      void* ptr,
+      const at::Tensor& tensor,
       std::shared_ptr<NCCLAllocation> allocation,
       const std::string& group_name,
       ncclWindow_t handle,
       ncclWindow_t signal_handle)
-      : allocation_(allocation),
+      : tensor_weak_ptr_(tensor.getIntrusivePtr()),
+        allocation_(allocation),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
         handle_(handle),
         signal_handle_(signal_handle) {
     c10::cuda::CUDAGuard guard(device_idx_);
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
     // Buffer size is rest of space available after ptr (this field may not be
     // important in future thus subject to removal)
     buffer_size_ = allocation->buffer_size -
@@ -210,7 +213,13 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return rank_to_global_rank_dev_;
   };
 
+  bool expired() const {
+    // True if the tensor has been deallocated
+    return tensor_weak_ptr_.expired();
+  }
+
  private:
+  c10::weak_intrusive_ptr<c10::TensorImpl> tensor_weak_ptr_;
   std::shared_ptr<NCCLAllocation> allocation_;
   size_t buffer_size_;
   // TODO: We need to finalize what booking variables we need for nccl backend.
@@ -269,15 +278,30 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,  // data_ptr() of the tensor
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
+
+    // Using raw address of TensorImpl as a unique key of tensor in `symm_mems_`
+    // map, because other addresses such as `tensor.data_ptr()` or
+    // `tensor.storage().data_ptr()` may been shared by views and slices.
+    auto tensor_raw_ptr = (void*)tensor.unsafeGetTensorImpl();
+    auto symm_mem_key = std::make_tuple(tensor_raw_ptr, *group_name);
     {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      auto it = symm_mems_.find(symm_mem_key);
       if (it != symm_mems_.end()) {
-        return it->second;
+        auto symm_mem = it->second;
+        if (!symm_mem->expired()) {
+          return symm_mem;
+        }
+        // Otherwise, the tensor in `symm_mems_` map must have been deallocated,
+        // and we are facing a new tensor that happens to have the same raw
+        // TensorImpl* address. We would go thru a new insert below.
       }
     }
+
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
     // Today this would still find the ptr in the map because one allocation
     // matches one tensor. But will break once we enable MemPool.
     // TODO: implement a customized `find` that searches for the allocation that
@@ -329,9 +353,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         comm));
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(ptr, alloc, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(tensor, alloc, *group_name, std::move(handle), std::move(signal_handle));
 
-    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
+    symm_mems_[symm_mem_key] = symm_mem;
     return symm_mem;
   };
 
@@ -353,7 +377,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       ptr_to_symm_mem_;
 
   std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NCCLSymmetricMemory>>
       symm_mems_;
 };
 
