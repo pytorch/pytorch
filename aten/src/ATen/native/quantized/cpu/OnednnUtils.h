@@ -460,4 +460,6 @@ at::Tensor _qconv_prepack_onednn(
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape=std::nullopt);
 
+#define FP8E4M3_MAX 448.0
+
 #endif // #if AT_MKLDNN_ENABLED()
