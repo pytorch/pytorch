@@ -17,7 +17,7 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
+  const std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();

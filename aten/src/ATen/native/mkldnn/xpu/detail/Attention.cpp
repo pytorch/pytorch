@@ -46,6 +46,13 @@ struct SDPALogicalParams {
       const at::Tensor& value_,
       const std::optional<at::Tensor>& attn_mask_,
       const at::Tensor& output_,
+      int batch_size,
+      int seq_len_q,
+      int seq_len_kv,
+      int num_head_q,
+      int num_head_kv,
+      int head_dim_qk,
+      int head_dim_v,
       bool is_causal) {
     const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
@@ -74,6 +81,25 @@ struct SDPALogicalParams {
     if (attn_mask_.has_value() &&
         at::native::onednn::is_broadcast(reshaped_attn_mask)) {
       at::native::onednn::undo_broadcast(reshaped_attn_mask);
+    }
+
+    if (num_head_q != num_head_kv) { // Check whether the attention is a
+                                     // Grouped-Query Attention (GQA)
+      int group_num = num_head_kv;
+      int group_size = num_head_q / num_head_kv;
+      // oneDNN requires the shape of the query tensor to be represented as
+      // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
+      // head_dim_qk]. Please refer to
+      // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
+      reshaped_query = query_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
+      reshaped_key = key_.unsqueeze(2);
+      reshaped_value = value_.unsqueeze(2);
+      reshaped_output = output_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
+        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+      }
     }
 
     query = {
@@ -140,19 +166,12 @@ struct SDPALogicalParams {
 };
 
 partition create_sdpa_graph_partition(
-    int batch_size,
-    int seq_len_q,
-    int seq_len_k,
-    int num_head,
-    int head_dim,
     bool is_causal,
     data_type dtype,
     const SDPALogicalParams& params) {
   // graph building and partitioning
   // currently, we assume that Q and K have same sequence length
 
-  dims qk_output_shape = {batch_size, num_head, seq_len_q, seq_len_k};
-  dims scale_shape = {1};
   size_t lt_id = static_cast<size_t>(SDPALogicalParams::TensorID::end);
   size_t op_id = 0;
 
@@ -246,6 +265,7 @@ partition create_sdpa_graph_partition(
 
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
   softmax.set_attr<int64_t>(op::attr::axis, -1);
+  softmax.set_attr<std::string>(op::attr::mode, "inf_as_zero");
 
   logical_tensor softmax_out{lt_id++, dtype};
   softmax.add_input(masked_qk_out.value_or(scaled_qk_out));
@@ -283,11 +303,6 @@ partition create_sdpa_graph_partition(
 }
 
 partition& find_or_create_graph_partition(
-    int batch_size,
-    int seq_len_q,
-    int seq_len_k,
-    int num_head,
-    int head_dim,
     bool is_causal,
     const SDPALogicalParams& params) {
   thread_local static PartitionCache cache;
@@ -317,15 +332,8 @@ partition& find_or_create_graph_partition(
   if (!partition_.has_value()) {
     // partition cache no hit
     // graph building and partitioning
-    partition sdp_partition = create_sdpa_graph_partition(
-        batch_size,
-        seq_len_q,
-        seq_len_k,
-        num_head,
-        head_dim,
-        is_causal,
-        dtype,
-        params);
+    partition sdp_partition =
+        create_sdpa_graph_partition(is_causal, dtype, params);
     partition_ = cache.insert_partition_cache(patternID, sdp_partition);
   }
   return *partition_;
@@ -336,10 +344,10 @@ namespace at::native::onednn {
 void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
-    int seq_len_k,
-    int num_head,
+    int seq_len_kv,
+    int num_head_q,
     int num_head_kv,
-    int head_dim,
+    int head_dim_qk,
     int head_dim_v,
     const Tensor& query,
     const Tensor& key,
@@ -354,9 +362,7 @@ void gpu_float_sdpa(
   const auto get_tril_mask = [&]() {
     auto opts = query.options();
     auto bool_tril =
-        at::ones_symint(
-            {query.sym_size(-2), key.sym_size(-2)}, opts.dtype(at::kBool))
-            .tril();
+        at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool)).tril();
     return at::where(
         bool_tril,
         0.f,
@@ -377,15 +383,21 @@ void gpu_float_sdpa(
 
   auto get_compiled_partition = [&]() {
     const SDPALogicalParams logical_params(
-        query, key, value, attn_mask, output, is_causal);
-    auto& partition_ = find_or_create_graph_partition(
+        query,
+        key,
+        value,
+        attn_mask,
+        output,
         batch_size,
         seq_len_q,
-        seq_len_k,
-        num_head,
-        head_dim,
-        is_causal,
-        logical_params);
+        seq_len_kv,
+        num_head_q,
+        num_head_kv,
+        head_dim_qk,
+        head_dim_v,
+        is_causal);
+    auto& partition_ =
+        find_or_create_graph_partition(is_causal, logical_params);
     auto i = logical_params.get_input();
     auto o = logical_params.get_output();
     auto compiled_partition = partition_.compile(i, o, eng);

@@ -30,7 +30,6 @@ def define_targets(rules):
             "//c10/macros",
             "//c10/util:base_headers",
             "//c10/util:bit_cast",
-            "//c10/util:ssize",
         ],
         visibility = ["//visibility:public"],
     )

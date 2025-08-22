@@ -573,9 +573,9 @@ using SizeType = uint64_t;
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
 // be inspected if an error occurred.
 //
-// `success_cond` is an expression used to check if an error has happend. So for
-// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
-// is stored in variable `__output` and may be used in `success_cond`.
+// `success_cond` is an expression used to check if an error has happened. So
+// for `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function
+// output is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
 #define SYSCHECK(expr, success_cond)                                           \
   while (true) {                                                               \

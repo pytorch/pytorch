@@ -97,7 +97,7 @@ def _streaming_save(
     This behaves similarly to :func:`torch.save` with a few notable differences:
 
     * A non-seekable file like object can be used when loading.
-    * No forwards/backwards compatiblity is provided for the serialization
+    * No forwards/backwards compatibility is provided for the serialization
       format. This is only intended to be used with a single version of PyTorch
       with transient storage (i.e. sockets or temp files).
     * mmap is not supported

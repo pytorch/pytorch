@@ -161,11 +161,6 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
-  bool pinned_use_background_threads() override {
-    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-        pinned_use_background_threads();
-  }
-
   EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
@@ -258,7 +253,7 @@ DECLARE_HOST_ALLOCATOR(
     CUDACachingHostAllocator,
     CUDACachingHostAllocatorImpl,
     raw_local_deleter,
-    caching_host_allocator);
+    caching_host_allocator)
 
 REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 

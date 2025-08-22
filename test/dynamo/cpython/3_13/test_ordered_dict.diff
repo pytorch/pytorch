@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_ordered_dict.py b/test/dynamo/cpython/3_13/test_ordered_dict.py
-index a9b6a84996e..b77eff70414 100644
+index a9b6a84996e..d9fce736a10 100644
 --- a/test/dynamo/cpython/3_13/test_ordered_dict.py
 +++ b/test/dynamo/cpython/3_13/test_ordered_dict.py
-@@ -1,3 +1,57 @@
+@@ -1,3 +1,60 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_ordered_dict.py
 +
 +import sys
 +import torch
@@ -60,7 +63,7 @@ index a9b6a84996e..b77eff70414 100644
  import builtins
  import contextlib
  import copy
-@@ -760,7 +814,7 @@ class _TriggerSideEffectOnEqual:
+@@ -760,7 +817,7 @@ class _TriggerSideEffectOnEqual:
      def side_effect(self):
          raise NotImplementedError
  
@@ -69,7 +72,7 @@ index a9b6a84996e..b77eff70414 100644
  
      module = py_coll
      OrderedDict = py_coll.OrderedDict
-@@ -781,7 +835,7 @@ class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+@@ -781,7 +838,7 @@ class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
          self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
  
  
@@ -78,7 +81,7 @@ index a9b6a84996e..b77eff70414 100644
      """Builtin dict preserves insertion order.
  
      Reuse some of tests in OrderedDict selectively.
-@@ -800,6 +854,7 @@ for method in (
+@@ -800,6 +857,7 @@ for method in (
  del method
  
  
@@ -86,7 +89,7 @@ index a9b6a84996e..b77eff70414 100644
  class CPythonOrderedDictSideEffects:
  
      def check_runtime_error_issue119004(self, dict1, dict2):
-@@ -878,7 +933,7 @@ class CPythonOrderedDictSideEffects:
+@@ -878,7 +936,7 @@ class CPythonOrderedDictSideEffects:
  @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
  class CPythonOrderedDictTests(OrderedDictTests,
                                CPythonOrderedDictSideEffects,
@@ -95,7 +98,7 @@ index a9b6a84996e..b77eff70414 100644
  
      module = c_coll
      OrderedDict = c_coll.OrderedDict
-@@ -986,7 +1041,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
+@@ -986,7 +1044,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
          pass
  
  
@@ -104,7 +107,7 @@ index a9b6a84996e..b77eff70414 100644
  
      module = py_coll
      class OrderedDict(py_coll.OrderedDict):
-@@ -995,7 +1050,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
+@@ -995,7 +1053,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
  
  
  @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
@@ -113,7 +116,7 @@ index a9b6a84996e..b77eff70414 100644
  
      module = c_coll
      class OrderedDict(c_coll.OrderedDict):
-@@ -1008,6 +1063,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1008,6 +1066,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
      @classmethod
      def setUpClass(cls):
          cls.type2test = py_coll.OrderedDict
@@ -121,7 +124,7 @@ index a9b6a84996e..b77eff70414 100644
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1020,6 +1076,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1020,6 +1079,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
      @classmethod
      def setUpClass(cls):
          cls.type2test = c_coll.OrderedDict
@@ -129,7 +132,7 @@ index a9b6a84996e..b77eff70414 100644
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1033,6 +1090,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1033,6 +1093,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
          class MyOrderedDict(py_coll.OrderedDict):
              pass
          cls.type2test = MyOrderedDict
@@ -137,7 +140,7 @@ index a9b6a84996e..b77eff70414 100644
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1047,6 +1105,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+@@ -1047,6 +1108,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
          class MyOrderedDict(c_coll.OrderedDict):
              pass
          cls.type2test = MyOrderedDict
@@ -145,7 +148,7 @@ index a9b6a84996e..b77eff70414 100644
  
      def test_popitem(self):
          d = self._empty_mapping()
-@@ -1120,21 +1179,22 @@ class SimpleLRUCacheTests:
+@@ -1120,21 +1182,22 @@ class SimpleLRUCacheTests:
          self.assertEqual(list(c), [1, 3, 2])
  
  

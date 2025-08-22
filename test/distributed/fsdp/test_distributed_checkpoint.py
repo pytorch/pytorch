@@ -31,10 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-_DISTRIBUTED_STATE_DICT_IMPLS = {
+_DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
-}
+)
 
 
 class TestDistributedCheckpoint(FSDPTest):
@@ -56,32 +56,36 @@ class TestDistributedCheckpoint(FSDPTest):
             torch.manual_seed(200)
             new_model = wrap(SkipModel(double_nest=True))
 
-        with FullyShardedDataParallel.summon_full_params(
-            model
-        ), FullyShardedDataParallel.summon_full_params(new_model):
+        with (
+            FullyShardedDataParallel.summon_full_params(model),
+            FullyShardedDataParallel.summon_full_params(new_model),
+        ):
             params = list(model.parameters())
             new_params = list(new_model.parameters())
             self.assertNotEqual(params, new_params)
 
         writer = FileSystemWriter(self.temp_dir)
         reader = FileSystemReader(self.temp_dir)
-        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-            new_model, state_dict_type
+        with (
+            FSDP.state_dict_type(model, state_dict_type),
+            FSDP.state_dict_type(new_model, state_dict_type),
         ):
             state_dict = model.state_dict()
 
         save(state_dict, writer)
 
-        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-            new_model, state_dict_type
+        with (
+            FSDP.state_dict_type(model, state_dict_type),
+            FSDP.state_dict_type(new_model, state_dict_type),
         ):
             state_dict = new_model.state_dict()
             load(state_dict, reader)
             new_model.load_state_dict(state_dict)
 
-        with FullyShardedDataParallel.summon_full_params(
-            model
-        ), FullyShardedDataParallel.summon_full_params(new_model):
+        with (
+            FullyShardedDataParallel.summon_full_params(model),
+            FullyShardedDataParallel.summon_full_params(new_model),
+        ):
             params = list(model.parameters())
             new_params = list(new_model.parameters())
             self.assertEqual(params, new_params)

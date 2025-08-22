@@ -26,6 +26,9 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
   which results in capturing the backwards pass "ahead-of-time". This enables
   acceleration of both forwards and backwards pass using TorchInductor.
 
+To better understand how `torch.compile` tracing behavior on your code, or to
+learn more about the internals of `torch.compile`, please refer to the [`torch.compile` programming model](compile/programming_model.md).
+
 :::{note}
 In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
@@ -36,7 +39,7 @@ TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
 TorchDynamo has a list of supported backends developed by our partners,
-which can be see by running `torch.compiler.list_backends()` each of which
+which can be seen by running `torch.compiler.list_backends()` each of which
 with its optional dependencies.
 
 Some of the most commonly used backends include:
@@ -56,8 +59,6 @@ Some of the most commonly used backends include:
      - CUDA graphs with AOT Autograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
-   * - ``torch.compile(m, backend="onnxrt")``
-     - Uses ONNX Runtime for training on CPU/GPU. :doc:`Read more <onnx_dynamo_onnxruntime_backend>`
 ```
 
 **Inference-only backends**
@@ -90,6 +91,7 @@ Some of the most commonly used backends include:
    torch.compiler_api
    torch.compiler.config
    torch.compiler_fine_grain_apis
+   torch.compiler_backward
    torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
    torch.compiler_profiling_torch_compile
@@ -97,6 +99,13 @@ Some of the most commonly used backends include:
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
    torch.compiler_inductor_provenance
+```
+
+```{eval-rst}
+.. toctree::
+   :caption: `torch.compile` Programming Model
+
+   compile/programming_model
 ```
 
 % _If you want to contribute a developer-level topic

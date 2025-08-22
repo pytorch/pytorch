@@ -35,7 +35,7 @@ using AllocationID = strong::type<
     strong::regular,
     strong::hashable>;
 
-// We use a Tensor's TensorImpl adress and StorageImpl data start to build the
+// We use a Tensor's TensorImpl address and StorageImpl data start to build the
 // data flow graph. We do not hold an owning reference so we wrap them in strong
 // types to prevent direct access.
 using TensorImplAddress = strong::type<

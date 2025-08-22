@@ -24,6 +24,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
 from typing import Any
 from unittest import mock
 
@@ -107,7 +108,7 @@ class TestParsedExpression(TestCase):
             ParsedExpression("(a) ((b c) (d ...))")
 
         # invalid identifiers
-        ParsedExpression("camelCase under_scored cApiTaLs \u00DF ...")
+        ParsedExpression("camelCase under_scored cApiTaLs \u00df ...")
         with self.assertRaises(ValueError):
             ParsedExpression("1a")
         with self.assertRaises(ValueError):

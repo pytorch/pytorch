@@ -1106,6 +1106,23 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
     """,
         )
 
+    def test_param_transfer_to_submodule(self):
+        def inner_fn(x, y):
+            return x + y + y + x
+
+        def fn(x0, x1, x2, y0, y1, y2):
+            x0 = inner_fn(x0, y0)
+            x1 = inner_fn(x1, y1)
+            x2 = inner_fn(x2, y2)
+            return x0.sum() + x1.sum() + x2.sum()
+
+        fn_opt = torch.compile(fn, fullgraph=True)
+        args = [torch.rand(10, 10) for _ in range(6)]
+        for arg in args:
+            torch._dynamo.mark_static_address(arg)
+
+        fn_opt(*args)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

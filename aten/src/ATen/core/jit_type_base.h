@@ -677,7 +677,7 @@ inline TypePtr Type::withContained(std::vector<TypePtr> contained_types) {
 }
 
 
-TORCH_API inline bool operator==(const Type& lhs, const Type& rhs) {
+inline bool operator==(const Type& lhs, const Type& rhs) {
   if (C10_UNLIKELY(!rhs.symmetric())) {
     return rhs.equals(lhs);
   }

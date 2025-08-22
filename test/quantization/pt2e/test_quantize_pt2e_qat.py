@@ -43,6 +43,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class PT2EQATTestCase(QuantizationTestCase):
@@ -276,9 +277,9 @@ class PT2EQATTestCase(QuantizationTestCase):
 
         # Verify: conv literal args
         if expected_conv_literal_args is not None:
-            assert (
-                len(expected_conv_literal_args) == 6
-            ), "wrong num conv args, bad test setup"
+            assert len(expected_conv_literal_args) == 6, (
+                "wrong num conv args, bad test setup"
+            )
             for i in range(6):
                 if i + 3 < len(conv_node.args):
                     self.assertEqual(
@@ -1177,3 +1178,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         self.checkGraphModuleNodes(
             exported_model.graph_module, expected_node_occurrence=node_occurrence
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

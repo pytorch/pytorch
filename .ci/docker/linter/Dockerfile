@@ -27,5 +27,7 @@ COPY ./common/install_linter.sh install_linter.sh
 RUN bash ./install_linter.sh
 RUN rm install_linter.sh
 
+RUN chown -R jenkins:jenkins /var/lib/jenkins/ci_env
+
 USER jenkins
 CMD ["bash"]

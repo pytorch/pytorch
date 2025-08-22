@@ -213,7 +213,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
-    if (dispatch_key != DispatchKey::Meta) {
+    // Also suppress the warning for MTIA, as MTIA achieves CPU fallback by overriding registration.
+    if (dispatch_key != DispatchKey::Meta && dispatch_key != DispatchKey::MTIA) {
       TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
@@ -314,6 +315,42 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
   return nullptr;
 }
 
+SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
+    DispatchKey k) const {
+  TORCH_CHECK(
+      !isAliasDispatchKey(k),
+      "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_CHECK(
+      dispatchTable_[dispatch_ix].isValid(),
+      "no kernel for ",
+      k,
+      " for ",
+      name_);
+
+  // Get the KernelFunction object from kernels_ to pass to SafeKernelFunction
+
+  // The KernelFunction object in dispatchTable_ is a copy of the KernelFunction
+  // in the AnnotatedKernel in kernels_. A KernelFunction is only truly
+  // deregistered when the kernel is removed from kernels_. However, the
+  // KernelFunction in dispatchTable_ might be removed before it is deregistered
+  // (when a newer kernel is registered). Therefore, here we want to return a
+  // SafeKernelFunction that is backed by the original KernelFunction in
+  // kernels_, so that we only invalidate it when the kernel is deregistered.
+  auto [annotatedKernel, _] =
+      computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
+
+  // Use findSchemaOrThrow to get OpHandle for the OperatorEntry
+  auto& dispatcher = c10::Dispatcher::singleton();
+  auto opHandle = dispatcher.findSchemaOrThrow(
+      name_.name.c_str(), name_.overload_name.c_str());
+
+  return SafeKernelFunction(
+      &annotatedKernel.kernel,
+      annotatedKernel.debug,
+      std::make_shared<OperatorHandle>(opHandle));
+}
+
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
   #if defined C10_MOBILE
     TORCH_CHECK(false, "tags are not saved for Mobile");
@@ -353,7 +390,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //   CompositExplicitAutogradNonFunctional > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
   // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
   //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
-  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
+  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overridden.
   //   This is fine and in practice CompositeExplicitAutograd and CompositeImplicitAutograd shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
 

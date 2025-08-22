@@ -1,0 +1,152 @@
+diff --git a/test/dynamo/cpython/3_13/test_exceptions.py b/test/dynamo/cpython/3_13/test_exceptions.py
+index c91f6662948..0ded70db3c7 100644
+--- a/test/dynamo/cpython/3_13/test_exceptions.py
++++ b/test/dynamo/cpython/3_13/test_exceptions.py
+@@ -1,3 +1,59 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_exceptions.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++__TestCase = CPythonTestCase
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- part 5, built-in exceptions
+ 
+ import copy
+@@ -45,7 +101,7 @@ class BrokenStrException(Exception):
+ # XXX This is not really enough, each *operation* should be tested!
+ 
+ 
+-class ExceptionTests(unittest.TestCase):
++class ExceptionTests(__TestCase):
+ 
+     def raise_catch(self, exc, excname):
+         with self.subTest(exc=exc, excname=excname):
+@@ -1844,7 +1900,7 @@ class ExceptionTests(unittest.TestCase):
+         self.assertIn(b'MemoryError', err)
+ 
+ 
+-class NameErrorTests(unittest.TestCase):
++class NameErrorTests(__TestCase):
+     def test_name_error_has_name(self):
+         try:
+             bluch
+@@ -1894,7 +1950,7 @@ class NameErrorTests(unittest.TestCase):
+     # Note: name suggestion tests live in `test_traceback`.
+ 
+ 
+-class AttributeErrorTests(unittest.TestCase):
++class AttributeErrorTests(__TestCase):
+     def test_attributes(self):
+         # Setting 'attr' should not be a problem.
+         exc = AttributeError('Ouch!')
+@@ -1937,7 +1993,7 @@ class AttributeErrorTests(unittest.TestCase):
+     # Note: name suggestion tests live in `test_traceback`.
+ 
+ 
+-class ImportErrorTests(unittest.TestCase):
++class ImportErrorTests(__TestCase):
+ 
+     def test_attributes(self):
+         # Setting 'name' and 'path' should not be a problem.
+@@ -2024,7 +2080,7 @@ def run_script(source):
+     _rc, _out, err = script_helper.assert_python_failure('-Wd', '-X', 'utf8', TESTFN)
+     return err.decode('utf-8').splitlines()
+ 
+-class AssertionErrorTests(unittest.TestCase):
++class AssertionErrorTests(__TestCase):
+     def tearDown(self):
+         unlink(TESTFN)
+ 
+@@ -2159,7 +2215,7 @@ class AssertionErrorTests(unittest.TestCase):
+ 
+ 
+ @support.force_not_colorized_test_class
+-class SyntaxErrorTests(unittest.TestCase):
++class SyntaxErrorTests(__TestCase):
+     maxDiff = None
+ 
+     @force_not_colorized
+@@ -2290,6 +2346,7 @@ class SyntaxErrorTests(unittest.TestCase):
+         err = run_script(b"\x89")
+         self.assertIn("SyntaxError: Non-UTF-8 code starting with '\\x89' in file", err[-1])
+ 
++
+     def test_string_source(self):
+         def try_compile(source):
+             with self.assertRaises(SyntaxError) as cm:
+@@ -2405,7 +2462,7 @@ class SyntaxErrorTests(unittest.TestCase):
+         self.assertRaises(TypeError, SyntaxError, "bad bad", args)
+ 
+ 
+-class TestInvalidExceptionMatcher(unittest.TestCase):
++class TestInvalidExceptionMatcher(__TestCase):
+     def test_except_star_invalid_exception_type(self):
+         with self.assertRaises(TypeError):
+             try:
+@@ -2420,7 +2477,7 @@ class TestInvalidExceptionMatcher(unittest.TestCase):
+                 pass
+ 
+ 
+-class PEP626Tests(unittest.TestCase):
++class PEP626Tests(__TestCase):
+ 
+     def lineno_after_raise(self, f, *expected):
+         try:
+@@ -2529,5 +2586,5 @@ class PEP626Tests(unittest.TestCase):
+                 1/0
+         self.lineno_after_raise(after_with, 1, 1)
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

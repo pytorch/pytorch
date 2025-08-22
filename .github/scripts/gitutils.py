@@ -211,7 +211,7 @@ class GitRepo:
         self, from_branch: str, to_branch: str
     ) -> tuple[list[str], list[str]]:
         """
-        Returns list of commmits that are missing in each other branch since their merge base
+        Returns list of commits that are missing in each other branch since their merge base
         Might be slow if merge base is between two branches is pretty far off
         """
         from_ref = self.rev_parse(from_branch)
