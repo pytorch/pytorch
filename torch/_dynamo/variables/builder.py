@@ -689,13 +689,10 @@ class VariableBuilder:
             )
             and type(value) not in config.nontraceable_tensor_subclasses
         ):
-            if type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
-                # This case it's either tensor or subclass with default
-                # torch_dispatch (they might override torch_function or not),
-                # and we can always trace into them.
-                return self.wrap_tensor(value)
-            elif is_traceable_wrapper_subclass(value):
-                # For non-default torch_dispatch, we have more requirements.
+            if (
+                type(value).__torch_dispatch__ is torch.Tensor.__torch_dispatch__
+                or is_traceable_wrapper_subclass(value)
+            ):
                 return self.wrap_tensor(value)
 
         if is_namedtuple(value):
@@ -1744,11 +1741,6 @@ class VariableBuilder:
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
 
-        # See [Note] Static Addresses and Precompile
-        # https://github.com/pytorch/pytorch/issues/159228
-        if torch._dynamo.config.caching_precompile:
-            return
-
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
         )
@@ -2060,32 +2052,8 @@ class VariableBuilder:
             return self.tx.output.input_source_to_var[source]
 
         options = {}
-        if type(value) in (
-            torch.Tensor,
-            torch.nn.Parameter,
-            torch._subclasses.fake_tensor.FakeTensor,
-            torch._subclasses.functional_tensor.FunctionalTensor,
-        ) or is_traceable_wrapper_subclass(value):
-            # Ordinarily, we would fakeify a tensor so that it can get dynamic
-            # shapes and be computed on without triggering actual operations.
-            # However, how can we fakeify a tensor subclass?  Ordinary
-            # inheritance (nor multiple inheritance) won't work work.
-            #
-            # Instead, our plan is to *manually simulate* the tensor subclass
-            # inheriting from a fake tensor with dynamo.  This means our
-            # data representation for a tensor subclass will be a fake tensor
-            # + tensor subclass type + any extra data the subclass may have
-            # been storing on the tensor.  Because all Python accesses are
-            # mediated through TensorWithTFOverrideVariable, we can ensure
-            # that we dispatch differently, e.g., according to
-            # __torch_function__
-            #
-            # To simplify things for now, the __dict__ tracking bits haven't
-            # been implemented yet, but they can be added into this design at
-            # a later point in time.
-            subclass_type = None
-        else:
-            subclass_type = type(value)
+        subclass_type = infer_subclass_type(value)
+        if subclass_type is not None:
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
@@ -3043,6 +3011,55 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         )
 
 
+def infer_subclass_type(value):
+    if type(value) in (
+        torch.Tensor,
+        torch.nn.Parameter,
+        torch._subclasses.fake_tensor.FakeTensor,
+        torch._subclasses.functional_tensor.FunctionalTensor,
+    ) or is_traceable_wrapper_subclass(value):
+        # Ordinarily, we would fakeify a tensor so that it can get dynamic
+        # shapes and be computed on without triggering actual operations.
+        # However, how can we fakeify a tensor subclass?  Ordinary
+        # inheritance (nor multiple inheritance) won't work work.
+        #
+        # Instead, our plan is to *manually simulate* the tensor subclass
+        # inheriting from a fake tensor with dynamo.  This means our
+        # data representation for a tensor subclass will be a fake tensor
+        # + tensor subclass type + any extra data the subclass may have
+        # been storing on the tensor.  Because all Python accesses are
+        # mediated through TensorWithTFOverrideVariable, we can ensure
+        # that we dispatch differently, e.g., according to
+        # __torch_function__
+        #
+        # To simplify things for now, the __dict__ tracking bits haven't
+        # been implemented yet, but they can be added into this design at
+        # a later point in time.
+        return None
+    else:
+        return type(value)
+
+
+def get_specialized_props(target_cls, tx, example_value, subclass_type):
+    specialized_props = target_cls.specialize(example_value)
+    # TODO: not sure about this fake mode test
+    if (
+        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+        and example_value.fake_mode is tx.fake_mode
+    ):
+        if subclass_type:
+            tensor_type = subclass_type
+        elif isinstance(example_value, torch.nn.Parameter):
+            tensor_type = torch.nn.Parameter
+        elif isinstance(example_value, torch.nn.Buffer):
+            tensor_type = torch.nn.Buffer
+        else:
+            tensor_type = torch.Tensor
+        specialized_props["class_type"] = tensor_type
+
+    return specialized_props
+
+
 def construct_tensor_variable(
     target_cls, tx, proxy, example_value, subclass_type, options
 ):
@@ -3060,23 +3077,7 @@ def construct_tensor_variable(
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
     tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
-    specialized_props = target_cls.specialize(example_value)
-    # TODO: not sure about this fake mode test
-    if (
-        isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
-        and example_value.fake_mode is tx.fake_mode
-    ):
-        if subclass_type:
-            tensor_type = subclass_type
-        elif isinstance(example_value, torch.nn.Parameter):
-            tensor_type = torch.nn.Parameter
-        elif isinstance(example_value, torch.nn.Buffer):
-            tensor_type = torch.nn.Buffer
-        else:
-            tensor_type = torch.Tensor
-        specialized_props["class_type"] = tensor_type
-
-    options.update(specialized_props)
+    options.update(get_specialized_props(target_cls, tx, example_value, subclass_type))
     return target_cls(proxy, **options)
 
 

@@ -13,8 +13,7 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
-    bool is_weight_prepacked,
-    std::string_view zendnn_op_name) {
+    bool is_weight_prepacked) {
   TORCH_CHECK(false, "zendnn_linear: ATen is not compiled with ZenDNN support");
 }
 } // namespace at::native
@@ -27,8 +26,7 @@ inline void zendnn_linear_impl(
     const at::Tensor& weight,
     const at::Tensor& bias,
     at::Tensor& result,
-    bool is_weight_prepacked,
-    std::string_view zendnn_op_name) {
+    bool is_weight_prepacked) {
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
   check_args_for_linear(input, weight);
@@ -75,16 +73,14 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
-    bool is_weight_prepacked,
-    std::string_view zendnn_op_name) {
+    bool is_weight_prepacked) {
   c10::MaybeOwned<at::Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias);
   const at::Tensor& bias_t = *bias_maybe_owned;
   // Create output tensor with appropriate size and strides
   at::Tensor result = create_linear_output_tensor(input, weight);
   // Perform ZENDNN linear operation
-  zendnn_linear_impl(
-      input, weight, bias_t, result, is_weight_prepacked, zendnn_op_name);
+  zendnn_linear_impl(input, weight, bias_t, result, is_weight_prepacked);
   return result;
 }
 } // namespace at::native
