@@ -269,15 +269,20 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,  // data_ptr() of the tensor
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
+
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
+    auto symm_mem_key = std::make_tuple(ptr, *group_name);
     {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      auto it = symm_mems_.find(symm_mem_key);
       if (it != symm_mems_.end()) {
         return it->second;
       }
     }
+
     // Today this would still find the ptr in the map because one allocation
     // matches one tensor. But will break once we enable MemPool.
     // TODO: implement a customized `find` that searches for the allocation that
@@ -331,7 +336,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto symm_mem =
         c10::make_intrusive<NCCLSymmetricMemory>(ptr, alloc, *group_name, std::move(handle), std::move(signal_handle));
 
-    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
+    symm_mems_[symm_mem_key] = symm_mem;
     return symm_mem;
   };
 
@@ -353,7 +358,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       ptr_to_symm_mem_;
 
   std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NCCLSymmetricMemory>>
       symm_mems_;
 };
 

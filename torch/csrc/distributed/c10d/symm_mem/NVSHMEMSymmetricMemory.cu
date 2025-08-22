@@ -374,15 +374,21 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,  // data_ptr() of the tensor
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
+
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
+    // NVSHMEM backend uses data_ptr() as key to find the symm_mem handle
+    auto symm_mem_key = std::make_tuple(ptr, *group_name);
     {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      auto it = symm_mems_.find(symm_mem_key);
       if (it != symm_mems_.end()) {
         return it->second;
       }
     }
+
     // This is the first time the tenosr gets rendezvous'ed. We need to first
     // search for an allocations that backs it (below).
 
@@ -401,9 +407,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "is the tensor allocated from SymmetricMemory?");
 
     auto symm_mem =
-        c10::make_intrusive<NVSHMEMSymmetricMemory>(ptr, it->second, *group_name);
+        c10::make_intrusive<NVSHMEMSymmetricMemory>(ptr, it->second /*allocation*/, *group_name);
 
-    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
+    symm_mems_[symm_mem_key] = symm_mem;
     return symm_mem;
   };
 
@@ -422,7 +428,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NVSHMEMSymmetricMemory>>
       symm_mems_;
 };
 
