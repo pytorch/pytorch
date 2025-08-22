@@ -5771,7 +5771,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
     // Pool is created
     memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
     // Register so that we call ncclCommRegister on all new allocations
-    registerMemPool(memPool_.get(), false);
+    registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";
   }
 
