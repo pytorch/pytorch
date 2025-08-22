@@ -512,7 +512,28 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     return;
   }
 
-  TORCH_CHECK(source.scalar_type() != ScalarType::Long, "index_add(): Expected non int64 dtype for source.");
+  bool use_deterministic_algorithm = globalContext().deterministicAlgorithms();
+
+  // TODO: Do not use deterministic algorithm for long/complex but rather implement it as Metal shader
+  use_deterministic_algorithm |= source.scalar_type() == ScalarType::Long;
+  use_deterministic_algorithm |= c10::isComplexType(source.scalar_type());
+
+  if (use_deterministic_algorithm) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    torch::List<std::optional<Tensor>> indices;
+    indices.reserve(dim + 1);
+    for (const auto i : c10::irange(dim)) {
+      indices.emplace_back();
+    }
+    indices.emplace_back(index.to(at::kLong));
+    const Tensor result_ = (result.dim() == 0) ? result.view(1) : result;
+    const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+    result_.index_put_(indices, source_.mul(alpha), true);
+    return;
+  }
+
   auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
 
   struct CachedGraph : public MPSCachedGraph {
@@ -921,6 +942,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_fill_(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
+  // MPS.scatter crashes if used with complex dtypes
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
 
   // Empty index
   if (num_indices == 0) {

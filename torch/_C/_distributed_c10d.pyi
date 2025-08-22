@@ -644,6 +644,7 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
         config: ProcessGroupNCCL.NCCLConfig
