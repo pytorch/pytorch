@@ -93,7 +93,7 @@ errors.implicit-import = false
 # and mypy.ini specifies `check_untyped_defs = False` for this file.
 # If you check even the unannotated stuff mypy produces 322 errors.
 # "test/test_torch.py",
-# Uncomment this file to check 
+# Uncomment this file to check
 # [[tool.pyrefly.sub-config]]
 # matches = "test/test_torch.py"
 # untyped-def-behavior = "skip-and-infer-return-any"
