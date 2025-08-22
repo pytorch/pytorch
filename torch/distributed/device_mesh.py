@@ -189,7 +189,7 @@ else:
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = chain(
                 list(not_none(root_mesh.mesh_dim_names)),
-                *self.flatten_name_to_root_dims[root_mesh].keys(),
+                self.flatten_name_to_root_dims[root_mesh].keys(),
             )
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
