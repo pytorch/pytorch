@@ -565,6 +565,9 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "EHsc",
             # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
             "Zc:__cplusplus",
+            # Enable max compatible to msvc for oneAPI headers.
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
+            "permissive-",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
