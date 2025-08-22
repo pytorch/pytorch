@@ -316,12 +316,14 @@ static void maybe_initialize_env_vars() {
 static void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
-    int world_size) {
+    int world_size,
+    int device_idx) {
   static bool is_initialized = false;
   if (is_initialized) {
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device_idx);
   maybe_initialize_env_vars();
   // Make sure the CUDA runtime is initialized.
   cudaFree(nullptr);
@@ -366,7 +368,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    initialize_nvshmem_with_store(store, rank, world_size);
+    initialize_nvshmem_with_store(store, rank, world_size, device_idx);
     auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
