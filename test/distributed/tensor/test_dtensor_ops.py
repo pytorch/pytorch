@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import run_tests, suppress_warnings
+from torch.testing._internal.common_utils import run_tests, suppress_warnings, parametrize
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -512,7 +512,8 @@ class TestDTensorOps(DTensorOpTestBase):
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
-    def test_dtensor_op_db(self, dtype, op):
+    @parametrize('use_compile,use_dynamic', [(False,False), (True,False), (True, True)])
+    def test_dtensor_op_db(self, dtype, op, use_compile, use_dynamic):
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 
         # test each op with dist tensor inputs and normal inputs
@@ -522,7 +523,7 @@ class TestDTensorOps(DTensorOpTestBase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
-                self.run_dtensor_crossref(op.op, args, kwargs)
+                self.run_dtensor_crossref(op.op, args, kwargs, use_compile, use_dynamic)
                 # we need to figure out a way to test the out variant, out variant testing
                 # is tricky, as we need to pre allocate the dtensor out, some of them rely
                 # on sharding placements to be pre-known (i.e. mm.out)
@@ -555,7 +556,7 @@ class TestDTensorOps(DTensorOpTestBase):
 
             self.assertEqualOnRank(dtensor_r, r)
 
-    def run_dtensor_crossref(self, func, args, kwargs):
+    def run_dtensor_crossref(self, func, args, kwargs, use_compile, use_dynamic):
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
         def concat_res_if_necessary(func, res: object) -> object:
@@ -580,6 +581,7 @@ class TestDTensorOps(DTensorOpTestBase):
         # errors
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            maybe_compiled_func = func
             # for every comb of sharding choices, we test if it works
             for dtensor_args, dtensor_kwargs in to_dtensor:
                 # Only attempt if we managed to convert all tensors to DTensor
@@ -592,7 +594,22 @@ class TestDTensorOps(DTensorOpTestBase):
                         # but it does matter if you want to use this decorator
                         # for cross-ref testing, as some tests may be looking at
                         # errors
-                        dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
+
+                        # If compiling without dynamic, need to reset caches, compile,
+                        # then synchronize to allow all threads to clear caches. This is
+                        # needed for dynamic too due to specializations on 0s and 1s.
+                        if use_compile:
+                            torch.compiler.reset()
+                            maybe_compiled_func = torch.compile(
+                                func,
+                                backend="aot_eager",
+                                dynamic=use_dynamic,
+                                fullgraph=True
+                            )
+                            # The barrier is needed on certain hardware (e.g. A100)
+                            # Not sure why it's hardware dependant, but it is
+                            torch.distributed.barrier()
+                        dtensor_rs = maybe_compiled_func(*dtensor_args, **dtensor_kwargs)
 
                         # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/PiPPy/issues/470
