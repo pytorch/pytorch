@@ -692,7 +692,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     if len(func._schema.returns) == 1:
         return get_arg_from_alias(
-            get_write_alias(schema_info.outs[0]), schema_info, args, kwargs
+            schema_info_outs_write_aliases[0], schema_info, args, kwargs
         )
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
