@@ -162,7 +162,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool pinned_use_background_threads() override {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
         pinned_use_background_threads();
   }
 
