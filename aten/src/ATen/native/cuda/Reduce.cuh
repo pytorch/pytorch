@@ -823,7 +823,7 @@ struct ReduceOp {
         index_t input_offset = threadIdx.y;
         index_t step = blockDim.y;
 #ifdef USE_ROCM // Prefetch loads to better hide their latency
-        #define PRFCH 4 
+        #define PRFCH 4
         for (; input_offset < config.ctas_per_output; input_offset += step*PRFCH) {
          arg_vec_t next[PRFCH];
          #pragma unroll
