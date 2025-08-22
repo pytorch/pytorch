@@ -1330,11 +1330,13 @@ def quantized_decomposed_quantize_per_channel(
 
 
 def _assert_async(cond, msg):
+    cond.realize()
     cond = to_dtype(cond, torch.bool)
-    cond_loader = cond.make_loader()
 
     def inner_fn(index):
-        return ops.device_assert_async(cond_loader(index), msg)
+        with cond.data.data.force_load():
+            cond_loader = cond.make_loader()
+            return ops.device_assert_async(cond_loader(index), msg)
 
     assertion_op = Pointwise.create(
         device=cond.get_device(),
@@ -1342,7 +1344,6 @@ def _assert_async(cond, msg):
         inner_fn=inner_fn,
         ranges=list(cond.get_size()),
     )
-
     assertion_op.realize()
     return assertion_op
 
