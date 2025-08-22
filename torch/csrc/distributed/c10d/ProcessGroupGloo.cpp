@@ -528,16 +528,16 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto hostname = std::make_unique<char[]>(hostNameMax);
-  auto rv = gethostname(hostname.get(), hostNameMax);
+  std::string hostname(hostNameMax, '\0');
+  auto rv = gethostname(hostname.data(), hostNameMax);
   if (rv != 0) {
     C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
     return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.get(), lazyInit);
+        hostname.data(), lazyInit);
   }
 
   // Otherwise, use the loopback address.
