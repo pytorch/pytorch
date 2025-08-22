@@ -262,9 +262,76 @@ static Variable applySlicing(
   return result;
 }
 
+static bool treatSequenceAsTuple(PyObject* index) {
+  if (PyTuple_Check(index)) {
+    return true;
+  }
+  if (THPVariable_Check(index)) {
+    return false;
+  }
+  //  Allow indexing with ndarray if numpy compilation is enabled. An ndarray
+  //  index should not be treated as a tuple since the indexing has a different
+  //  syntax.
+#ifdef USE_NUMPY
+  if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
+    return false;
+  }
+#endif
+  if (!PySequence_Check(index)) {
+    return false;
+  }
+  // This uses a heuristics from NumPy for determining whether to treat
+  // non-tuple sequences as if they were a tuple. From the NumPy code comments:
+  //
+  // "At this point, we're left with a non-tuple, non-array, sequence:
+  //  typically, a list. We use some somewhat-arbitrary heuristics from here
+  //  onwards to decided whether to treat that list as a single index, or a
+  //  list of indices. Backwards compatibility only takes effect for short
+  //  sequences - otherwise we treat it like any other scalar."
+  auto n = PySequence_Size(index);
+  if (n < 0) {
+    // Negative size indicates a Python error in the PySequence_Size call.
+    PyErr_Clear();
+    return false;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  if (n >= 32) {
+    return false;
+  }
+  for (Py_ssize_t i = 0; i < n; i++) {
+    auto obj = THPObjectPtr{PySequence_GetItem(index, i)};
+    if (!obj.get()) {
+      PyErr_Clear();
+      return false;
+    }
+    if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
+        PySlice_Check(obj.get())) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
+      return true;
+    }
+    if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
+      return true;
+    }
+  }
+  return false;
+}
+
 static THPObjectPtr wrapTuple(PyObject* index) {
   THPObjectPtr res;
-  if (PyTuple_Check(index)) {
+  if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
   } else {
     res = PyTuple_Pack(1, index);
