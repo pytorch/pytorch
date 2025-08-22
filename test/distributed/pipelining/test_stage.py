@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
 )
 from torch.utils._pytree import tree_map_only
