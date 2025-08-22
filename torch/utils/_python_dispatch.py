@@ -614,7 +614,7 @@ def get_alias_info(func) -> SchemaInfo:
 
 
 # See NOTE[SchemaInfo int_tags] above.
-_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)
+_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
