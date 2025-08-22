@@ -337,6 +337,16 @@ if not IS_WINDOWS:
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
+        @onlyCPU
+        def test_parallel_for(self, device):
+            import libtorch_agnostic
+
+            size = 100
+            grain_size = 10
+            result = libtorch_agnostic.ops.test_parallel_for(size, grain_size)
+            expected = torch.arange(size, dtype=torch.int64)
+            self.assertEqual(result, expected)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
