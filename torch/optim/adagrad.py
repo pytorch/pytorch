@@ -145,12 +145,17 @@ class Adagrad(Optimizer):
         return has_sparse_grad, has_complex
 
     @_use_grad_for_differentiable
-    def step(self, closure=None):
+    def step(self, closure=None, zero_grad=None):
         """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         loss = None
 
@@ -187,6 +192,7 @@ class Adagrad(Optimizer):
                 found_inf=getattr(self, "found_inf", None),
             )
 
+        super()._zero_grad(zero_grad)
         return loss
 
 

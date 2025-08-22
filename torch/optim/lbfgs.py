@@ -299,12 +299,17 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    def step(self, closure):  # type: ignore[override]
+    def step(self, closure, zero_grad=None):  # type: ignore[override]
         """Perform a single optimization step.
 
         Args:
             closure (Callable): A closure that reevaluates the model
                 and returns the loss.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         assert len(self.param_groups) == 1
 
@@ -500,4 +505,5 @@ class LBFGS(Optimizer):
         state["prev_flat_grad"] = prev_flat_grad
         state["prev_loss"] = prev_loss
 
+        super()._zero_grad(zero_grad)
         return orig_loss
