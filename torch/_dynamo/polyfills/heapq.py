@@ -4,9 +4,6 @@ Python polyfills for builtins
 
 from __future__ import annotations
 
-import _imp
-
-import contextlib
 import heapq
 import importlib
 import sys
@@ -20,6 +17,8 @@ _R = TypeVar("_R")
 KeyFn = Callable[[_T], _R]
 
 
+# Partially copied from CPython test/support/import_helper.py
+# https://github.com/python/cpython/blob/bb8791c0b75b5970d109e5557bfcca8a578a02af/Lib/test/support/import_helper.py
 def _save_and_remove_modules(names):  # type: ignore[no-untyped-def]
     orig_modules = {}
     prefixes = tuple(name + "." for name in names)
@@ -29,41 +28,19 @@ def _save_and_remove_modules(names):  # type: ignore[no-untyped-def]
     return orig_modules
 
 
-@contextlib.contextmanager
-def frozen_modules(enabled=True):  # type: ignore[no-untyped-def]
-    """Force frozen modules to be used (or not).
-
-    This only applies to modules that haven't been imported yet.
-    Also, some essential modules will always be imported frozen.
-    """
-    _imp._override_frozen_modules_for_tests(1 if enabled else -1)  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        _imp._override_frozen_modules_for_tests(0)  # type: ignore[attr-defined]
-
-
 def import_fresh_module(  # type: ignore[no-untyped-def]
-    name, fresh=(), blocked=(), *, deprecated=False, usefrozen=False
+    name, blocked=(), *, deprecated=False, usefrozen=False
 ):
     # Keep track of modules saved for later restoration as well
     # as those which just need a blocking entry removed
-    fresh = list(fresh)
     blocked = list(blocked)
-    names = {name, *fresh, *blocked}
+    names = {name, *blocked}
     orig_modules = _save_and_remove_modules(names)
     for modname in blocked:
         sys.modules[modname] = None  # type: ignore[assignment]
 
     try:
-        with frozen_modules(usefrozen):
-            # Return None when one of the "fresh" modules can not be imported.
-            try:
-                for modname in fresh:
-                    __import__(modname)
-            except ImportError:
-                return None
-            return importlib.import_module(name)
+        return importlib.import_module(name)
     finally:
         _save_and_remove_modules(names)
         sys.modules.update(orig_modules)
