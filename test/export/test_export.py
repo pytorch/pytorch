@@ -15982,7 +15982,6 @@ def forward(self, x):
         exported_param_names = [name for name, _ in gm.named_parameters()]
         self.assertEqual(original_param_names, exported_param_names)
 
-
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
