@@ -23,7 +23,7 @@ import torch
 import torch.onnx
 import torch.utils.cpp_extension
 from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from torch.onnx._internal.torchscript_exporter import _experimental
+
 
 __all__ = [
     "OnnxBackend",
@@ -40,13 +42,13 @@ import numpy.typing as npt
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, utils
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import onnx_proto_utils
+from torch.onnx import _constants, utils
 from torch.onnx._internal.exporter._verification import (
     VerificationInfo,
     verify_onnx_program,
 )
+from torch.onnx._internal.torchscript_exporter import onnx_proto_utils
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.types import Number
 
 
