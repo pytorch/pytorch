@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
@@ -66,7 +67,9 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
-    pass
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -264,7 +267,14 @@ class UnsafeScriptObjectError(TorchDynamoException):
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: Optional[StackSummary] = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class IncorrectUsage(Exception):
@@ -355,7 +365,7 @@ observed_exception_map = {
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
         name = getattr(exc_type, "__name__", str(exc_type))
-        observed_exception_map[exc_type] = type(
+        observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
     return observed_exception_map[exc_type]
@@ -373,7 +383,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.set_current_exception(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raise get_dynamo_observed_exception(exc_type)
 
 

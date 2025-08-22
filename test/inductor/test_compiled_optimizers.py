@@ -64,7 +64,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
 
 def get_inputs(optim):
@@ -916,7 +916,7 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertLess(end - start, 90)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -935,7 +935,7 @@ class CompiledOptimizerTests(TestCase):
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_foreach_map_adam(self):
         params = [
             torch.rand(

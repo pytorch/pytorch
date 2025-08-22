@@ -93,7 +93,7 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual void free(void* ptr) = 0;
   virtual size_t get_alloc_size(void* ptr) = 0;
   virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) = 0;
   virtual bool has_multicast_support(int device_idx) = 0;
   virtual c10::DeviceType supported_device_type() = 0;
