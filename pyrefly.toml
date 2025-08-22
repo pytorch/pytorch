@@ -86,7 +86,7 @@ ignore-missing-imports = [
 
 untyped_def_behavior = "check-and-infer-return-any"
 
-# Shut off noisey errors
+# Shut off noisy errors
 errors.implicit-import = false
 
 # We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
