@@ -329,6 +329,8 @@ class OpSchema:
 
     schema_info: Optional[RuntimeSchemaInfo] = None
 
+    _comparison_key: Optional[tuple[object, ...]] = None
+
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
         """
