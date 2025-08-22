@@ -3110,7 +3110,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         os.environ["NCCL_DEBUG"] = "INFO"
         os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
         if torch.cuda.nccl.version() >= (2, 24, 3):
-            os.environ["NCCL_DEBUG_SUBSYS"] = "REG"
+            os.environ["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
         os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
         self._spawn_processes()
 
@@ -3205,6 +3205,12 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
             # allreduce now should use NVIDIA Switches
             pg.allreduce(tensor).wait()
+            # check that further allocations are also registered
+            with torch.cuda.use_mem_pool(pool):
+                tensor = torch.arange(
+                    1024 * 1024 * 2, device=device, dtype=torch.float32
+                )
+            pg.allreduce(tensor).wait()
             torch.cuda.synchronize(device=device)
 
             # de-register buffers from NCCL
@@ -3217,7 +3223,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
             nccl_debug_file_content = f.read()
             # if buffers were registered and symmetric kernels ran, NCCL_DEBUG
             # should show successful registration in debug output
-            self.assertRegex(nccl_debug_file_content, "[Symmetric]")
+            self.assertRegex(nccl_debug_file_content, "Symmetric")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
