@@ -386,14 +386,13 @@ class CachingAutotuner(KernelInterface):
         assert self.is_statically_launchable()
 
         configs = [result.config for result in self.compile_results]
-        if len(configs) <= 1:
-            return
+
         (cached_configs, _, autotune_cache_info) = check_autotune_cache(
             configs, self.filename, self.inductor_meta
         )
         self.autotune_cache_info = autotune_cache_info
         # I.e. there was an autotune cache hit
-        if len(cached_configs) == 1:
+        if len(cached_configs) == 1 and len(configs) > 1:
             best_config = cached_configs[0]
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
@@ -422,7 +421,7 @@ class CachingAutotuner(KernelInterface):
         self,
         warm_cache_only=False,
         reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
-        source_code: Optional[str] = None,  # Used for static_triton_bundle_key
+        static_triton_bundle_key: Optional[str] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
@@ -435,9 +434,8 @@ class CachingAutotuner(KernelInterface):
             if reload_kernel is not None:
                 self._reload_kernel = reload_kernel
             self._precompile_worker()
-
-            if source_code is not None and self.is_statically_launchable():
-                TritonBundler.put_static_autotuner(source_code, self)
+            if static_triton_bundle_key is not None and self.is_statically_launchable():
+                TritonBundler.put_static_autotuner(static_triton_bundle_key, self)
             self._make_launchers()
             self._dynamic_scale_rblock()
 
@@ -2461,7 +2459,7 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
+    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
@@ -2514,12 +2512,60 @@ def _reduction_configs(
                 register_intensive=register_intensive,
             )
 
+    def make_outer_config():
+        # Default to 64 for vectorized loads
+        max_x_block, x_block = 256, 64
+        load_factor = inductor_meta.get("num_load", 0)
+        x = size_hints["x"]
+        num_warps = None
+
+        # Try to use all SMs with small x
+        if x <= 1024:
+            x_block = max(min(x // 128, 8), 2)
+            outer_r_block = min(rnumel, 64)
+        # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
+        elif x // 4096 <= 8:
+            x_block = 16
+            outer_r_block = 512 // x_block
+        elif num_dynamic > 1:
+            # Lots of compute with multiple dynamic shape per loop iteration
+            # Larger RBLOCK minimizes loop iteration
+            outer_r_block = max(min((rnumel // 64), 64), 8)
+        elif num_dynamic == 1:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
+            )
+        else:
+            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
+            if load_factor < 4 or rnumel <= 128:
+                outer_r_block = 512 // x_block
+            else:
+                # Heavier reductions contain a lot more overhead per loop iteration
+                # We minimize the overhead by enlarging r block
+                if rnumel >= 2048:
+                    outer_r_block = 64
+                else:
+                    outer_r_block = 32
+                x_block = min(x_block, 32)
+                num_warps = 4
+
+        # Set register intensive to true by default as we try to maximize tiles with heuristic
+        return make_config(
+            x_block,
+            outer_r_block,
+            num_warps=num_warps,
+            register_intensive=register_intensive,
+        )
+
     contiguous_config = make_config(
         1,
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    outer_config = make_config(64, 8, register_intensive=register_intensive)
+    outer_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
         min(rnumel, MAX_R0_BLOCK),
@@ -2644,7 +2690,15 @@ def reduction(
 
     assert triton_meta is not None
 
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    num_dynamic = 0
+    for k in triton_meta["signature"].keys():
+        if "ks" in k:
+            num_dynamic += 1
+
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, num_dynamic=num_dynamic
+    )
+
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     return cached_autotune(
         size_hints,
