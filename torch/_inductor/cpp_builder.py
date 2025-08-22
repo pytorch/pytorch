@@ -669,20 +669,23 @@ def _get_optimization_cflags(
 
     cflags += _get_ffast_math_flags()
 
-    if sys.platform != "darwin":
-        # on macos, unknown argument: '-fno-tree-loop-vectorize'
-        if _is_gcc(cpp_compiler):
-            cflags.append("fno-tree-loop-vectorize")
-        # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-        # `-march=native` is unrecognized option on M1
-        if not config.is_fbcode():
-            if platform.machine() == "ppc64le":
-                cflags.append("mcpu=native")
-            else:
-                cflags.append("march=native")
+    if _IS_WINDOWS:
+        pass
+    else:
+        if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if _is_gcc(cpp_compiler):
+                cflags.append("fno-tree-loop-vectorize")
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
+            if not config.is_fbcode():
+                if platform.machine() == "ppc64le":
+                    cflags.append("mcpu=native")
+                else:
+                    cflags.append("march=native")
 
-    if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
-        cflags.append("flto=thin")
+        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+            cflags.append("flto=thin")
 
     return cflags, ldflags
 

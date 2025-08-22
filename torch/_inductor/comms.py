@@ -555,8 +555,11 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if contains_collective(candidate):
                             return False, "contains_collective"
 
-                        # if contains_gemm_like(candidate):
-                        #     return False, "contains_gemm_like"
+                        if (
+                            not config.reorder_iterative_group_with_gemm
+                            and contains_gemm_like(candidate)
+                        ):
+                            return False, "contains_gemm_like"
                         return True, None
 
                     is_groupable_result, grouping_reason = is_groupable(candidate)
@@ -1188,7 +1191,10 @@ def _sink_waits_iterative_internal(
                                 False,
                                 f"candidate contains collective {snode.get_name()}",
                             )
-                        if contains_gemm_like(snode):
+                        if (
+                            not config.sink_iterative_group_with_gemm
+                            and contains_gemm_like(candidate)
+                        ):
                             return (
                                 False,
                                 f"candidate contains gemm_like {snode.get_name()}",
@@ -1246,11 +1252,11 @@ def _sink_waits_iterative_internal(
                 # total advantage/disadvantage of the swap.
                 # Conservatively prohibit such swaps.
                 # TODO(ivankobzarev): Rewrite once we get runtime estimations.
-                if len(gns) > 1 and is_wait(candidate.node):
-                    info.limiting_factor = (
-                        f"candidate is wait, group not only wait({_group_names(gns)})"
-                    )
-                    break
+                # if len(gns) > 1 and is_wait(candidate.node):
+                #     info.limiting_factor = (
+                #         f"candidate is wait, group not only wait({_group_names(gns)})"
+                #     )
+                #     break
 
                 candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
                 candidate_delta_mem = (

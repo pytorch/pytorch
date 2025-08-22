@@ -38,7 +38,10 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
-from .comm_analysis import estimate_nccl_collective_runtime
+from .comm_analysis import (
+    estimate_nccl_collective_runtime,
+    estimate_nccl_collective_runtime_nccl_estimator,
+)
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -822,6 +825,14 @@ class BaseSchedulerNode:
         if is_collective(self.node):
             assert isinstance(self.node, ir.IRNode)
             try:
+                if config.runtime_estimations_use_nccl_lib_estimations:
+                    est = estimate_nccl_collective_runtime_nccl_estimator(self)
+                    if est == -1000.0:
+                        # NCCL estimations fail for all_to_all
+                        # Fallback to intree estimation.
+                        est = estimate_nccl_collective_runtime(self.node)
+
+                    return est
                 return estimate_nccl_collective_runtime(self.node)
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,

@@ -171,28 +171,35 @@ def estimate_runtime(
     # Get the runtime of each rank
     mults = defaultdict(list)
     for _, snode in enumerate(snodes):
-        # if not contains_collective(snode):
-        #     continue
+        if not contains_collective(snode):
+            continue
         try:
             print(f"XXX ESTIMATE SNODE:{snode.debug_str_short()}")
             from .comms import estimate_op_runtime
 
-            def_est = estimate_op_runtime(snode)
-            print(f"XXX DEFAULT_EST:{def_est}")
-            new_est = _estimate_op_runtime(sched, snode, verbose=verbose)
-            runtimes[snode.get_name()] = new_est
-            print(f"XXX     NEW_EST:{new_est}")
-            new_est_f = new_est["COMM"] + new_est["COMP"]
+            torch._inductor.config.runtime_estimations_use_nccl_lib_estimations = True
+            est_nccl = estimate_op_runtime(snode)
+            torch._inductor.config.runtime_estimations_use_nccl_lib_estimations = False
+            est_no_nccl = estimate_op_runtime(snode)
+            torch._inductor.config.runtime_estimations_use_nccl_lib_estimations = True
+
+            est_bench = _estimate_op_runtime(sched, snode, verbose=verbose)
+            py_kernel_name = getattr(snode.node, "python_kernel_name", "")
+            print(f"XXX {snode.get_name}\n [{py_kernel_name}]   EST_BENCH:{est_bench}")
+            runtimes[snode.get_name()] = est_bench
+            print(f"XXX {snode.get_name}\n [{py_kernel_name}]\n   EST_BENCH:{est_bench}\n    EST_NCCL:{est_nccl}\n EST_NO_NCCL:{est_no_nccl}")
+
+            new_est_f = est_bench["COMM"] + est_bench["COMP"]
             mult = 1.0
-            if def_est != 0.0:
-                mult = new_est_f / def_est
+            if est_nccl != 0.0:
+                mult = new_est_f / est_nccl
 
             key = "other"
             if contains_collective(snode):
                 key = "collective"
             elif isinstance(snode, ExternKernelSchedulerNode):
                 key = "extern"
-            if def_est != 0.0:
+            if est_nccl != 0.0:
                 mults[key].append(mult)
                 print(f"XXX        MULT[{key}]:{mult}")
 
@@ -201,34 +208,35 @@ def estimate_runtime(
 
             print(f"XXX ERROR_ESTIMATION {e} of snode:{snode.get_name()}")
             traceback.print_exception(type(e), e, e.__traceback__)
+            raise e
     for key, mults in mults.items():
         print(f"XXX MULTS_AVG[{key}]:{sum(mults) / len(mults)}")
 
     # If world_size is larger than 1, gather runtimes from each rank and sync the median runtime across ranks
     world_size = c10d.distributed_c10d.get_world_size()
     median_runtimes = runtimes
-    if world_size > 1:
-        gathered_runtimes: list[dict[str, dict[str, float]]] = [
-            {} for _ in range(world_size)
-        ]
-        c10d.all_gather_object(
-            gathered_runtimes,
-            runtimes,
-            group=c10d.distributed_c10d._get_default_group(),
-        )
-        assert [len(gathered_runtime) > 0 for gathered_runtime in gathered_runtimes]
+    # if world_size > 1:
+    #     gathered_runtimes: list[dict[str, dict[str, float]]] = [
+    #         {} for _ in range(world_size)
+    #     ]
+    #     c10d.all_gather_object(
+    #         gathered_runtimes,
+    #         runtimes,
+    #         group=c10d.distributed_c10d._get_default_group(),
+    #     )
+    #     assert [len(gathered_runtime) > 0 for gathered_runtime in gathered_runtimes]
 
-        for key in list(runtimes.keys()):
-            comm_value = [
-                gathered_runtime[key]["COMM"] for gathered_runtime in gathered_runtimes
-            ]
-            comp_value = [
-                gathered_runtime[key]["COMP"] for gathered_runtime in gathered_runtimes
-            ]
-            median_runtimes[key] = {
-                "COMM": statistics.median(comm_value),
-                "COMP": statistics.median(comp_value),
-            }
+    #     for key in list(runtimes.keys()):
+    #         comm_value = [
+    #             gathered_runtime[key]["COMM"] for gathered_runtime in gathered_runtimes
+    #         ]
+    #         comp_value = [
+    #             gathered_runtime[key]["COMP"] for gathered_runtime in gathered_runtimes
+    #         ]
+    #         median_runtimes[key] = {
+    #             "COMM": statistics.median(comm_value),
+    #             "COMP": statistics.median(comp_value),
+    #         }
 
     return median_runtimes
 
@@ -259,125 +267,116 @@ def estimate_comm_time(
     verbose: bool = False,
     comm_cache: "CommPerfCache" = None,
 ) -> float:
-    # TODO (ruisizhang123): add more types of collective communication.
-    # Currently, it only supports all_gather and reduce_scatter
-    # estimate set to True: return NCCL's estimated comm time (https://github.com/pytorch/pytorch/pull/149343)
-    # estimate set to False: run the collective communication and return the actual comm time
-    from .scheduler import BaseSchedulerNode
+    py_kernel_name = getattr(snode.node, "python_kernel_name", "")
+    from torch.distributed.distributed_c10d import _resolve_process_group
 
-    # for node with collective kernel estimation
-    if isinstance(snode, BaseSchedulerNode):
+    pg_name = snode.node.constant_args[-1]
+    pg = _resolve_process_group(pg_name)
+    rank: int = torch.distributed.get_rank(pg)
+    pg_size = pg.size()
+    device = torch.device(f"cuda:{rank}")
+    kernel = snode.node
+
+    def _tensor(size, dtype, device) -> torch.Tensor:
+        return torch.empty(size, dtype=dtype, device=device)
+
+    def _tensor_from_layout(layout):
+        return _tensor(layout.size, layout.dtype, layout.device)
+
+    def _get_fn_args(name, snode):
         kernel = snode.node
-        py_kernel_name = (getattr(kernel, "python_kernel_name", ""),)
-        assert hasattr(kernel.inputs[0], "data")
+        constant_args = snode.node.constant_args
+        input_layout = kernel.inputs[0].layout
+        in_t = _tensor_from_layout(input_layout)
 
-        if (
-            "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-            in py_kernel_name
-        ):
-            input_layout = kernel.inputs[0].layout
-            output_layout = kernel.inputs[1].layout
-            tensor_input = _create_real_tensor(
-                input_layout.size, input_layout.dtype, input_layout.device
-            )
-            tensor_output = _create_real_tensor(
-                output_layout.size, output_layout.dtype, output_layout.device
-            )
-        else:
-            inputs = kernel.inputs[0]
-            output_layout = kernel.layout
-            tensor_input = _create_real_tensor(
-                inputs.data.get_size(),
-                inputs.data.get_dtype(),
-                inputs.data.get_device(),
-            )
-            tensor_output = _create_real_tensor(
-                output_layout.size, output_layout.dtype, output_layout.device
-            )
+        # schemes are defined torch/csrc/distributed/c10d/Functional.cpp
+        if name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
+            fn = torch.ops._c10d_functional.all_gather_into_tensor
+            return fn, {
+                "input": in_t,
+                "group_size": pg_size,
+                "group_name": pg_name,
+            }
+        elif name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+            # TODO: use all_gather_into_tensor_out
+            fn = torch.ops._c10d_functional.all_gather_into_tensor
+            return fn, {
+                "input": in_t,
+                "group_size": pg_size,
+                "group_name": pg_name,
+            }
+        elif name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+            fn = torch.ops._c10d_functional.reduce_scatter_tensor
+            reduce_op = constant_args[0]
+            return fn, {
+                "input": in_t,
+                "reduce_op": reduce_op,
+                "group_size": pg_size,
+                "group_name": pg_name,
+            }
+        elif name == "torch.ops._c10d_functional.all_reduce_.default":
+            fn = torch.ops._c10d_functional.all_reduce
+            reduce_op = constant_args[0]
+            return fn, {
+                "input": in_t,
+                "reduce_op": reduce_op,
+                "group_name": pg_name,
+            }
+        elif name == "torch.ops._c10d_functional.all_to_all_single.default":
+            fn = torch.ops._c10d_functional.all_to_all_single
+            split_sizes = [in_t.size(0) // pg_size] * pg_size
+            return fn, {
+                "input": in_t,
+                "output_split_sizes": split_sizes,
+                "input_split_sizes": split_sizes,
+                "group_name": pg_name,
+            }
+        elif name == "torch.ops._dtensor.shard_dim_alltoall.default":
+            # fn = torch.ops._dtensor.shard_dim_alltoall
+            fn = torch.ops._c10d_functional.all_to_all_single
+            gather_dim = constant_args[0]
+            shard_dim = constant_args[1]
+            in_t_ = in_t.movedim(shard_dim, 0).contiguous()
+            split_sizes = [in_t_.size(0) // pg_size] * pg_size
+            return fn, {
+                "input": in_t_,
+                "output_split_sizes": split_sizes,
+                "input_split_sizes": split_sizes,
+                "group_name": pg_name,
+            }
+        assert False, f"Unsupported collective:{name}"
 
-    elif isinstance(snode, tuple):
-        node, inputs, outputs = snode
-        kernel = node.inputs[0]
-        tensor_input = _create_real_tensor(
-            inputs.layout.size, inputs.layout.dtype, inputs.layout.device
-        )
-        tensor_output = _create_real_tensor(
-            outputs.layout.size, outputs.layout.dtype, outputs.layout.device
-        )
-    else:
-        assert False, "NYI"
+    fn, kwargs = _get_fn_args(py_kernel_name, snode)
 
-    comm_time = benchmark_comm_func(
-        tensor_input,
-        tensor_output,
-        getattr(kernel, "python_kernel_name", ""),
-        comm_cache,
-        estimate,
-        verbose=verbose,
-    )
-    return comm_time
-
-
-def benchmark_comm_func(
-    tensor_input, tensor_output, comm_func_name, comm_cache, estimate, verbose=False
-):
-    rank = c10d.distributed_c10d.get_rank()
-    device = torch.device(f"cuda:{rank:d}")
-    process_group = c10d.distributed_c10d._get_default_group()
-    if (
-        comm_func_name == "torch.ops._c10d_functional.all_gather_into_tensor.default"
-        or comm_func_name
-        == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
-    ):
-        input_args = {"input_tensor": tensor_input, "output_tensor": tensor_output}
-    elif comm_func_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
-        input_args = {"input": tensor_input, "output": tensor_output}
-    if comm_cache is not None:
-        comm_time = comm_cache.get_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name
-        )
-        if comm_time is not None:
-            return comm_time
-
-    comm_func = kernel_name_to_comm_op.get(comm_func_name, None)
-    assert comm_func is not None, f"Unsupported comm op {comm_func}"
-
-    if estimate:
-        with c10d._time_estimator(group=process_group, device=device) as cm:
-            comm_func(**input_args)
-        comm_time = cm.estimated_time
-    else:
+    nruns = 2
+    comm_time_ms = 0
+    for _ in range(nruns):
+        c10d.barrier()
         torch.cuda.synchronize()
-        comm_func(**input_args)
 
-        nruns = 2
-        comm_time_ms = 0
-        for _ in range(nruns):
-            c10d.barrier()
-            torch.cuda.synchronize()
+        start_evt = torch.cuda.Event(enable_timing=True)
+        end_evt = torch.cuda.Event(enable_timing=True)
+        start_evt.record()
+        w = fn(**kwargs)
+        torch.ops._c10d_functional.wait_tensor.default(w)
+        end_evt.record()
+        end_evt.synchronize()
 
-            start_evt = torch.cuda.Event(enable_timing=True)
-            end_evt = torch.cuda.Event(enable_timing=True)
-            start_evt.record()
-            comm_func(**input_args)
-            end_evt.record()
-            end_evt.synchronize()
-
-            current_run_time = start_evt.elapsed_time(end_evt)
-            comm_time_ms += current_run_time
-        comm_time_ns = comm_time_ms / nruns * 1e6
+        current_run_time = start_evt.elapsed_time(end_evt)
+        comm_time_ms += current_run_time
+    comm_time_ns = comm_time_ms / nruns * 1e6
     if verbose:
         print(
             f"[COMM Node estimate:{estimate}]",
-            getattr(comm_func_name, "python_kernel_name", ""),
+            py_kernel_name,
             "time",
             comm_time_ns,
         )
-    if comm_cache is not None:
-        comm_cache.add_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name, comm_time_ns
-        )
-    del tensor_input, tensor_output
+    # if comm_cache is not None:
+    #     comm_cache.add_comm_time(
+    #         tensor_input.size(), tensor_output.size(), py_kernel_name, comm_time_ns
+    #     )
+    # del tensor_input, tensor_output
     return comm_time_ns
 
 
