@@ -3643,26 +3643,6 @@ exit(2)
         not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
         "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
     )
-    def test_cuda_graph_raw_graph_exec_keep_graph_false(self):
-        import cuda.bindings.runtime as cudart
-
-        graph = torch.cuda.CUDAGraph(keep_graph=False)
-        x = torch.zeros([2000], device="cuda")
-        y = torch.ones([2000], device="cuda")
-        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
-            z = x + y
-
-        raw_pointer = graph.raw_cuda_graph_exec()
-
-        cudart_cuda_graph_exec = cudart.cudaGraphExec_t(init_value=raw_pointer)
-        cuda_python_error_check(cudart.cudaGraphExecGetFlags(cudart_cuda_graph_exec))
-
-        graph.replay()
-
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
-        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
-    )
     def test_cuda_graph_raw_graph(self):
         import cuda.bindings.runtime as cudart
 
@@ -3690,22 +3670,24 @@ exit(2)
         not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
         "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
     )
-    def test_cuda_graph_raw_graph_exec(self):
+    @parametrize("keep_graph", [True, False])
+    def test_cuda_graph_raw_graph_exec(self, keep_graph):
         import cuda.bindings.runtime as cudart
 
-        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        graph = torch.cuda.CUDAGraph(keep_graph=keep_graph)
         x = torch.zeros([2000], device="cuda")
         y = torch.ones([2000], device="cuda")
         with torch.cuda.graph(graph, capture_error_mode="relaxed"):
             z = x + y
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"You cannot access the raw (cuda|hip)GraphExec_t instance until instantiate\(\) has been called",
-        ):
-            graph.raw_cuda_graph_exec()
+        if keep_graph:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"You cannot access the raw (cuda|hip)GraphExec_t instance until instantiate\(\) has been called",
+            ):
+                graph.raw_cuda_graph_exec()
 
-        graph.instantiate()
+            graph.instantiate()
         raw_pointer = graph.raw_cuda_graph_exec()
 
         cudart_cuda_graph_exec = cudart.cudaGraphExec_t(init_value=raw_pointer)
