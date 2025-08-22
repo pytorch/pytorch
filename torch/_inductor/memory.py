@@ -88,13 +88,20 @@ def get_freeable_input_buf(
         collections.defaultdict(OrderedSet)
     )
     dep_name_to_size: dict[str, int] = dict()
+
     for node in nodes:
         for dep in node.read_writes.reads:
-            if dep.name in graph_inputs and not dep.name.startswith(
-                ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
-            ):
-                dep_name_to_succ_nodes[dep.name].add(node)
-                dep_name_to_size[dep.name] = _dep_size_hint(dep)
+            if dep.name in graph_inputs:
+                dep_name = dep.name
+                # Subgraphs have a prefix for the name, cleanup the prefix
+                # before checking for known strings.
+                if V.graph.name:
+                    dep_name = dep_name.removeprefix(V.graph.name + "_")
+                if not dep_name.startswith(
+                    ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
+                ):
+                    dep_name_to_succ_nodes[dep.name].add(node)
+                    dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = dict()
