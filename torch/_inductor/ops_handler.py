@@ -327,8 +327,8 @@ class OpsHandler(Generic[T]):
     def erf(self, x0: T) -> T:
         raise NotImplementedError
 
-    # def erf_u20(self, x0: T) -> T:
-    #     raise NotImplementedError
+    def erf_u20(self, x0: T) -> T:
+        raise NotImplementedError
 
     def cosh(self, x0: T) -> T:
         raise NotImplementedError

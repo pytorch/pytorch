@@ -1169,6 +1169,12 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         triton=lambda x: f"libdevice.erfcx({x})",
         name="special_erfcx",
     ),
+    erf_u20=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x: f"std::erf({x})",
+        cppvec=lambda x: f"{x}.erf_u20()",
+        name="erf_u20",
+    ),
     fma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",

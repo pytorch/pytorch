@@ -786,9 +786,9 @@ class CppOverrides(OpOverrides):
     def erf(x):
         return f"std::erf({x})"
 
-    @staticmethod
-    def erf_u20(x):
-        return f"std::erf({x})"
+    # @staticmethod
+    # def erf_u20(x):
+    #     return f"std::erf({x})"
 
     @staticmethod
     def erfc(x):
@@ -1267,11 +1267,11 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def erf(x):
-        return f"{x}.erf_u20()"
+        return f"{x}.erf()"
 
-    @staticmethod
-    def erf_u20(x):
-        return f"{x}.erf_u20()"
+    # @staticmethod
+    # def erf_u20(x):
+    #     return f"{x}.erf_u20()"
 
     @staticmethod
     def erfc(x):
