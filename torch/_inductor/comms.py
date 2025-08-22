@@ -254,16 +254,15 @@ def _op_runtime_estimate_mult(snode):
 
 
 def is_async_collective(snode):
-    if python_kernel_name := getattr(node, "python_kernel_name", None):
-        print(f"XXX KERNEL_NAME:{python_kernel_name}")
-        if "shard_dim_alltoall" in python_kernel_name:
+    if python_kernel_name := getattr(snode.node, "python_kernel_name", None):
+        if "torch.ops._dtensor.shard_dim_alltoall.default" in python_kernel_name:
             return False
 
     return True
 
 
 def contains_async_collective(snode):
-    return contains_collective(snode, is_async_collective(snode))
+    return contains_collective(snode, is_async_collective)
 
 
 def _reorder_communication_preserving_peak_memory_internal(
@@ -324,7 +323,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # print(f"XXX EXPOSED: COLLECTIVE->USE coll:{collective_snode.debug_str()} unmet_dep:{snode.debug_str()}")
                 break
 
-            if contains_collective(snode):
+            if contains_async_collective(snode):
                 # Assumption that all collectives are async.
                 # TODO(ivankobzarev):
                 # It is not true, as we have sync "custom" collectives torch.ops._dtensor.shard_dim_alltoall.default

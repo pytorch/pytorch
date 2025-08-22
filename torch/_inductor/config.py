@@ -405,16 +405,16 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
 # TODO:(ivankobzarev) Remove once runtime estimations are reliable.
 reorder_iterative_limit_by_runtime_estimations: bool = True
 sink_waits_iterative_limit_by_runtime_estimations: bool = True
-reorder_sink_runtime_estimations_mm_mult: float = 1.0
-reorder_sink_runtime_estimations_comm_mult: float = 10
+reorder_sink_runtime_estimations_mm_mult: float = 2.0
+reorder_sink_runtime_estimations_comm_mult: float = 0.5
 reorder_iterative_swapped_gemm_like_limit: Optional[int] = None
 sink_waits_iterative_swapped_gemm_like_limit: Optional[int] = None
 
 # Experimental unsafe configuration that allows changing relative collectives order,
 # No guarantees for now that all the rank will do the same order of collectives,
 # which can result in collective hangs.
-reorder_iterative_unsafe_collectives_reorder: bool = True
-sink_waits_iterative_unsafe_collectives_reorder: bool = True
+reorder_iterative_unsafe_collectives_reorder: bool = False
+sink_waits_iterative_unsafe_collectives_reorder: bool = False
 
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
