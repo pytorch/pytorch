@@ -797,14 +797,23 @@ struct ReduceOp {
     if (should_store) {
       index_t offset = config.staging_memory_offset(blockIdx.y);
       reduce_buffer[offset] = value;
+#ifdef USE_ROCM
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent"); // make sure writes are globally visible
+#endif
     }
 
+#ifndef USE_ROCM
     __threadfence(); // make sure writes are globally visible
+#endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+#ifdef USE_ROCM
+      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent"); // complete the acquire pattern after release
+#else
       __threadfence(); // complete the acquire pattern after atomic
+#endif
       for (auto &v : value) {
         v = ident;
       }
