@@ -252,6 +252,7 @@ def forward(self, x, y):
     getitem = tree_flatten[0];  tree_flatten = None
     x = getitem[0]
     y = getitem[1];  getitem = None
+    _guards_fn = self._guards_fn(x, y);  _guards_fn = None
     tree_unflatten_1 = torch.utils._pytree.tree_unflatten([x, y], _spec_1);  x = y = _spec_1 = None
     getitem_1 = tree_unflatten_1[0];  tree_unflatten_1 = None
     getitem_2 = getitem_1[0]

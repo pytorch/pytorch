@@ -1047,6 +1047,8 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _guards_code: list[str]
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
@@ -1083,6 +1085,8 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+
+        self._guards_code = _convert_guards_to_code(_get_shape_env(self._graph_module))
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1677,3 +1681,22 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
+
+
+def _convert_guards_to_code(shape_env):
+    if shape_env is None:
+        return []
+
+    local_vars = set(
+        var
+        for var, sources in shape_env.var_to_sources.items()
+        if all(not isinstance(source, torch._dynamo.source.ConstantSource) for source in sources)
+    )
+    py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
+        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+    )
+    return [
+        py_printer.doprint(guard.expr)
+        for guard in shape_env.guards
+        if guard.expr.free_symbols.issubset(local_vars)
+    ]

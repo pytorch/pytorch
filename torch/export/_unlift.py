@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import inspect
 import warnings
 from collections.abc import Sequence
 from itertools import chain
@@ -73,6 +74,34 @@ def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     return flat_args_with_path
 
 
+def _convert_guards_code_to_fn(guards_code, paths_of_placeholders):
+    actual_guards_code = []
+    shadow_guards_code = []
+    for c in guards_code:
+        a, s = c, c
+        for idx, path in enumerate(paths_of_placeholders):
+            a = a.replace("L" + pytree.keystr(path), f"args[{idx}]")
+            s = s.replace("L" + pytree.keystr(path), path[0].key + pytree.keystr(path[1:]))
+        actual_guards_code.append(a)
+        shadow_guards_code.append(s.replace("\n", ""))
+
+    code_str = "\ndef _(*args):\n"
+    import ast
+    for actual, shadow in zip(actual_guards_code, shadow_guards_code):
+        _shadow = ast.unparse(ast.parse(shadow, mode="eval"))
+        code_str += f"  torch._assert({actual}, \"Guard failed: {_shadow}\")\n"
+    code_str += "  return\n"
+
+    import math
+    namespace = {"math": math, "torch": torch}
+    exec(code_str, namespace)
+
+    guards_fn = GuardsFn()
+    guards_fn.forward = torch._dynamo.dont_skip_tracing(namespace["_"])
+    guards_fn._is_impure = True
+    return guards_fn
+
+
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
@@ -80,11 +109,12 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 
     flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
 
-    _check_input_constraints_for_graph(
-        [node for node in self.graph.nodes if node.op == "placeholder"],
-        flat_args_with_path,
-        self.range_constraints,
-    )
+    if not hasattr(self, "_guards_fn"):
+        _check_input_constraints_for_graph(
+            [node for node in self.graph.nodes if node.op == "placeholder"],
+            flat_args_with_path,
+            self.range_constraints,
+        )
 
 
 def _unlift_inputs_as_getattr(
@@ -419,6 +449,75 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
+def _get_input_paths(example_inputs, signature):
+    args, kwargs = example_inputs
+    ctx = signature.bind(*args, **kwargs).arguments
+    flat_example_inputs_with_paths = pytree.tree_leaves_with_path(ctx)
+    return [path for path, _ in flat_example_inputs_with_paths]
+
+
+def _get_input_guards_for_graph(placeholders, range_constraints, paths_for_placeholders):
+    import math
+    import sympy
+    from torch.utils._sympy.solve import try_solve
+    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+        _convert_range_to_int,
+    )
+
+    deferred_expressions = []
+    new_guards_code = []
+    sources = {}
+
+    def handle_symint(expr, src):
+        if len(expr.free_symbols) == 1:
+            deferred_expressions.append((src, expr))
+        if expr in sources:
+            orig_src = sources[expr]
+            new_guards_code.append(f"{src} == {orig_src}")
+        else:
+            sources[expr] = src
+            min_val, max_val = _convert_range_to_int(range_constraints[expr])
+            if min_val > 2:
+                new_guards_code.append(f"{src} >= {min_val}")
+            if max_val < math.inf:
+                new_guards_code.append(f"{src} <= {max_val}")
+
+    for placeholder, path in zip(placeholders, paths_for_placeholders):
+        src = "L" + pytree.keystr(path)
+        meta = placeholder.meta["val"]
+        if isinstance(meta, (int, float)):
+            new_guards_code.append(f"{src} == {meta}")
+        elif isinstance(meta, str):
+            new_guards_code.append(f"{src} == '{meta}'")
+        elif isinstance(meta, torch.SymInt) and meta.node.expr in range_constraints:
+            handle_symint(meta.node.expr, src)
+        elif isinstance(meta, torch.Tensor):
+            for i, dim in enumerate(meta.shape):
+                src = "L" + pytree.keystr(path) + f".size()[{i}]"
+                if isinstance(dim, int):
+                    new_guards_code.append(f"{src} == {dim}")
+                elif isinstance(dim, torch.SymInt) and dim.node.expr in range_constraints:
+                    handle_symint(dim.node.expr, src)
+
+    unification_map = {}
+    py_printer = torch.utils._sympy.printers.PythonPrinter()
+
+    for src, expr in deferred_expressions:
+        symbol = next(iter(expr.free_symbols))
+        if symbol in sources:
+            continue
+        if symbol in unification_map:
+            substitution = expr.subs(unification_map)
+            new_guards_code.append(py_printer.doprint(sympy.Eq(substitution, sympy.Symbol(src))))
+        else:
+            solution = try_solve(sympy.Eq(expr, sympy.Symbol(src)), symbol)
+            if solution is not None:
+                definition = solution[1]
+                unification_map[symbol] = definition
+
+    return new_guards_code
+
+
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
@@ -489,4 +588,28 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
     unlift_gm.meta.update(ep.graph_module.meta)
+
+    graph = unlift_gm.graph
+    placeholders = graph.find_nodes(op="placeholder")
+    if placeholders and ep.example_inputs:
+        input_paths = _get_input_paths(
+            ep.example_inputs,
+            inspect.signature(unlift_gm.forward),
+        )
+        guards_code = _get_input_guards_for_graph(
+            placeholders, ep.range_constraints, input_paths
+        )
+        guards_code.extend(ep._guards_code)
+        unlift_gm._guards_fn = _convert_guards_code_to_fn(
+            guards_code, input_paths
+        )
+
+        with graph.inserting_after(placeholders[-1]):
+            graph.call_module("_guards_fn", tuple(placeholders))
+
+        unlift_gm.recompile()
+
     return unlift_gm
+
+class GuardsFn(torch.nn.Module):
+    pass

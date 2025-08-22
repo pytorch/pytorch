@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import re
 import tempfile
 import unittest
 
@@ -408,7 +409,7 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
 
-        ep = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}})
+        ep = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}}, prefer_deferred_runtime_asserts_over_guards=True)
         report = ep._report
 
         self.assertEqual(len(report.failures), 1)
@@ -418,7 +419,11 @@ class TestDraftExport(TestCase):
         self.assertEqual(ep.module()(*inp), M()(*inp))
 
         inp = (torch.randn(4, 3),)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            AssertionError,
+            re.escape("Guard failed: a.size()[0] <= 3"),
+        ):
+            # expected <= 3, but got 4
             ep.module()(*inp)
 
     def test_side_effect1(self):

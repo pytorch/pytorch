@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 10)
+SCHEMA_VERSION = (8, 11)
 TREESPEC_VERSION = 1
 
 
@@ -451,6 +451,9 @@ class ExportedProgram:
     # key is the FQN of constant in exported program (constant tensor or torchbind objs)
     # value is the archive path of serialized constants
     constant_paths: Annotated[dict[str, str], 100] = field(default_factory=dict)
+
+    # e.g.
+    guards_code: Annotated[list[str], 110] = field(default_factory=list)
 
 
 #########################################################################
