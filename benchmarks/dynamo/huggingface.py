@@ -128,6 +128,12 @@ with open(MODELS_FILENAME) as fh:
 assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
+try:
+    from .huggingface_llm_models import HF_LLM_MODELS
+except ImportError:
+    from huggingface_llm_models import HF_LLM_MODELS
+
+
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
         "Speech2Text2Decoder": "transformers.models.speech_to_text_2.modeling_speech_to_text_2",
@@ -418,11 +424,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         reset_rng_state()
-        model_cls, config = self._get_model_cls_and_config(model_name)
-        model = self._download_model(model_name)
-        model = model.to(device, dtype=dtype)
-        if self.args.enable_activation_checkpointing:
-            model.gradient_checkpointing_enable()
+
+        # Get batch size
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
@@ -440,14 +443,35 @@ class HuggingfaceRunner(BenchmarkRunner):
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
 
-        example_inputs = generate_inputs_for_model(
-            model_cls, model, model_name, batch_size, device, include_loss_args=True
-        )
+        # Get model and example inputs
+        if model_name in HF_LLM_MODELS:
+            benchmark_cls = HF_LLM_MODELS[model_name]
+            model, example_inputs = benchmark_cls.get_model_and_inputs(
+                model_name, device
+            )
 
-        # So we can check for correct gradients without eliminating the dropout computation
-        for attr in dir(config):
-            if "drop" in attr and isinstance(getattr(config, attr), float):
-                setattr(config, attr, 1e-30)
+            # If we set use_generate_mode to True, we will only apply the
+            # optimizations (torch.compile/export) to model.forward, and not
+            # apply to self.model_iter_fn, which calls model.generate.
+            self.use_generate_mode = True
+            self.model_iter_fn = self.generate
+
+        else:
+            model_cls, config = self._get_model_cls_and_config(model_name)
+            model = self._download_model(model_name)
+            model = model.to(device, dtype=dtype)
+
+            example_inputs = generate_inputs_for_model(
+                model_cls, model, model_name, batch_size, device, include_loss_args=True
+            )
+
+            # So we can check for correct gradients without eliminating the dropout computation
+            for attr in dir(config):
+                if "drop" in attr and isinstance(getattr(config, attr), float):
+                    setattr(config, attr, 1e-30)
+
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
 
         if (
             is_training
@@ -531,6 +555,9 @@ class HuggingfaceRunner(BenchmarkRunner):
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
             return mod(**inputs)
+
+    def generate(self, mod, inputs, collect_outputs=True):
+        return mod.generate(**inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
