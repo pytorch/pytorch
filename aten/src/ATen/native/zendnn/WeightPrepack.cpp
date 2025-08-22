@@ -12,9 +12,7 @@
 
 #if !AT_ZENDNN_ENABLED()
 namespace at::native {
-at::Tensor zendnn_weight_prepack_for_linear(
-    const at::Tensor& weight,
-    std::string_view zendnn_op_name) {
+at::Tensor zendnn_weight_prepack_for_linear(const at::Tensor& weight) {
   TORCH_CHECK(
       false,
       "zendnn_weight_prepack_for_linear: ATen is not compiled with ZenDNN support");
@@ -23,9 +21,7 @@ at::Tensor zendnn_weight_prepack_for_linear(
 #else // !AT_ZENDNN_ENABLED()
 namespace at::native {
 using namespace zendnnl::interface;
-at::Tensor zendnn_weight_prepack_for_linear(
-    const at::Tensor& weight,
-    std::string_view zendnn_op_name) {
+at::Tensor zendnn_weight_prepack_for_linear(const at::Tensor& weight) {
   TORCH_CHECK(
       weight.dim() == 2,
       "Weight tensor must be 2D for linear layer prepacking, got ",
