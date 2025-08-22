@@ -83,7 +83,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
 # Re-generate this failed list, turn on dry_run of the below func
 # check_dtensor_func(self, test, op, dry_run=True), then run sth
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
-dtensor_fails = {
+dtensor_fails_eager = {
     # these sometimes pass and sometimes fail
     # we need to remove many of them from list once op
     # get full support with varying sharding specs
@@ -485,6 +485,80 @@ dtensor_fails = {
 }
 
 
+dtensor_fails_compile = dtensor_fails_eager.union({
+xfail("bmm"),
+xfail("cdouble"),
+xfail("cfloat"),
+xfail("chalf"),
+xfail("clamp"),
+xfail("copysign"),
+xfail("corrcoef"),
+xfail("cov"),
+xfail("cumsum"),
+xfail("cumulative_trapezoid"),
+xfail("diag"),
+xfail("diagonal_copy"),
+xfail("diagonal"),
+xfail("einsum"),
+xfail("hash_tensor"),
+xfail("i0"),
+xfail("igamma"),
+xfail("igammac"),
+xfail("index_reduce"),
+xfail("index_reduce"),
+xfail("index_reduce"),
+xfail("index_reduce"),
+xfail("item"),
+xfail("linalg.diagonal"),
+xfail("linalg.vector_norm"),
+xfail("logit"),
+xfail("max"),
+xfail("max"),
+xfail("maximum"),
+xfail("min"),
+xfail("min"),
+xfail("minimum"),
+xfail("msort"),
+xfail("mvlgamma"),
+xfail("mvlgamma"),
+xfail("mvlgamma"),
+xfail("narrow"),
+xfail("nextafter"),
+xfail("nn.functional.channel_shuffle"),
+xfail("nn.functional.interpolate"),
+xfail("nn.functional.interpolate"),
+xfail("nn.functional.interpolate"),
+xfail("nn.functional.multi_head_attention_forward"),
+xfail("nn.functional.pad"),
+xfail("nn.functional.pad"),
+xfail("nn.functional.pad"),
+xfail("nonzero_static"),
+xfail("repeat"),
+xfail("scatter_add"),
+xfail("scatter_reduce"),
+xfail("scatter_reduce"),
+xfail("scatter_reduce"),
+xfail("scatter_reduce"),
+xfail("scatter_reduce"),
+xfail("scatter"),
+xfail("slice_scatter"),
+xfail("sort"),
+xfail("sparse.mm"),
+xfail("tile"),
+xfail("topk"),
+xfail("transpose_copy"),
+xfail("unsqueeze_copy"),
+})
+
+dtensor_fails_dynamic = dtensor_fails_compile.copy()
+
+# The following are succeeding with compile for some reason
+# linalg.multi_dot
+# nn.functional.hardshrink
+# nn.functional.linear
+# nn.functional.softshrink
+
+
 # Add a list of ops that are currently failing BW pass
 skip_bw = [
     None,  # corresponds to the transpose ops 'H' and 'T'
@@ -511,9 +585,23 @@ class TestDTensorOps(DTensorOpTestBase):
     # when feel necessary later (i.e when adding quantization support).
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
-    @parametrize('use_compile,use_dynamic', [(False,False), (True,False), (True, True)])
-    def test_dtensor_op_db(self, dtype, op, use_compile, use_dynamic):
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_eager)
+    def test_dtensor_op_db_eager(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, False, False)
+      
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_compile)
+    def test_dtensor_op_db_compile(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, True, False)
+
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails_dynamic)
+    def test_dtensor_op_db_dynamic(self, dtype, op):
+        return self._test_dtensor_op_db(dtype, op, True, True)
+
+    def _test_dtensor_op_db(self, dtype, op, use_compile, use_dynamic):
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 
         # test each op with dist tensor inputs and normal inputs
