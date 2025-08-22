@@ -10,7 +10,7 @@ else
   arch_path='sbsa'
 fi
 
-NVSHMEM_VERSION=3.3.20
+NVSHMEM_VERSION=3.3.24
 
 function install_cuda {
   version=$1
@@ -65,7 +65,7 @@ function install_nvshmem {
   # This pattern is a lie as it is not consistent across versions, for 3.3.9 it was cuda_ver-arch-nvshhem-ver
   filename="libnvshmem-linux-${arch_path}-${nvshmem_version}_cuda${cuda_major_version}-archive"
   suffix=".tar.xz"
-  url="https://developer.download.nvidia.com/compute/redist/nvshmem/${nvshmem_version}/builds/cuda${cuda_major_version}/txz/agnostic/${dl_arch}/${filename}${suffix}"
+  url="https://developer.download.nvidia.com/compute/nvshmem/redist/libnvshmem/${dl_arch}/${nvshmem_version}/${filename}${suffix}"
 
   # download, unpack, install
   wget -q "${url}"
