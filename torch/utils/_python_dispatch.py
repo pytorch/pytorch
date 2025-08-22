@@ -475,7 +475,16 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         # in theory if a subclass that needs this API wants to sometimes return
         # plain tensors, we could remove the assert and just not perform the aliasing,
         # but it seems safer to learn more about this case first.
-        if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
+        #
+        # Performance note: This is all just to assert that the argument and result
+        # types match, checking that is cheaper than is_traceable_wrapper_subclass_type,
+        # and multiple returns are relatively unlikely, so just check up front!
+        arg_type = type(arg)
+        ret_type = type(ret)
+        if arg_type is not ret_type and (
+            is_traceable_wrapper_subclass_type(arg_type)
+            or is_traceable_wrapper_subclass_type(ret_type)
+        ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
                 assert type(arg) == type(
@@ -605,7 +614,7 @@ def get_alias_info(func) -> SchemaInfo:
 
 
 # See NOTE[SchemaInfo int_tags] above.
-_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)
+_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
