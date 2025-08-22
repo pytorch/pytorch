@@ -173,6 +173,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
+  export USE_MPI=0
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
