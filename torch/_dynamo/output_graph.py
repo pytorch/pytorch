@@ -1467,12 +1467,13 @@ class OutputGraph(OutputGraphGuardsState):
                 fx_graph_outputs = pass2.graph_outputs
                 proxy_ids = list(fx_graph_outputs.keys())
                 for idx, out_vt in enumerate(stack_values_flat[0].items):
-                    assert isinstance(out_vt, variables.TensorVariable)
                     if out_vt.source is not None:
                         # Must be an input
                         print("-----> Output", idx, out_vt.source.name())
-                    elif id(out_vt.proxy) in proxy_ids:
+                    elif isinstance(out_vt, variables.TensorVariable) and id(out_vt.proxy) in proxy_ids:
                         print("-----> Output", idx, proxy_ids.index(id(out_vt.proxy)))
+                    elif isinstance(out_vt, variables.ConstantVariable):
+                        print("-----> Output", idx, " constant value", out_vt.value)
                     else:
                         raise NotImplementedError("Where is this output coming from?")
 
