@@ -803,13 +803,27 @@ struct ReduceOp {
       // Here we preempt need for fences by committing stores to global memory.
       // We do so by converting the stores to atomics with a return.
       int constexpr num_int_per_val = sizeof(value)/sizeof(int);
-      CUDA_KERNEL_ASSERT(num_int_per_val>=1);
-      union pnr { std::array<arg_t, output_vec_size> v; int i[num_int_per_val]; } _pnr = {.v = value };
-      for (int i=0; i<num_int_per_val; i++)
-        reinterpret_cast<int *>(&reduce_buffer[offset])[i] = 0;
-      for (int i=0; i<num_int_per_val; i++)
-        _pnr.i[i] = atomicAdd(reinterpret_cast<int *>(&reduce_buffer[offset])+i, _pnr.i[i]);
-      value = _pnr.v;
+      int constexpr num_short_per_val = sizeof(value)/sizeof(short);
+      int constexpr num_char_per_val = sizeof(value)/sizeof(char);
+      if constexpr(num_int_per_val*sizeof(int) == sizeof(value)) {
+        union pnr { std::array<arg_t, output_vec_size> v; int i[num_int_per_val]; } _pnr = {.v = value };
+        for (int i=0; i<num_int_per_val; i++)
+          _pnr.i[i] = atomicOr(reinterpret_cast<int *>(reduce_buffer)+num_int_per_val*offset+i, _pnr.i[i]);
+        value = _pnr.v;
+      }
+      else if constexpr(num_short_per_val*sizeof(short) == sizeof(value)) {
+        union pnr { std::array<arg_t, output_vec_size> v; short s[num_short_per_val]; } _pnr = {.v = value };
+        for (int i=0; i<num_short_per_val; i++)
+          _pnr.s[i] = atomicOr(reinterpret_cast<int *>(reduce_buffer)+((num_char_per_val*offset)/sizeof(int)),
+                               ((unsigned int)_pnr.s[i])<<(8*sizeof(short)*i));
+        value = _pnr.v;
+      } else {
+        union pnr { std::array<arg_t, output_vec_size> v; char c[num_char_per_val]; } _pnr = {.v = value };
+        for (int i=0; i<num_char_per_val; i++)
+          _pnr.c[i] = atomicOr(reinterpret_cast<int *>(reduce_buffer)+((num_char_per_val*offset)/4),
+                               ((unsigned int)_pnr.c[i])<<(8*sizeof(char)*i));
+        value = _pnr.v;
+      }
 #endif
     }
 
@@ -1303,6 +1317,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     semaphores = allocator.allocate(config.semaphore_size());
 
     auto stream = at::cuda::getCurrentCUDAStream();
+#ifdef USE_ROCM
+    AT_CUDA_CHECK(cudaMemsetAsync(buffer.get(), 0, config.global_memory_size(), stream));
+#endif
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
@@ -1413,6 +1430,9 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
     semaphores = allocator.allocate(config.semaphore_size());
 
     auto stream = at::cuda::getCurrentCUDAStream();
+#ifdef USE_ROCM
+    AT_CUDA_CHECK(cudaMemsetAsync(buffer.get(), 0, config.global_memory_size(), stream));
+#endif
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
