@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -46,14 +48,21 @@ struct NVSHMEMAllocation {
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
+      const at::Tensor& tensor,
       std::shared_ptr<NVSHMEMAllocation> allocation,
       const std::string& group_name)
-      : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
+      : tensor_weak_ptr_(tensor.getIntrusivePtr()),
+        allocation_(allocation),
         device_idx_(allocation->device_idx),
         group_name_(group_name) {
     // For logging only
     static int exchanged_n_times = 0;
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
+    // Buffer size is rest of space available after ptr (this field may not be
+    // important in future thus subject to removal)
+    buffer_size_ = allocation->buffer_size -
+        (reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(allocation->ptr));
     c10::cuda::CUDAGuard guard(device_idx_);
 
     auto global_rank = get_group_info("0").rank;
@@ -78,7 +87,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     rank_to_global_rank_ = group_info.rank_to_global_rank;
     for (int r = 0; r < world_size_; ++r) {
       buffers_.push_back(nvshmem_ptr(
-          allocation->ptr, rank_to_global_rank_[r]));
+          ptr, rank_to_global_rank_[r]));
     }
 
     // TODO: use the same allocation for signal pad
@@ -89,28 +98,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       signal_pads_.push_back(nvshmem_ptr(
           signal_pad_ptr, rank_to_global_rank_[r]));
     }
-
-    const size_t arr_size = sizeof(void*) * world_size_;
-    buffers_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-    signal_pads_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-
-    AT_CUDA_CHECK(cudaMemcpy(
-        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
-    AT_CUDA_CHECK(cudaMemcpy(
-        signal_pads_dev_,
-        signal_pads_.data(),
-        arr_size,
-        cudaMemcpyHostToDevice));
-
-    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
-    AT_CUDA_CHECK(cudaMemcpy(
-        rank_to_global_rank_dev_,
-        rank_to_global_rank_.data(),
-        sizeof(int) * world_size_,
-        cudaMemcpyHostToDevice));
   }
 
   ~NVSHMEMSymmetricMemory() override{
@@ -126,13 +113,31 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   void** get_buffer_ptrs_dev() override {
+    if (buffers_dev_) return buffers_dev_;
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    buffers_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    AT_CUDA_CHECK(cudaMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
     return buffers_dev_;
   }
 
   void** get_signal_pad_ptrs_dev() override {
+    if (signal_pads_dev_) return signal_pads_dev_;
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    signal_pads_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    AT_CUDA_CHECK(cudaMemcpy(
+        signal_pads_dev_,
+        signal_pads_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice));
     return signal_pads_dev_;
   }
 
+  // This API is subject to removal
   size_t get_buffer_size() override {
     return buffer_size_;
   }
@@ -250,10 +255,25 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   };
 
   int* get_rank_to_global_rank_dev() override {
+    if (rank_to_global_rank_dev_) return rank_to_global_rank_dev_;
+
+    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
+    AT_CUDA_CHECK(cudaMemcpy(
+        rank_to_global_rank_dev_,
+        rank_to_global_rank_.data(),
+        sizeof(int) * world_size_,
+        cudaMemcpyHostToDevice));
     return rank_to_global_rank_dev_;
   };
 
+  bool expired() const {
+    // True if the tensor has been deallocated
+    return tensor_weak_ptr_.expired();
+  }
+
  private:
+  c10::weak_intrusive_ptr<c10::TensorImpl> tensor_weak_ptr_;
   std::shared_ptr<NVSHMEMAllocation> allocation_;
   size_t buffer_size_;
   std::vector<void*> buffers_;
@@ -261,12 +281,12 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int device_idx_;
   int rank_;
   int world_size_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  void** buffers_dev_{nullptr};
+  void** signal_pads_dev_{nullptr};
   std::string group_name_;
 
   std::vector<int> rank_to_global_rank_;
-  int* rank_to_global_rank_dev_;
+  int* rank_to_global_rank_dev_{nullptr};
 };
 
 // Bootstrap based on user's setting for NCCL
@@ -337,6 +357,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         group_name == std::nullopt,
         "NVSHMEMSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
+    c10::cuda::CUDAGuard guard(device_idx);
 
     auto group_info = get_group_info("0");
     auto store = group_info.store;
@@ -367,21 +388,53 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,
+      const at::Tensor& tensor,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value());
+
+    // Using raw address of TensorImpl as a unique key of tensor in `symm_mems_`
+    // map, because other addresses such as `tensor.data_ptr()` or
+    // `tensor.storage().data_ptr()` may been shared by views and slices.
+    auto tensor_raw_ptr = (void*)tensor.unsafeGetTensorImpl();
+    auto symm_mem_key = std::make_tuple(tensor_raw_ptr, *group_name);
     {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      auto it = symm_mems_.find(symm_mem_key);
       if (it != symm_mems_.end()) {
-        return it->second;
+        auto symm_mem = it->second;
+        if (!symm_mem->expired()) {
+          return symm_mem;
+        }
+        // Otherwise, the tensor in `symm_mems_` map must have been deallocated,
+        // and we are facing a new tensor that happens to have the same raw
+        // TensorImpl* address. We would go thru a new insert below.
       }
     }
-    auto it = allocations_.find(ptr);
-    TORCH_CHECK(it != allocations_.end());
-    auto symm_mem =
-        c10::make_intrusive<NVSHMEMSymmetricMemory>(it->second, *group_name);
 
-    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
+    // This is the first time the tenosr gets rendezvous'ed. We need to first
+    // search for an allocations that backs it (below).
+    LOG(INFO) << tensor.device() << ": rendezvousing tensor " << tensor_raw_ptr
+              << ", size " << tensor.sizes() << ", over group " << *group_name;
+
+    // `ptr` is tensor data's starting address
+    auto ptr = tensor.data_ptr();
+    // [Note] In case of MemPool or when the tensor is a slice of another, the
+    // tensor's data_ptr() may not match exactly with an allocation's base
+    // address. Thus we perform the search by testing if the tensor's data_ptr
+    // is within an allocation's range.
+    auto it = std::find_if(allocations_.begin(), allocations_.end(),
+                               [&](const auto& pair){
+                                  auto& allocation = pair.second;
+                                  auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                  auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                  return ptr_int >= base_ptr && ptr_int < base_ptr + allocation->buffer_size; });
+    TORCH_CHECK(it != allocations_.end(),
+        "Pointer not within any SymmetricMemory allocation, "
+        "is the tensor allocated from SymmetricMemory?");
+
+    auto symm_mem =
+        c10::make_intrusive<NVSHMEMSymmetricMemory>(tensor, it->second /*allocation*/, *group_name);
+
+    symm_mems_[symm_mem_key] = symm_mem;
     return symm_mem;
   };
 
@@ -400,7 +453,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NVSHMEMSymmetricMemory>>
       symm_mems_;
 };
 
