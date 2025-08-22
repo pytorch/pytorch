@@ -30,7 +30,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
