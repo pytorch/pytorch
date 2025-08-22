@@ -987,6 +987,10 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 
+  if(USE_FBGEMM_GENAI)
+    target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
+  endif()
+
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
   if(USE_NVSHMEM)
