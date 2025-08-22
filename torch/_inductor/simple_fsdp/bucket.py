@@ -138,6 +138,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
         all_ag_snodes = []
         all_wait_snodes = []
         all_ag_input_ir_nodes = []
+        group_sizes = []
+        group_names = []
         for ag_info, ag_snodes in ag_bucket.items():
             if len(ag_snodes) == 0:
                 continue
@@ -178,13 +180,15 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     )
                 ag_input_ir_nodes.append(ag_input_ir_node)
                 wait_snodes.append(ag_snode_to_wait_snode[ag_snode])
+            group_sizes.append(group_size)
+            group_names.append(group_name)
             all_ag_snodes.append(ag_snodes)
             all_wait_snodes.append(wait_snodes)
             all_ag_input_ir_nodes.append(ag_input_ir_nodes)
         bucket_id_to_bucketed_op_info[bucket_id] = (
             all_ag_input_ir_nodes,
-            group_size,
-            group_name,
+            group_sizes,
+            group_names,
             all_ag_snodes,
             all_wait_snodes,
         )
@@ -212,8 +216,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             if coarsen_bucket_id not in bucket_id_is_scheduled:
                 (
                     all_ag_input_ir_nodes,
-                    group_size,
-                    group_name,
+                    group_sizes,
+                    group_names,
                     all_orig_ag_snodes,
                     all_orig_wait_snodes,
                 ) = bucket_id_to_bucketed_op_info[coarsen_bucket_id]
@@ -224,8 +228,10 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     ag_input_ir_nodes,
                     orig_ag_snodes,
                     orig_wait_snodes,
+                    group_size,
+                    group_name
                 ) in enumerate(
-                    zip(all_ag_input_ir_nodes, all_orig_ag_snodes, all_orig_wait_snodes)
+                    zip(all_ag_input_ir_nodes, all_orig_ag_snodes, all_orig_wait_snodes, group_sizes, group_names)
                 ):
                     if len(orig_ag_snodes) == 1:
                         # If there is only one all_gather in the bucket, schedule it normally.
@@ -428,7 +434,6 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             _, reduce_op, group_size, group_name = example_rs_fx_node.args
-            print("group_size, group_name ", group_size, group_name )
             rs_input_ir_nodes: list[ir.IRNode] = []
             wait_snodes = []
             wait_snode_recursive_users = OrderedSet()

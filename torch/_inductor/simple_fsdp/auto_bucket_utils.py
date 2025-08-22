@@ -28,7 +28,7 @@ def get_ag_node_pg_info(snode, resolve_pg=False):
     )
     if ag_fx_node is None:
         return None
-    group_size, group_name = ag_fx_node.args[1], ag_fx_node.args[2]
+    group_size, group_name = snode.node.constant_args[0], snode.node.constant_args[1]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
     return group_size, group_name
@@ -41,7 +41,7 @@ def get_rs_node_pg_info(snode, resolve_pg=False, return_reduce_op=False):
     )
     if rs_fx_node is None:
         return None
-    group_size, group_name = rs_fx_node.args[2], rs_fx_node.args[3]
+    group_size, group_name = snode.node.constant_args[1], snode.node.constant_args[2]
     if resolve_pg:
         group_name = _resolve_process_group(group_name)
     if return_reduce_op:
