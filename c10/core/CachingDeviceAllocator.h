@@ -2835,7 +2835,7 @@ struct CachingDeviceAllocatorInterface : BaseDeviceAllocator {
   }
 
   void attachAllocatorTraceTracker(
-      std::function<void(const typename implT::TraceEntryT&)> tracker)
+      std::function<void(const typename ImplT::TraceEntryT&)> tracker)
       override {
     for (auto& impl : impls_) {
       impl->attachAllocatorTraceTracker(tracker);
