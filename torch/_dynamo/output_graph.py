@@ -1459,6 +1459,25 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
 
+            export_tracing = True
+            # This is some flag that will make life simpler. Can be a ctx manager as well.
+            if export_tracing:
+                assert len(stack_values_flat) == 1
+                assert isinstance(stack_values_flat[0], variables.ListVariable)
+                fx_graph_outputs = pass2.graph_outputs
+                proxy_ids = list(fx_graph_outputs.keys())
+                for idx, out_vt in enumerate(stack_values_flat[0].items):
+                    if out_vt.source is not None:
+                        # Must be an input
+                        print("-----> Output", idx, out_vt.source.name())
+                    elif isinstance(out_vt, variables.TensorVariable) and id(out_vt.proxy) in proxy_ids:
+                        print("-----> Output", idx, proxy_ids.index(id(out_vt.proxy)))
+                    elif isinstance(out_vt, variables.ConstantVariable):
+                        print("-----> Output", idx, " constant value", out_vt.value)
+                    else:
+                        raise NotImplementedError("Where is this output coming from?")
+
+
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -1913,6 +1932,13 @@ class OutputGraph(OutputGraphGuardsState):
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
+
+
+            # At this time the graphargs are fully generated
+
+            for idx, grapharg in enumerate(self.graphargs):
+                print("---> Input: ", idx, grapharg.source.name())
+
             cg.make_call_generated_code(name)
             return cg.get_instructions()
 

@@ -3480,7 +3480,6 @@ MOD_SKIPLIST = [
     "torch._decomp",
     "torch._dispatch",
     "torch._dynamo",
-    "torch._export",
     "torch._functorch",
     "torch._guards",
     "torch._higher_order_ops.effects",
