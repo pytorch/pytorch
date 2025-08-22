@@ -524,6 +524,14 @@ class SchemaInfo:
     args: list[AliasInfo]
     outs: list[AliasInfo]
 
+    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
+    # advantage of our existing caching of data for each OpOverload to paper over an
+    # efficiency problem with pybind11::enum_ (which currently is used to implement
+    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
+    # each element must be converted to int with the __int__ method, which incurs a lot
+    # of overhead. Converting to int once and caching removes this per-op overhead.
+    int_tags: list[int]
+
 
 # Given an OpOverload, returns schema information on it.
 # This is cached for efficiency, since it can involve running torchgen
@@ -590,8 +598,14 @@ def get_alias_info(func) -> SchemaInfo:
             )
             for a in func._schema.returns
         ]
-    schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
+    schema_info = SchemaInfo(
+        args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
+    )
     return schema_info
+
+
+# See NOTE[SchemaInfo int_tags] above.
+_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
@@ -648,7 +662,8 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
-    if torch.Tag.inplace_view in func.tags:
+    # See NOTE[SchemaInfo int_tags] above.
+    if _TORCH_TAG_INPLACE_VIEW_INT in schema_info.int_tags:
         # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
         # but don't end up dispatching the op anywhere else.
         mutated_args = [
