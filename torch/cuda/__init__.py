@@ -279,7 +279,10 @@ def _check_capability():
                 (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
                 default=50,
             )
-            if current_arch // 10 < min_arch // 10 or current_arch // 10 > max_arch // 10:
+            if (
+                current_arch // 10 < min_arch // 10
+                or current_arch // 10 > max_arch // 10
+            ):
                 warnings.warn(
                     incompatible_gpu_warn
                     % (
