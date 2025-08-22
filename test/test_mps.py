@@ -8905,11 +8905,11 @@ class TestPad(TestCaseMPS):
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
     def test_constant_pad_nd_with_empty_pad(self):
-        input_cpu = torch.randn((2, 3, 4), device='cpu', dtype=torch.float)
-        input_mps = input_cpu.detach().clone().to('mps')
-        output_cpu = torch.constant_pad_nd(input_cpu, [])
+        # Empty constant pad is no-op
+        # See https://github.com/pytorch/pytorch/issues/161066
+        input_mps = torch.randn((2, 3, 4), device="mps")
         output_mps = torch.constant_pad_nd(input_mps, [])
-        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_mps, input_mps)
 
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
