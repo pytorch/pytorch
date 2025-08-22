@@ -615,14 +615,14 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     schema_info = get_alias_info(func)
 
     def get_write_alias(x):
-        if len(x.alias_set) == 0:
+        alias_set = x.alias_set
+        if not alias_set or not x.is_write:
             return None
-        alias_set = list(x.alias_set)
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
         assert len(alias_set) == 1
-        if x.is_write:
-            return alias_set[0]
-        return None
+        # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
+        # set of size 1 on Python 3.13.
+        return next(iter(alias_set))
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
         new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
