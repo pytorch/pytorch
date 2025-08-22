@@ -15,15 +15,16 @@ import ctypes
 import functools
 import glob
 import importlib
+import importlib.metadata as md
 import inspect
 import math
 import os
 import platform
+import re
 import sys
 import textwrap
 import threading
-import importlib.metadata as md
-import re
+from re import Pattern
 from typing import (
     Any as _Any,
     Callable as _Callable,
@@ -310,15 +311,18 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
     ctypes.CDLL(lib_path)
 
 
-#following finds Cuda-12 libcudart.so and Cuda-13 libcudart.so.13
-_pat_cudart = re.compile(r"libcudart\.so(?:\.\d+(?:\.\d+)*)?")
-def _wheel_contains_cudart() -> bool:
+# Following finds Cuda-12 libcudart.so and Cuda-13 libcudart.so.13
+_pat_cudart: Pattern[str] = re.compile(r"libcudart\.so(?:\.\d+(?:\.\d+)*)?")
+
+
+def _wheel_contains_cudart() -> builtins.bool:
     """Checks if an installed Python wheel contains libcudart.so."""
-    return any(
-        _pat_cudart.search(str(f).replace("\\", "/"))
+    return builtins.any(
+        (_pat_cudart.search(str(f).replace("\\", "/")) is not None)
         for dist in md.distributions()
-        for f in (dist.files or [])
+        for f in (getattr(dist, "files", None) or ())
     )
+
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
