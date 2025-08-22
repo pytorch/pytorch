@@ -306,19 +306,13 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
-    def len(self):
-        return len(
-            [
-                x
-                for x in self.items.values()
-                if not isinstance(x, variables.DeletedVariable)
-            ]
+    def len(self) -> int:
+        return sum(
+            not isinstance(x, variables.DeletedVariable) for x in self.items.values()
         )
 
-    def has_new_items(self):
-        if self.should_reconstruct_all:
-            return True
-        return any(
+    def has_new_items(self) -> bool:
+        return self.should_reconstruct_all or any(
             self.is_new_item(self.original_items.get(key.vt), value)
             for key, value in self.items.items()
         )
@@ -554,15 +548,16 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
-            if self.user_cls is dict and len(args):
+            if (
+                issubclass(self.user_cls, dict)
+                and self.user_cls is not collections.OrderedDict
+                and len(args)
+            ):
                 raise_args_mismatch(tx, name)
 
             if not self.items:
                 msg = ConstantVariable.create("popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
-
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
 
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
@@ -576,6 +571,10 @@ class ConstDictVariable(VariableTracker):
                 k, v = self.items.popitem(last=last)
             else:
                 k, v = self.items.popitem()
+
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+
             return variables.TupleVariable([k.vt, v])
         elif name == "clear":
             if args or kwargs:

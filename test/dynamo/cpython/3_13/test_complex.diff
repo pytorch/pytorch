@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_complex.py b/test/dynamo/cpython/3_13/test_complex.py
-index 6ff1a8ab29d..cda348d2f37 100644
+index 6ff1a8ab29d..01295e03efc 100644
 --- a/test/dynamo/cpython/3_13/test_complex.py
 +++ b/test/dynamo/cpython/3_13/test_complex.py
 @@ -1,16 +1,146 @@
@@ -226,7 +226,80 @@ index 6ff1a8ab29d..cda348d2f37 100644
      def assertClose(self, x, y, eps=1e-9):
          """Return true iff complexes x and y "are close"."""
          self.assertCloseAbs(x.real, y.real, eps)
-@@ -855,4 +1041,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -431,12 +617,13 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+         self.assertRaises(TypeError, complex, WithComplex(1), object())
+         self.assertRaises(TypeError, complex, WithComplex(None), object())
+ 
+-        class EvilExc(Exception):
+-            pass
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class EvilExc(Exception):
++                pass
+ 
+-        class evilcomplex:
+-            def __complex__(self):
+-                raise EvilExc
++            class evilcomplex:
++                def __complex__(self):
++                    raise EvilExc
+ 
+         self.assertRaises(EvilExc, complex, evilcomplex())
+ 
+@@ -460,31 +647,33 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+         self.assertRaises(TypeError, complex, WithIndex(None), 1.5)
+         self.assertRaises(TypeError, complex, 1.5, WithIndex(None))
+ 
+-        class MyInt:
+-            def __int__(self):
+-                return 42
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class MyInt:
++                def __int__(self):
++                    return 42
+ 
+         self.assertRaises(TypeError, complex, MyInt())
+         self.assertRaises(TypeError, complex, MyInt(), 1.5)
+         self.assertRaises(TypeError, complex, 1.5, MyInt())
+ 
+-        class complex0(complex):
+-            """Test usage of __complex__() when inheriting from 'complex'"""
+-            def __complex__(self):
+-                return 42j
+-
+-        class complex1(complex):
+-            """Test usage of __complex__() with a __new__() method"""
+-            def __new__(self, value=0j):
+-                return complex.__new__(self, 2*value)
+-            def __complex__(self):
+-                return self
+-
+-        class complex2(complex):
+-            """Make sure that __complex__() calls fail if anything other than a
+-            complex is returned"""
+-            def __complex__(self):
+-                return None
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class complex0(complex):
++                """Test usage of __complex__() when inheriting from 'complex'"""
++                def __complex__(self):
++                    return 42j
++
++            class complex1(complex):
++                """Test usage of __complex__() with a __new__() method"""
++                def __new__(self, value=0j):
++                    return complex.__new__(self, 2*value)
++                def __complex__(self):
++                    return self
++
++            class complex2(complex):
++                """Make sure that __complex__() calls fail if anything other than a
++                complex is returned"""
++                def __complex__(self):
++                    return None
+ 
+         check(complex(complex0(1j)), 0.0, 42.0)
+         with self.assertWarns(DeprecationWarning):
+@@ -855,4 +1044,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
  
  
  if __name__ == "__main__":
