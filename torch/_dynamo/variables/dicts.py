@@ -919,7 +919,7 @@ class SetVariable(ConstDictVariable):
                 "symmetric_difference",
             )
             and check_constant_args(args, kwargs)
-            and istype(self.python_type(), set)
+            and self.python_type() is set
         ):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
