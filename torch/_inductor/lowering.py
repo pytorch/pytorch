@@ -3012,11 +3012,8 @@ def select_scatter(x, src, dim: int, index: int):
     )
 
 
-@register_lowering(
-     aten.slice_scatter, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
-)
+@register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
