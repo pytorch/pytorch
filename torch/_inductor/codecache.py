@@ -2399,15 +2399,12 @@ end
 
                 if use_mmap_weights:
 
-                    def get_page_size():
+                    def get_page_size() -> int:
                         # Don't use resource.getpagesize(), as it is a Unix specific package
                         # as seen in https://docs.python.org/2/library/resource.html
-                        import psutil
+                        page_size = os.sysconf("SC_PAGE_SIZE")
 
-                        try:
-                            return psutil.virtual_memory().page_size
-                        except:
-                            return 4096  # Default valuevalue
+                        return page_size
 
                     page_size_ = get_page_size()
                     page_size = max(16384, page_size_)
