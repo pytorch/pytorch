@@ -499,17 +499,15 @@ and output of type {type(ret)}. But expected types to match."""
             assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
-    def is_read_only_alias_match(arg, ret):
-        shared_aliases = arg.alias_set & ret.alias_set
-        return shared_aliases and not arg.is_write
-
     num_args = len(func._schema.arguments)
     num_returns = len(func._schema.returns)
     for arg_idx in range(num_args):
         for return_idx in range(num_returns):
-            if is_read_only_alias_match(
-                schema_info.args[arg_idx], schema_info.outs[return_idx]
-            ):
+            schema_arg = schema_info.args[arg_idx]
+            is_read_only_alias_match = (
+                schema_arg.alias_set & schema_info.outs[return_idx].alias_set
+            ) and not schema_arg.is_write
+            if is_read_only_alias_match:
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
