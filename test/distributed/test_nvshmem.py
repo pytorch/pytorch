@@ -66,6 +66,17 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
+    def test_rendezvous_slice(self) -> None:
+        # Rendezvous a slice of a tensor
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        x = symm_mem.empty((2, 1024), device=self.device)
+        y = x[1]
+        symm_mem.rendezvous(y, group=group_name)
+
+    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
