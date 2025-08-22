@@ -250,8 +250,6 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
-        # NOTE: required for nvshmem allocation
-        torch.empty(1, device=self.device)
         # Set NVSHMEM as SymmMem backend
         symm_mem.set_backend("NVSHMEM")
 

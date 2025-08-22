@@ -323,6 +323,8 @@ void initialize_nvshmem_with_store(
   }
 
   maybe_initialize_env_vars();
+  // Make sure the CUDA runtime is initialized.
+  cudaFree(nullptr);
 
   nvshmemx_uniqueid_t unique_id;
   NVSHMEM_CHECK(
