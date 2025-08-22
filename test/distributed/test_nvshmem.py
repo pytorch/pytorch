@@ -77,6 +77,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         dtype = torch.float
         numel = 1024
         out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(out.device, self.device)
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
