@@ -1908,10 +1908,10 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        assert issubclass(user_cls, (dict, OrderedDict, defaultdict))
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
+            assert issubclass(user_cls, OrderedDict)
             assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
