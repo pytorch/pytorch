@@ -200,7 +200,6 @@ jobs:
     env:
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
-      VC_INSTALL_PATH: "C:\\MSVC-BuildTools-2022"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -242,14 +241,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Enable long paths on Windows and install VS2022 17.13.2
-        env:
-          VC_YEAR: 2022
-          VC_VERSION: 17.13.2
-        shell: bash
+      - name: Enable long paths on Windows
+        shell: powershell
         working-directory: pytorch
         run: |
-          powershell .github/scripts/windows/install_vs2022.ps1
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
