@@ -403,9 +403,12 @@ class Unpickler:
                     func not in _get_allowed_globals().values()
                     and func not in _get_user_allowed_globals().values()
                 ):
-                    raise UnpicklingError(
+                    error_msg = (
                         f"Trying to call reduce for unrecognized function {func}"
                     )
+                    if hasattr(func, "__self__"):
+                        error_msg += f" which belongs to {func.__self__}"
+                    raise UnpicklingError(error_msg)
                 result = func(*args)
                 if func in torch._tensor_classes and "sparse" in func.__module__:
                     _sparse_tensors_to_validate.append(result)
