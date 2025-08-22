@@ -30,6 +30,12 @@ struct XPUCachingHostAllocatorImpl
   bool query_event(XPUEvent& event) override {
     return event.query();
   }
+
+  bool pinned_use_background_threads() override {
+    // Background threads for XPU currently hang on Windows.
+    // This will be enabled once the underlying issue is fixed.
+    return false;
+  }
 };
 
 DECLARE_HOST_ALLOCATOR(
