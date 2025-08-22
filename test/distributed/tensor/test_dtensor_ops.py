@@ -485,78 +485,9 @@ dtensor_fails_eager = {
 }
 
 
-dtensor_fails_compile = dtensor_fails_eager.union({
-xfail("bmm"),
-xfail("cdouble"),
-xfail("cfloat"),
-xfail("chalf"),
-xfail("clamp"),
-xfail("copysign"),
-xfail("corrcoef"),
-xfail("cov"),
-xfail("cumsum"),
-xfail("cumulative_trapezoid"),
-xfail("diag"),
-xfail("diagonal_copy"),
-xfail("diagonal"),
-xfail("einsum"),
-xfail("hash_tensor"),
-xfail("i0"),
-xfail("igamma"),
-xfail("igammac"),
-xfail("index_reduce"),
-xfail("index_reduce"),
-xfail("index_reduce"),
-xfail("index_reduce"),
-xfail("item"),
-xfail("linalg.diagonal"),
-xfail("linalg.vector_norm"),
-xfail("logit"),
-xfail("max"),
-xfail("max"),
-xfail("maximum"),
-xfail("min"),
-xfail("min"),
-xfail("minimum"),
-xfail("msort"),
-xfail("mvlgamma"),
-xfail("mvlgamma"),
-xfail("mvlgamma"),
-xfail("narrow"),
-xfail("nextafter"),
-xfail("nn.functional.channel_shuffle"),
-xfail("nn.functional.interpolate"),
-xfail("nn.functional.interpolate"),
-xfail("nn.functional.interpolate"),
-xfail("nn.functional.multi_head_attention_forward"),
-xfail("nn.functional.pad"),
-xfail("nn.functional.pad"),
-xfail("nn.functional.pad"),
-xfail("nonzero_static"),
-xfail("repeat"),
-xfail("scatter_add"),
-xfail("scatter_reduce"),
-xfail("scatter_reduce"),
-xfail("scatter_reduce"),
-xfail("scatter_reduce"),
-xfail("scatter_reduce"),
-xfail("scatter"),
-xfail("slice_scatter"),
-xfail("sort"),
-xfail("sparse.mm"),
-xfail("tile"),
-xfail("topk"),
-xfail("transpose_copy"),
-xfail("unsqueeze_copy"),
-})
+dtensor_fails_compile = dtensor_fails_eager.copy()
 
 dtensor_fails_dynamic = dtensor_fails_compile.copy()
-
-# The following are succeeding with compile for some reason
-# linalg.multi_dot
-# nn.functional.hardshrink
-# nn.functional.linear
-# nn.functional.softshrink
 
 
 # Add a list of ops that are currently failing BW pass
