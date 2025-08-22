@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import itertools
+
 from collections.abc import Sequence, Sized
-from threading import enumerate
 from typing import cast, Optional
 
 import torch
@@ -40,6 +41,14 @@ from ._pointwise_ops import pointwise_strategy
 
 
 aten = torch.ops.aten
+
+
+def propagate_first_input_strategy(op_schema: OpSchema) -> StrategyType:
+    return propagate_single_input_strategy(
+        OpSchema(
+            op=op_schema.op, args_schema=op_schema.args_schema[:1], kwargs_schema={}
+        )
+    )
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -1056,32 +1065,38 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
     for i in range(len(indices_tuple_strategy.children), self_strategy.ndim):
         free_dims.append(i)
 
+    # special case: no-op
+    if not remove_dims and not select_dims:
+        return cast(OpStrategy, propagate_first_input_strategy(op_schema))
+
+    # normal cases: one tensor dim will be removed/selected
     # enumerate all possible input_specs
     self_input_specs: list[DTensorSpec] = [
-        strat.output_specs for strat in self_strategy.strategies
+        strat.output_spec for strat in self_strategy.strategies
     ]
-    non_empty_indices_input_specs_dict: dict[int, list[DTensorSpec]] = {}
-    for i, index_strategy in enumerate(indices_tuple_strategy.childs):
-        if index_strategy is not None:
-            non_empty_indices_input_specs_dict[i] = [
-                strat.output_specs for strat in index_strategy.strategies
-            ]
+    non_empty_indices_input_specs: list[Sequence[DTensorSpec]] = []
+    for index_strategy in indices_tuple_strategy.children:
+        if isinstance(index_strategy, OpStrategy):
+            non_empty_indices_input_specs.append(
+                [strat.output_specs for strat in index_strategy.strategies]
+            )
 
-    non_empty_index_idx_to_dim = list(non_empty_indices_input_specs_dict.keys())
-    non_empty_indices_input_specs = list(non_empty_indices_input_specs_dict.values())
+    print(f"self_input_specs={self_input_specs}")
+    print(f"non_empty_indices_input_specs={non_empty_indices_input_specs}")
     all_input_specs_comb = itertools.product(
-        (self_input_specs, *non_empty_indices_input_specs)
+        self_input_specs, *non_empty_indices_input_specs
     )
 
     # enumerate all acceptable input_specs
-    acceptable_input_specs_collection = {}  # use set to dedup
-    output_spec_collection = {}
+    acceptable_input_specs_and_out_spec_dict = {}  # use dict to dedup
+    print(list(all_input_specs_comb))
     for input_specs_comb in all_input_specs_comb:
         self_input_spec: DTensorSpec = input_specs_comb[0]
+        self_ndim = self_input_spec.ndim
         indices_input_specs: list[DTensorSpec] = input_specs_comb[1:]
 
-        # first, if `indices`` are sharded, they have to be sharded consistently.
-        # Besides, `indices`` can broadcast. Therefore we leverage the `pointwise_rule`
+        # first, if `indices` are sharded, they have to be sharded consistently.
+        # Besides, `indices` can broadcast. Therefore we leverage the `pointwise_rule`
         # to produce acceptable `indices_input_specs`.
         if_indices_comply_pointwise_rule = pointwise_rule(
             OpSchema(
@@ -1098,11 +1113,12 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
             # use that to compute our ideal values_spec
-            indices_reshard_tgt_spec = pointwise_rule(
-                valid_indices_suggestion
-            ).output_spec
-            assert isinstance(indices_reshard_tgt_spec, DTensorSpec)
-            indices_input_specs = indices_reshard_tgt_spec
+            indices_input_specs = list(valid_indices_suggestion.args_spec)
+            index_input_spec = pointwise_rule(valid_indices_suggestion).output_spec
+        else:
+            index_input_spec = if_indices_comply_pointwise_rule.output_spec
+
+        assert isinstance(index_input_spec, DTensorSpec)
 
         # second, check `self` spec (i.e. placements)
         self_input_tgt_placements: list[Placement] = []
@@ -1115,26 +1131,92 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             else:
                 self_input_tgt_placements.append(placement)
 
-        self_input_spec = self_input_tgt_placements
+        self_input_spec = DTensorSpec(
+            mesh=self_input_spec.mesh,
+            placements=tuple(self_input_tgt_placements),
+        )
+
+        acceptable_input_specs = (self_input_spec, *indices_input_specs)
+        if acceptable_input_specs in acceptable_input_specs_and_out_spec_dict:
+            continue
+
         # last, create the output_spec from self_input_spec and indices_input_specs
-        output_placements = []
+        # note that we will conduct in a tensor-dim oriented way because the output
+        # sharding is determined by ``indices`` which come in order of tensor-dims.
+        out_dim_map = self_input_spec.dim_map
 
-    """
-    indices_acceptable_shardings: list[Optional[Placement]] = [
-        Replicate() if index_strategy is not None else None
-        for index_strategy in indices_tuple_strategy.children
-    ]
-    single_mesh_acceptable_input_shardings: list[Optional[Placement]] = [
-        Replicate(),  # output
-        Replicate(),  # self
-    ] + indices_acceptable_shardings
+        # first, we need to find the first remove/select dim
+        first_remove_dim = self_ndim if not remove_dims else remove_dims[0]
+        first_select_dim = self_ndim if not select_dims else select_dims[0]
+        # case: remove a tensor dim
+        if remove_dims and not select_dims:
+            # TODO: shall we also check that all remove_dims have Replicate() shardings
+            # (i.e. dim_map[x] == -1)???
+            out_dim_map = (
+                out_dim_map[:first_remove_dim] + out_dim_map[first_remove_dim + 1 :]
+            )
+            # TODO: fill in out spec
+            out_spec = DTensorSpec.from_dim_map()
+        else:  # output has a new select_dim at the first remove/select dim
+            index_dim_map = index_input_spec.dim_map
+            assert len(index_dim_map) == 1
+            first_select_dim = min(first_remove_dim, first_select_dim)
+            # all remove_dims and select_dims in dim_map cannot be Shard()
+            any_shard = any(
+                [out_dim_map[dim] >= 0 for dim in remove_dims + select_dims]
+            )
+            if any_shard:
+                continue
+            else:
+                if index_input_spec.is_sharded():
+                    # the ``self`` must be Replicate() on the corresponding mesh dim
+                    mesh_dim = index_dim_map[0]
+                    self_input_placements = self_input_spec.placements
+                    if not self_input_placements[mesh_dim].is_replicate():
+                        continue
+                    else:
+                        out_spec = DTensorSpec(
+                            mesh=self_input_spec.mesh,
+                            placements=tuple(
+                                self_input_placements[:mesh_dim]
+                                + (Shard(first_select_dim),)  # select_dim
+                                + self_input_placements[mesh_dim + 1 :]
+                            ),
+                        )
+                else:
+                    # TODO: fill in out spec
+                    out_spec = DTensorSpec.from_dim_map()
 
-    return expand_to_full_mesh_op_strategy(
-        mesh=self_strategy.mesh,
-        op_schema=op_schema,
-        single_mesh_dim_strategies=[single_mesh_acceptable_input_shardings],
-    )
-    """
+        # find a new acceptable arg shardings
+        acceptable_input_specs_and_out_spec_dict[acceptable_input_specs] = out_spec
+
+    # generate OpStrategy from input strategies and acceptable shardings
+    op_strategy = OpStrategy([])
+    for acc_shardings, out_spec in acceptable_input_specs_and_out_spec_dict.items():
+        # create the corresponding OpSpec
+        self_redistribute_cost = generate_redistribute_costs(
+            self_strategy, acc_shardings[0]
+        )
+        indices_redistribute_costs = []
+        i = 1
+        for index_strategy in indices_tuple_strategy.children:
+            if isinstance(index_strategy, OpStrategy):
+                indices_redistribute_costs.append(
+                    generate_redistribute_costs(index_strategy, acc_shardings[i])
+                )
+                i += 1
+            else:
+                indices_redistribute_costs.append([0.0])
+
+        op_strategy.strategies.append(
+            OpSpec(
+                output_specs=out_spec,
+                input_specs=acc_shardings,
+                redistribute_cost=[self_redistribute_cost] + indices_redistribute_costs,
+            )
+        )
+
+    return op_strategy
 
 
 @register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))
