@@ -75,15 +75,15 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  linux-jammy-cpu-py3_10-gcc11-inductor-build:
+    name: linux-jammy-cpu-py3.10-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      sync-tag: linux-jammy-cpu-py3_9-gcc11-inductor-build
+      sync-tag: linux-jammy-cpu-py3_10-gcc11-inductor-build
       test-matrix: |
         { include: [
           { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },

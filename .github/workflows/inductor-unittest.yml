@@ -131,13 +131,13 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  linux-jammy-cpu-py3_10-gcc11-inductor-build:
+    name: linux-jammy-cpu-py3.10-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
