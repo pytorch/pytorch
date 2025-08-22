@@ -3086,7 +3086,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout)
           .def_readonly("backend", &::c10d::Backend::Options::backend)
-          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
+          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout)
+          .def_readwrite(
+              "global_ranks_in_group",
+              &::c10d::Backend::Options::global_ranks_in_group)
+          .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
@@ -3102,12 +3106,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupGloo::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupGloo::Options::group_name);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo
       .def_static(
@@ -3469,11 +3468,6 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-      .def_readwrite(
-          "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
-      .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
       .def(
           "__copy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self) {
@@ -3512,17 +3506,49 @@ Example::
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
-                          int size) {
+                          int size,
+                          c10::intrusive_ptr<::c10d::ProcessGroupXCCL::Options>
+                              options) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
-
                 return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
-                    store, rank, size);
+                    store, rank, size, std::move(options));
               }),
               py::arg("store"),
               py::arg("rank"),
-              py::arg("size"));
+              py::arg("size"),
+              py::arg("options"),
+              R"(Create a new ProcessGroupXCCL instance.)");
+
+  intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
+      processGroupXCCL, "Options", backendOptions)
+      .def(py::init<>());
+  module
+      .def(
+          "_dump_xccl_trace",
+          [](std::optional<bool> includeCollectives,
+             std::optional<bool> includeStackTraces,
+             std::optional<bool> onlyActive) {
+            return py::bytes(::c10d::dump_xccl_trace(
+                includeCollectives.value_or(true),
+                includeStackTraces.value_or(true),
+                onlyActive.value_or(false)));
+          },
+          py::arg("includeCollectives") = std::optional<bool>(),
+          py::arg("includeStackTraces") = std::optional<bool>(),
+          py::arg("onlyActive") = std::optional<bool>(),
+          R"(
+Arguments:
+    includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+    includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+    onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+Returns:
+    Stringified pickle work traces.
+    Default settings return everything - i.e. contains XCCL comm dumps and collective traces.
+      )")
+      .def("get_xccl_version", [] { return ::c10d::getXcclVersion(); });
+
 #endif
 
 #ifdef USE_C10D_UCC
