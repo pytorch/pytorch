@@ -80,9 +80,7 @@ def _adjust_lr(
     elif adjust_lr_fn == "match_rms_adamw":
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
     else:
-        raise ValueError(
-            f"Adjust learning rate function {adjust_lr_fn} is not supported"
-        )
+        adjusted_ratio = 1.0
     return lr * adjusted_ratio
 
 
@@ -107,6 +105,10 @@ class Muon(Optimizer):
             raise ValueError(f"momentum should be >= 0 but is: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"weight decay should be >= 0 but is: {weight_decay}")
+        if adjust_lr_fn is not None and adjust_lr_fn not in ["original", "match_rms_adamw"]:
+            raise ValueError(
+                f"Adjust learning rate function {adjust_lr_fn} is not supported"
+            )
 
         defaults = {
             "lr": lr,
