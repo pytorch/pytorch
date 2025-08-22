@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.onnx import symbolic_helper, utils
-from torch.onnx._internal import registration
+from torch.onnx._internal.torchscript_exporter import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
 

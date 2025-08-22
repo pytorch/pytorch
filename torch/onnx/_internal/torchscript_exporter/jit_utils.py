@@ -14,8 +14,8 @@ from typing import Any
 
 import torch
 from torch import _C
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import registration
+from torch.onnx._internal.torchscript_exporter import registration
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")

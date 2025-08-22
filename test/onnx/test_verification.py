@@ -13,7 +13,8 @@ import pytorch_test_common
 from packaging import version
 
 import torch
-from torch.onnx import _constants, _experimental, verification
+from torch.onnx import _constants, verification
+from torch.onnx._internal.torchscript_exporter import _experimental
 from torch.testing._internal import common_utils
 
 
