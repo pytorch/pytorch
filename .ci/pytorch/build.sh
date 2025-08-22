@@ -195,8 +195,16 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
+  J=2  # default to 2 jobs
+  case "$RUNNER" in
+    linux.12xlarge.memory|linux.24xlarge.memory)
+      J=24
+      ;;
+  esac
+  echo "Building FlashAttention with job limit $J"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
