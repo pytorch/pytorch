@@ -2202,8 +2202,6 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
-  ASSERT_TRUE(set_module_attr(
-      "_has_eigen_sparse", at::hasEigenSparse() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_zendnn", at::hasZenDNN() ? Py_True : Py_False));
 
@@ -2454,6 +2452,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_is_ck_sdpa_available", []() {
+#ifdef USE_ROCM
+    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+#else
+    return false;
+#endif
   });
 
   py_module.def(

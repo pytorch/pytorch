@@ -97,8 +97,6 @@ file(GLOB native_zendnn_cpp "native/zendnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
-file(GLOB native_eigen_cpp "native/sparse/eigen/*.cpp")
-
 # Metal
 file(GLOB metal_h "metal/*.h")
 file(GLOB metal_cpp "metal/*.cpp")
@@ -344,9 +342,6 @@ if(USE_VULKAN)
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
 endif()
-if(USE_EIGEN_SPARSE)
-  set(all_cpu_cpp ${all_cpu_cpp} ${native_eigen_cpp})
-endif()
 
 if(USE_MTIA)
     set(ATen_MTIA_SRCS ${ATen_MTIA_SRCS} ${mtia_cpp} ${mtia_h} ${native_mtia_cpp} ${native_mtia_h})
@@ -475,10 +470,6 @@ if(USE_ROCM)
     file(GLOB native_hip_ck "native/hip/ck*.hip")
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
-  endif()
-  if(WIN32) # Windows doesn't support Composable Kernels and Triton
-    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
-      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
   endif()
 
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
