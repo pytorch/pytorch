@@ -1913,8 +1913,8 @@ class TestIndexing(TestCase):
     # onlyNativeDeviceTypes due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160737
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
         scalars = (
