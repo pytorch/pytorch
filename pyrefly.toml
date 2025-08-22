@@ -86,10 +86,15 @@ ignore-missing-imports = [
 
 untyped_def_behavior = "check-and-infer-return-any"
 
+# Shut off noisey errors
+errors.implicit-import = false
+
 # We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
 # and mypy.ini specifies `check_untyped_defs = False` for this file.
 # If you check even the unannotated stuff mypy produces 322 errors.
 # "test/test_torch.py",
+
+# Uncomment this file to check 
 # [[tool.pyrefly.sub-config]]
 # matches = "test/test_torch.py"
 
