@@ -1466,12 +1466,10 @@ class OutputGraph(OutputGraphGuardsState):
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, pre_stack_values_flat, pass2)
             if root_stack_values:
-                pass2.record_return_map = True
-                pass2._leaf_idx = 0
-                self.codegen_suffix(tx, root_stack_values, pass2)
-                pass2.record_return_map = False
+                self.codegen_suffix(tx, pre_stack_values_flat + root_stack_values, pass2, return_vt=root_stack_values[0])
+            else:
+                self.codegen_suffix(tx, pre_stack_values_flat + root_stack_values, pass2)
 
             return_map = {
                 "num_leaves": pass2._leaf_idx,
@@ -1549,10 +1547,11 @@ class OutputGraph(OutputGraphGuardsState):
         tx: "InstructionTranslatorBase",
         stack_values: list[VariableTracker],
         cg: PyCodegen,
+        return_vt: Optional[VariableTracker] = None
     ) -> None:
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
         # for variables with `AttributeMutationNew`, as they don't implement
-        # `reconstruct` themselves.
+        # `reconstruct` themselves
         self.side_effects.codegen_save_tempvars(cg)
         if self.backward_state:
             assert not self.export
@@ -1561,7 +1560,8 @@ class OutputGraph(OutputGraphGuardsState):
                 assert self.backward_state_var is not None
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
-        self.side_effects.codegen_hooks(cg)
+        with cg.disable_record_return_leaves():
+            self.side_effects.codegen_hooks(cg)
 
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
@@ -1571,8 +1571,9 @@ class OutputGraph(OutputGraphGuardsState):
             cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
-        cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg)
+        cg.restore_stack(stack_values, value_from_source=not tx.export, return_vt=return_vt)
+        with cg.disable_record_return_leaves():
+            self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """

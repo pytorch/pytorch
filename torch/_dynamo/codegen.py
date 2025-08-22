@@ -134,11 +134,9 @@ class PyCodegen:
             while isinstance(root_src, ChainedSource):
                 root_src = root_src.base
             self._root_source_to_flat_positions.setdefault(root_src, []).append(i)
-        
-        self._suppress_return_leaf: int = 0
     
     def _bump_leaf(self) -> None:
-        if self.record_return_map and self._suppress_return_leaf == 0:
+        if self.record_return_map:
             self._leaf_idx += 1
 
     def _rec_graph(self, graph_idx: int) -> None:
@@ -152,20 +150,37 @@ class PyCodegen:
             self._leaf_idx += 1
     
     @contextmanager
-    def suppress_return_leaves(self):
-        self._suppress_return_leaf += 1
+    def disable_record_return_leaves(self):
+        prev = self.record_return_map
+        # Temporarily disable recording (single controlling variable)
+        self.record_return_map = False
         try:
             yield
         finally:
-            self._suppress_return_leaf -= 1
+            self.record_return_map = prev
+
+    @contextmanager
+    def enable_record_return_leaves(self):
+        prev = self.record_return_map
+        # Temporarily enable recording
+        self.record_return_map = True
+        try:
+            yield
+        finally:
+            self.record_return_map = prev
 
     def restore_stack(
-        self, stack_values: list[Any], *, value_from_source: bool = True
+        self, stack_values: list[Any], *, value_from_source: bool = True, return_vt: Optional[VariableTracker] = None
     ) -> None:
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
-            self.foreach(stack_values)
+            for val in stack_values:
+                if val is return_vt:
+                    with self.enable_record_return_leaves():
+                        self(val)
+                else:
+                    self(val)
         finally:
             self.value_from_source = prev
 
@@ -262,9 +277,10 @@ class PyCodegen:
             def _record_returned_input_leaves(src: Source) -> None:
                 if not self.record_return_map:
                     return
+
+                # THIS LOGIC MIGHT GET SIMPLIFIED
                 # Try exact leaf first (e.g., x[2])
                 flat_idx = self._source_to_flat_input_idx.get(src)
-                breakpoint()
                 if flat_idx is not None:
                     # one returned input leaf
                     self.return_inputs.append((self._leaf_idx, flat_idx))
@@ -282,14 +298,12 @@ class PyCodegen:
 
             if self.top_of_stack is value:
                 self._output.append(create_dup_top())
-                print("HERERERE", self.record_return_map)
                 _record_returned_input_leaves(source)
                 return
 
             if self.tempvars.get(source) is not None:
                 self._output.append(self.create_load(self.tempvars[source]))
                 self.top_of_stack = source
-                print("TERHERE", self.record_return_map)
                 _record_returned_input_leaves(source)
                 return
 
