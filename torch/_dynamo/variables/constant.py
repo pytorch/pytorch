@@ -206,7 +206,7 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif isinstance(self.value, complex) and name in complex.__dict__.keys():
+        elif type(self.value) is complex and name in complex.__dict__.keys():
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
