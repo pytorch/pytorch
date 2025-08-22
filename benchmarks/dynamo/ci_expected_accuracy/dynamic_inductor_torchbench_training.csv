@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,fail_to_run,3
+torchrec_dlrm,pass,3
 
 
 
@@ -46,7 +46,7 @@ dcgan,pass,6
 
 
 
-demucs,fail_to_run,4
+demucs,pass,4
 
 
 
@@ -94,7 +94,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,fail_to_run,3
+hf_BigBird,pass,3
 
 
 
@@ -110,7 +110,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,fail_to_run,21
+hf_Reformer,pass,21
 
 
 
