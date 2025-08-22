@@ -245,12 +245,32 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        self.items = {make_hashable(x): v for x, v in items.items()}
+        dict_cls = self._get_dict_cls_from_user_cls(user_cls)
+        self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = not is_from_local_source(self.source)
         self.original_items = items.copy()
         self.user_cls = user_cls
+
+    def _get_dict_cls_from_user_cls(self, user_cls):
+        accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
+
+        # avoid executing user code if user_cls is a dict subclass
+        if user_cls in accepted_dict_types:
+            dict_cls = user_cls
+        else:
+            # <Subclass, ..., dict, object>
+            dict_cls = next(
+                base for base in user_cls.__mro__ if base in accepted_dict_types
+            )
+        assert dict_cls in accepted_dict_types, dict_cls
+
+        # Use a dict instead as the call "defaultdict({make_hashable(x): v ..})"
+        # would fail as defaultdict expects a callable as first argument
+        if dict_cls is collections.defaultdict:
+            dict_cls = dict
+        return dict_cls
 
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -604,12 +624,23 @@ class ConstDictVariable(VariableTracker):
                 return x
         elif name == "move_to_end":
             self.install_dict_keys_match_guard()
-            assert not kwargs and len(args) == 1
             tx.output.side_effects.mutation(self)
+            if args[0] not in self:
+                raise_observed_exception(KeyError, tx)
+
+            last = True
+            if len(args) == 2 and isinstance(args[1], ConstantVariable):
+                last = args[1].value
+
+            if (
+                kwargs
+                and "last" in kwargs
+                and isinstance(kwargs["last"], ConstantVariable)
+            ):
+                last = kwargs.get("last").value
+
             key = Hashable(args[0])
-            val = self.items[key]
-            self.items.pop(key)
-            self.items[key] = val
+            self.items.move_to_end(key, last=last)
             return ConstantVariable.create(None)
         elif name == "__eq__" and istype(
             self, ConstDictVariable

@@ -420,6 +420,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
