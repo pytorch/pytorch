@@ -128,8 +128,10 @@ There are 4 DSOs in torch_openreg, and the dependencies between them are as foll
 
 - Autoload Backend Machanism
 
-  - Registering the backend with Python entry points: See `setup`
-  - Adding an invoked function for the backend initialization: See `_autoload`
+When `import torch`, installed plugin backends (such as `torch_openreg`) will be automatically loaded, achieving the same experience as the built-in backends.
+
+  - Registering the backend with Python `entry points`: See `setup` in `setup.py`
+  - Adding a callable function for backend initialization: See `_autoload` in `torch_openreg/__init__.py`
   - Dynamically loading the backend without explicit imports: See [Usage Example](#usage-example)
 
 ## Installation and Usage
@@ -147,7 +149,6 @@ After installation, you can use the `openreg` device in Python just like any oth
 
 ```python
 import torch
-# import torch_openreg <- No need to import this because it is automatically loaded
 
 if not torch.openreg.is_available():
     print("OpenReg backend is not available in this build.")
