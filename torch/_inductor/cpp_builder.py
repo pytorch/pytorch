@@ -563,6 +563,11 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "wd4067",
             "wd4068",
             "EHsc",
+            # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+            "Zc:__cplusplus",
+            # Enable max compatible to msvc for oneAPI headers.
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
+            "permissive-",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
@@ -580,23 +585,42 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_ffast_math_flags() -> list[str]:
-    # ffast-math is equivalent to these flags as in
-    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
-    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
-    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
-    # are added by linking in crtfastmath.o. This is done by the spec file which
-    # only does globbing for -ffast-math.
-    flags = [
-        "fno-trapping-math",
-        "funsafe-math-optimizations",
-        "ffinite-math-only",
-        "fno-signed-zeros",
-        "fno-math-errno",
-    ]
+def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
+    os_definitions: list[str] = []
+    if _IS_WINDOWS:
+        # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
+        # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
+        os_definitions.append("NOMINMAX")
+    else:
+        pass
+    return os_definitions
 
-    if is_gcc():
-        flags.append("fexcess-precision=fast")
+
+def _get_ffast_math_flags() -> list[str]:
+    if _IS_WINDOWS:
+        flags = []
+    else:
+        # ffast-math is equivalent to these flags as in
+        # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+        # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+        # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+        # are added by linking in crtfastmath.o. This is done by the spec file which
+        # only does globbing for -ffast-math.
+        flags = [
+            "fno-trapping-math",
+            "funsafe-math-optimizations",
+            "ffinite-math-only",
+            "fno-signed-zeros",
+            "fno-math-errno",
+        ]
+
+        flags.append("fno-finite-math-only")
+        if not config.cpp.enable_unsafe_math_opt_flag:
+            flags.append("fno-unsafe-math-optimizations")
+        flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+
+        if is_gcc():
+            flags.append("fexcess-precision=fast")
 
     return flags
 
@@ -644,10 +668,6 @@ def _get_optimization_cflags(
             cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
 
     cflags += _get_ffast_math_flags()
-    cflags.append("fno-finite-math-only")
-    if not config.cpp.enable_unsafe_math_opt_flag:
-        cflags.append("fno-unsafe-math-optimizations")
-    cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
     if sys.platform != "darwin":
         # on macos, unknown argument: '-fno-tree-loop-vectorize'
@@ -706,6 +726,8 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    definitions += _get_os_related_cpp_definitions(cpp_compiler)
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
         ldflags.append("fuse-ld=lld")
@@ -1374,14 +1396,24 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definitions.append(" USE_XPU")
-        # Suppress multi-line comment warnings in sycl headers
-        cflags += ["Wno-comment"]
-        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-        if not find_library("ze_loader"):
-            raise OSError(
-                "Intel GPU driver is not properly installed, please follow the instruction "
-                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
-            )
+        xpu_error_string = (
+            "Intel GPU driver is not properly installed, please follow the instruction "
+            "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+        )
+        if _IS_WINDOWS:
+            ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
+            if ze_root is None:
+                raise OSError(xpu_error_string)
+            include_dirs += [os.path.join(ze_root, "include")]
+            libraries_dirs += [os.path.join(ze_root, "lib")]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        else:
+            # Suppress multi-line comment warnings in sycl headers
+            cflags += ["Wno-comment"]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+
+            if not find_library("ze_loader"):
+                raise OSError(xpu_error_string)
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
