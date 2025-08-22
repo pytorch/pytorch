@@ -24,7 +24,7 @@ class LinterTestCase(TestCase):
         return replacement
 
     @mock.patch("sys.stdout", new_callable=io.StringIO)
-    def lint_test(self, path, args, mock_stdout):
+    def lint_test(self, path, args, mock_stdout, required_flag):
         return self._lint_test(path, args, mock_stdout)[:2]
 
     @mock.patch("sys.stdout", new_callable=io.StringIO)
