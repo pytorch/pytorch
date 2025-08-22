@@ -116,6 +116,7 @@ ARG PINNED_TORCH_VERSION
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Installing torch wheels to build vllm"; \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
@@ -123,10 +124,10 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
-        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+        echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
     else \
-        echo "[INFO] Installing torch nightly with latest one"; \
+        echo "[INFO] Installing torch nightly with latest one to build vllm"; \
         uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
 
@@ -328,7 +329,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
-        echo "Found: '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
+        echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
