@@ -74,16 +74,11 @@ class PagedAttention:
             batch_idx (Tensor): batch index to be reserved; shape :math:`(1)`.
             seq_len (Tensor): minimum capacity for the given batch; shape :math:`(1)`.
         """
-        print("before. self.seq_lens:", self.seq_lens, ", self.capacity[batch_idx]:", self.capacity[batch_idx])
-
-        
-        self.seq_lens[batch_idx] = max(seq_len, self.seq_lens[batch_idx])
+        self.seq_lens[batch_idx] = torch.max(seq_len, self.seq_lens[batch_idx])
 
         if seq_len <= self.capacity[batch_idx]:
             return
         self.seq_lens[batch_idx] = seq_len
-        print("after. self.seq_lens:", self.seq_lens)
-
 
         num_pages_to_allocate = _cdiv(
             seq_len - self.capacity[batch_idx], self.page_size
