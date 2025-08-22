@@ -22,6 +22,10 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/irange.h>
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
