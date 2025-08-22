@@ -394,7 +394,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
                 that require the stride info to be constructed. In most cases, this arg can be
                 safely ignored.
     """
-    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    is_subclass = isinstance(t, torch.Tensor) and type(t) is not torch.Tensor
     return (
         is_subclass
         and hasattr(t, "__tensor_flatten__")
@@ -406,7 +406,7 @@ def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten
     """Same as above, but takes a type argument instead of an instance."""
     return (
         issubclass(t, torch.Tensor)
-        and t != torch.Tensor
+        and t is not torch.Tensor
         and hasattr(t, "__tensor_flatten__")
         and hasattr(t, "__tensor_unflatten__")
     )
