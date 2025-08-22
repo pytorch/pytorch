@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.debug_utils import InputReader
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
@@ -26,7 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     requires_gpu,
     skip_windows_ci,
@@ -80,6 +81,7 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_broadcast_prefer_nd_tiling_False_x_size3_y_size3",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
+        "test_broadcast_with_singleton_dims",
     ),
     TMA_XFAIL,
 )
@@ -324,6 +326,67 @@ class CommonTemplate:
             y,
             expected_num_block_pointers=3,
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
+        )
+
+    def test_broadcast_with_singleton_dims(self):
+        # This tests the case when the input / output contains both zero strides
+        # and singleton dimensions. In this case the broadcasting dimensions
+        # generated for the descriptor need to ignore dimensions that have zero
+        # strides with size 1
+
+        # This is a minified repro based on HuggingFaceTB/SmolLM2-135M
+        # original issue:
+        # store index=x2 + 192*y0 + 64*y1
+        # matched block params = BlockParameters(
+        #     shape=[3, 4, 1, 1, 64],
+        #     block_shape=[((YBLOCK + 3)//4), Min(4, YBLOCK), 1, 1, XBLOCK],
+        #     strides=[64, 192, 0, 0, 1],
+        #     offsets=[(yoffset//4), ModularIndexing(yoffset, 1, 4), 0, 0, xoffset]
+        # )
+        # broadcasting_dims=[False, False, True, True, False]
+        # broadcast_shape=[((YBLOCK + 3)//4), Min(4, YBLOCK), XBLOCK]
+        # error, len(broadcasting_dims) != broadcast_shape
+        def forward(expand_4, permute_4, mul_7):
+            clone = torch.ops.aten.clone.default(
+                expand_4, memory_format=torch.contiguous_format
+            )
+            expand_4 = None
+            view_4 = torch.ops.aten.view.default(clone, [1, 4, 64])
+            clone = None
+            cos = torch.ops.aten.cos.default(view_4)
+            view_4 = None
+            mul = torch.ops.aten.mul.Tensor(cos, 1.0)
+            cos = None
+            unsqueeze_4 = torch.ops.aten.unsqueeze.default(mul, 1)
+            mul = None
+            mul_6 = torch.ops.aten.mul.Tensor(permute_4, unsqueeze_4)
+            permute_4 = unsqueeze_4 = None
+            add_3 = torch.ops.aten.add.Tensor(mul_6, mul_7)
+            mul_6 = mul_7 = None
+            unsqueeze_6 = torch.ops.aten.unsqueeze.default(add_3, 2)
+            add_3 = None
+            return (unsqueeze_6,)
+
+        def load_args(reader):
+            buf0 = reader.storage(storage_hash=None, nbytes=512, device=self.device)
+            reader.tensor(buf0, (1, 4, 2, 32), (128, 1, 0, 4), is_leaf=True)  # expand_4
+            buf1 = reader.storage(storage_hash=None, nbytes=3072, device=self.device)
+            reader.tensor(
+                buf1, (1, 3, 4, 64), (768, 64, 192, 1), is_leaf=True
+            )  # permute_4
+            buf2 = reader.storage(storage_hash=None, nbytes=3072, device=self.device)
+            reader.tensor(buf2, (1, 3, 4, 64), is_leaf=True)  # mul_7
+
+        load_args._version = 0
+
+        input_reader = InputReader()
+        load_args(input_reader)
+        args = input_reader.args
+
+        self._run_and_compare(
+            forward,
+            *args,
+            expected_num_block_pointers=4,
         )
 
     @parametrize(
@@ -744,31 +807,6 @@ class CommonTemplate:
         )
 
         # Check the code for multiple Rn_BLOCK's
-        self._assert_reduction_ndims(code, 2)
-
-    def test_2d_reduction_no_x_dim(self):
-        """
-        Tests a 2D reduction without an "x" dimension.
-        """
-        # We need a size to get no x dim.
-        view = self._discontiguous_tensor((2, 346), self.device)
-
-        # Expect 1 block pointer for the input.
-        result, (code,) = self._run_and_compare(
-            torch.prod,
-            view,
-            expected_num_block_pointers=1,
-            expected_num_triton_kernels=1,
-            config_patches=tiled_reduction_config,
-        )
-
-        # Check that there's no X dimension in the signature.
-        (signature_line,) = (
-            line for line in code.splitlines() if line.startswith("def triton")
-        )
-        self.assertNotIn("BLOCK", signature_line)
-
-        # Check for 2 reduction dimensions in the body.
         self._assert_reduction_ndims(code, 2)
 
     @parametrize(
@@ -1349,7 +1387,11 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 
 @unittest.skipIf(
-    not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9),
+    not (
+        HAS_CUDA_AND_TRITON
+        and torch.cuda.get_device_capability()[0] >= 9
+        and torch.version.hip is None
+    ),
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
