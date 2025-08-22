@@ -15,6 +15,8 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import skipXPUIf
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -34,6 +36,7 @@ class RedistributeTest(DTensorTestBase):
     def world_size(self):
         return 4
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_shard_to_replicate_forward_backward(self, dtype):
@@ -273,6 +276,7 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(grad_input.to_local(), torch.ones(12, 3))
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_shard_to_replicate_forward_backward_datatype_conversion(self):
         device_mesh = self.build_device_mesh()
@@ -461,6 +465,7 @@ class RedistributeTest(DTensorTestBase):
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
@@ -485,6 +490,7 @@ class RedistributeTest(DTensorTestBase):
                 dt_full_tensor = dt.full_tensor()
                 self.assertEqual(dt_full_tensor, input_tensor)
 
+    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/156782")
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
@@ -604,9 +610,12 @@ instantiate_parametrized_tests(RedistributeTest)
 class MultiDimRedistributeTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 8
+        device_count = torch.accelerator.device_count() if torch.accelerator.is_available() else 8
+        return min(8, device_count)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
+    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_multi_dim_mesh(self):
         devices = torch.arange(self.world_size)
         for mesh_shape in [devices, devices.view(4, 2), devices.view(2, 2, 2)]:
@@ -656,6 +665,8 @@ class MultiDimRedistributeTest(DTensorTestBase):
                         self.assertEqual(local_full, expected)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
+    @skipXPUIf(True, "Skip it due to XPU CI machine limitation")
     def test_redistribute_shard_dim_multi_dim_mesh(self):
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((8, 8, 8), device=self.device_type)
