@@ -1280,7 +1280,8 @@ struct CachingDeviceAllocatorImpl {
     oom_observers_.emplace_back(std::move(observer));
   }
 
-  void attachAllocatorTraceTracker(GenericAllocatorTraceTracker tracker) {
+  void attachAllocatorTraceTracker(
+      std::function<void(const TraceEntryT&)> tracker) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     trace_trackers_.emplace_back(std::move(tracker));
   }
