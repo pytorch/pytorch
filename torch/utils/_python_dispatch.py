@@ -697,7 +697,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     if not all(x is not None for x in schema_info_outs_write_aliases):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
-    if len(func._schema.returns) == 1:
+    if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
             schema_info_outs_write_aliases[0], schema_info, args, kwargs
         )
