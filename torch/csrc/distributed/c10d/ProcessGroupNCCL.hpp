@@ -545,7 +545,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
-    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
