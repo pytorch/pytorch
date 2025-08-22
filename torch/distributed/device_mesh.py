@@ -189,7 +189,6 @@ else:
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = chain(
                 list(not_none(root_mesh.mesh_dim_names)),
-                self.flatten_name_to_root_dims[root_mesh].keys(),
             )
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
@@ -199,8 +198,6 @@ else:
                 )
 
             # Quick return if the flatten mesh has been created before.
-            # TODO: If we decide to restrict flatten initialization once, we should remove
-            # this check and throw an error if the flatten mesh is already created before.
             if (
                 root_mesh in self.root_to_flatten_mapping
                 and mesh_dim_name in self.root_to_flatten_mapping[root_mesh]

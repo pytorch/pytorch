@@ -838,11 +838,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             RuntimeError,
             "already exists for submesh of the DeviceMesh",
         ):
-            dp_cp_mesh._flatten()
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "already exists for submesh of the DeviceMesh",
-        ):
             dp_cp_mesh._flatten("dp")
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
@@ -854,11 +849,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
         # Calling flatten again should not create a new pg.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "already exists for submesh of the DeviceMesh",
-        ):
-            dp_cp_mesh._flatten()
+        ref_pg_count = _world.group_count
+        # Calling flatten again should not create a new pg.
+        flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
+        self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
+        self.assertEqual(id(flattened_dp_cp_mesh), id(flattened_dp_cp_mesh_2))
+        self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
         dp_tp_mesh = mesh_3d["dp", "tp"]
