@@ -98,28 +98,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       signal_pads_.push_back(nvshmem_ptr(
           signal_pad_ptr, rank_to_global_rank_[r]));
     }
-
-    const size_t arr_size = sizeof(void*) * world_size_;
-    buffers_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-    signal_pads_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-
-    AT_CUDA_CHECK(cudaMemcpy(
-        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
-    AT_CUDA_CHECK(cudaMemcpy(
-        signal_pads_dev_,
-        signal_pads_.data(),
-        arr_size,
-        cudaMemcpyHostToDevice));
-
-    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
-    AT_CUDA_CHECK(cudaMemcpy(
-        rank_to_global_rank_dev_,
-        rank_to_global_rank_.data(),
-        sizeof(int) * world_size_,
-        cudaMemcpyHostToDevice));
   }
 
   ~NVSHMEMSymmetricMemory() override{
@@ -135,10 +113,27 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   void** get_buffer_ptrs_dev() override {
+    if (buffers_dev_) return buffers_dev_;
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    buffers_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    AT_CUDA_CHECK(cudaMemcpy(
+        buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
     return buffers_dev_;
   }
 
   void** get_signal_pad_ptrs_dev() override {
+    if (signal_pads_dev_) return signal_pads_dev_;
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    signal_pads_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    AT_CUDA_CHECK(cudaMemcpy(
+        signal_pads_dev_,
+        signal_pads_.data(),
+        arr_size,
+        cudaMemcpyHostToDevice));
     return signal_pads_dev_;
   }
 
@@ -260,6 +255,15 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   };
 
   int* get_rank_to_global_rank_dev() override {
+    if (rank_to_global_rank_dev_) return rank_to_global_rank_dev_;
+
+    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
+    AT_CUDA_CHECK(cudaMemcpy(
+        rank_to_global_rank_dev_,
+        rank_to_global_rank_.data(),
+        sizeof(int) * world_size_,
+        cudaMemcpyHostToDevice));
     return rank_to_global_rank_dev_;
   };
 
@@ -277,12 +281,12 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int device_idx_;
   int rank_;
   int world_size_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  void** buffers_dev_{nullptr};
+  void** signal_pads_dev_{nullptr};
   std::string group_name_;
 
   std::vector<int> rank_to_global_rank_;
-  int* rank_to_global_rank_dev_;
+  int* rank_to_global_rank_dev_{nullptr};
 };
 
 // Bootstrap based on user's setting for NCCL
