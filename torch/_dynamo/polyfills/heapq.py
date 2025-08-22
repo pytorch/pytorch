@@ -1,5 +1,5 @@
 """
-Python polyfills for builtins
+Python polyfills for heapq
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ from ..decorators import substitute_in_graph
 
 
 _T = TypeVar("_T")
-_R = TypeVar("_R")
-KeyFn = Callable[[_T], _R]
 
 
 # Partially copied from CPython test/support/import_helper.py
