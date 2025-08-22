@@ -23,8 +23,12 @@ from typing import Optional
 
 import torch
 from torch import _C
-from torch.onnx import _type_utils, errors, symbolic_helper
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx import errors, symbolic_helper
+from torch.onnx._internal.torchscript_exporter import (
+    _type_utils,
+    jit_utils,
+    registration,
+)
 
 
 # EDITING THIS FILE? READ THIS FIRST!

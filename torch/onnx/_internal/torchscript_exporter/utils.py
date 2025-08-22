@@ -20,11 +20,12 @@ import torch
 import torch._C._onnx as _C_onnx
 import torch.jit._trace
 from torch import _C
-from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
+from torch.onnx import _constants, errors
 from torch.onnx._internal.torchscript_exporter import (
     jit_utils,
     onnx_proto_utils,
     registration,
+    symbolic_helper,
 )
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 

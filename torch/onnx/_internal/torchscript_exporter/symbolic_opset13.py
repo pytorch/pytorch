@@ -9,14 +9,17 @@ import torch
 import torch._C._onnx as _C_onnx
 from torch.onnx import (
     _constants,
-    _type_utils,
     errors,
     symbolic_helper,
     symbolic_opset11 as opset11,
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx._internal.torchscript_exporter import (
+    _type_utils,
+    jit_utils,
+    registration,
+)
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)

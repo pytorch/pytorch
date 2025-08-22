@@ -13,14 +13,17 @@ import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch.onnx import (
-    _type_utils,
     errors,
     symbolic_helper,
     symbolic_opset10 as opset10,
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx._internal.torchscript_exporter import (
+    _type_utils,
+    jit_utils,
+    registration,
+)
 
 
 if TYPE_CHECKING:

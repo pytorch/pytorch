@@ -33,8 +33,12 @@ from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
-from torch.onnx import _type_utils, errors, symbolic_helper, utils
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx import errors, symbolic_helper, utils
+from torch.onnx._internal.torchscript_exporter import (
+    _type_utils,
+    jit_utils,
+    registration,
+)
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)

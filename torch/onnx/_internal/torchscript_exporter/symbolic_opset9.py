@@ -24,8 +24,13 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _type_utils, errors, symbolic_helper
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx import _constants, errors
+from torch.onnx._internal.torchscript_exporter import (
+    _type_utils,
+    jit_utils,
+    registration,
+    symbolic_helper,
+)
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 

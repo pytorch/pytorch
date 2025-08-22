@@ -7,14 +7,12 @@ import sys
 
 import torch
 from torch._C import _onnx as _C_onnx
-from torch.onnx import (
+from torch.onnx import errors, symbolic_helper, symbolic_opset9 as opset9, utils
+from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
-    errors,
-    symbolic_helper,
-    symbolic_opset9 as opset9,
-    utils,
+    jit_utils,
+    registration,
 )
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!

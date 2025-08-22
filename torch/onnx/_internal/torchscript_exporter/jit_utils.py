@@ -1,9 +1,6 @@
 # mypy: allow-untyped-defs
 """Utilities for manipulating the torch.Graph object and the torchscript."""
 
-# TODO(justinchuby): Move more of the symbolic helper functions here and expose
-# them to the user.
-
 from __future__ import annotations
 
 import dataclasses
