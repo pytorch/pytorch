@@ -3667,7 +3667,7 @@ def select_one_layer_lstm_function(input, hx, params):
 
     # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
     # will expand over the seq_len dim
-    if False:
+    if use_mkldnn(input, hx, params):
         return mkldnn_one_layer_lstm
     else:
         return one_layer_while_loop_lstm
