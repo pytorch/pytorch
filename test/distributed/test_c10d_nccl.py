@@ -3191,7 +3191,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
 
             # Use NCCL memory allocator
             # enable symmetric memory usage in NCCL
-            pool = torch.cuda.MemPool(backend.mem_allocator, symmetric=True)
+            pool = torch.cuda.MemPool(backend.mem_allocator)
 
             # allocate memory with ncclMemAlloc
             # note: symmetric kernels are not available for dtypes like torch.int64
@@ -3201,7 +3201,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
                 )
 
             # register buffers to NCCL
-            backend.register_mem_pool(pool)
+            backend.register_mem_pool(pool, symm=True)
 
             # allreduce now should use NVIDIA Switches
             pg.allreduce(tensor).wait()
