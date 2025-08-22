@@ -6738,6 +6738,20 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(input, target, **kwargs)
 
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=0, high=1, requires_grad=requires_grad)
+
+    for sample in sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
+        input, target = sample.input, *sample.args
+        if len(input.shape) == 2:  # TODO: fix higher dimensions
+            _rows, columns = input.shape
+            linear_weight = make_arg((columns, columns))
+            kw = dict(sample.kwargs, chunking_strategy=None)
+            if (weight := kw.pop("weight", None)) is not None:
+                kw["cross_entropy_weight"] = weight
+
+            yield SampleInput(input, target, linear_weight, **kw)
+            yield SampleInput(input, target, linear_weight, bias=make_arg(input.shape), **kw)
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -14766,10 +14780,30 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
+            DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
 
         )
+    ),
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            #
+            # skips taken from nn.functional.cross_entropy:
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+            DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet")),
+        ),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),

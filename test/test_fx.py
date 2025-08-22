@@ -4723,6 +4723,7 @@ class TestFunctionalTracing(JitTestCase):
         "kl_div": CONTROL_FLOW,
         "l1_loss": CONTROL_FLOW,
         "leaky_relu": CONTROL_FLOW,
+        "linear_cross_entropy": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
         "mse_loss": CONTROL_FLOW,

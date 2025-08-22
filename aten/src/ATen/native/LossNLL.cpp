@@ -17,6 +17,8 @@
 #else
 #include <ATen/ops/cross_entropy_loss_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/linear_cross_entropy_loss_native.h>
 #include <ATen/ops/log_softmax.h>
 #include <ATen/ops/nll_loss.h>
 #include <ATen/ops/nll_loss2d.h>
@@ -656,6 +658,20 @@ Tensor cross_entropy_loss_symint(
         std::move(ignore_index));
   }
   return ret;
+}
+
+Tensor linear_cross_entropy_loss_symint(
+    Tensor const& input,
+    Tensor const& target,
+    Tensor const& linear_weight,
+    std::optional<Tensor> const& bias,
+    std::optional<Tensor> const& cross_entropy_weight,
+    std::string_view chunking_strategy,
+    int64_t reduction,
+    c10::SymInt ignore_index,
+    double label_smoothing) {
+  auto linear = ::at::native::linear(input, linear_weight, bias);
+  return ::at::native::cross_entropy_loss_symint(linear, target, cross_entropy_weight, reduction, ignore_index, label_smoothing);
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
