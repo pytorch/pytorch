@@ -38,11 +38,11 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
-    SM80OrLater,
-    tf32_on_and_off,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM80OrLater,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
