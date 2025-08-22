@@ -12,7 +12,7 @@ numba==0.59.0
 numpy==1.26.4
 opt-einsum>=3.3
 optree==0.13.0
-packaging==23.1
+packaging==25.0
 parameterized==0.8.1
 pillow==10.3.0
 protobuf==5.29.4
@@ -26,7 +26,7 @@ pytest-xdist==3.3.1
 pytest==7.3.2
 pyyaml==6.0.2
 scipy==1.12.0
-setuptools==72.1.0
+setuptools==79.0.1
 sympy==1.13.3
 tlparse==0.3.30
 tensorboard==2.13.0
