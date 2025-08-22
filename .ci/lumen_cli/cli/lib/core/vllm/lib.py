@@ -57,6 +57,7 @@ def sample_vllm_test_library():
                     ]
                 ),
                 "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
+                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "pytest -v -s entrypoints/llm/test_generate.py ",
                 "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
                 "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
@@ -75,8 +76,12 @@ def sample_vllm_test_library():
             "id": "vllm_lora_tp_test_distributed",
             "num_gpus": 4,
             "steps": [
+                "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
+                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_chatglm3_tp.py",
+                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_llama_tp.py",
+                "echo $VLLM_WORKER_MULTIPROC_METHOD",
                 "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_multi_loras_with_tp.py",
             ],
         },
