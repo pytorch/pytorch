@@ -61,13 +61,8 @@ class VllmTestRunner(BaseRunner):
         self.test_plan = ""
         self.test_type = TestInpuType.UNKNOWN
 
-        self.shard_id = 0
-        self.num_shards = 0
-
-        # only set value if num_shards > 1 because we don't need to shard if num_shards == 1
-        if args.shard_id and args.num_shards and args.num_shards > 1:
-            self.shard_id = args.shard_id
-            self.num_shards = args.num_shards
+        self.shard_id = args.shard_id
+        self.num_shards = args.num_shards
 
         if args.test_plan:
             self.test_plan = args.test_plan
@@ -111,7 +106,7 @@ class VllmTestRunner(BaseRunner):
         self.prepare()
         with working_directory(self.work_directory):
             if self.test_type == TestInpuType.TEST_PLAN:
-                if self.num_shards:
+                if self.num_shards > 1:
                     run_test_plan(
                         self.test_plan,
                         "vllm",

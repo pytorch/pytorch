@@ -24,12 +24,14 @@ def common_args(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument(
         "--shard-id",
-        type=str,
+        type=int,
+        default=1,
         help="a shard id to run, e.g. '0,1,2,3'",
     )
     parser.add_argument(
         "--num-shards",
-        type=str,
+        type=int,
+        default=1,
         help="a number of shards to run, e.g. '4'",
     )
     group = parser.add_mutually_exclusive_group(required=True)
