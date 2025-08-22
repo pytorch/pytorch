@@ -765,7 +765,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         assert group.ndim == 1, (
             "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         )
-        return _mesh_resources.layouts_to_groups[group._layouts[0]]
+        root_mesh = _mesh_resources.get_root_mesh(group)
+        layouts_to_groups_map = _mesh_resources.layouts_to_groups.get(root_mesh, {})
+        return layouts_to_groups_map[group._layouts[0]]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
@@ -774,7 +776,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
         ):
             dmesh = group[0]
             dim = group[1]
-            return _mesh_resources.layouts_to_groups[dmesh._layouts[dim]]
+            root_mesh = _mesh_resources.get_root_mesh(dmesh)
+            layouts_to_groups_map = _mesh_resources.layouts_to_groups.get(root_mesh, {})
+            return layouts_to_groups_map[dmesh._layouts[dim]]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):

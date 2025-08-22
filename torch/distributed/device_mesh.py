@@ -73,8 +73,8 @@ else:
             self.mesh_dim_group_options: dict[
                 int, tuple[Optional[str], Optional[C10dBackend.Options]]
             ] = {}
-            self.layouts_to_groups: dict[_Layout, str] = {}
-            self.names_to_layouts: dict[str, _Layout] = {}
+            self.layouts_to_groups: dict[DeviceMesh, dict[_Layout, str]] = {}
+            self.names_to_layouts: dict[DeviceMesh, dict[str, _Layout]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -329,14 +329,21 @@ else:
             """
             # Every mesh_dim_name will only map to one and only one layout.
             # When the layout has backend initiated, we want to ensure that
-            if layout in _mesh_resources.layouts_to_groups:
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            layouts_to_groups_map = _mesh_resources.layouts_to_groups.setdefault(
+                root_mesh, {}
+            )
+            names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                root_mesh, {}
+            )
+            if layout in layouts_to_groups_map:
                 if name is not None:
-                    assert name in _mesh_resources.names_to_layouts, (
-                        f"dim_name {name} has not been mapped to any layout"
-                    )
-                    assert _mesh_resources.names_to_layouts[name] == layout, (
-                        f"dim_name {name} has been mapped to another layout"
-                    )
+                    if name in names_to_layouts_map:
+                        assert names_to_layouts_map[name] == layout, (
+                            f"dim_name {name} has been mapped to another layout"
+                        )
+                    else:
+                        names_to_layouts_map[name] = layout
                 if backend_override != (None, None):
                     warnings.warn(
                         f"Group for {layout} ({name=}) already exists, ignoring backend override"
@@ -350,15 +357,15 @@ else:
             # Let mesh_dim_name maps to the current layout whose backend has not been initialized.
             # If mesh_dim_name has already mapped to another layout, we throw an error.
             if name is not None:
-                assert name not in _mesh_resources.names_to_layouts, (
+                assert name not in names_to_layouts_map, (
                     f"Mesh dim name {name} has been mapped to other backend initiated layout already"
                 )
-                _mesh_resources.names_to_layouts[name] = layout
+                names_to_layouts_map[name] = layout
 
             # When user explicitly pass in a process group, we directly reuse that PG as backend rather
             # than creating a new one.
             if group is not None:
-                _mesh_resources.layouts_to_groups[layout] = group.group_name
+                layouts_to_groups_map[layout] = group.group_name
                 return
 
             default_group = _get_default_group()
@@ -435,7 +442,7 @@ else:
                             group = maybe_group
 
             assert group is not None
-            _mesh_resources.layouts_to_groups[layout] = group.group_name
+            layouts_to_groups_map[layout] = group.group_name
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
@@ -686,14 +693,16 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
-                if not set(mesh_dim_names) <= _mesh_resources.names_to_layouts.keys():
+                root_mesh = _mesh_resources.get_root_mesh(self)
+                names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                    root_mesh, {}
+                )
+                if not set(mesh_dim_names) <= names_to_layouts_map.keys():
                     raise KeyError(
                         f"Invalid mesh_dim_names {mesh_dim_names} specified."
                     )
 
-                layouts_sliced = [
-                    _mesh_resources.names_to_layouts[n] for n in mesh_dim_names
-                ]
+                layouts_sliced = [names_to_layouts_map[n] for n in mesh_dim_names]
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
@@ -741,9 +750,15 @@ else:
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            # do we still need _dim_group_names??? or init_backend??
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            layouts_to_groups_map = _mesh_resources.layouts_to_groups.setdefault(
+                root_mesh, {}
+            )
+            names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                root_mesh, {}
+            )
             if not self._init_backend or not all(
-                layout in _mesh_resources.layouts_to_groups for layout in self._layouts
+                layout in layouts_to_groups_map for layout in self._layouts
             ):
                 raise RuntimeError("DeviceMesh backend not initialized!")
 
@@ -758,9 +773,7 @@ else:
             # Quick return if the current device_mesh is a 1D mesh.
             if self.ndim == 1 and mesh_dim is None:
                 return not_none(
-                    _resolve_process_group(
-                        _mesh_resources.layouts_to_groups[self._layouts[0]]
-                    )
+                    _resolve_process_group(layouts_to_groups_map[self._layouts[0]])
                 )
 
             if isinstance(mesh_dim, str):
@@ -768,7 +781,7 @@ else:
                     raise ValueError(
                         "Cannot get group by name on a DeviceMesh without names"
                     )
-                if mesh_dim not in _mesh_resources.names_to_layouts:
+                if mesh_dim not in names_to_layouts_map:
                     raise ValueError(
                         f"Invalid named dim {mesh_dim!r} for DeviceMesh with names {self.mesh_dim_names}"
                     )
@@ -779,13 +792,11 @@ else:
                     )
 
             if isinstance(mesh_dim, str):
-                layout = _mesh_resources.names_to_layouts[mesh_dim]
+                layout = names_to_layouts_map[mesh_dim]
             else:
                 layout = self._layouts[not_none(mesh_dim)]
 
-            return not_none(
-                _resolve_process_group(_mesh_resources.layouts_to_groups[layout])
-            )
+            return not_none(_resolve_process_group(layouts_to_groups_map[layout]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -1024,6 +1035,9 @@ else:
                 (flattened_layout,),
                 self.get_rank(),
                 dim_names=(mesh_dim_name,) if mesh_dim_name else None,
+            )
+            _mesh_resources.child_to_root_mapping[res_mesh] = (
+                _mesh_resources.get_root_mesh(self)
             )
             res_mesh._maybe_create_backend(
                 flattened_layout,
