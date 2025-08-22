@@ -687,30 +687,26 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
+    # Compute write aliases once instead of repeatedly.
+    schema_info_outs_write_aliases = [get_write_alias(r) for r in schema_info.outs]
     # simple case: none of our outputs have mutable aliases, so we can return the output as-is
-    if not any(get_write_alias(r) is not None for r in schema_info.outs):
+    if not any(x is not None for x in schema_info_outs_write_aliases):
         return out
 
     # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
-    if not all(get_write_alias(r) is not None for r in schema_info.outs):
+    if not all(x is not None for x in schema_info_outs_write_aliases):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
-    if len(func._schema.returns) == 1:
+    if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
-            get_write_alias(schema_info.outs[0]), schema_info, args, kwargs
+            schema_info_outs_write_aliases[0], schema_info, args, kwargs
         )
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
     outs_to_return = type(out)(
         [
-            (
-                get_arg_from_alias(
-                    get_write_alias(schema_info.outs[i]), schema_info, args, kwargs
-                )
-                if get_write_alias(r) is not None
-                else o
-            )
-            for ((i, r), o) in zip(enumerate(schema_info.outs), out)
+            (get_arg_from_alias(write_alias, schema_info, args, kwargs))
+            for write_alias in schema_info_outs_write_aliases
         ]
     )
     return outs_to_return
