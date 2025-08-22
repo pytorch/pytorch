@@ -21,11 +21,11 @@ export INSTALL_TEST=0 # dont install test binaries into site-packages
 export FORCE_RPATH="--force-rpath"
 
 # Keep an array of cmake variables to add to
-if [[ -z "$CMAKE_ARGS" ]]; then
+if [[ -z "${CMAKE_ARGS:-}" ]]; then
     # These are passed to tools/build_pytorch_libs.sh::build()
     CMAKE_ARGS=()
 fi
-if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
+if [[ -z "${EXTRA_CAFFE2_CMAKE_FLAGS:-}" ]]; then
     # These are passed to tools/build_pytorch_libs.sh::build_caffe2()
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
@@ -48,8 +48,8 @@ fi
 # Package directories
 WHEELHOUSE_DIR="wheelhouse$ROCM_VERSION"
 LIBTORCH_HOUSE_DIR="libtorch_house$ROCM_VERSION"
-if [[ -z "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
-    if [[ -z "$BUILD_PYTHONLESS" ]]; then
+if [[ -z "${PYTORCH_FINAL_PACKAGE_DIR:-}" ]]; then
+    if [[ -z "${BUILD_PYTHONLESS:-}" ]]; then
         PYTORCH_FINAL_PACKAGE_DIR="/remote/wheelhouse$ROCM_VERSION"
     else
         PYTORCH_FINAL_PACKAGE_DIR="/remote/libtorch_house$ROCM_VERSION"
@@ -218,15 +218,15 @@ ROCM_SO_PATHS=()
 for lib in "${ROCM_SO_FILES[@]}"
 do
     file_path=($(find $ROCM_HOME/lib/ -name "$lib")) # First search in lib
-    if [[ -z $file_path ]]; then
+    if [[ -z ${file_path:-} ]]; then
         if [ -d "$ROCM_HOME/lib64/" ]; then
             file_path=($(find $ROCM_HOME/lib64/ -name "$lib")) # Then search in lib64
         fi
     fi
-    if [[ -z $file_path ]]; then
+    if [[ -z ${file_path:-} ]]; then
         file_path=($(find $ROCM_HOME/ -name "$lib")) # Then search in ROCM_HOME
     fi
-    if [[ -z $file_path ]]; then
+    if [[ -z ${file_path:-} ]]; then
         echo "Error: Library file $lib is not found." >&2
         exit 1
     fi
@@ -274,7 +274,7 @@ DEPS_AUX_DSTLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_DST/})
 echo "PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
-if [[ -z "$BUILD_PYTHONLESS" ]]; then
+if [[ -z "${BUILD_PYTHONLESS:-}" ]]; then
     BUILD_SCRIPT=build_common.sh
 else
     BUILD_SCRIPT=build_libtorch.sh
