@@ -2565,11 +2565,7 @@ def _reduction_configs(
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
-    default_outer_config = make_config(
-        64,
-        8,
-        register_intensive=register_intensive
-    )
+    default_outer_config = make_config(64, 8, register_intensive=register_intensive)
     outer_heuristic_config = make_outer_config()
     tiny_config = make_config(
         2 * (256 // rnumel) if rnumel <= 256 else 1,
