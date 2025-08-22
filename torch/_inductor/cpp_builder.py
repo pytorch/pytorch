@@ -563,6 +563,8 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "wd4067",
             "wd4068",
             "EHsc",
+            # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+            "Zc:__cplusplus",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
@@ -578,6 +580,17 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
             cflags.append("pedantic")
     return cflags
+
+
+def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
+    os_definitions: list[str] = []
+    if _IS_WINDOWS:
+        # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
+        # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
+        os_definitions.append("NOMINMAX")
+    else:
+        pass
+    return os_definitions
 
 
 def _get_ffast_math_flags() -> list[str]:
@@ -706,6 +719,8 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    definitions += _get_os_related_cpp_definitions(cpp_compiler)
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
         ldflags.append("fuse-ld=lld")
@@ -1374,14 +1389,24 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definitions.append(" USE_XPU")
-        # Suppress multi-line comment warnings in sycl headers
-        cflags += ["Wno-comment"]
-        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
-        if not find_library("ze_loader"):
-            raise OSError(
-                "Intel GPU driver is not properly installed, please follow the instruction "
-                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
-            )
+        xpu_error_string = (
+            "Intel GPU driver is not properly installed, please follow the instruction "
+            "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+        )
+        if _IS_WINDOWS:
+            ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
+            if ze_root is None:
+                raise OSError(xpu_error_string)
+            include_dirs += [os.path.join(ze_root, "include")]
+            libraries_dirs += [os.path.join(ze_root, "lib")]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        else:
+            # Suppress multi-line comment warnings in sycl headers
+            cflags += ["Wno-comment"]
+            libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+
+            if not find_library("ze_loader"):
+                raise OSError(xpu_error_string)
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
