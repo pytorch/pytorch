@@ -1915,7 +1915,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                 "dict_vt must be constructed by builder.py when source is present"
             )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
@@ -1954,6 +1954,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
 
     @property
     def items(self):
