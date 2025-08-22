@@ -57,7 +57,7 @@ struct TORCH_API HostStats {
   // COUNT: number of allocated segments from host memory allocation.
   Stat segment;
 
-  // SUM: bytes allocated by this memory alocator. Note that active bytes
+  // SUM: bytes allocated by this memory allocator. Note that active bytes
   // can be extracted by looking at current bytes allocated
   Stat allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
