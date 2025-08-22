@@ -81,14 +81,14 @@ def _get_lstm_with_individually_observed_parts(
     quantizable_lstm.qconfig = float_lstm.qconfig
 
     for idx in range(float_lstm.num_layers):
-        quantizable_lstm.layers[
-            idx
-        ] = torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
-            float_lstm,
-            idx,
-            float_lstm.qconfig,
-            batch_first=False,
-            split_gates=split_gates,
+        quantizable_lstm.layers[idx] = (
+            torch.ao.nn.quantizable.modules.rnn._LSTMLayer.from_float(
+                float_lstm,
+                idx,
+                float_lstm.qconfig,
+                batch_first=False,
+                split_gates=split_gates,
+            )
         )
 
     # Build QConfigMapping for the LSTM cell

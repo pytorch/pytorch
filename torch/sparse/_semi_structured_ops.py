@@ -179,7 +179,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
-    # only cuSPARSELt supports float8_e4m3fn currentl
+    # only cuSPARSELt supports float8_e4m3fn currently
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
     assert A.packed is not None
     # Currently we only support per-tensor scaling, with float32 scales

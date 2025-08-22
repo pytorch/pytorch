@@ -936,6 +936,25 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         )
         torch.testing.assert_close(output_tensor, expected)
 
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_reduce_scatter_bfloat16(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+
+        numel = 1024
+        output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
+            torch.bfloat16
+        )
+        input_tensor = torch.ones(
+            self.world_size * numel, dtype=torch.float32, device=device
+        ).to(torch.bfloat16)
+        # currently only reduce_scatter_tensor supports bfloat16
+        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+
+        expected = (
+            torch.empty_like(output_tensor).fill_(self.world_size).to(torch.bfloat16)
+        )
+        torch.testing.assert_close(output_tensor, expected)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_barrier(self):

@@ -61,8 +61,8 @@ You are now all set to start developing with PyTorch in a DevContainer environme
 ## Step 8: Build PyTorch
 
 To build pytorch from source, simply run:
-   ```
-   python setup.py develop
+   ```bash
+   python -m pip install --no-build-isolation -v -e .
    ```
 
 The process involves compiling thousands of files, and would take a long time. Fortunately, the compiled objects can be useful for your next build. When you modify some files, you only need to compile the changed files the next time.

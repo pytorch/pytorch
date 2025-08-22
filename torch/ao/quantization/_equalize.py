@@ -92,9 +92,9 @@ def channel_range(input, axis=0):
     mins = min_over_ndim(input, axis_list)
     maxs = max_over_ndim(input, axis_list)
 
-    assert mins.size(0) == input.size(
-        axis
-    ), "Dimensions of resultant channel range does not match size of requested axis"
+    assert mins.size(0) == input.size(axis), (
+        "Dimensions of resultant channel range does not match size of requested axis"
+    )
     return maxs - mins
 
 

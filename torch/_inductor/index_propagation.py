@@ -35,7 +35,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
-from .sizevars import evaluate_expr
+from .sizevars import statically_known_true
 from .utils import generate_assert
 from .virtualized import V
 
@@ -311,7 +311,7 @@ class IndexPropagation(DefaultHandler):
               If this is an issue, just use guards in `self.axioms`.
 
               The proper way of handling this would be to have a global shape_env that adds
-              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              runtime_asserts as they happen in the code. Then, it should be used in SimplifyIndexing
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
@@ -322,7 +322,7 @@ class IndexPropagation(DefaultHandler):
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
-        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
+        return statically_known_true(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
         self,

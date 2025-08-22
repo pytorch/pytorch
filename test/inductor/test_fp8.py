@@ -22,7 +22,7 @@ from torch.testing._internal.inductor_utils import (
     _quantize_tensorwise,
     _to_fp8_saturated,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
 )
 from torch.utils._triton import has_triton_tma_device
 
@@ -40,7 +40,7 @@ def _fix_fp8_dtype_for_rocm(
     # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz
     #    e5m2   -> e5m2fnuz
-    # Supports single, typle and list of dtypes
+    # Supports single, tuple and list of dtypes
     # Keeps the same test name for CUDA and ROCm
     # Also it allows to enable FP8 inductor tests for CPU
     if (
@@ -766,5 +766,5 @@ class TestFP8Lowering(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA or HAS_CPU:
+    if HAS_CUDA_AND_TRITON or HAS_CPU:
         run_tests()

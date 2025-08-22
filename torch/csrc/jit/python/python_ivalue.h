@@ -99,7 +99,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     py_obj_.ptr() = nullptr;
   }
 
-  // explicit construction to avoid errornous implicit conversion and
+  // explicit construction to avoid erroneous implicit conversion and
   // copy-initialization
   explicit ConcretePyObjectHolder(py::object py_obj)
       : py_obj_(std::move(py_obj)) {}

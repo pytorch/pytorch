@@ -89,7 +89,7 @@ if(NOT CORTEXA9_FOUND)
 endif(NOT CORTEXA9_FOUND)
 mark_as_advanced(NEON_FOUND)
 
-#SVE support is availale is only for Linux OS.
+#SVE support is available is only for Linux OS.
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     # Include necessary modules for checking C and C++ source compilations
     INCLUDE(CheckCSourceCompiles)
