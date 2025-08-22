@@ -291,7 +291,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
-void maybe_initialize_env_vars() {
+static void maybe_initialize_env_vars() {
   auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
   auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
   auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
@@ -313,16 +313,20 @@ void maybe_initialize_env_vars() {
   }
 }
 
-void initialize_nvshmem_with_store(
+static void initialize_nvshmem_with_store(
     c10::intrusive_ptr<c10d::Store> store,
     int rank,
-    int world_size) {
+    int world_size,
+    int device_idx) {
   static bool is_initialized = false;
   if (is_initialized) {
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device_idx);
   maybe_initialize_env_vars();
+  // Make sure the CUDA runtime is initialized.
+  cudaFree(nullptr);
 
   nvshmemx_uniqueid_t unique_id;
   NVSHMEM_CHECK(
@@ -364,7 +368,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
-    initialize_nvshmem_with_store(store, rank, world_size);
+    initialize_nvshmem_with_store(store, rank, world_size, device_idx);
     auto ptr = nvshmem_malloc(size);
     auto allocation =
         std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
