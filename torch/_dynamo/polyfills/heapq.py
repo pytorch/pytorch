@@ -7,7 +7,7 @@ from __future__ import annotations
 import heapq
 import importlib
 import sys
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from ..decorators import substitute_in_graph
 
