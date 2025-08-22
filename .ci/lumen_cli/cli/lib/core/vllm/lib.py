@@ -179,9 +179,8 @@ def run_test_plan(
         failures = []
         for step in tests["steps"]:
             if is_parallel:
-                step = step.replace("$$BUILDKITE_PARALLEL_JOB", str(shard_id)).replace(
-                    "$$BUILDKITE_PARALLEL_JOB_COUNT", str(num_shards)
-                )
+                step = replace_buildkite_placeholders(step, shard_id, num_shards)
+                logger.info("Running prallel step: %s", step)
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)
@@ -198,3 +197,13 @@ def clone_vllm(dst: str = "vllm"):
         dst=dst,
         update_submodules=True,
     )
+
+
+def replace_buildkite_placeholders(step: str, shard_id: int, num_shards: int) -> str:
+    mapping = {
+        "$$BUILDKITE_PARALLEL_JOB_COUNT": str(num_shards),
+        "$$BUILDKITE_PARALLEL_JOB": str(shard_id),
+    }
+    for k in sorted(mapping, key=len, reverse=True):
+        step = step.replace(k, mapping[k])
+    return step
