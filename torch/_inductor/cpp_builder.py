@@ -2,6 +2,7 @@
 # The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
 
 import copy
+import ctypes
 import errno
 import functools
 import json
@@ -18,7 +19,7 @@ import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
-from ctypes import cdll
+from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -141,11 +142,104 @@ def check_compiler_exist_windows(compiler: str) -> None:
         pass
 
 
+class WinPeFileVersionInfo:
+    def __init__(self, file_path: str) -> None:
+        self.file_path = file_path
+        self.version_dll = ctypes.WinDLL("version.dll")  # type: ignore[attr-defined]
+        self._setup_functions()
+        self._get_version_info()
+
+    def _setup_functions(self) -> None:
+        self.version_dll.GetFileVersionInfoSizeW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPDWORD,
+        ]
+        self.version_dll.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+
+        self.version_dll.GetFileVersionInfoW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+        ]
+        self.version_dll.GetFileVersionInfoW.restype = wintypes.BOOL
+
+        self.version_dll.VerQueryValueW.argtypes = [
+            wintypes.LPCVOID,
+            wintypes.LPCWSTR,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        self.version_dll.VerQueryValueW.restype = wintypes.BOOL
+
+    def _get_version_info(self) -> None:
+        dummy = wintypes.DWORD()
+        size = self.version_dll.GetFileVersionInfoSizeW(
+            self.file_path, ctypes.byref(dummy)
+        )
+
+        if size == 0:
+            raise RuntimeError("Can't get version info size.")
+
+        self.version_info = ctypes.create_string_buffer(size)
+        success = self.version_dll.GetFileVersionInfoW(
+            self.file_path, 0, size, self.version_info
+        )
+
+        if not success:
+            raise RuntimeError("Can't get version info.")
+
+    def get_language_id(self) -> int:
+        lp_buffer = ctypes.c_void_p()
+        u_len = wintypes.UINT()
+
+        success = self.version_dll.VerQueryValueW(
+            self.version_info,
+            r"\VarFileInfo\Translation",
+            ctypes.byref(lp_buffer),
+            ctypes.byref(u_len),
+        )
+
+        if not success or u_len.value == 0:
+            return 0
+
+        translations = []
+        lang_id: int = 0
+        if lp_buffer.value is not None:
+            for i in range(u_len.value // 4):
+                offset = i * 4
+                data = ctypes.string_at(lp_buffer.value + offset, 4)
+                lang_id = int.from_bytes(data[:2], "little")
+                code_page = int.from_bytes(data[2:4], "little")
+                translations.append((lang_id, code_page))
+        else:
+            # Handle the case where lp_buffer.value is None
+            print("Buffer is None")
+
+        return lang_id
+
+
+def check_msvc_cl_language_id(compiler: str) -> None:
+    if not _is_msvc_cl(compiler):
+        return
+
+    # Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
+    version_info = WinPeFileVersionInfo(compiler)
+    lang_id = version_info.get_language_id()
+    if lang_id != 1033:
+        # MSVC English language id is 0x0409, and the DEC value is 1033.
+        raise RuntimeError(
+            "Torch.compile() is not support MSVC with English language pack,"
+            "Please reinstall its language pack to English."
+        )
+
+
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
+        check_msvc_cl_language_id(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc
