@@ -13,7 +13,6 @@ from cli.lib.common.envs_helper import (
     env_str_field,
     with_params_help,
 )
-from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.path_helper import (
     copy,
     ensure_dir_exists,
@@ -22,6 +21,7 @@ from cli.lib.common.path_helper import (
     is_path_exist,
 )
 from cli.lib.common.utils import run_command
+from cli.lib.core.vllm.lib import clone_vllm
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class VllmBuildParameters:
     """
 
     # USE_TORCH_WHEEL: when true, use local Torch wheels; requires TORCH_WHEELS_PATH.
-    #  Otherwise docker build pull torch nightly during build
+    # Otherwise docker build pull torch nightly during build
     # TORCH_WHEELS_PATH: directory containing local torch wheels when use_torch_whl is True
     use_torch_whl: bool = env_bool_field("USE_TORCH_WHEEL", True)
     torch_whls_path: Path = env_path_field("TORCH_WHEELS_PATH", "./dist")
@@ -152,6 +152,7 @@ class VllmBuildRunner(BaseRunner):
         3. run docker build
         """
         inputs = VllmBuildParameters()
+        logger.info("Running vllm build with inputs: %s", inputs)
         clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
@@ -252,12 +253,3 @@ class VllmBuildRunner(BaseRunner):
                 --progress=plain .
         """
         ).strip()
-
-
-def clone_vllm():
-    clone_external_repo(
-        target="vllm",
-        repo="https://github.com/vllm-project/vllm.git",
-        dst="vllm",
-        update_submodules=True,
-    )
