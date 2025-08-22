@@ -59,25 +59,10 @@ def get_non_bucketable_pg(snodes):
                 expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
             )
             ag_input_fx_nodes = [ag_fx_node.args[0]]
-            print("AG snode.node.constant_args[1]", snode.node.get_name(), snode.node.constant_args[0], snode.node.constant_args[1], "ir_node_origins", ir_node_origins, ag_fx_node, "ag_input_fx_nodes", ag_input_fx_nodes)
 
             if not _check_op_in_accept_op_list(ir_node_origins) or not _check_op_in_accept_op_list(ag_input_fx_nodes):
                 non_bucketable_pg.add(snode.node.constant_args[1])
-
-        elif is_collective(snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
-            ir_node = snode.node
-            ir_node_origins = list(getattr(ir_node, "origins", None))
-            if ir_node_origins is None:
-                continue
-            rs_fx_node = get_fx_node(
-                snode,
-                expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
-            )
-            rx_input_fx_nodes = [rs_fx_node.args[0]]
-            print("RS snode.node.constant_args[1]", snode.node.get_name(), snode.node.constant_args[1], snode.node.constant_args[2], "ir_node_origins", ir_node_origins, rs_fx_node, "rx_input_fx_nodes", rx_input_fx_nodes)
-            if _check_op_in_accept_op_list(ir_node_origins) or not _check_op_in_accept_op_list(rx_input_fx_nodes):
-                non_bucketable_pg.add(snode.node.constant_args[2])
-
+                print("AG snode.node.constant_args[1]", snode.node.get_name(), snode.node.constant_args[0], snode.node.constant_args[1], "ir_node_origins", ir_node_origins, ag_fx_node, "ag_input_fx_nodes", ag_input_fx_nodes)
 
     return non_bucketable_pg
 
