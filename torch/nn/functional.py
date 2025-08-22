@@ -2430,7 +2430,6 @@ def _no_grad_embedding_renorm_(
     torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
 
-@_wrap_torch_function_variadic
 def embedding(
     input: Tensor,
     weight: Tensor,
@@ -2509,6 +2508,18 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            embedding,
+            (input, weight),
+            input,
+            weight,
+            padding_idx=padding_idx,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            sparse=sparse,
+        )
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), (
@@ -2629,6 +2640,22 @@ def embedding_bag(
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
     """
+    if has_torch_function_variadic(input, weight, offsets, per_sample_weights):
+        return handle_torch_function(
+            embedding_bag,
+            (input, weight, offsets, per_sample_weights),
+            input,
+            weight,
+            offsets=offsets,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            mode=mode,
+            sparse=sparse,
+            per_sample_weights=per_sample_weights,
+            include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
+        )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
     # Now is     embedding_bag(input, weight, ...)
@@ -2758,7 +2785,6 @@ def _verify_batch_size(size: list[int]) -> None:
         )
 
 
-@_wrap_torch_function_variadic
 def batch_norm(
     input: Tensor,
     running_mean: Optional[Tensor],
@@ -2774,6 +2800,19 @@ def batch_norm(
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
+        return handle_torch_function(
+            batch_norm,
+            (input, running_mean, running_var, weight, bias),
+            input,
+            running_mean,
+            running_var,
+            weight=weight,
+            bias=bias,
+            training=training,
+            momentum=momentum,
+            eps=eps,
+        )
     if training:
         _verify_batch_size(input.size())
 
@@ -2926,7 +2965,6 @@ def local_response_norm(
 # loss
 
 
-@_wrap_torch_function_variadic
 def ctc_loss(
     log_probs: Tensor,
     targets: Tensor,
@@ -2980,6 +3018,18 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        return handle_torch_function(
+            ctc_loss,
+            (log_probs, targets, input_lengths, target_lengths),
+            log_probs,
+            targets,
+            input_lengths,
+            target_lengths,
+            blank=blank,
+            reduction=reduction,
+            zero_infinity=zero_infinity,
+        )
     return torch.ctc_loss(
         log_probs,
         targets,
@@ -3094,7 +3144,6 @@ def poisson_nll_loss(
     return ret
 
 
-@_wrap_torch_function_variadic
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -3121,6 +3170,18 @@ def gaussian_nll_loss(
             ``'sum'``: the output is the sum of all batch member losses.
             Default: ``'mean'``.
     """
+    if has_torch_function_variadic(input, target, var):
+        return handle_torch_function(
+            gaussian_nll_loss,
+            (input, target, var),
+            input,
+            target,
+            var,
+            full=full,
+            eps=eps,
+            reduction=reduction,
+        )
+
     # Entries of var must be non-negative
     if isinstance(var, float):
         if var < 0:
@@ -3554,7 +3615,6 @@ def huber_loss(
             )
 
 
-@_wrap_torch_function_variadic
 def l1_loss(
     input: Tensor,
     target: Tensor,
@@ -3583,6 +3643,16 @@ def l1_loss(
     Returns:
         Tensor: L1 loss (optionally weighted).
     """
+    if has_torch_function_variadic(input, target):
+        return handle_torch_function(
+            l1_loss,
+            (input, target, weight),
+            input,
+            target,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
     if not (target.size() == input.size()):
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
