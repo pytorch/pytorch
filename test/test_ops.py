@@ -333,7 +333,6 @@ class TestCommon(TestCase):
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
     # skip windows case on CPU due to https://github.com/pytorch/pytorch/issues/129947
-    #@skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -388,7 +387,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    #@skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -603,7 +601,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    #@skipXPU
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -639,7 +636,6 @@ class TestCommon(TestCase):
         op.op = partial(make_traced(op.op), executor=executor)
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
@@ -651,7 +647,6 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -675,7 +670,6 @@ class TestCommon(TestCase):
                 out = op(si.input, *si.args, **si.kwargs)
                 self.assertFalse(isinstance(out, type(NotImplemented)))
 
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -795,7 +789,6 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
@@ -934,7 +927,6 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype

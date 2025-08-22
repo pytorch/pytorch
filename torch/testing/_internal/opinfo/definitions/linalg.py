@@ -1283,6 +1283,19 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="cpu"
             ),
+            # https://github.com/intel/torch-xpu-ops/issues/1950
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out_warning",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="xpu",
+            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1446,6 +1459,21 @@ op_db: list[OpInfo] = [
             ),
             skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
+        skips=(
+            # https://github.com/intel/torch-xpu-ops/issues/1950
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out_warning",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="xpu",
+            ),
+        ),
     ),
     OpInfo(
         "linalg.ldl_factor",
@@ -2001,7 +2029,22 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(skipCPUIfNoLapack,),
+        skips=(
+            skipCPUIfNoLapack,
+            # https://github.com/intel/torch-xpu-ops/issues/1950
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out_warning",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="xpu",
+            ),
+        ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),
