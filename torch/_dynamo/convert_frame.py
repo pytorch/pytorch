@@ -892,6 +892,7 @@ def fullgraph_capture(frame: FrameInfo) -> CaptureOutput:
         nonlocal backend_input
         fake_mode = TracingContext.get().fake_mode
         assert fake_mode is not None
+        assert isinstance(gm._backend_id, str)
         backend_input = BackendInput(gm._backend_id, gm, example_inputs, fake_mode)
         return gm
 
