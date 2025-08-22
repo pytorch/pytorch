@@ -1606,6 +1606,11 @@ class _InProcessFxCompile(FxCompile):
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
+                    compile_id = str(torch._guards.CompileContext.current_compile_id())
+                    graph_id = graph_kwargs.get("graph_id")
+                    if graph_id is not None:
+                        torch._inductor.debug.GRAPH_COMPILE_IDS[graph_id] = compile_id
+
                     return CompiledFxGraph(
                         compiled_fn,
                         graph,
@@ -1619,7 +1624,6 @@ class _InProcessFxCompile(FxCompile):
                         static_input_idxs,
                         graph_kwargs,
                         inputs_to_check,
-                        str(torch._guards.CompileContext.current_compile_id()),
                         runnable_graph_str,
                         inductor_post_grad_graph_str,
                         compiled_fn_runner,
@@ -2332,7 +2336,29 @@ def compile_fx(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "before_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
+
                     _recursive_joint_graph_passes(gm)
+
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "after_joint_graph",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)

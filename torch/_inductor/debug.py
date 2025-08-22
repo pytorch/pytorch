@@ -50,6 +50,7 @@ log = logging.getLogger(__name__)
 # Graph execution tracking for debugging
 GRAPH_EXECUTION_ORDER: list[dict[str, object]] = []
 RECORD_GRAPH_EXECUTION: bool = False
+GRAPH_COMPILE_IDS: dict[int, Optional[str]] = {}
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -807,11 +808,7 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
 
 
 def log_graph_execution() -> None:
-    """Emit a single structured artifact with the graph execution order.
-
-    Each entry records both the Dynamo compile_id and the Inductor graph_id
-    that executed.
-    """
+    """Emit a structured artifact with the graph execution order."""
     if not GRAPH_EXECUTION_ORDER:
         return
     try:
@@ -1041,6 +1038,48 @@ def dump_inductor_provenance_info(
             "provenance_tracking_error",
             {
                 "function": "dump_inductor_provenance_info",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
+
+
+def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
+    """Create kernel information JSON"""
+    try:
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_kernel_stack_trace
+        global _inductor_triton_kernel_to_post_grad_node_info
+
+        post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
+        all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
+            _inductor_triton_kernel_to_post_grad_node_info.keys()
+        )
+
+        result = {}
+        for kernel_name in all_kernels:
+            post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
+                kernel_name, []
+            )
+
+            pre_grad_nodes: OrderedSet[str] = OrderedSet()
+            for post_node in post_grad_nodes:
+                pre_grad_nodes.update(post_to_pre.get(post_node, []))
+
+            result[kernel_name] = {
+                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+                "post_grad_nodes": post_grad_nodes,
+                "pre_grad_nodes": list(pre_grad_nodes),
+            }
+
+        return result
+    except Exception as e:
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_kernel_information_json",
                 "error_msg": str(e),
                 "stack_trace": traceback.format_exc(),
             },

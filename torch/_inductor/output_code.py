@@ -427,7 +427,6 @@ class CompiledFxGraph(OutputCode):
     partition_maps: Optional[list[GraphPartitionMap]]
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
-    compile_id: Optional[str]
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
@@ -446,7 +445,6 @@ class CompiledFxGraph(OutputCode):
         static_input_idxs: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
-        compile_id: Optional[str],
         runnable_graph_str: str,
         inductor_post_grad_graph_str: str,
         compiled_fn_runner: Optional[Any] = None,
@@ -568,7 +566,6 @@ class CompiledFxGraph(OutputCode):
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
-        self.compile_id = compile_id
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -586,9 +583,15 @@ class CompiledFxGraph(OutputCode):
         assert self.current_callable is not None
 
         if torch._inductor.debug.RECORD_GRAPH_EXECUTION:
+            graph_id = self.fx_kwargs.get("graph_id")
+            compile_id = (
+                torch._inductor.debug.GRAPH_COMPILE_IDS.get(graph_id)
+                if graph_id is not None
+                else None
+            )
             torch._inductor.debug.GRAPH_EXECUTION_ORDER.append(
                 {
-                    "compile_id": self.compile_id,
+                    "compile_id": compile_id,
                 }
             )
         try:
