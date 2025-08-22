@@ -3,7 +3,7 @@ from typing import Any
 
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
-from cli.lib.common.utils import run_command, working_directory
+from cli.lib.common.utils import run_command, temp_environ, working_directory
 
 
 logger = logging.getLogger(__name__)
@@ -20,8 +20,10 @@ def sample_vllm_test_library():
         "vllm_basic_correctness_test": {
             "title": "Basic Correctness Test",
             "id": "vllm_basic_correctness_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
             "steps": [
-                "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
                 "pytest -v -s basic_correctness/test_cumem.py",
                 "pytest -v -s basic_correctness/test_basic_correctness.py",
                 "pytest -v -s basic_correctness/test_cpu_offload.py",
@@ -42,8 +44,10 @@ def sample_vllm_test_library():
         "vllm_entrypoints_test": {
             "title": "Entrypoints Test ",
             "id": "vllm_entrypoints_test",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
             "steps": [
-                "export VLLM_WORKER_MULTIPROC_METHOD=spawn",
                 " ".join(
                     [
                         "pytest",
@@ -73,11 +77,15 @@ def sample_vllm_test_library():
         "vllm_lora_tp_test_distributed": {
             "title": "LoRA TP Test (Distributed)",
             "id": "vllm_lora_tp_test_distributed",
+            "env_vars": {
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+            },
             "num_gpus": 4,
             "steps": [
-                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_chatglm3_tp.py",
-                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_llama_tp.py",
-                "VLLM_WORKER_MULTIPROC_METHOD=spawn pytest -v -s -x lora/test_multi_loras_with_tp.py",
+                "pytest -v -s -x lora/test_chatglm3_tp.py",
+                "echo $VLLM_WORKER_MULTIPROC_METHOD",
+                "pytest -v -s -x lora/test_llama_tp.py",
+                "pytest -v -s -x lora/test_multi_loras_with_tp.py",
             ],
         },
         "vllm_lora_280_failure_test": {
@@ -175,7 +183,10 @@ def run_test_plan(
     if pkgs:
         logger.info("Installing packages: %s", pkgs)
         pip_install_packages(packages=pkgs, prefer_uv=True)
-    with working_directory(tests.get("working_directory", "tests")):
+    with (
+        working_directory(tests.get("working_directory", "tests")),
+        temp_environ(tests.get("env_vars", {})),
+    ):
         failures = []
         for step in tests["steps"]:
             logger.info("Running step: %s", step)

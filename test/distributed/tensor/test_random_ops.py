@@ -33,11 +33,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-def get_generator_seed_for_device_type(device_type: str) -> int:
-    device_module = torch.get_device_module(device_type)
-    return device_module.get_rng_state()[:8].view(torch.int64).item()
-
-
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
@@ -118,20 +113,22 @@ class DistTensorRandomInitTest(DTensorTestBase):
         #     (`torch.distributed.tensor._random._rng_tracker._manual_seed`)
         # (b) If we try to match the semantics of (a) with a user-supplied RNG, they may be very surprised to find that
         #     their RNG object never advances its state after using it with DTensor.
-        torch.manual_seed(55)
-        rng.manual_seed(55)
-        torch.nn.init.uniform_(t1, 0.0, 1.0)
-        torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
-        self.assertEqual(t1.full_tensor(), t2.full_tensor())
+        # torch.distributed.tensor._random._rng_tracker._manual_seed(55)
+        # rng.manual_seed(55)
+        # torch.nn.init.uniform_(t1, 0.0, 1.0)
+        # torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
+        # self.assertEqual(t1.full_tensor(), t2.full_tensor())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_meta_tensor_init(self):
-        # test suite sets each rank's seed to the same value.
-        # The DTensor random ops will use the same generator as the default one on the device.
-
-        # Note: this behavior changed, and now the guideline is to set the same RNG seed on all SPMD ranks.
-        torch.cuda.manual_seed(0)
+        # test suite sets each rank's seed to the same value but in actual
+        # execution the default random seed will be different (a random value).
+        # The DTensor random ops will use the same random seed even though the
+        # torch random generator keeps different seeds on ranks. This ensures
+        # that Replicate DTensor will have the same initialized results
+        # across ranks.
+        torch.cuda.manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -150,7 +147,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        gathered_local_tensors = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_tensor(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -161,8 +158,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                 # other rank should have an identical local tensor
                 other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
                 self.assertEqual(
-                    gathered_local_tensors[self_slice, :],
-                    gathered_local_tensors[other_slice, :],
+                    local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
 
         # Test 2: disable the distribute region for RNG
@@ -181,11 +177,11 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
         # compare with local tensors from other ranks
         for other_rank in range(self.world_size):
-            # the RNG result on each rank are the same even without the help of DTensor's RNG infra,
-            # since the default RNG is the same across ranks.
+            # the RNG result on each rank differs even they're supposed
+            # to be replicated
             if self.rank != other_rank:
                 other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
-                self.assertEqual(
+                self.assertNotEqual(
                     local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
 
@@ -311,12 +307,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # seed synchronization only happens after `manual_seed` or the first DTensor
         # random op call
         dt.uniform_(0, 1)
-
-        # We do not maintain the copy of the seed in dtensor, but we do mutate the global rng state
-        # since we now always pull it fresh from the local device generator
-        self.assertEqual(
-            seed_from_rank_0, get_generator_seed_for_device_type(self.device_type)
-        )
+        self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
 
     @with_comms
     @skip_unless_torch_gpu
@@ -335,13 +326,11 @@ class DistTensorRandomOpTest(DTensorTestBase):
             manual_seed(self.rank, device_mesh)
             # RNG tracker should already be initialized
             self.assertTrue(random._rng_tracker is not None)
-            self.assertEqual(
-                self.rank, get_generator_seed_for_device_type(self.device_type)
-            )
+            self.assertEqual(self.rank, random._rng_tracker.get_seed("parallel-rng"))
 
             # Test 2: set same seed on different ranks
             manual_seed(1234, device_mesh)
-            self.assertEqual(1234, get_generator_seed_for_device_type(self.device_type))
+            self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
 
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
@@ -374,10 +363,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         # set the seed for each pipeline stage to 123 + pp_rank
         manual_seed(123 + pp_rank, spmd_mesh)
-        # dtensor no longer stores a copy of the seed, but it mutates the device's generator so we can check that
-        self.assertEqual(
-            123 + pp_rank, get_generator_seed_for_device_type(self.device_type)
-        )
+        self.assertEqual(123 + pp_rank, random._rng_tracker.get_seed("parallel-rng"))
 
         # mimic initializing a model weight sharded on the SPMD mesh
         spmd_dtensor = torch.distributed.tensor.ones(
@@ -462,15 +448,14 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self_slice = slice(4 * self.rank, 4 * self.rank + 4)
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    # other rank should have a different local tensor for shard placement
+                    # other rank should have an identical local tensor
                     other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                     self.assertNotEqual(
                         local_tensor[self_slice, :],
                         local_tensor[other_slice, :],
                     )
 
-            # we should set manual seed to the same value on all SPMD ranks
-            torch.manual_seed(0)
+            torch.manual_seed(self.rank)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
             local_tensor = funcol.all_gather_tensor(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
@@ -480,7 +465,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self_slice = slice(4 * self.rank, 4 * self.rank + 4)
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
-                    # other rank should have an identical local tensor for replicate placement
+                    # other rank should have an identical local tensor
                     other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                     self.assertEqual(
                         local_tensor[self_slice, :],
