@@ -3019,7 +3019,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    dim_size = x.get_size()[dim]：
+    dim_size = x.get_size()[dim]
 
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
