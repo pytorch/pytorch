@@ -28,12 +28,20 @@ namespace c10d::nvshmem_extension {
 
 constexpr int MiB = 1024 * 1024;
 
+extern "C" void nvshmem_init() __attribute__((weak));
+
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
   // Runtime check
   static std::mutex mutex;
   static int is_available = -2;
   std::lock_guard<std::mutex> lock(mutex);
+
+  // Checked if the symbol is statically linked
+  if(is_available == -2 && nvshmem_init) {
+    is_available = 1;
+  }
+
   if (is_available == -2) {
     void* handle{};
     // Open the shared library, RTLD_LAZY defers symbol resolution until needed

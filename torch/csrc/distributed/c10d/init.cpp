@@ -3400,6 +3400,11 @@ for details.
 #ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
 #endif
+      .def(
+          "unsafe_get_ptr",
+          [](const ncclConfig_t& self) {
+            return reinterpret_cast<uintptr_t>(&self);
+          })
       .def_property(
           "net_name",
           [](const ncclConfig_t& self) { return self.netName; },
@@ -3776,14 +3781,27 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   auto fakeProcessGroup =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
-          module, "FakeProcessGroup", backend)
-          .def(
-              py::init([](int rank, int size) {
-                return c10::make_intrusive<::c10d::FakeProcessGroup>(
-                    rank, size);
-              }),
-              py::arg("rank"),
-              py::arg("world_size"));
+          module, "FakeProcessGroup", backend);
+  intrusive_ptr_class_<::c10d::FakeProcessGroup::Options>(
+      fakeProcessGroup, "Options", backendOptions)
+      .def(py::init())
+      .def_readwrite(
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option);
+  fakeProcessGroup
+      .def(
+          py::init([](int rank,
+                      int size,
+                      c10::intrusive_ptr<::c10d::FakeProcessGroup::Options>
+                          options) {
+            return c10::make_intrusive<::c10d::FakeProcessGroup>(
+                rank, size, std::move(options));
+          }),
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("options") =
+              c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def_property_readonly(
+          "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)

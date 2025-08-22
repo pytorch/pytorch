@@ -200,13 +200,13 @@ def debug_insert_nops(
             return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
-        code = transform_code_object(frame.f_code, insert_nops)
+        code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,
-            root_tx=None,
+            root_tx=None,  # type: ignore[arg-type]
             export=False,
-            export_constraints=None,
+            export_constraints=[],
             frame_state={"_id": 0},
             # TODO: shouldn't this be f_locals/f_globals from frame?
             local_scope=locals(),

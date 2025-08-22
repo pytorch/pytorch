@@ -104,6 +104,7 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
+    is_from_closure_source,
     is_from_global_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
@@ -1332,9 +1333,16 @@ class VariableBuilder:
                 and not is_traceable_wrapper_subclass_type(value)
             ):
                 return TensorSubclassVariable(value, source=self.source)
-            # This is a userdefined class, so install an ID_MATCH even if its a
-            # global variable.
-            self.install_guards(GuardBuilder.ID_MATCH)
+
+            if not is_from_closure_source(self.source):
+                # For closure source, the variable comes from LOAD_SUPER_ATTR,
+                # which calls self.__class__. This is internal Cpython
+                # implementation, and it is rare for the user to modify
+                # self.__class__ manually.
+                # For other cases, this is a userdefined class, so install an
+                # ID_MATCH even if its a global variable.
+                self.install_guards(GuardBuilder.ID_MATCH)
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1735,11 +1743,6 @@ class VariableBuilder:
 
     def mark_static_input(self, value: torch.Tensor, guard: bool):
         from ..decorators import mark_static_address
-
-        # See [Note] Static Addresses and Precompile
-        # https://github.com/pytorch/pytorch/issues/159228
-        if torch._dynamo.config.caching_precompile:
-            return
 
         static_inputs_log.debug(
             "Marking static input %s, id: %s)", self.source.name(), id(value)
@@ -2977,6 +2980,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.seed,
             operator.mod,
             torch._functorch.vmap._validate_and_get_batch_size,
+            torch._functorch.predispatch._vmap_increment_nesting,
+            torch._functorch.predispatch._vmap_decrement_nesting,
             # some mac builds are missing torch.distributed.get_rank()
             getattr(torch.distributed, "get_rank", _missing),
             getattr(torch.distributed, "get_world_size", _missing),
@@ -3010,9 +3015,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (
-        isinstance(example_value, (int, float, bool))
-        and proxy.node.target is call_torchbind
+    elif isinstance(example_value, (int, float, bool)) and (
+        proxy.node.target is call_torchbind
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
@@ -3239,7 +3243,6 @@ def _automatic_dynamic(
         )
 
     if static_shapes and not is_dynamic_source(name):
-        record_automatic_dynamic(tx, name, e)
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -3588,6 +3591,12 @@ class SourcelessBuilder:
             if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
+        elif callable(value) and UserDefinedClassVariable.is_supported_new_method(
+            value
+        ):
+            # NamedTuple._make uses an alias of tuple.__new__
+            obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
+            return GetAttrVariable(obj, "__new__")
         elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
         elif isinstance(
