@@ -178,22 +178,7 @@ static void parallel_for_trampoline(
 }
 
 // ABI stable version of parallel_for with identical semantics to
-// at::parallel_for This function provides intra-op parallelization capabilities
-// while maintaining binary compatibility across PyTorch versions. The template
-// design preserves all performance benefits of the original implementation by
-// copying the original logic but using ABI-stable shim functions.
-//
-// Key performance features preserved:
-// - Template instantiation per callable type F
-// - Complete inlining of user function f
-// - Cross-boundary optimizations between parallel framework and user code
-// - Zero function call overhead for iterations (shim functions called only
-// once)
-//
-// Usage: torch::stable::parallel_for(0, size, grain_size, [](int64_t begin,
-// int64_t end) {
-//   // Your parallel work here - fully inlined!
-// });
+// at::parallel_for
 template <class F>
 inline void parallel_for(
     const int64_t begin,
