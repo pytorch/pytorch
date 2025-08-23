@@ -16,6 +16,7 @@ class TemplateConfigHeuristics:
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
+        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get template configs for the given inputs.

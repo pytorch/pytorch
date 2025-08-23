@@ -767,6 +767,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if (
         is_nonzero
         and use_triton_template(layout)
+        and (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
         and torch._inductor.config.run_autoheuristic(name)
         and is_triton(mat1)
     ):

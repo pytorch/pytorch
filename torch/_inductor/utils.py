@@ -1647,7 +1647,6 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )

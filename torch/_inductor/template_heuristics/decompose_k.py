@@ -29,6 +29,7 @@ class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
+        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Get all the valid k_splits for the given m, n, k.
@@ -49,7 +50,10 @@ class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        k_splits = get_k_splits(m, n, k)
+        k_splits = []
+        if max_autotune:
+            # only valid when max-autotuning
+            k_splits = get_k_splits(m, n, k)
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
