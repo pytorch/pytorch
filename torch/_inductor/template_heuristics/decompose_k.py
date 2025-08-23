@@ -6,6 +6,7 @@ import sympy
 
 import torch
 
+from ..ir import get_free_symbols
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
@@ -35,6 +36,18 @@ class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs), (
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
+
+        # Check for unbacked symbols - if found, yield nothing
+        unbacked_symbols = any(
+            len(get_free_symbols(itr, unbacked_only=True)) > 0
+            for itr in (
+                *kernel_inputs.shapes_symbolic(),
+                *kernel_inputs.strides_symbolic(),
+            )
+        )
+        if unbacked_symbols:
+            return
+
         m, n, k = kernel_inputs.mnk_symbolic()
         k_splits = get_k_splits(m, n, k)
         for k_split in k_splits:
