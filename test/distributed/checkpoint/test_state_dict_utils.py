@@ -222,6 +222,7 @@ class TestStateDictUtils(DTensorTestBase):
 
         def _verify_weakref_finalize(cpu_state_dict):
             import gc
+
             del cpu_state_dict["tensor1"]
             del cpu_state_dict
             gc.collect()
