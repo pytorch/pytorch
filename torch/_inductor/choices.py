@@ -26,6 +26,7 @@ from .template_heuristics.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .utils import _use_autotune_backend
 from .virtualized import V
 
 
@@ -195,8 +196,18 @@ class InductorChoices:
         adjusted_choices = self._adjust_mm_configs(template_choices)
 
         # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
-        if all(
-            isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
+        if (
+            all(
+                isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
+            )
+        ) and not (
+            _use_autotune_backend("CUTLASS"),
+            _use_autotune_backend("CK"),
+            _use_autotune_backend("CKTILE"),
+            _use_autotune_backend("CPP"),
+            # do not run this optimization if we're using CPP,CK,CUTLASS as those paths do not go through
+            # here yet, so we don't know if this is safe to do.
+            # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
         ):
             for ktc in adjusted_choices:
                 print(ktc.template.uid)
