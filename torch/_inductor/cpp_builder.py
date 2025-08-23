@@ -307,9 +307,13 @@ def check_msvc_cl_language_id(compiler: str) -> None:
 
         return None
 
-    cl_exe_path = get_msvc_cl_path()
-    if cl_exe_path is None:
-        return
+    if os.path.exists(compiler):
+        # Passed compiler with path.
+        cl_exe_path = compiler
+    else:
+        cl_exe_path = get_msvc_cl_path()
+        if cl_exe_path is None:
+            return
 
     # Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
     version_info = WinPeFileVersionInfo(cl_exe_path)
