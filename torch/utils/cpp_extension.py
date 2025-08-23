@@ -282,7 +282,7 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
-def _get_icpx_version():
+def _get_icpx_version() -> str:
     icpx = 'icx' if IS_WINDOWS else 'icpx'
     compiler_info = subprocess.check_output([icpx, '--version'])
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
