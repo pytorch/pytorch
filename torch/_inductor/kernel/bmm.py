@@ -205,8 +205,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         ):
             bmm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
@@ -280,8 +278,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             bmm_template.maybe_append_choice(
                 choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
                 **kwargs,
                 **extra_kwargs,
             )
