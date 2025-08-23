@@ -347,7 +347,7 @@ class FxConverter:
                 return node
             elif isinstance(node, ir.NoneAsConstantBuffer):
                 return None
-            elif isinstance(node, ir.StorageBox):
+            elif isinstance(node, ir.MutableBox):
                 return generate_to_buffer(node.data)
             elif isinstance(node, ir.ReinterpretView):
                 # We need to introduce a new symbol if the output is a ReinterpretView.
