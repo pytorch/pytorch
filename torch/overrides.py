@@ -315,6 +315,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.frombuffer,
         torch.asarray,
         torch.zendnn_linear,
+        torch.zendnn_weight_prepack_for_linear,
         torch._functional_sym_constrain_range,
         torch._make_dep_token,
         Tensor.__delitem__,
