@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -24,6 +25,9 @@ from ..utils import (
 from ..virtualized import V
 from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
 
+
+if TYPE_CHECKING:
+    from torch._inductor.ir import ChoiceCaller
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -185,16 +189,23 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         layout,
     )
 
+    aten_handler: ExternKernelChoice = aten_bmm
+    aten_extra_kwargs = {}
     if out_dtype:
         assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
-        aten_func = aten_bmm_dtype.bind(
-            kernel_inputs.nodes(), layout, out_dtype=out_dtype
-        )
-    else:
-        aten_func = aten_bmm.bind(kernel_inputs.nodes(), layout)
+        aten_handler = aten_bmm_dtype
+        aten_extra_kwargs = {"out_dtype": out_dtype}
 
-    # options to tune from
-    choices = [aten_func] if use_aten_gemm_kernels() else []
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs, layout, aten_handler.uid, name, aten_extra_kwargs
+        ):
+            aten_handler.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
+            )
 
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
@@ -263,11 +274,16 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
     name = "baddbmm"
     # options to tune from
-    choices = (
-        [aten_baddbmm.bind(kernel_inputs.nodes(), layout, alpha=alpha, beta=beta)]
-        if use_aten_gemm_kernels()
-        else []
-    )
+    choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            kernel_inputs, layout, aten_baddbmm.uid, name
+        ):
+            aten_baddbmm.maybe_append_choice(
+                choices,
+                **kwargs,
+                **extra_kwargs,
+            )
 
     if use_triton_template(layout):
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
