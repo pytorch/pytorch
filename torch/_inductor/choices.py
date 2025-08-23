@@ -34,9 +34,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -210,7 +210,6 @@ class InductorChoices:
             # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
         ):
             for ktc in adjusted_choices:
-                print(ktc.template.uid)
                 if isinstance(ktc.layout, FixedLayout):
                     ktc.layout = FlexibleLayout(
                         device=ktc.layout.device,
