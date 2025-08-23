@@ -824,6 +824,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_3d["cp", "dp"]
 
     @with_comms
+    def test_flatten_mesh_1d(self):
+        mesh_shape = (4,)
+        mesh_dim_names = ("default",)
+        mesh_1d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mesh_1d._flatten()
+
+    @with_comms
     def test_flatten_mesh_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
@@ -831,14 +840,16 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        # Test flatten contiguous dims
-        dp_cp_mesh = mesh_3d["dp", "cp"]
-        flattened_dp_cp_mesh = dp_cp_mesh._flatten()
+        # Test flatten into an existing mesh_dim_name inside the mesh
         with self.assertRaisesRegex(
             RuntimeError,
             "already exists for submesh of the DeviceMesh",
         ):
-            dp_cp_mesh._flatten("dp")
+            mesh_3d._flatten("dp")
+
+        # Test flatten contiguous dims
+        dp_cp_mesh = mesh_3d["dp", "cp"]
+        flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
