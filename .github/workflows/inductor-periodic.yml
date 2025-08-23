@@ -139,13 +139,13 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-smoke-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build:
-    name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
+  linux-jammy-cpu-py3_10-gcc11-periodic-dynamo-benchmarks-build:
+    name: linux-jammy-cpu-py3.10-gcc11-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
@@ -211,15 +211,15 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  linux-jammy-cpu-py3_10-gcc11-inductor-build:
+    name: linux-jammy-cpu-py3.10-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      sync-tag: linux-jammy-cpu-py3_9-gcc11-inductor-build
+      sync-tag: linux-jammy-cpu-py3_10-gcc11-inductor-build
       test-matrix: |
         { include: [
           { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
@@ -247,12 +247,12 @@ jobs:
       build-additional-packages: "vision audio torchao"
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-test:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  linux-jammy-cpu-py3_10-gcc11-inductor-test:
+    name: linux-jammy-cpu-py3.10-gcc11-inductor
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    needs: linux-jammy-cpu-py3_10-gcc11-inductor-build
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image: ${{ needs.linux-jammy-cpu-py3_10-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_10-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
