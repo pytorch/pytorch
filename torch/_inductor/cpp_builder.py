@@ -219,11 +219,14 @@ class WinPeFileVersionInfo:
         return lang_id
 
 
+@functools.cache
 def check_msvc_cl_language_id(compiler: str) -> None:
-    if not _is_msvc_cl(compiler):
-        return
+    """
+    Torch.compile() is only work on MSVC with English language pack well.
+    Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
+    """
 
-    def get_msvc_cl_path() -> str | None:
+    def get_msvc_cl_path() -> tuple[bool, str]:
         """
         Finds the path to cl.exe using vswhere.exe.
         """
@@ -241,7 +244,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
                 "vswhere.exe",
             )
             if not os.path.exists(vswhere_path):
-                return None  # vswhere.exe not found
+                return False, ""  # vswhere.exe not found
 
         try:
             # Get the Visual Studio installation path
@@ -261,12 +264,12 @@ def check_msvc_cl_language_id(compiler: str) -> None:
             ).strip()
 
             if not vs_install_path:
-                return None
+                return False, ""
 
             # Find the latest MSVC toolset version within the installation
             msvc_tools_path = os.path.join(vs_install_path, "VC", "Tools", "MSVC")
             if not os.path.exists(msvc_tools_path):
-                return None
+                return False, ""
 
             # Get the latest toolset version directory
             toolset_versions = [
@@ -275,7 +278,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
                 if os.path.isdir(os.path.join(msvc_tools_path, d))
             ]
             if not toolset_versions:
-                return None
+                return False, ""
             latest_toolset_version = sorted(toolset_versions, reverse=True)[0]
 
             # Construct the full cl.exe path
@@ -288,7 +291,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
                 "cl.exe",
             )
             if os.path.exists(cl_path):
-                return cl_path
+                return True, cl_path
             else:
                 # Fallback for older versions or different architectures if needed
                 cl_path = os.path.join(
@@ -300,22 +303,24 @@ def check_msvc_cl_language_id(compiler: str) -> None:
                     "cl.exe",
                 )
                 if os.path.exists(cl_path):
-                    return cl_path
+                    return True, cl_path
 
         except (subprocess.CalledProcessError, FileNotFoundError):
-            return None
+            return False, ""
 
-        return None
+        return False, ""
+
+    if not _is_msvc_cl(compiler):
+        return
 
     if os.path.exists(compiler):
         # Passed compiler with path.
         cl_exe_path = compiler
     else:
-        cl_exe_path = get_msvc_cl_path()
-        if cl_exe_path is None:
+        b_ret, cl_exe_path = get_msvc_cl_path()
+        if b_ret is False:
             return
 
-    # Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
     version_info = WinPeFileVersionInfo(cl_exe_path)
     lang_id = version_info.get_language_id()
     if lang_id != 1033:
