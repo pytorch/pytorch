@@ -1,4 +1,4 @@
-project-includes = [
+project_includes = [
     "torch",
     "caffe2",
     "test/test_bundled_images.py",
@@ -7,11 +7,12 @@ project-includes = [
     "test/test_datapipe.py",
     "test/test_futures.py",
     "test/test_numpy_interop.py",
+    "test/test_torch.py",
     "test/test_type_hints.py",
     "test/test_type_info.py",
     "test/test_utils.py",
 ]
-project-excludes = [
+project_excludes = [
   "torch/include/**",
   "torch/csrc/**",
   "torch/distributed/elastic/agent/server/api.py",
@@ -26,7 +27,7 @@ project-excludes = [
   "*/__pycache__/**",
   "*/.*",
 ]
-ignore-missing-imports = [
+replace_imports_with_any = [
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",
@@ -85,15 +86,3 @@ ignore-missing-imports = [
 ]
 
 untyped_def_behavior = "check-and-infer-return-any"
-
-# Shut off noisy errors
-errors.implicit-import = false
-
-# We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
-# and mypy.ini specifies `check_untyped_defs = False` for this file.
-# If you check even the unannotated stuff mypy produces 322 errors.
-# "test/test_torch.py",
-# Uncomment this file to check
-# [[tool.pyrefly.sub-config]]
-# matches = "test/test_torch.py"
-# untyped-def-behavior = "skip-and-infer-return-any"
