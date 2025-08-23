@@ -179,7 +179,7 @@ class WinPeFileVersionInfo:
         )
 
         if size == 0:
-            raise RuntimeError("Can't get version info size.")
+            raise RuntimeError(f"Can't get version info size of {self.file_path}.")
 
         self.version_info = ctypes.create_string_buffer(size)
         success = self.version_dll.GetFileVersionInfoW(
@@ -187,7 +187,7 @@ class WinPeFileVersionInfo:
         )
 
         if not success:
-            raise RuntimeError("Can't get version info.")
+            raise RuntimeError(f"Can't get version info of {self.file_path}.")
 
     def get_language_id(self) -> int:
         lp_buffer = ctypes.c_void_p()
