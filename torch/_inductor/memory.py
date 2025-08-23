@@ -88,13 +88,20 @@ def get_freeable_input_buf(
         collections.defaultdict(OrderedSet)
     )
     dep_name_to_size: dict[str, int] = dict()
+
     for node in nodes:
         for dep in node.read_writes.reads:
-            if dep.name in graph_inputs and not dep.name.startswith(
-                ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
-            ):
-                dep_name_to_succ_nodes[dep.name].add(node)
-                dep_name_to_size[dep.name] = _dep_size_hint(dep)
+            if dep.name in graph_inputs:
+                dep_name = dep.name
+                # Subgraphs have a prefix for the name, cleanup the prefix
+                # before checking for known strings.
+                if V.graph.name:
+                    dep_name = dep_name.removeprefix(V.graph.name + "_")
+                if not dep_name.startswith(
+                    ("primals_", "arg", "fwd_rng_state", "bwd_rng_state")
+                ):
+                    dep_name_to_succ_nodes[dep.name].add(node)
+                    dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = dict()
@@ -279,6 +286,11 @@ def assign_memory_planning_info_for_scheduler_nodes(
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
         succ_nodes = node_to_succ_nodes[node]
+        pred_nodes = node_to_pred_nodes[node]
+
+        # make sure we do not make node a successor or predecessor of itself
+        succ_nodes.discard(node)
+        pred_nodes.discard(node)
 
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
@@ -395,17 +407,35 @@ def estimate_peak_memory(
 ) -> tuple[int, list[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
-    keeping track of the liveness of SchedulerBuffers and FreeableInputBuffers.
+    keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.
 
     Returns:
         int: peak memory
         List[int]: memory usage at each node (or each step).
     """
-    # Use estimate_peak_memory_allocfree to keep one impl.
-    peak_memory, snodes_curr_memory, snodes_allocfree, buf_to_snode_last_use = (
-        estimate_peak_memory_allocfree(nodes, name_to_freeable_input_buf, graph_outputs)
+
+    buf_info_list, _, _ = compute_memory_timeline(
+        nodes, name_to_freeable_input_buf, graph_outputs
     )
-    return peak_memory, [(curr_mem[0] + curr_mem[1]) for curr_mem in snodes_curr_memory]
+
+    # incremental memory changes at each step
+    memory = [0 for _ in range(len(nodes) + 1)]
+
+    # for each buffer, update memory when created and when freed
+    for buf_info in buf_info_list:
+        memory[buf_info.start_step] += buf_info.size_alloc
+        memory[buf_info.end_step + 1] -= buf_info.size_free
+
+    # get peak memory by compute the cumulative memories
+    max_memory = 0
+    cur_memory = 0
+    memories_at_nodes = []
+    for t in range(len(nodes) + 1):
+        cur_memory += memory[t]
+        memories_at_nodes.append(cur_memory)
+        max_memory = max(max_memory, cur_memory)
+
+    return (max_memory, memories_at_nodes)
 
 
 @dataclasses.dataclass
@@ -748,6 +778,7 @@ def validate_graph_acyclic(nodes: list[BaseSchedulerNode]) -> None:
         path.append(node)
 
         for pred_node in node.mpi_node.pred_nodes:
+            assert pred_node != node
             dfs_visit(pred_node)
 
         path.pop()
