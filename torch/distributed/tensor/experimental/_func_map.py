@@ -24,10 +24,10 @@ OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
 
 
 def local_map(
-    func: Callable,
-    out_placements: OutputPlacements,
-    in_placements: Optional[InputPlacements] = None,
-    in_grad_placements: Optional[InputPlacements] = None,
+    func: Optional[Callable] = None,
+    out_placements: OutputPlacements = None,
+    in_placements: InputPlacements = None,
+    in_grad_placements: InputPlacements = None,
     device_mesh: Optional[DeviceMesh] = None,
     *,
     redistribute_inputs: bool = False,
@@ -132,6 +132,20 @@ def local_map(
 
     .. note:: This API is currently experimental and subject to change
     """
+
+    if func is None:
+        # decorator mode
+        def decorated(func):
+            return local_map(
+                func=func,
+                out_placements=out_placements,
+                in_placements=in_placements,
+                in_grad_placements=in_grad_placements,
+                device_mesh=device_mesh,
+                redistribute_inputs=redistribute_inputs,
+            )
+
+        return decorated
 
     def wrapped(device_mesh: Optional[DeviceMesh], *args, **kwargs):
         # process input args
