@@ -132,3 +132,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ROCm/aiter.git
+[submodule "third_party/ZenDNN"]
+	path = third_party/ZenDNN
+	url = https://github.com/amd/ZenDNN.git
