@@ -124,7 +124,7 @@ def sample_vllm_test_library():
             "id": "lora_test",
             "parallelism": 4,
             "steps": [
-                "echo 'list lora tests:'"
+                "echo 'list lora tests:'",
                 " ".join(
                     [
                         "pytest -q --collect-only lora",
