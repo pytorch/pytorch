@@ -230,7 +230,7 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
                 index.numel());
     int64_t idx = index.item<int64_t>();
     TORCH_CHECK(idx == 0, "index_copy_(): the only valid index for a 0-dim tensor is 0, but got ", idx);
-    result.copy_(source);
+    result.copy_(source.squeeze());
     return;
   }
 
@@ -254,11 +254,12 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
     }
   }
 
-  TORCH_CHECK(source.size(dim) == index.numel(),
+  const auto source_size_dim = source.dim() > 0 ? source.size(dim) : 1;
+  TORCH_CHECK(index.numel() == source_size_dim,
               "index_copy_(): Number of indices (",
               index.numel(),
               ") should be equal to source.size(dim) (",
-              source.size(dim),
+              source_size_dim,
               ")");
 
   auto stream = getCurrentMPSStream();
