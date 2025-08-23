@@ -1112,10 +1112,11 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert (
-                len(V.graph.current_node.users) == 1
-                and next(iter(V.graph.current_node.users)).target
-                is torch._prims.rng_prims.graphsafe_run_with_rng_state
+            assert len(V.graph.current_node.users) == 1 and next(
+                iter(V.graph.current_node.users)
+            ).target in (
+                torch._prims.rng_prims.graphsafe_run_with_rng_state,
+                torch.ops.higher_order.invoke_subgraph,
             )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
