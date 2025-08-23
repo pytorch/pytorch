@@ -133,9 +133,9 @@ mm_template = TritonTemplate(
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
 
         {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
-        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% endif %}
 
     # rematerialize rm and rn to save registers
@@ -208,9 +208,9 @@ mm_template = TritonTemplate(
         idx_n = offs_b_n[None, :]
         {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
         {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
+        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% else %}
-        acc += tl.dot(a, b, input_precision=FLOAT32_PRECISION, out_dtype=ACC_TYPE)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% endif %}
 
     # rematerialize rm and rn to save registers
@@ -344,7 +344,7 @@ persistent_tma_mm_template = TritonTemplate(
         acc += tl.dot(
             a if A_ROW_MAJOR else a.T,
             b if B_ROW_MAJOR else b.T,
-            input_precision=FLOAT32_PRECISION,
+            allow_tf32=ALLOW_TF32,
         )
 
         if ki == k_tiles - 1:
@@ -755,20 +755,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **extra_kwargs,
                 )
 
-        from torch._inductor.ir import get_free_symbols
-
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        # and if there aren't any unbacked symbols
-        unbacked_symbols = any(
-            len(get_free_symbols(itr, unbacked_only=True)) > 0
-            for itr in (
-                mat1.get_size(),
-                mat1.get_stride(),
-                mat2.get_size(),
-                mat2.get_stride(),
-            )
-        )
-        if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
+        if use_decompose_k_choice(m, n, k):
             for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, decompose_k_subgraph_template.name, "mm"
             ):
@@ -946,6 +934,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
+    aten_layout = layout
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
@@ -954,37 +943,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         from torch._inductor.ir import FixedLayout, FlexibleLayout
 
         if isinstance(layout, FixedLayout):
-            layout = FlexibleLayout(
+            aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
-        choices = (
-            [
-                aten_addmm.bind(
-                    # TODO(coconutruben): replace with kernel_inputs.nodes()
-                    # once that supports the unexpanded nodes as well
-                    [inp, mat1, mat2],
-                    layout,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
-        )
-        return autotune_select_algorithm(
-            # TODO(coconutruben): replace with kernel_inputs.nodes()
-            # once that supports the unexpanded nodes as well
-            "addmm",
-            choices,
-            [inp, mat1, mat2],
-            layout,
-        )
 
     choices = (
         [
             aten_addmm.bind(
                 kernel_inputs.nodes(),
-                layout,
+                aten_layout,
                 alpha=alpha,
                 beta=beta,
             )
