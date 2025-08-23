@@ -157,7 +157,7 @@ void pushPyOutToStack(
     const char* msg) {
   TORCH_CHECK(
       PyGILState_Check(), "GIL must be held before you call pushPyOutToStack");
-  auto schema_returns = op.schema().returns();
+  const auto& schema_returns = op.schema().returns();
   const auto num_returns = schema_returns.size();
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
