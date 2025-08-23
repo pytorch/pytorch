@@ -37,7 +37,6 @@ __all__ = [
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
-    "enable_fake_mode",
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
@@ -47,7 +46,6 @@ import torch
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
-from ._internal._exporter_legacy import enable_fake_mode
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._type_utils import JitScalarType
 from .errors import OnnxExporterError
@@ -90,7 +88,6 @@ if TYPE_CHECKING:
 JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
-enable_fake_mode.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
