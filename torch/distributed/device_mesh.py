@@ -73,7 +73,9 @@ else:
             self.mesh_dim_group_options: dict[
                 int, tuple[Optional[str], Optional[C10dBackend.Options]]
             ] = {}
+            # Use a dict per root mesh to bookkeep the mapping between layout and pg
             self.layouts_to_groups: dict[DeviceMesh, dict[_Layout, str]] = {}
+            # Use a dict per root mesh to bookkeep the mapping between mesh_dim_name and layout
             self.names_to_layouts: dict[DeviceMesh, dict[str, _Layout]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
@@ -324,7 +326,9 @@ else:
                 - If a name is provided, it will be mapped to the layout for future reference
                 - For world-size layouts with no overrides, it will try to use the default process group
                 - For other layouts, it creates appropriate subgroups using either split_group (more efficient and it only
-                available for nccl communicators) or new_group
+                available for nccl communicators) or new_group. The former sometimes is called "eager init" which means
+                we eagerly initialize the nccl communicator when we initialize the device mesh and the later is called
+                "lazy init" which means we lazily initialize the nccl communicator when we first hit first collective
                 - Because process group itself is not serializable, we only store the group name in the mapping
             """
             # Every mesh_dim_name will only map to one and only one layout.
@@ -336,14 +340,22 @@ else:
             names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
                 root_mesh, {}
             )
+            # Let mesh_dim_name maps to the current layout whose backend has not been initialized.
+            # If mesh_dim_name has already mapped to another layout, we throw an error.
+            if name is not None:
+                if (
+                    name in names_to_layouts_map
+                    and names_to_layouts_map[name] != layout
+                ):
+                    raise ValueError(
+                        f"Mesh_dim_name {name} has already mapped to layout {layout}."
+                    )
+                names_to_layouts_map[name] = layout
+
+            # If the layout has already been mapped to a process group backend, we ignore the
+            # backend_override and group, and return early. We also throw a warning for that.
             if layout in layouts_to_groups_map:
-                if name is not None:
-                    if name in names_to_layouts_map:
-                        assert names_to_layouts_map[name] == layout, (
-                            f"dim_name {name} has been mapped to another layout"
-                        )
-                    else:
-                        names_to_layouts_map[name] = layout
+                # TODO: We need to bookkeep pg_option together with the group name.
                 if backend_override != (None, None):
                     warnings.warn(
                         f"Group for {layout} ({name=}) already exists, ignoring backend override"
@@ -353,14 +365,6 @@ else:
                         f"Group for {layout} ({name=}) already exists, ignoring explicit group"
                     )
                 return
-
-            # Let mesh_dim_name maps to the current layout whose backend has not been initialized.
-            # If mesh_dim_name has already mapped to another layout, we throw an error.
-            if name is not None:
-                assert name not in names_to_layouts_map, (
-                    f"Mesh dim name {name} has been mapped to other backend initiated layout already"
-                )
-                names_to_layouts_map[name] = layout
 
             # When user explicitly pass in a process group, we directly reuse that PG as backend rather
             # than creating a new one.
@@ -968,8 +972,7 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            ranks = [get_rank(pg) for pg in self.get_all_groups()]
-            return ranks if all(r != -1 for r in ranks) else None
+            return self._coordinate_on_dim if self._coordinate_on_dim else None
 
         def _flatten(
             self,

@@ -260,8 +260,9 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
-        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            mesh.get_coordinate()
+        # coordinates should always been populated when init_backend is False, as whenever
+        # we call init_backend we should make sure the default pg already created
+        mesh.get_coordinate()
 
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
@@ -882,13 +883,13 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
         # Test flatten into an existing mesh_dim_name inside the mesh
         with self.assertRaisesRegex(
-            AssertionError,
-            "Mesh dim name dp has been mapped to other backend",
+            ValueError,
+            "Mesh_dim_name dp has already mapped to layout",
         ):
             mesh_3d._flatten("dp")
         with self.assertRaisesRegex(
-            AssertionError,
-            "dim_name dp_tp has been mapped to another layout",
+            ValueError,
+            "Mesh_dim_name dp_tp has already mapped to layout",
         ):
             mesh_3d["cp", "tp"]._flatten("dp_tp")
 
