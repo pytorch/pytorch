@@ -313,6 +313,9 @@ class BackwardHookFunction(Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
+        ctx.mark_non_differentiable(
+            *[input for input in inputs if not input.requires_grad]
+        )
         return output
 
     @staticmethod
