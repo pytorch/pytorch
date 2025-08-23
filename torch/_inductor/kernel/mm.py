@@ -699,48 +699,31 @@ def tuned_mm(mat1, mat2, *, layout=None):
         )
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, aten_layout, aten_mm, "mm"
-        ):
-            aten_mm.maybe_append_choice(
-                choices=choices,
-                **kwargs,
-                **extra_kwargs,
-            )
+        choices += list(
+            V.choices.get_mm_configs(kernel_inputs, aten_layout, aten_mm, "mm")
+        )
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout):
-        # Get template params using the new unified function
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template, "mm"
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
-            )
+        # Get template choices using the new unified function
+        choices += list(
+            V.choices.get_mm_configs(kernel_inputs, layout, mm_template, "mm")
+        )
 
         if use_triton_tma_template(mat1, mat2):
-            # Get TMA template params using the new unified function
-            for kwargs, extra_kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, persistent_tma_mm_template, "mm"
-            ):
-                persistent_tma_mm_template.maybe_append_choice(
-                    choices,
-                    **kwargs,
-                    **extra_kwargs,
+            # Get TMA template choices using the new unified function
+            choices += list(
+                V.choices.get_mm_configs(
+                    kernel_inputs, layout, persistent_tma_mm_template, "mm"
                 )
+            )
 
-        # Only do split-k optimization if K is much larger than m, n and m, n are small
         if use_decompose_k_choice(m, n, k):
-            for kwargs, extra_kwargs in V.choices.get_mm_configs(
-                kernel_inputs, layout, decompose_k_subgraph_template, "mm"
-            ):
-                decompose_k_subgraph_template.maybe_append_choice(
-                    choices,
-                    **kwargs,
-                    **extra_kwargs,
+            choices += list(
+                V.choices.get_mm_configs(
+                    kernel_inputs, layout, decompose_k_subgraph_template, "mm"
                 )
+            )
 
     if (
         is_nonzero
@@ -775,21 +758,17 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for kwargs, _ in V.choices.get_mm_configs(
-            # TODO(coconutruben): remove once we deprecate ah
-            # mm-extra is a hack to keep the ah functionality alive
-            # while we transition to the unified kwargs retrieval
-            kernel_inputs,
-            layout,
-            mm_template,
-            "mm-ah",
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=kernel_inputs.nodes(),
-                layout=layout,
-                **kwargs,
+        choices += list(
+            V.choices.get_mm_configs(
+                # TODO(coconutruben): remove once we deprecate ah
+                # mm-extra is a hack to keep the ah functionality alive
+                # while we transition to the unified kwargs retrieval
+                kernel_inputs,
+                layout,
+                mm_template,
+                "mm-ah",
             )
+        )
 
         # using AutoHeuristic for ranking
         ah_choices = mm_autoheuristic(
@@ -863,17 +842,14 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     # Create MMKernelInputs for Int MM
     kernel_inputs = MMKernelInputs([mat1, mat2])
     if use_aten_gemm_kernels():
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            aten__int_mm,
-            name,
-        ):
-            aten__int_mm.maybe_append_choice(
-                choices=choices,
-                **kwargs,
-                **extra_kwargs,
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                aten__int_mm,
+                name,
             )
+        )
 
     if use_cutlass and _use_cutlass_for_op(name):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -881,14 +857,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout, mm_template, name
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
-            )
+        choices += list(
+            V.choices.get_mm_configs(kernel_inputs, layout, mm_template, name)
+        )
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
@@ -931,57 +902,45 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             )
 
     if use_aten_gemm_kernels():
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            aten_layout,
-            aten_bias_addmm,
-            name,
-        ):
-            aten_bias_addmm.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                aten_layout,
+                aten_bias_addmm,
+                name,
             )
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            aten_layout,
-            aten_addmm,
-            name,
-        ):
-            aten_addmm.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
+        )
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                aten_layout,
+                aten_addmm,
+                name,
             )
+        )
 
     if is_nonzero and use_triton_template(layout):
         # all the triton templates use the extra_kwargs
-        # Get template params using the new unified function
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            mm_template,
-            name,
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
-            )
-
-        if use_triton_tma_template(mat1, mat2):
-            # Get TMA template params using the new unified function
-            for kwargs, extra_kwargs in V.choices.get_mm_configs(
+        # Get template choices using the new unified function
+        choices += list(
+            V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                persistent_tma_mm_template,
+                mm_template,
                 name,
-            ):
-                persistent_tma_mm_template.maybe_append_choice(
-                    choices,
-                    **kwargs,
-                    **extra_kwargs,
+            )
+        )
+
+        if use_triton_tma_template(mat1, mat2):
+            # Get TMA template choices using the new unified function
+            choices += list(
+                V.choices.get_mm_configs(
+                    kernel_inputs,
+                    layout,
+                    persistent_tma_mm_template,
+                    name,
                 )
+            )
 
     if (
         is_nonzero
@@ -1135,19 +1094,17 @@ def tuned_scaled_mm(
 
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        aten_extra_kwargs = dict(out_dtype=out_dtype, use_fast_accum=use_fast_accum)
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            aten__fp8_mm,
-            name,
-            kwarg_overrides=aten_extra_kwargs,
-        ):
-            aten__fp8_mm.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                aten__fp8_mm,
+                name,
+                kwarg_overrides=dict(
+                    out_dtype=out_dtype, use_fast_accum=use_fast_accum
+                ),
             )
+        )
 
     # We dont have triton lowerings for the MX variants yet
     if scale_a.dtype != torch.float32:
@@ -1160,34 +1117,27 @@ def tuned_scaled_mm(
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
-            # Get TMA template params using the new unified function
-            for kwargs, extra_kwargs in V.choices.get_mm_configs(
+            # Get TMA template choices using the new unified function
+            choices += list(
+                V.choices.get_mm_configs(
+                    kernel_inputs,
+                    layout,
+                    scaled_mm_device_tma_template,
+                    name,
+                    kwarg_overrides=scaled_mm_kwargs,
+                )
+            )
+
+        # Get template choices using the new unified function
+        choices += list(
+            V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                scaled_mm_device_tma_template,
+                mm_template,
                 name,
                 kwarg_overrides=scaled_mm_kwargs,
-            ):
-                scaled_mm_device_tma_template.maybe_append_choice(
-                    choices,
-                    **kwargs,
-                    **extra_kwargs,
-                )
-
-        # Get template params using the new unified function
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs,
-            layout,
-            mm_template,
-            name,
-            kwarg_overrides=scaled_mm_kwargs,
-        ):
-            # possibly appends a TritonTemplateCaller to choices
-            mm_template.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
             )
+        )
 
     if (
         is_nonzero

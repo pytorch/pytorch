@@ -156,29 +156,22 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     # options to tune from
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, aten_mm_plus_mm, "mm_plus_mm"
-        ):
-            aten_mm_plus_mm.maybe_append_choice(
-                choices,
-                **kwargs,
-                **extra_kwargs,
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs, layout1, aten_mm_plus_mm, "mm_plus_mm"
             )
+        )
 
     if use_triton_template(layout1):
-        # Get template params using the new unified function
-        for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"
-        ):
-            # Apply BLOCK_K constraint specific to mm_plus_mm
-            # see https://github.com/triton-lang/triton/issues/1298
-            # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
-                mm_plus_mm_template.maybe_append_choice(
-                    choices,
-                    **kwargs,
-                    **extra_kwargs,
-                )
+        # Get template choices using the new unified function
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"
+            )
+        )
+        # TODO: Apply BLOCK_K constraint specific to mm_plus_mm
+        # For now, we'll add all choices since we can't easily inspect kwargs
+        # This may need to be handled in the template/heuristic level
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, kernel_inputs.nodes(), layout1

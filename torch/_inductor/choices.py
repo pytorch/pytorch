@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
+    from .ir import ChoiceCaller
     from .select_algorithm import ExternKernelChoice
 
 
@@ -109,9 +110,9 @@ class InductorChoices:
         template: Union[KernelTemplate, ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, Any]] = None,
-    ) -> Generator[tuple[dict[str, Any], dict[str, Any]], None, None]:
+    ) -> Generator[ChoiceCaller, None, None]:
         """
-        Get generator of template parameters for MM templates using template-specific heuristics.
+        Get generator of ChoiceCallers for MM templates using template-specific heuristics.
 
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
@@ -121,7 +122,7 @@ class InductorChoices:
             kwarg_overrides: Optional dict of kwargs to override for the template heuristic
                              these only override the per config kwargs, not the extra kwargs
         Yields:
-            Template parameter dictionaries ready for maybe_append_choice
+            ChoiceCaller objects from the template
         """
         # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
         # the max-autotune bool, rather than inferring it here
@@ -152,9 +153,10 @@ class InductorChoices:
         ).nodes()
         overrides = kwarg_overrides if kwarg_overrides is not None else {}
         for c in cs:
-            # yield in a comprehensive package what the extra kwargs are
-            # fixed for template/op combo, and the config kwargs (c)
-            yield {**c, **overrides}, extra_kwargs
+            # Create choice using the new choice_or_None method
+            choice = template.choice_or_None(**{**c, **overrides}, **extra_kwargs)
+            if choice is not None:
+                yield choice
 
     def triton_kernel_kwargs(
         self,

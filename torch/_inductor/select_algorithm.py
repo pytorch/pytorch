@@ -1913,6 +1913,18 @@ class ExternKernelChoice:
         # unique by prefixing with aten
         return f"aten::{self.name}"
 
+    def choice_or_None(self, **kwargs: Any) -> Optional[ChoiceCaller]:
+        """
+        Maybe generates a new ChoiceCaller and returns it, or None if generation fails.
+
+        kwargs: Additional kwargs to be passed to generate a new ChoiceCaller.
+        """
+        temp_choices: list[Any] = []
+        result = self.maybe_append_choice(temp_choices, **kwargs)
+        if result is None and len(temp_choices) == 1:
+            return temp_choices[0]
+        return None
+
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> Optional[NotImplementedError]:
