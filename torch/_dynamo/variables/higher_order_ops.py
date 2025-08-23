@@ -74,7 +74,11 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 @dataclass
 class OutputSpec:
     """
-    The treespec of the output of the speculated subgraph and other metadata.
+    Contains the treespec of the output of the speculated subgraph, and the
+    information to mask out the constant values from the output during
+    flattening and inserting them back during unflattening. Cleaning up
+    constants from the graph makes the graph simpler for AOTDispatcher and
+    Inductor.
     """
 
     treespec: pytree.TreeSpec
