@@ -4935,14 +4935,14 @@ class AOTInductorTestsTemplate:
         example_inputs = (a,)
 
         if self.device == "mps":
-            kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
+            kernel_calls = [("aoti_torch_mps_addmm_out", 1)]
         elif self.device == GPU_TYPE:
             kernel_calls = [
                 ("triton_poi_fused_0", 1),
-                (f"aoti_torch_{GPU_TYPE}_addmm_out", 2),
+                (f"aoti_torch_{GPU_TYPE}_addmm_out", 1),
             ]
         else:
-            kernel_calls = [("aoti_torch_cpu_addmm_out", 2)]
+            kernel_calls = [("aoti_torch_cpu_addmm_out", 1)]
 
         # test default debug printing all tensor values codegen
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
@@ -4977,7 +4977,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             filtered_kernel_calls = [
-                (filtered_kernel_name, 2),
+                (filtered_kernel_name, 1),
             ]
             for kernel_call, count in filtered_kernel_calls:
                 FileCheck().check_count(

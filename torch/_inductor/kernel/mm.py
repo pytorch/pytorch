@@ -607,7 +607,7 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     kernel under the hood.  There are a few shapes where this is slower,
     but they are rare.
     """
-    if inp.stride(0) == 0 or inp.size(0) == 1:
+    if (inp.stride(0) == 0 and inp.size(0) != 0) or inp.size(0) == 1:
         return torch.addmm(inp[0], mat1, mat2, out=out, alpha=alpha, beta=beta)
     return torch.addmm(inp, mat1, mat2, out=out, alpha=alpha, beta=beta)
 
@@ -927,6 +927,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
+    aten_layout = layout
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
@@ -935,37 +936,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         from torch._inductor.ir import FixedLayout, FlexibleLayout
 
         if isinstance(layout, FixedLayout):
-            layout = FlexibleLayout(
+            aten_layout = FlexibleLayout(
                 device=layout.device, dtype=layout.dtype, size=layout.size
             )
-        choices = (
-            [
-                aten_addmm.bind(
-                    # TODO(coconutruben): replace with kernel_inputs.nodes()
-                    # once that supports the unexpanded nodes as well
-                    [inp, mat1, mat2],
-                    layout,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
-        )
-        return autotune_select_algorithm(
-            # TODO(coconutruben): replace with kernel_inputs.nodes()
-            # once that supports the unexpanded nodes as well
-            "addmm",
-            choices,
-            [inp, mat1, mat2],
-            layout,
-        )
 
     choices = (
         [
             aten_addmm.bind(
                 kernel_inputs.nodes(),
-                layout,
+                aten_layout,
                 alpha=alpha,
                 beta=beta,
             )
@@ -1060,7 +1039,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
             has_bias=True,
         )
-
     return autotune_select_algorithm("addmm", choices, kernel_inputs.nodes(), layout)
 
 
