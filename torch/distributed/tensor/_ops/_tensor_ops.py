@@ -1066,6 +1066,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
     for i in range(len(indices_tuple_strategy.children), self_strategy.ndim):
         free_dims.append(i)
 
+    print(f"free: {free_dims}, remove: {remove_dims}, select: {select_dims}")
     # special case: no-op
     if not remove_dims and not select_dims:
         return cast(OpStrategy, propagate_first_input_strategy(op_schema))
@@ -1126,6 +1127,8 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                 dim = placement.dim
                 if not dim in free_dims:
                     self_input_tgt_placements.append(Replicate())
+                else:
+                    self_input_tgt_placements.append(placement)
             else:
                 self_input_tgt_placements.append(placement)
 
@@ -1187,27 +1190,29 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                         ]
                     ):
                         continue
-                    else:
-                        # change out_dim_map
-                        insert_ndim = index_input_spec.ndim
-                        insert_dim_map = index_input_spec.dim_map
-                        out_dim_map = (
-                            out_dim_map[:first_select_dim]
-                            + insert_dim_map
-                            + out_dim_map[first_select_dim + insert_ndim :]
-                        )
-                        self_input_placements = self_input_spec.placements
-                        out_spec = DTensorSpec.from_dim_map(
-                            mesh=self_input_spec.mesh,
-                            dim_map=out_dim_map,
-                            sums=[],
-                        )
-                else:
-                    out_spec = self_input_spec
+
+            # change out_dim_map
+            insert_ndim = index_input_spec.ndim
+            insert_dim_map = index_input_spec.dim_map
+            old_out_dim_map = out_dim_map
+            out_dim_map = (
+                out_dim_map[:first_select_dim]
+                + insert_dim_map
+                + out_dim_map[first_select_dim + insert_ndim :]
+            )
+            self_input_placements = self_input_spec.placements
+            print(
+                f"out_dim_map={out_dim_map}, from {old_out_dim_map}[:{first_select_dim}] + {insert_dim_map} + {old_out_dim_map}[{first_select_dim + insert_ndim} : ]"
+            )
+            out_spec = DTensorSpec.from_dim_map(
+                mesh=self_input_spec.mesh,
+                dim_map=out_dim_map,
+                sums=[],
+            )
 
         # find a new acceptable arg shardings
         print(
-            f"add {acceptable_input_specs} to acceptable_input_specs_and_out_spec_dict"
+            f"add {acceptable_input_specs} to acceptable_input_specs_and_out_spec_dict, output_spec={out_spec}"
         )
         # torch.distributed.breakpoint()
         # torch.distributed.barrier()
