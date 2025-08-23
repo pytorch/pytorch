@@ -223,7 +223,7 @@ def check_msvc_cl_language_id(compiler: str) -> None:
     if not _is_msvc_cl(compiler):
         return
 
-    def get_msvc_cl_path():
+    def get_msvc_cl_path() -> str | None:
         """
         Finds the path to cl.exe using vswhere.exe.
         """
