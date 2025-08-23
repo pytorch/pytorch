@@ -60,18 +60,10 @@ def sample_vllm_test_library():
                         "--ignore=entrypoints/llm/test_collective_rpc.py",
                     ]
                 ),
-<<<<<<< Updated upstream
                 "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
                 "pytest -v -s entrypoints/llm/test_generate.py ",
                 "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
                 "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
-=======
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_lazy_outlines.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_generate.py ",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD",
->>>>>>> Stashed changes
             ],
         },
         "vllm_regression_test": {
