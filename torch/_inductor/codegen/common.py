@@ -518,9 +518,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            (
+                CppWrapperCpuArrayRef
+                if config.aot_inductor.allow_stack_allocation
+                else CppWrapperCpu
+            ),
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -2390,6 +2392,17 @@ class KernelTemplate:
 
     def __init__(self, name: str) -> None:
         self.name = name
+
+    @property
+    def uid(self) -> str:
+        """
+        entry point to override for templates to ensure a uid e.g. through a prefix
+
+        the purpose of this is that every KernelTemplate/ExternKernelChoice is unique
+        in the system, but reproducible e.g. restarting pytorch should yield the same id
+        """
+        # TODO(coconutruben): add some central registration to assert on global uniqueness
+        return self.name
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any

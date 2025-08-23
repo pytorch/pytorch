@@ -1443,6 +1443,11 @@ class TritonTemplate(KernelTemplate):
     # was not used are the same.
     test_cache = False
 
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with triton
+        return f"triton::{self.name}"
+
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
     ) -> Optional[NotImplementedError]:
@@ -1902,6 +1907,11 @@ class ExternKernelChoice:
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )
+
+    @property
+    def uid(self) -> str:
+        # unique by prefixing with aten
+        return f"aten::{self.name}"
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any

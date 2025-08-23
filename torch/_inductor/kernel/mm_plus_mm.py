@@ -159,7 +159,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     if use_triton_template(layout1):
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, mm_plus_mm_template.name, "mm_plus_mm"
+            kernel_inputs, layout1, mm_plus_mm_template.uid, "mm_plus_mm"
         ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
