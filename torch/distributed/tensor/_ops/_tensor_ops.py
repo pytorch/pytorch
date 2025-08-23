@@ -1046,6 +1046,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
     self_strategy, indices_tuple_strategy = op_schema.args_schema
     assert isinstance(self_strategy, OpStrategy)
     # TODO: change it to something else
+    # TODO: each index can be multi-dim tensor.
     assert isinstance(indices_tuple_strategy, TupleStrategy)
     # `indices_tuple_strategy` only includes non-tailing `None`s
     assert len(indices_tuple_strategy.children) <= self_strategy.ndim
@@ -1081,15 +1082,12 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                 [strat.output_specs for strat in index_strategy.strategies]
             )
 
-    print(f"self_input_specs={self_input_specs}")
-    print(f"non_empty_indices_input_specs={non_empty_indices_input_specs}")
     all_input_specs_comb = itertools.product(
         self_input_specs, *non_empty_indices_input_specs
     )
 
     # enumerate all acceptable input_specs
     acceptable_input_specs_and_out_spec_dict = {}  # use dict to dedup
-    print(list(all_input_specs_comb))
     for input_specs_comb in all_input_specs_comb:
         self_input_spec: DTensorSpec = input_specs_comb[0]
         self_ndim = self_input_spec.ndim
@@ -1134,7 +1132,9 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
         self_input_spec = DTensorSpec(
             mesh=self_input_spec.mesh,
             placements=tuple(self_input_tgt_placements),
+            tensor_meta=self_input_spec.tensor_meta,
         )
+        print(f"self_input_spec={self_input_spec}")
 
         acceptable_input_specs = (self_input_spec, *indices_input_specs)
         if acceptable_input_specs in acceptable_input_specs_and_out_spec_dict:
@@ -1155,11 +1155,13 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             out_dim_map = (
                 out_dim_map[:first_remove_dim] + out_dim_map[first_remove_dim + 1 :]
             )
-            # TODO: fill in out spec
-            out_spec = DTensorSpec.from_dim_map()
-        else:  # output has a new select_dim at the first remove/select dim
-            index_dim_map = index_input_spec.dim_map
-            assert len(index_dim_map) == 1
+            # TODO: fill in sums
+            out_spec = DTensorSpec.from_dim_map(
+                mesh=self_input_spec.mesh,
+                dim_map=out_dim_map,
+                sums=[],
+            )
+        else:  # output has new select_dim(s) at the first remove/select dim
             first_select_dim = min(first_remove_dim, first_select_dim)
             # all remove_dims and select_dims in dim_map cannot be Shard()
             any_shard = any(
@@ -1169,25 +1171,46 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                 continue
             else:
                 if index_input_spec.is_sharded():
-                    # the ``self`` must be Replicate() on the corresponding mesh dim
-                    mesh_dim = index_dim_map[0]
+                    # TODO: put this in a util. Find the sharding mesh dim(s).
+                    index_input_shard_mesh_dims = [
+                        i
+                        for i, placement in enumerate(index_input_spec.placements)
+                        if placement.is_shard()
+                    ]
+                    # the ``self`` cannot be Partial() (i.e. must be Replicate())
+                    # on ``index_input_shard_mesh_dims``
                     self_input_placements = self_input_spec.placements
-                    if not self_input_placements[mesh_dim].is_replicate():
+                    if not all(
+                        [
+                            self_input_placements[mesh_dim].is_replicate()
+                            for mesh_dim in index_input_shard_mesh_dims
+                        ]
+                    ):
                         continue
                     else:
-                        out_spec = DTensorSpec(
+                        # change out_dim_map
+                        insert_ndim = index_input_spec.ndim
+                        insert_dim_map = index_input_spec.dim_map
+                        out_dim_map = (
+                            out_dim_map[:first_select_dim]
+                            + insert_dim_map
+                            + out_dim_map[first_select_dim + insert_ndim :]
+                        )
+                        self_input_placements = self_input_spec.placements
+                        out_spec = DTensorSpec.from_dim_map(
                             mesh=self_input_spec.mesh,
-                            placements=tuple(
-                                self_input_placements[:mesh_dim]
-                                + (Shard(first_select_dim),)  # select_dim
-                                + self_input_placements[mesh_dim + 1 :]
-                            ),
+                            dim_map=out_dim_map,
+                            sums=[],
                         )
                 else:
-                    # TODO: fill in out spec
-                    out_spec = DTensorSpec.from_dim_map()
+                    out_spec = self_input_spec
 
         # find a new acceptable arg shardings
+        print(
+            f"add {acceptable_input_specs} to acceptable_input_specs_and_out_spec_dict"
+        )
+        # torch.distributed.breakpoint()
+        # torch.distributed.barrier()
         acceptable_input_specs_and_out_spec_dict[acceptable_input_specs] = out_spec
 
     # generate OpStrategy from input strategies and acceptable shardings
@@ -1215,6 +1238,9 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
                 redistribute_cost=[self_redistribute_cost] + indices_redistribute_costs,
             )
         )
+
+    if not op_strategy.strategies:
+        print(f"op schema={op_schema} produces no sharding")
 
     return op_strategy
 

@@ -525,7 +525,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @skipIfRocm
     @with_comms
-    def test_index(self):
+    def test_index_rename_for_test(self):
         meshes = [
             self.build_device_mesh(),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
