@@ -309,12 +309,10 @@ class BackwardHookFunction(Function):
 
     @staticmethod
     def forward(*args, **kwargs):
-        output = tuple(arg.view_as(arg) for arg in args)
-        return output
+        return args
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        ctx.save_for_backward(*inputs)
         return output
 
     @staticmethod
