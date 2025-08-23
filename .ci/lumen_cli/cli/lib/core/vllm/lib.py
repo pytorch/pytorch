@@ -63,12 +63,10 @@ def sample_vllm_test_library():
                         "--ignore=entrypoints/llm/test_collective_rpc.py",
                     ]
                 ),
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_lazy_outlines.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_generate.py ",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD && VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
-                "echo $VLLM_WORKER_MULTIPROC_METHOD",
-
+                "pytest -v -s entrypoints/llm/test_lazy_outlines.py",
+                "pytest -v -s entrypoints/llm/test_generate.py ",
+                "pytest -v -s entrypoints/llm/test_generate_multiple_loras.py",
+                "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
             ],
         },
         "vllm_regression_test": {
@@ -126,6 +124,16 @@ def sample_vllm_test_library():
             "id": "lora_test",
             "parallelism": 4,
             "steps": [
+                "echo 'list lora tests:'"
+                " ".join(
+                    [
+                        "pytest -q --collect-only lora",
+                        "--shard-id=$$BUILDKITE_PARALLEL_JOB",
+                        "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
+                        "--ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py",
+                    ]
+                ),
+                "echo 'done list lora tests:'",
                 " ".join(
                     [
                         "pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB",
