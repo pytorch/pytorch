@@ -10,6 +10,7 @@ import torch
 from . import config
 from .codecache import write_text
 from .kernel_inputs import KernelInputs  # noqa: TC001
+from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
@@ -135,9 +136,10 @@ class InductorChoices:
 
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-
         assert device_type is not None, "get_mm_configs requires a valid device type"
 
+        # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
+        template_choices = {}
         for template in templates:
             # Extract template_name from the template object
             template_name = template.uid
@@ -154,20 +156,29 @@ class InductorChoices:
             layout_val = layout
             # adjust the kernel inputs to the template-specific heuristic, if needed
             # default here is to just return the kernel_inputs as is
-            input_nodes_val = heuristic.adjust_kernel_inputs(
-                kernel_inputs, op_name
-            ).nodes()
+            inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
 
             # Get overrides for this specific template
             overrides = kwarg_overrides.get(template.uid, {})
 
-            extra_kwargs["layout"] = layout_val
-            extra_kwargs["input_nodes"] = input_nodes_val
-            for c in cs:
-                # Create choice using the new choice_or_None method
-                choice = template.choice_or_None(**{**c, **overrides}, **extra_kwargs)
-                if choice is not None:
-                    yield choice
+            # Create KernelTemplateChoice generator using the moved function
+            choice_gen = make_ktc_generator(
+                template=template,
+                cs=cs,
+                overrides=overrides,
+                extra_kwargs=extra_kwargs,
+                layout=layout_val,
+                inputs=inputs_val,
+            )
+
+            template_choices[template.uid] = choice_gen
+
+        # Second pass: Iterate through templates in original order and yield choices
+        for template in templates:
+            choice_gen = template_choices[template.uid]
+            for ktc in choice_gen:
+                if ktc.choice is not None:
+                    yield ktc.choice
 
     def triton_kernel_kwargs(
         self,
