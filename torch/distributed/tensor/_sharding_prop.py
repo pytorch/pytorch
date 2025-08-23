@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -199,6 +200,14 @@ class ShardingPropagator:
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         return self._propagate_tensor_meta_non_cached(op_schema)
+
+    def propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        if _are_we_tracing():
+            return self._propagate_tensor_meta_non_cached(op_schema)
+        else:
+            return self._propagate_tensor_meta(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,
