@@ -39,3 +39,15 @@ class TemplateConfigHeuristics:
         always the same, for all configs
         """
         return {}
+
+    def adjust_kernel_inputs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> KernelInputs:
+        """
+        Adjust kernel inputs for the given inputs/op for the template.
+
+        override this to adjust the kernel inputs e.g. (un)squeezing
+        """
+        return kernel_inputs

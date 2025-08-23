@@ -135,7 +135,11 @@ class InductorChoices:
         extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
         # We also return the layout and the input_nodes as part of the extra_kwargs
         extra_kwargs["layout"] = layout
-        extra_kwargs["input_nodes"] = kernel_inputs.nodes()
+        # adjust the kernel inputs to the template-specific heuristic, if needed
+        # default here is to just return the kernel_inputs as is
+        extra_kwargs["input_nodes"] = heuristic.adjust_kernel_inputs(
+            kernel_inputs, op_name
+        ).nodes()
         overrides = kwarg_overrides if kwarg_overrides is not None else {}
         for c in cs:
             # yield in a comprehensive package what the extra kwargs are
