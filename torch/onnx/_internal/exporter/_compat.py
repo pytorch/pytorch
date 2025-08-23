@@ -115,9 +115,11 @@ def export_compat(
             "the requested opset_version %s is a lower version than we have implementations for. "
             "Automatic version conversion will be performed, which may not be successful "
             "at converting to the requested version. If version conversion is unsuccessful, "
-            "the opset version of the exported model will be kept at %s",
+            "the opset version of the exported model will be kept at %s. "
+            "Please consider setting opset_version >=%s to leverage latest ONNX features",
             _constants.TORCHLIB_OPSET,
             opset_version,
+            _constants.TORCHLIB_OPSET,
             _constants.TORCHLIB_OPSET,
         )
         registry_opset_version = _constants.TORCHLIB_OPSET
