@@ -110,11 +110,15 @@ def export_compat(
     )
 
     if opset_version < _constants.TORCHLIB_OPSET:
-        logger.info(
-            "Setting torchlib registry to %s to use the torchlib opset version because "
-            "the requested opset_version %s is a lower version. Version conversion will be done after export",
+        logger.warning(
+            "Setting ONNX exporter to use operator set version %s because "
+            "the requested opset_version %s is a lower version than we have implementations for. "
+            "Automatic version conversion will be performed, which may not be successful "
+            "at converting to the requested version. If version conversion is unsuccessful, "
+            "the opset version of the exported model will be kept at %s",
             _constants.TORCHLIB_OPSET,
             opset_version,
+            _constants.TORCHLIB_OPSET,
         )
         registry_opset_version = _constants.TORCHLIB_OPSET
     else:
