@@ -7,7 +7,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from functools import reduce
-from itertools import chain, zip_longest
+from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
@@ -193,9 +193,7 @@ else:
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
-            invalid_dim_names = chain(
-                list(not_none(root_mesh.mesh_dim_names)),
-            )
+            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise RuntimeError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
