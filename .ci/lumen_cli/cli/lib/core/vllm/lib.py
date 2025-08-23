@@ -124,7 +124,7 @@ def sample_vllm_test_library():
             "id": "lora_test",
             "parallelism": 4,
             "steps": [
-                "echo 'list lora tests:'",
+                "echo '[checking] list sharded lora tests:'",
                 " ".join(
                     [
                         "pytest -q --collect-only lora",
@@ -133,7 +133,7 @@ def sample_vllm_test_library():
                         "--ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py",
                     ]
                 ),
-                "echo 'done list lora tests:'",
+                "echo '[checking] Done. list lora tests'",
                 " ".join(
                     [
                         "pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB",
