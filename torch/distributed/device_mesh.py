@@ -760,7 +760,7 @@ else:
             if not self._init_backend or not all(
                 layout in layouts_to_groups_map for layout in self._layouts
             ):
-                raise RuntimeError("DeviceMesh backend not initialized!")
+                raise RuntimeError("process groups not initialized!")
 
             if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(

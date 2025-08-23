@@ -257,14 +257,10 @@ class DeviceMeshTest(DTensorTestBase):
     def test_device_mesh_init_backend(self):
         mesh = DeviceMesh(self.device_type, [1], _init_backend=False)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "DeviceMesh backend not initialized!"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_group()
 
-        with self.assertRaisesRegex(
-            RuntimeError, "DeviceMesh backend not initialized!"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_coordinate()
 
     def test_fake_pg_device_mesh(self):
@@ -383,7 +379,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
         self.assertEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
-        mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d, _init_backend=False)
+        mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
@@ -856,6 +852,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
+        self.assertEqual(
+            flattened_dp_cp_mesh._layouts[0].layout_to_global_ranks(8),
+            [[0, 2, 4, 6], [1, 3, 5, 7]],
+        )
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
@@ -870,11 +870,27 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
+        self.assertEqual(
+            flattened_dp_tp_mesh._layouts[0].layout_to_global_ranks(8),
+            [[0, 1, 4, 5], [2, 3, 6, 7]],
+        )
 
         # Test flatten with a flattened mesh_dim_name
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Mesh dim name dp has been mapped to other backend",
+        ):
+            mesh_3d._flatten("dp")
+        with self.assertRaisesRegex(
+            AssertionError,
+            "dim_name dp_tp has been mapped to another layout",
+        ):
+            mesh_3d["cp", "tp"]._flatten("dp_tp")
 
     @with_comms(eager_init=True)
     def test_flatten_mesh_4d(self):
@@ -905,7 +921,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         )
         self.assertEqual(hsdp_mesh.mesh, expected_mesh_tensor)
         self.assertEqual(shard_cp_mesh.get_group(), mesh_3d["shard_cp"].get_group())
-        mesh_3d.get_group(mesh_dim="shard_cp")
         self.assertEqual(
             shard_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="shard_cp")
         )
