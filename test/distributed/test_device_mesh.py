@@ -824,12 +824,28 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_3d["cp", "dp"]
 
     @with_comms
+    def test_flatten_mesh_1d(self):
+        mesh_shape = (4,)
+        mesh_dim_names = ("default",)
+        mesh_1d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mesh_1d._flatten()
+
+    @with_comms
     def test_flatten_mesh_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "already exists for submesh of the DeviceMesh",
+        ):
+            mesh_3d._flatten("dp")
 
         # Test flatten contiguous dims
         dp_cp_mesh = mesh_3d["dp", "cp"]
@@ -847,6 +863,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Calling flatten again should not create a new pg.
         flattened_dp_cp_mesh_2 = dp_cp_mesh._flatten()
         self.assertEqual(flattened_dp_cp_mesh, flattened_dp_cp_mesh_2)
+        self.assertEqual(id(flattened_dp_cp_mesh), id(flattened_dp_cp_mesh_2))
         self.assertEqual(ref_pg_count, _world.group_count)
 
         # Test flatten non-contiguous dims
