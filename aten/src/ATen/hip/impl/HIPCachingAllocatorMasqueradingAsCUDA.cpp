@@ -1,11 +1,10 @@
-#include <c10/hip/HIPCachingAllocator.h>
-#include <ATen/hip/impl/HIPAllocatorMasqueradingAsCUDA.h>
+#include <c10/core/Allocator.h>
 #include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 
 namespace c10 { namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
-HIPCachingAllocator::HIPAllocator* get() {
+Allocator* get() {
   static HIPAllocatorMasqueradingAsCUDA allocator(HIPCachingAllocator::get());
   return &allocator;
 }
