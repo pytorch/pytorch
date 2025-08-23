@@ -1183,6 +1183,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
                 )
 
+                # TODO: mlazos remove this by returning buffer metadata from
+                # ir_to_evt_python code
+                for name, buf in (
+                    V.graph.name_to_buffer | V.graph.graph_inputs
+                ).items():
+                    if name not in name_to_buffer:
+                        name_to_buffer[name] = buf  # type: ignore[assignment]
+
                 D_output_name = var_name_to_buffer_name["D"]
                 D_output_buffer = name_to_buffer[D_output_name]
                 Y = D_output_buffer  # type: ignore[assignment]
