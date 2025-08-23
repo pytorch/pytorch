@@ -1,3 +1,4 @@
+#include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
@@ -1405,6 +1406,57 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     t->zero_();
+  });
+}
+
+// ABI stable parallel utilities implementations
+void aoti_torch_lazy_init_num_threads() {
+  at::internal::lazy_init_num_threads();
+}
+
+bool aoti_torch_in_parallel_region() {
+  return at::in_parallel_region();
+}
+
+int32_t aoti_torch_get_num_threads() {
+  return static_cast<int32_t>(at::get_num_threads());
+}
+
+AOTITorchError aoti_torch_create_thread_id_guard(
+    int32_t thread_id,
+    ThreadIdGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::internal::ThreadIdGuard* guard =
+        new at::internal::ThreadIdGuard(thread_id);
+    *ret_guard = reinterpret_cast<ThreadIdGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::internal::ThreadIdGuard* tid_guard =
+        reinterpret_cast<at::internal::ThreadIdGuard*>(guard);
+    delete tid_guard;
+  });
+}
+
+AOTITorchError aoti_torch_invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    aoti_invoke_parallel_callback_t callback,
+    void* user_data) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // Create a lambda that calls the callback with user data
+    // This matches the original parallel_for implementation which sets
+    // ParallelGuard in the callback
+    auto f = [callback, user_data](int64_t begin, int64_t end) {
+      c10::ParallelGuard guard(true);
+      callback(begin, end, user_data);
+    };
+
+    // Call the original at::internal::invoke_parallel with this lambda
+    at::internal::invoke_parallel(begin, end, grain_size, f);
   });
 }
 

@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+#include <c10/util/Exception.h>
+#include <c10/util/ParallelGuard.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
 
@@ -161,6 +164,61 @@ inline Tensor zero_(Tensor& self) {
   TORCH_ERROR_CODE_CHECK(
       aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
   return to<Tensor>(stack[0]);
+}
+
+// Helper trampoline function template for parallel_for - must be static to get
+// function pointer
+template <typename F>
+static void parallel_for_trampoline(
+    int64_t begin,
+    int64_t end,
+    void* user_data) {
+  const F* f = static_cast<const F*>(user_data);
+  (*f)(begin, end); // This call is inlined by the compiler!
+}
+
+// ABI stable version of parallel_for with identical semantics to
+// at::parallel_for
+template <class F>
+inline void parallel_for(
+    const int64_t begin,
+    const int64_t end,
+    const int64_t grain_size,
+    const F& f) {
+  STD_TORCH_CHECK(grain_size >= 0);
+  if (begin >= end) {
+    return;
+  }
+
+// FIXME: is doing ifdef ok?
+#ifdef INTRA_OP_PARALLEL
+  aoti_torch_lazy_init_num_threads();
+  const auto numiter = end - begin;
+  const bool use_parallel =
+      (numiter > grain_size && numiter > 1 &&
+       !aoti_torch_in_parallel_region() && aoti_torch_get_num_threads() > 1);
+  if (!use_parallel) {
+    ThreadIdGuardHandle tid_guard;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_create_thread_id_guard(0, &tid_guard));
+    c10::ParallelGuard guard(true);
+    f(begin, end);
+    TORCH_ERROR_CODE_CHECK(aoti_torch_delete_thread_id_guard(tid_guard));
+    return;
+  }
+
+  TORCH_ERROR_CODE_CHECK(aoti_torch_invoke_parallel(
+      begin,
+      end,
+      grain_size,
+      parallel_for_trampoline<F>,
+      const_cast<void*>(static_cast<const void*>(&f))));
+#else
+  ThreadIdGuardHandle tid_guard;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_create_thread_id_guard(0, &tid_guard));
+  c10::ParallelGuard guard(true);
+  f(begin, end);
+  TORCH_ERROR_CODE_CHECK(aoti_torch_delete_thread_id_guard(tid_guard));
+#endif
 }
 
 } // namespace torch::stable

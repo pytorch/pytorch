@@ -539,3 +539,54 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("test_get_current_device_index", &boxed_test_get_current_device_index);
 }
 #endif // LAE_USE_CUDA
+
+
+Tensor test_parallel_for(int64_t size, int64_t grain_size) {
+  // Create a tensor to work on
+  AtenTensorHandle tensor_handle;
+  int64_t sizes[] = {size};
+  int64_t strides[] = {1};
+
+  aoti_torch_empty_strided(
+      1,
+      sizes,
+      strides,
+      aoti_torch_dtype_int64(),
+      aoti_torch_device_type_cpu(),
+      0,
+      &tensor_handle);
+
+  Tensor tensor(tensor_handle);
+  int64_t* data_ptr = reinterpret_cast<int64_t*>(tensor.data_ptr());
+
+  // Initialize all elements to 0
+  for (int64_t i = 0; i < size; i++) {
+    data_ptr[i] = 0;
+  }
+
+  // Use parallel_for to fill each element with its index
+  torch::stable::parallel_for(
+      0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
+        for (int64_t i = begin; i < end; i++) {
+          data_ptr[i] = i;
+        }
+      });
+
+  return tensor;
+}
+
+void boxed_test_parallel_for(
+    StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = test_parallel_for(to<int64_t>(stack[0]), to<int64_t>(stack[1]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("test_parallel_for(int size, int grain_size) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("test_parallel_for", &boxed_test_parallel_for);
+}

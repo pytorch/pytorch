@@ -400,6 +400,35 @@ aoti_torch_cpu__wrapped_quantized_linear_prepacked(
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 
+// ABI stable parallel utilities
+AOTI_TORCH_EXPORT void aoti_torch_lazy_init_num_threads();
+AOTI_TORCH_EXPORT bool aoti_torch_in_parallel_region();
+AOTI_TORCH_EXPORT int32_t aoti_torch_get_num_threads();
+
+// ABI stable ThreadIdGuard handle - opaque pointer to avoid exposing C++ class
+struct ThreadIdGuardOpaque;
+using ThreadIdGuardHandle = ThreadIdGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_thread_id_guard(
+    int32_t thread_id,
+    ThreadIdGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard);
+
+// ABI stable invoke_parallel function
+typedef void (*aoti_invoke_parallel_callback_t)(
+    int64_t begin,
+    int64_t end,
+    void* user_data);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    aoti_invoke_parallel_callback_t callback,
+    void* user_data);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);
 
