@@ -107,9 +107,9 @@ class InductorChoices:
         self,
         kernel_inputs: KernelInputs,
         layout: Any,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        templates: list[Union[KernelTemplate, ExternKernelChoice]],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, Any]] = None,
+        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> Generator[ChoiceCaller, None, None]:
         """
         Get generator of ChoiceCallers for MM templates using template-specific heuristics.
@@ -117,46 +117,57 @@ class InductorChoices:
         Args:
             kernel_inputs: MMKernelInputs containing input tensor nodes and matrix indices
             layout: Output layout
-            template: Template object (KernelTemplate or ExternKernelChoice)
+            templates: List of template objects (KernelTemplate or ExternKernelChoice)
             op_name: Operation name (e.g., "bmm", "baddbmm", "addmm", "mm_plus_mm")
-            kwarg_overrides: Optional dict of kwargs to override for the template heuristic
-                             these only override the per config kwargs, not the extra kwargs
+            kwarg_overrides: Optional dict of kwargs to override for each template heuristic,
+                             indexed by template.uid. These only override the per config kwargs, not the extra kwargs
         Yields:
-            ChoiceCaller objects from the template
+            ChoiceCaller objects from the templates
         """
         # TODO(coconutruben): once this supports more than just GEMMs, we need to pass in
         # the max-autotune bool, rather than inferring it here
         max_autotune = config.max_autotune or config.max_autotune_gemm
+        if kwarg_overrides is None:
+            kwarg_overrides = {}
         input_tensors = kernel_inputs.nodes()
         if len(input_tensors) < 2:
             raise ValueError(f"Need at least 2 input tensors, got {len(input_tensors)}")
 
-        # Extract template_name from the template object
-        template_name = template.uid
-
         # Extract device_type from kernel_inputs
         device_type = kernel_inputs.device_type
-        assert device_type is not None, "get_mm_configs requires a valid device type"
-        # Get the appropriate template-specific heuristic
-        heuristic = get_template_heuristic(template_name, device_type, op_name)
 
-        cs = heuristic.get_template_configs(
-            kernel_inputs, layout, op_name, max_autotune
-        )
-        extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
-        # We also return the layout and the input_nodes as part of the extra_kwargs
-        extra_kwargs["layout"] = layout
-        # adjust the kernel inputs to the template-specific heuristic, if needed
-        # default here is to just return the kernel_inputs as is
-        extra_kwargs["input_nodes"] = heuristic.adjust_kernel_inputs(
-            kernel_inputs, op_name
-        ).nodes()
-        overrides = kwarg_overrides if kwarg_overrides is not None else {}
-        for c in cs:
-            # Create choice using the new choice_or_None method
-            choice = template.choice_or_None(**{**c, **overrides}, **extra_kwargs)
-            if choice is not None:
-                yield choice
+        assert device_type is not None, "get_mm_configs requires a valid device type"
+
+        for template in templates:
+            # Extract template_name from the template object
+            template_name = template.uid
+
+            # Get the appropriate template-specific heuristic
+            heuristic = get_template_heuristic(template_name, device_type, op_name)
+
+            cs = heuristic.get_template_configs(
+                kernel_inputs, layout, op_name, max_autotune
+            )
+            extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, layout, op_name)
+
+            # Extract layout and input_nodes from extra_kwargs to pass them explicitly
+            layout_val = layout
+            # adjust the kernel inputs to the template-specific heuristic, if needed
+            # default here is to just return the kernel_inputs as is
+            input_nodes_val = heuristic.adjust_kernel_inputs(
+                kernel_inputs, op_name
+            ).nodes()
+
+            # Get overrides for this specific template
+            overrides = kwarg_overrides.get(template.uid, {})
+
+            extra_kwargs["layout"] = layout_val
+            extra_kwargs["input_nodes"] = input_nodes_val
+            for c in cs:
+                # Create choice using the new choice_or_None method
+                choice = template.choice_or_None(**{**c, **overrides}, **extra_kwargs)
+                if choice is not None:
+                    yield choice
 
     def triton_kernel_kwargs(
         self,

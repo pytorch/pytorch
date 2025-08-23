@@ -158,7 +158,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     if use_aten_gemm_kernels():
         choices += list(
             V.choices.get_mm_configs(
-                kernel_inputs, layout1, aten_mm_plus_mm, "mm_plus_mm"
+                kernel_inputs, layout1, [aten_mm_plus_mm], "mm_plus_mm"
             )
         )
 
@@ -166,7 +166,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         # Get template choices using the new unified function
         choices += list(
             V.choices.get_mm_configs(
-                kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"
+                kernel_inputs, layout1, [mm_plus_mm_template], "mm_plus_mm"
             )
         )
         # TODO: Apply BLOCK_K constraint specific to mm_plus_mm
