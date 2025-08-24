@@ -145,7 +145,7 @@ def _assert_module_states(
         for param_name, param in model.named_parameters()
     ]
     named_module_states += [
-        (buffer_name, buffer.detach().cpu())
+        (buffer_name, buffer.detach().cpu())  # type: ignore[misc]
         for buffer_name, buffer in model.named_buffers()
     ]
     world_size = dist.get_world_size(process_group)
