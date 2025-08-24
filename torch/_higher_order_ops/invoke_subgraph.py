@@ -45,7 +45,6 @@ invoke_subgraph_counter = 0
 @dataclass
 class OutputMetadata:
     num_fw_outs: Optional[int] = None
-    indexes_with_none: set[int] = field(default_factory=set)
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
 
@@ -259,9 +258,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
 
             output_metadata.num_fw_outs = num_fw_outs
             for idx, fw_out in enumerate(fw_outs):
-                if fw_out is None:
-                    output_metadata.indexes_with_none.add(idx)
-                elif isinstance(fw_out, torch.SymInt):
+                if isinstance(fw_out, torch.SymInt):
                     output_metadata.indexes_with_symint.add(idx)
                 elif not fw_out.requires_grad:
                     output_metadata.indexes_with_no_grad.add(idx)
@@ -334,9 +331,7 @@ def get_output_metadata(subgraph, *operands):
 
             output_metadata.num_fw_outs = num_fw_outs
             for idx, fw_out in enumerate(fw_outs):
-                if fw_out is None:
-                    output_metadata.indexes_with_none.add(idx)
-                elif isinstance(fw_out, torch.SymInt):
+                if isinstance(fw_out, torch.SymInt):
                     output_metadata.indexes_with_symint.add(idx)
                 elif not fw_out.requires_grad:
                     output_metadata.indexes_with_no_grad.add(idx)
@@ -433,11 +428,9 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 *operands,
             )
 
-        # Check that None is at expected indexes.
+        # Check that int (coming from symint) is at expected indexes.
         for idx, o in enumerate(out):
-            if o is None:
-                assert idx in output_metadata.indexes_with_none
-            elif isinstance(o, int):
+            if isinstance(o, int):
                 assert idx in output_metadata.indexes_with_symint
 
         return out
@@ -459,9 +452,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                assert idx in output_metadata.indexes_with_none.union(
-                    output_metadata.indexes_with_symint
-                )
+                assert idx in output_metadata.indexes_with_symint
             elif idx in output_metadata.indexes_with_no_grad:
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
