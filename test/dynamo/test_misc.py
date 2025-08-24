@@ -6391,6 +6391,19 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
 
+    def test_inference_mode_param(self):
+        def fn(x):
+            p = torch.nn.Parameter(x, requires_grad=False)
+            return x * p
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with torch.inference_mode():
+            x = torch.rand(4)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
     def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
