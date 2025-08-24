@@ -2,8 +2,26 @@
 
 #ifdef USE_ROCM
 
+// Expect to be included after headers of at::zeros_like and at::empty_like
+
+#include <aotriton/config.h>
 #include <aotriton/dtypes.h>
 #include <aotriton/util.h>
+
+#define AOTRITON_VERSION_INT(x, y) (x * 100 + y)
+#define AOTRITON_VERSION_CURRENT (AOTRITON_VERSION_MAJOR * 100 + AOTRITON_VERSION_MINOR)
+
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
+#define AOTRITON_ALWAYS_V3_API 1
+#else
+#define AOTRITON_ALWAYS_V3_API 0
+#endif
+
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 10)
+#define AOTRITON_V3_API 1
+#else
+#define AOTRITON_V3_API 0
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
@@ -110,6 +128,54 @@ inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
   return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
                                  aotriton::DType::kInt32);
 }
+
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
+
+template<int kRank, bool kRequireZeros>
+struct LazyTensorContext {
+  at::Tensor like_tensor;
+  at::Tensor tensor;
+  std::string_view tensor_name;
+
+  static aotriton::TensorView<kRank> acquire(void* cookie) {
+    auto ctx = (LazyTensorContext*)cookie;
+    if (!ctx->tensor.defined()) {
+      auto q = ctx->like_tensor;
+      if constexpr (kRequireZeros) {
+        ctx->tensor = at::zeros_like(q.shape(),
+                                     q.options().dtypes(at::kFloat));
+      } else {
+        ctx->tensor = at::empty_like(like_tensor);
+      }
+    }
+    return mk_aotensor<kRank>(ctx->tensor, ctx->tensor_name);
+  }
+
+  static void dispose(void* cookie) {
+    auto ctx = (LazyTensorContext*)cookie;
+    delete ctx;
+  }
+};
+
+template<int kRank, bool kRequireZeros>
+aotriton::LazyTensor<kRank> mklazy_common(const at::Tensor& q, std::string_view tensor_name)
+{
+  auto cookie = new LazyTensorContext<kRank, kRequireZeros>();
+  cookie->like_tensor = q;
+  cookie->tensor_name = tensor_name;
+  return aotriton::LazyTensor<kRank> {
+    .cookie = cookie,
+    .acquire = &LTH::acquire,
+    .dispose = &LTH::dispose
+  };
+}
+
+template<int kRank>
+using mklazy_empty_like = mklazy_common<kRank, false>;
+
+// Note: this will not keep the original strides
+template<int kRank>
+using mklazy_fp32zeros = mklazy_common<kRank, true>;
 
 } // namespace aotriton_adapter
 
