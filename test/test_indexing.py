@@ -1870,7 +1870,7 @@ class TestIndexing(TestCase):
                     self.assertEqual(dest, expected)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160993
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
         # and the behavior is undefined
