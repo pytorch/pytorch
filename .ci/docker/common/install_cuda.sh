@@ -65,7 +65,7 @@ function install_nvshmem {
   # This pattern is a lie as it is not consistent across versions, for 3.3.9 it was cuda_ver-arch-nvshhem-ver
   filename="libnvshmem-linux-${arch_path}-${nvshmem_version}_cuda${cuda_major_version}-archive"
   suffix=".tar.xz"
-  url="https://developer.download.nvidia.com/compute/nvshmem/redist/libnvshmem/${dl_arch}/${nvshmem_version}/${filename}${suffix}"
+  url="https://developer.download.nvidia.com/compute/nvshmem/redist/libnvshmem/linux-${arch_path}/${filename}${suffix}"
 
   # download, unpack, install
   wget -q "${url}"
