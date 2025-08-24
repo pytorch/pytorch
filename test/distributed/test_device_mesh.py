@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -60,6 +61,13 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
             self.assertEqual(mesh_group, default_group)
+
+
+def get_mesh_pg_names(mesh: DeviceMesh, idx: Optional[int] = None) -> list[str]:
+    idx = idx or len(mesh._layouts)
+    root_mesh = _mesh_resources.get_root_mesh(mesh)
+    layouts_to_groups_map = _mesh_resources.layouts_to_groups.get(root_mesh, {})
+    return [layouts_to_groups_map[l] for l in mesh._layouts[:idx]]
 
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
@@ -276,7 +284,9 @@ class DeviceMeshTest(DTensorTestBase):
         mesh_pg = ref_global_mesh.get_group()
         global_mesh = DeviceMesh.from_group(mesh_pg, self.device_type)
         self.assertEqual(ref_global_mesh, global_mesh)
-        self.assertEqual(ref_global_mesh._dim_group_names, global_mesh._dim_group_names)
+        self.assertEqual(
+            get_mesh_pg_names(ref_global_mesh), get_mesh_pg_names(global_mesh)
+        )
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
@@ -285,7 +295,9 @@ class DeviceMeshTest(DTensorTestBase):
             mesh_pg, self.device_type, mesh=torch.arange(self.world_size)
         )
         self.assertEqual(ref_global_mesh, global_mesh)
-        self.assertEqual(ref_global_mesh._dim_group_names, global_mesh._dim_group_names)
+        self.assertEqual(
+            get_mesh_pg_names(ref_global_mesh), get_mesh_pg_names(global_mesh)
+        )
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
@@ -421,7 +433,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
         # ep_mesh is considered different from mesh_2d["TP"]
-        self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
+        self.assertEqual(mesh_2d["TP"]._layouts, ep_mesh._layouts)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
         self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
@@ -435,7 +447,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
             another_mesh_1 if self.rank < self.world_size // 2 else another_mesh_2
         )
         # another_mesh is considered the same as ep_mesh
-        self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
+        self.assertEqual(ep_mesh._layouts, another_mesh._layouts)
         self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
         self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
@@ -464,19 +476,19 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
-        ref_mesh_dp_dim_group_names = ref_mesh._dim_group_names[:2]
-        self.assertEqual(ref_mesh_dp_dim_group_names, dp_mesh._dim_group_names[:2])
+        ref_mesh_dp_dim_group_names = get_mesh_pg_names(ref_mesh, 2)
+        self.assertEqual(ref_mesh_dp_dim_group_names, get_mesh_pg_names(dp_mesh, 2))
         # Cannot check directly for mesh equality since parent meshes are not
         # the same since the ref's parent mesh is 3D
         self.assertEqual(dp_mesh["dp_replicate"].mesh, ref_mesh["dp_replicate"].mesh)
         self.assertEqual(
-            dp_mesh["dp_replicate"]._dim_group_names,
-            ref_mesh["dp_replicate"]._dim_group_names,
+            get_mesh_pg_names(dp_mesh["dp_replicate"]),
+            get_mesh_pg_names(ref_mesh["dp_replicate"]),
         )
         self.assertEqual(dp_mesh["dp_shard"].mesh, ref_mesh["dp_shard"].mesh)
         self.assertEqual(
-            dp_mesh["dp_shard"]._dim_group_names,
-            ref_mesh["dp_shard"]._dim_group_names,
+            get_mesh_pg_names(dp_mesh["dp_shard"]),
+            get_mesh_pg_names(ref_mesh["dp_shard"]),
         )
 
     @with_comms()
@@ -521,7 +533,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
-        # self.assertEqual(ref_mesh._dim_group_names, dp_mesh._dim_group_names)
         for mesh_dim_group, ref_mesh_dim_group in zip(
             dp_mesh.get_all_groups(), ref_mesh.get_all_groups()
         ):
@@ -818,11 +829,14 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Check on the current dp_local_rank, whether the cp mesh tensor is the same.
         self.assertEqual(dp_cp_mesh.mesh[dp_local_rank], cp_mesh.mesh)
 
-        with self.assertRaisesRegex(
-            KeyError,
-            "Invalid mesh_dim_names",
-        ):
-            mesh_3d["cp", "dp"]
+        # Support transpose slicing.
+        cp_dp_mesh = mesh_3d["cp", "dp"]
+        expected_mesh_tensor = (
+            torch.tensor([[0, 4], [1, 5]], dtype=torch.int)
+            if self.rank in (0, 1, 4, 5)
+            else torch.tensor([[2, 6], [3, 7]], dtype=torch.int)
+        )
+        self.assertEqual(cp_dp_mesh.mesh, expected_mesh_tensor)
 
     @with_comms
     def test_flatten_mesh_3d(self):
@@ -839,10 +853,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
-            "dp_cp"
-        ]
-        self.assertEqual(flatten_mesh_root_dims, (0, 1))
+        self.assertEqual(
+            flattened_dp_cp_mesh._layouts[0].layout_to_global_ranks(8),
+            [[0, 2, 4, 6], [1, 3, 5, 7]],
+        )
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
@@ -857,15 +871,27 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
-            "dp_tp"
-        ]
-        self.assertEqual(flatten_mesh_root_dims, (0, 2))
+        self.assertEqual(
+            flattened_dp_tp_mesh._layouts[0].layout_to_global_ranks(8),
+            [[0, 1, 4, 5], [2, 3, 6, 7]],
+        )
 
         # Test flatten with a flattened mesh_dim_name
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+        # Test flatten into an existing mesh_dim_name inside the mesh
+        with self.assertRaisesRegex(
+            ValueError,
+            "Mesh_dim_name dp has already mapped to layout",
+        ):
+            mesh_3d._flatten("dp")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Mesh_dim_name dp_tp has already mapped to layout",
+        ):
+            mesh_3d["cp", "tp"]._flatten("dp_tp")
 
     @with_comms(eager_init=True)
     def test_flatten_mesh_4d(self):
@@ -1254,7 +1280,6 @@ class CuTeLayoutTest(TestCase):
         # ((3,2),(2,1)) -> (6,1)
         l = _Layout(((3, 2), (2, 1)))
         l = l.coalesce()
-        print(l.sizes_and_strides)
         self.assertEqual(l.sizes_and_strides, ((6, 1),))
 
         # ((2,12),(3,4),(4,1)) -> (24,1)

@@ -175,6 +175,13 @@ class TestFakePG(TestCase):
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_fsdp_tp_fake_e2e(self):
+        # Today DeviceMesh do bookkeeping in a global variable which is thread local,
+        # but autograd will create more extra threads so that the DeviceMesh on the side thread
+        # will see empty bookkeeping info. This usually is not a problem for process group because
+        # we use multi-process, but for fake PG, we use single process and thread for test, we need
+        # to force autograd to follow that as well. This is a hacky way indeed, but before we figure
+        # out a better design for MeshEnv, we need this to unblock the test.
+        torch.autograd.set_multithreading_enabled(False)
         world_size = 4
         tp_size = 2
 
@@ -218,6 +225,7 @@ class TestFakePG(TestCase):
                 loss = x.sum()
                 loss.backward()
                 optim.step()
+        torch.autograd.set_multithreading_enabled(True)
 
 
 if __name__ == "__main__":
