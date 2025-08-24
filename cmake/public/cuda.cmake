@@ -152,9 +152,9 @@ endif()
 # end-users should never have this flag set.
 
 # cuda
-add_library(caffe2::cuda INTERFACE IMPORTED)
+add_library(torch::cuda INTERFACE IMPORTED)
 set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
+    TARGET torch::cuda PROPERTY INTERFACE_LINK_LIBRARIES
     CUDA::cuda_driver)
 
 # cudart
@@ -171,18 +171,18 @@ endif()
 
 
 # cublas
-add_library(caffe2::cublas INTERFACE IMPORTED)
+add_library(torch::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         # NOTE: cublas is always linked dynamically
         CUDA::cublas CUDA::cublasLt)
     set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cudart_static rt)
 else()
     set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cublas CUDA::cublasLt)
 endif()
 
@@ -268,34 +268,34 @@ else()
 endif()
 
 # curand
-add_library(caffe2::curand INTERFACE IMPORTED)
+add_library(torch::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::curand PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::curand_static)
 else()
     set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::curand PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::curand)
 endif()
 
 # cufft
-add_library(caffe2::cufft INTERFACE IMPORTED)
+add_library(torch::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cufft_static_nocallback)
 else()
     set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         CUDA::cufft)
 endif()
 
 # nvrtc
-add_library(caffe2::nvrtc INTERFACE IMPORTED)
+add_library(torch::nvrtc INTERFACE IMPORTED)
 set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc caffe2::cuda)
+    TARGET torch::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+    CUDA::nvrtc torch::cuda)
 
 # Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
