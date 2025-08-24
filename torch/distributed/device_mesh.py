@@ -10,6 +10,7 @@ from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
+from torch._prims_common import Tensor
 from torch.distributed import is_available
 from torch.distributed._cute_layout import _Layout, init_layouts_from_mesh
 from torch.utils._typing_utils import not_none
@@ -265,24 +266,54 @@ else:
                     self._setup_world_group_and_device()
                     if backend_override is None:
                         backend_override = ((None, None),) * self.mesh.ndim
-                    for i, layout in enumerate(self._layouts):
-                        backend_override_ = backend_override[i]
-                        global_override = _mesh_resources.mesh_dim_group_options.get(
-                            i, (None, None)
-                        )
-                        if backend_override_ == (None, None):
-                            backend_override_ = global_override
-                        elif global_override != (None, None):
-                            raise RuntimeError(
-                                f"Dimension {i} present both in the backend_override argument "
-                                "and via _mesh_resources._set_mesh_dim_group_options"
+                    if torch.equal(self.mesh, torch.arange(get_world_size(), device=self.mesh.device, dtype=self.mesh.dtype)):
+                        for i, layout in enumerate(self._layouts):
+                            backend_override_ = backend_override[i]
+                            global_override = _mesh_resources.mesh_dim_group_options.get(
+                                i, (None, None)
                             )
-                        self._maybe_create_backend(
-                            layout,
-                            i,
-                            self.mesh_dim_names[i] if self.mesh_dim_names else None,
-                            backend_override=backend_override_,
-                        )
+                            if backend_override_ == (None, None):
+                                backend_override_ = global_override
+                            elif global_override != (None, None):
+                                raise RuntimeError(
+                                    f"Dimension {i} present both in the backend_override argument "
+                                    "and via _mesh_resources._set_mesh_dim_group_options"
+                                )
+                            self._maybe_create_backend(
+                                layout,
+                                i,
+                                self.mesh_dim_names[i] if self.mesh_dim_names else None,
+                                backend_override=backend_override_,
+                            )
+                    else:
+                        # For BC, DeviceMesh takes in a random ArrayList as mesh, for example [0,1,3]
+                        # or [[0], [3]] as tested in test/distributed/tensor/test_init.py so we need
+                        # need to keep the old logic which is not compatible with layout semantics.
+                        # create sub pgs base on the mesh argument specified
+                        for dim in range(self.mesh.ndim):
+                            # swap the current dim to the last dim
+                            # then reshape to flatten out other dims
+                            array_mesh = self.mesh.swapdims(-1, dim).reshape(
+                                -1, self.mesh.size(dim)
+                            )
+                            backend_override_ = backend_override[dim]
+                            global_override = _mesh_resources.mesh_dim_group_options.get(
+                                dim, (None, None)
+                            )
+                            if backend_override_ == (None, None):
+                                backend_override_ = global_override
+                            elif global_override != (None, None):
+                                raise RuntimeError(
+                                    f"Dimension {dim} present both in the backend_override argument "
+                                    "and via _mesh_resources._set_mesh_dim_group_options"
+                                )
+                            self._maybe_create_backend(
+                                self._layouts[dim],
+                                dim,
+                                self.mesh_dim_names[dim] if self.mesh_dim_names else None,
+                                backend_override=backend_override_,
+                                array_mesh=array_mesh,
+                            )
 
                 if is_initialized() and get_backend() == "threaded":
                     self._thread_id = threading.get_ident()
@@ -303,6 +334,7 @@ else:
                 None,
                 None,
             ),
+            array_mesh: Optional[torch.Tensor] = None,
             group: Optional[ProcessGroup] = None,
         ) -> None:
             """
@@ -393,7 +425,7 @@ else:
                 )
             else:
                 # Generate the pg_ranks_by_dim for pg_creation from the layout.
-                pg_ranks_by_dim = layout.layout_to_global_ranks(get_world_size())
+                pg_ranks_by_dim = array_mesh if array_mesh is not None else layout.layout_to_global_ranks(get_world_size())
                 backend, pg_options = backend_override
 
                 # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
@@ -445,8 +477,9 @@ else:
                             assert group is None
                             group = maybe_group
 
-            assert group is not None
-            layouts_to_groups_map[layout] = group.group_name
+            assert group is not None or array_mesh is not None
+            if group is not None:
+                layouts_to_groups_map[layout] = group.group_name
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
@@ -614,7 +647,7 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        self._layouts,
+                        self._flatten_mesh_list,
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
@@ -630,7 +663,7 @@ else:
                 return True
             else:
                 return (
-                    self._layouts == other._layouts
+                    self._flatten_mesh_list == other._flatten_mesh_list
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
@@ -866,7 +899,17 @@ else:
                         f"Invalid mesh {mesh_list} for ProcessGroup with ranks {group_ranks}"
                     )
                 mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int)
-                group = [group]
+                # For BC, DeviceMesh takes in a random ArrayList as mesh, we need to handle that case as well.
+                device_mesh = DeviceMesh(
+                    device_type,
+                    mesh,
+                    mesh_dim_names=mesh_dim_names,
+                    _init_backend=False,
+                )
+                name = mesh_dim_names[0] if mesh_dim_names else None
+                device_mesh._maybe_create_backend(_Layout(((mesh.size(0), mesh.stride(0)),)), 0, name, group=group)
+                device_mesh._init_backend = True
+                return device_mesh
 
             # nD scenario
             if len(group) == 0:
