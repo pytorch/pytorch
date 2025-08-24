@@ -47,6 +47,11 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+# Graph execution tracking for debugging
+GRAPH_EXECUTION_ORDER: list[dict[str, object]] = []
+RECORD_GRAPH_EXECUTION: bool = False
+GRAPH_COMPILE_IDS: dict[int, Optional[str]] = {}
+
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
@@ -800,6 +805,37 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
         )
     except Exception:
         log.debug("Failed to log inductor_runtime_and_tensor_meta", exc_info=True)
+
+
+def log_graph_execution() -> None:
+    """Emit a structured artifact with the graph execution order."""
+    if not GRAPH_EXECUTION_ORDER:
+        return
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "graph_execution",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"graph_execution_order": GRAPH_EXECUTION_ORDER},
+        )
+    except Exception:
+        log.debug("Failed to log graph_execution", exc_info=True)
+
+
+@contextlib.contextmanager
+def record_and_log_graph_execution_order() -> Iterator[None]:
+    """Record graph execution order and log it once on exit."""
+    global RECORD_GRAPH_EXECUTION
+    GRAPH_EXECUTION_ORDER.clear()
+    RECORD_GRAPH_EXECUTION = True
+    try:
+        yield
+    finally:
+        log_graph_execution()
+        RECORD_GRAPH_EXECUTION = False
+        GRAPH_EXECUTION_ORDER.clear()
 
 
 @dataclasses.dataclass
