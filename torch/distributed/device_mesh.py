@@ -10,7 +10,6 @@ from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
 
 import torch
-from torch._prims_common import Tensor
 from torch.distributed import is_available
 from torch.distributed._cute_layout import _Layout, init_layouts_from_mesh
 from torch.utils._typing_utils import not_none
@@ -266,11 +265,20 @@ else:
                     self._setup_world_group_and_device()
                     if backend_override is None:
                         backend_override = ((None, None),) * self.mesh.ndim
-                    if torch.equal(self.mesh, torch.arange(get_world_size(), device=self.mesh.device, dtype=self.mesh.dtype)):
+                    if torch.equal(
+                        self.mesh,
+                        torch.arange(
+                            get_world_size(),
+                            device=self.mesh.device,
+                            dtype=self.mesh.dtype,
+                        ),
+                    ):
                         for i, layout in enumerate(self._layouts):
                             backend_override_ = backend_override[i]
-                            global_override = _mesh_resources.mesh_dim_group_options.get(
-                                i, (None, None)
+                            global_override = (
+                                _mesh_resources.mesh_dim_group_options.get(
+                                    i, (None, None)
+                                )
                             )
                             if backend_override_ == (None, None):
                                 backend_override_ = global_override
@@ -297,8 +305,10 @@ else:
                                 -1, self.mesh.size(dim)
                             )
                             backend_override_ = backend_override[dim]
-                            global_override = _mesh_resources.mesh_dim_group_options.get(
-                                dim, (None, None)
+                            global_override = (
+                                _mesh_resources.mesh_dim_group_options.get(
+                                    dim, (None, None)
+                                )
                             )
                             if backend_override_ == (None, None):
                                 backend_override_ = global_override
@@ -310,7 +320,9 @@ else:
                             self._maybe_create_backend(
                                 self._layouts[dim],
                                 dim,
-                                self.mesh_dim_names[dim] if self.mesh_dim_names else None,
+                                self.mesh_dim_names[dim]
+                                if self.mesh_dim_names
+                                else None,
                                 backend_override=backend_override_,
                                 array_mesh=array_mesh,
                             )
@@ -425,7 +437,11 @@ else:
                 )
             else:
                 # Generate the pg_ranks_by_dim for pg_creation from the layout.
-                pg_ranks_by_dim = array_mesh if array_mesh is not None else layout.layout_to_global_ranks(get_world_size())
+                pg_ranks_by_dim = (
+                    array_mesh
+                    if array_mesh is not None
+                    else layout.layout_to_global_ranks(get_world_size())
+                )
                 backend, pg_options = backend_override
 
                 # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
@@ -455,7 +471,7 @@ else:
                     group = split_group(
                         parent_pg=default_group,
                         pg_options=pg_options,
-                        split_ranks=pg_ranks_by_dim,
+                        split_ranks=pg_ranks_by_dim,  # type: ignore[arg-type]
                         group_desc=group_desc,
                     )
                 else:
@@ -907,7 +923,9 @@ else:
                     _init_backend=False,
                 )
                 name = mesh_dim_names[0] if mesh_dim_names else None
-                device_mesh._maybe_create_backend(_Layout(((mesh.size(0), mesh.stride(0)),)), 0, name, group=group)
+                device_mesh._maybe_create_backend(
+                    _Layout(((mesh.size(0), mesh.stride(0)),)), 0, name, group=group
+                )
                 device_mesh._init_backend = True
                 return device_mesh
 

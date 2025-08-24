@@ -82,7 +82,9 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
             mesh_fsdp_ep, {}
         )
         for layout in mesh_fsdp_ep._layouts:
-            layouts_to_groups_map[layout] = _mesh_resources.layouts_to_groups[root_mesh][layout]
+            layouts_to_groups_map[layout] = _mesh_resources.layouts_to_groups[
+                root_mesh
+            ][layout]
         names_to_layouts_map["dp"] = _mesh_resources.names_to_layouts[root_mesh]["dp"]
         del _mesh_resources.child_to_root_mapping[mesh_fsdp_ep]
 
