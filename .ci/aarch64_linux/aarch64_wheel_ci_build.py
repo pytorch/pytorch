@@ -102,6 +102,9 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libcudnn_engines_runtime_compiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_engines_precompiled.so.9",
         "/usr/local/cuda/lib64/libcudnn_heuristic.so.9",
+        "/usr/local/cuda/lib64/libcufile.so.0",
+        "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+        "/usr/local/cuda/lib64/libcusparse.so.12",
     ]
 
     # CUDA version-specific libraries
@@ -112,28 +115,24 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
             "/usr/local/cuda/lib64/libcublasLt.so.13",
             "/usr/local/cuda/lib64/libcudart.so.13",
             "/usr/local/cuda/lib64/libcufft.so.12",
-            "/usr/local/cuda/lib64/libcusparse.so.12",
             "/usr/local/cuda/lib64/libcusolver.so.12",
             "/usr/local/cuda/lib64/libnvJitLink.so.13",
             "/usr/local/cuda/lib64/libnvrtc.so.13",
             "/usr/local/cuda/lib64/libnvrtc-builtins.so.13.0",
-            "/usr/local/cuda/lib64/libcufile.so.1",
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1",
         ]
-    elif "129" in desired_cuda:
+    elif "12" in desired_cuda:
+        # Get the last character for libnvrtc-builtins version (e.g., "129" -> "9")
+        minor_version = desired_cuda[-1]
         version_specific_libs = [
             "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12",
             "/usr/local/cuda/lib64/libcublas.so.12",
             "/usr/local/cuda/lib64/libcublasLt.so.12",
             "/usr/local/cuda/lib64/libcudart.so.12",
             "/usr/local/cuda/lib64/libcufft.so.11",
-            "/usr/local/cuda/lib64/libcusparse.so.12",
             "/usr/local/cuda/lib64/libcusolver.so.11",
             "/usr/local/cuda/lib64/libnvJitLink.so.12",
             "/usr/local/cuda/lib64/libnvrtc.so.12",
-            "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.9",
-            "/usr/local/cuda/lib64/libcufile.so.0",
-            "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+            f"/usr/local/cuda/lib64/libnvrtc-builtins.so.12.{minor_version}",
         ]
 
     # Combine all libraries
