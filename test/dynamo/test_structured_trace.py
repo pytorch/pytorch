@@ -1525,7 +1525,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
             executions = payload["graph_execution_order"]
             self.assertTrue(all(isinstance(e["compile_id"], str) for e in executions))
             self.assertExpectedInline(
-                json.dumps(payload, sort_keys=True),
+                json.dumps(payload),
                 """{"graph_execution_order": [{"compile_id": "0/0"}, {"compile_id": "1/0"}]}""",
             )
             self.assertParses()
