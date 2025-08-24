@@ -920,6 +920,26 @@ def run_test_with_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "1"
+
+    with extend_python_path([install_dir]):
+        return run_test(test_module, test_directory, options)
+
+
+def run_test_with_openreg_autoload_disable(test_module, test_directory, options):
+    # TODO(FFFrog): Will remove this later when windows/macos are supported.
+    if not IS_LINUX:
+        return 0
+
+    openreg_dir = os.path.join(
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
+    )
+    install_dir, return_code = install_cpp_extensions(openreg_dir)
+    if return_code != 0:
+        return return_code
+
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
     with extend_python_path([install_dir]):
         return run_test(test_module, test_directory, options)
 
@@ -1251,6 +1271,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_openreg": run_test_with_openreg,
+    "test_openreg_autoload_disable": run_test_with_openreg_autoload_disable,
     "test_transformers_privateuse1": run_test_with_openreg,
 }
 
