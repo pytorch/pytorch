@@ -294,7 +294,7 @@ The following packages should be installed with `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements.txt
+pip install -r .ci/docker/requirements-ci.txt
 ```
 will install these dependencies for you.
 
