@@ -82,4 +82,6 @@ class GenericTorchDispatchRuleHolder:
 def find_torch_dispatch_rule(
     op: Any, torch_dispatch_class: type
 ) -> Optional[Callable[..., Any]]:
-    return singleton.find(op.__qualname__).torch_dispatch_rules.find(torch_dispatch_class)
+    return singleton.find(op.__qualname__).torch_dispatch_rules.find(
+        torch_dispatch_class
+    )
