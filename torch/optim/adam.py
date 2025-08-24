@@ -85,19 +85,19 @@ class Adam(Optimizer):
             if betas[1].numel() != 1:
                 raise ValueError("Tensor betas[1] must be 1-element")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            amsgrad=amsgrad,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            differentiable=differentiable,
-            fused=fused,
-            decoupled_weight_decay=decoupled_weight_decay,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "amsgrad": amsgrad,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "differentiable": differentiable,
+            "fused": fused,
+            "decoupled_weight_decay": decoupled_weight_decay,
+        }
         super().__init__(params, defaults)
 
         if fused:

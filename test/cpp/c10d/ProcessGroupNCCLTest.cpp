@@ -28,7 +28,7 @@ class NCCLTestBase {
 
   NCCLTestBase(NCCLTestBase&& other) noexcept = default;
 
-  std::shared_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
+  ::c10::intrusive_ptr<::c10d::ProcessGroupNCCL> getProcessGroup() {
     return pg_;
   }
 
@@ -39,7 +39,7 @@ class NCCLTestBase {
   void initialize(
       int rank,
       size_t size,
-      std::optional<::std::shared_ptr<::c10d::ProcessGroupNCCL>> split_from =
+      std::optional<::c10::intrusive_ptr<::c10d::ProcessGroupNCCL>> split_from =
           std::nullopt) {
     store_ = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
@@ -52,13 +52,13 @@ class NCCLTestBase {
       opts->split_color = ++color_;
     }
 #endif
-    pg_ = std::make_unique<::c10d::ProcessGroupNCCL>(
+    pg_ = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
         store_, rank, size, std::move(opts));
   }
 
  protected:
   std::string path_;
-  std::shared_ptr<::c10d::ProcessGroupNCCL> pg_;
+  ::c10::intrusive_ptr<::c10d::ProcessGroupNCCL> pg_;
   std::chrono::milliseconds pgTimeout_;
   ::c10::intrusive_ptr<::c10d::Store> store_;
   int color_{1};
@@ -767,8 +767,8 @@ TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
   }
 
   // Test that the CUDAEventCache can be used to create CUDA events and reuse.
-  auto event1 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
-  auto event2 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+  auto event1 = c10d::CUDAEventCache::get(1)->create(true);
+  auto event2 = c10d::CUDAEventCache::get(1)->create(false);
 
   auto event1_ptr = event1.get();
   auto event2_ptr = event2.get();
@@ -777,14 +777,14 @@ TEST_F(ProcessGroupNCCLTest, CUDAEventCache) {
   event2 = nullptr;
 
   // Test that the CUDAEventCache is indeed reused.
-  auto event3 = c10d::ProcessGroupNCCL::CUDAEventCache::get(2)->create(true);
-  auto event4 = c10d::ProcessGroupNCCL::CUDAEventCache::get(2)->create(false);
+  auto event3 = c10d::CUDAEventCache::get(2)->create(true);
+  auto event4 = c10d::CUDAEventCache::get(2)->create(false);
   // The cache has been used up, new events should be created.
-  auto event5 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
-  auto event6 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+  auto event5 = c10d::CUDAEventCache::get(1)->create(true);
+  auto event6 = c10d::CUDAEventCache::get(1)->create(false);
   // The cache has been used up, new events should be created.
-  auto event7 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(true);
-  auto event8 = c10d::ProcessGroupNCCL::CUDAEventCache::get(1)->create(false);
+  auto event7 = c10d::CUDAEventCache::get(1)->create(true);
+  auto event8 = c10d::CUDAEventCache::get(1)->create(false);
   EXPECT_NE(event1_ptr, event3.get());
   EXPECT_NE(event2_ptr, event4.get());
   EXPECT_EQ(event1_ptr, event5.get());

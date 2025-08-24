@@ -316,17 +316,18 @@ class TensorVariable(VariableTracker):
         real_value = getattr(_input_associated_real_value, name)
 
         attr_source = AttrSource(self.source, name)
-        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
 
         # Typically we'd want to use variable builder here
         # but unfortunately id(real_value.__self__) is not id(<original value>)
         if is_bound_tensor_method(real_value):
+            # No need to install the guard because its a bound tensor method
             from .misc import GetAttrVariable
 
             return GetAttrVariable(
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
+        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
@@ -1089,6 +1090,30 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
+        if isinstance(value, TensorVariable):
+            # [Note: Tensor.__setitem__ and VariableTracker metadata]
+            # At this point, we proxied a node representing `self[key] = value` into the graph.
+            # When executed, this node will mutate `self`'s tensor metadata, so it's important
+            # even during tracing to propagate. For example:
+            #   value.requires_grad is True => self.requires_grad becomes True
+            #   value.requires_grad is True => self.has_grad_fn becomes True
+
+            # Not sure if __setitem__ can ever save activations, disabling just in case
+            with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
+            example_value = self.proxy.node.meta.get("example_value")
+            from .builder import get_specialized_props, infer_subclass_type
+
+            if isinstance(value, variables.lazy.LazyVariableTracker):
+                value = variables.lazy.LazyVariableTracker.realize_all(value)
+
+            specialized_props = get_specialized_props(
+                type(value), tx, example_value, infer_subclass_type(example_value)
+            )
+            for k, v in specialized_props.items():
+                setattr(self, k, v)
+
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
@@ -1539,10 +1564,36 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from ..exc import unimplemented_v2
         from ..utils import numpy_method_wrapper
 
         args, kwargs = self.patch_args(name, args, kwargs)
 
+        if name == "astype":
+            from .builtin import BuiltinVariable
+
+            dtype_arg = None
+            if "dtype" in kwargs:
+                dtype_arg = kwargs["dtype"]
+            elif len(args) > 0:
+                dtype_arg = args[0]
+            is_object_str = (
+                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
+            )
+            is_object_type = (
+                isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
+            )
+            if is_object_str or is_object_type:
+                unimplemented_v2(
+                    gb_type="ndarray.astype(object)",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=(
+                        "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
+                        "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
+                        "This will be executed eagerly."
+                    ),
+                    hints=[*graph_break_hints.FUNDAMENTAL],
+                )
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)

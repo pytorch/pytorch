@@ -1,9 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
 
-cc_library(
-    name = "torch_headeronly",
-    hdrs = glob([
-        "**/*.h"
-    ]),
-    visibility = ["//visibility:public"],
-)
+define_targets(rules = rules)

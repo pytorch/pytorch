@@ -50,7 +50,14 @@ from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
 from .symbolic_convert import TensorifyState
-from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
+from .utils import (
+    create_nested_fn_cache,
+    graph_break_reasons,
+    guard_failures,
+    orig_code_map,
+    register_hook_for_recompile_user_context,
+    reset_frame_count,
+)
 
 
 # Register polyfill functions
@@ -138,6 +145,7 @@ def reset() -> None:
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
+        create_nested_fn_cache.clear()
 
 
 def reset_code_caches() -> None:
