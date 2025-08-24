@@ -2644,6 +2644,18 @@ class CPUReproTests(TestCase):
             self.common(fn, inps)
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_large_mean(self):
+        size = (30000, 100000)
+        t = torch.rand(size, dtype=torch.float)
+        op = torch.mean
+        expected = op(t)
+        actual = torch.compile(op)(t)
+        self.assertEqual(expected, actual)
+        with set_num_threads(1):
+            expected = op(t)
+            actual = torch.compile(op)(t)
+            self.assertEqual(expected, actual)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3104,6 +3116,30 @@ class CPUReproTests(TestCase):
         get_traj_idx(lengths, num_slices=4)
         lengths = torch.zeros(11, dtype=torch.long)
         get_traj_idx(lengths, num_slices=4)
+
+    def test_store_reduction(self):
+        # fix https://github.com/pytorch/pytorch/issues/157683
+        def fn(x, y):
+            r1 = x.amax(dim=0)
+            r2 = y.amax(dim=0)
+            return r1, r2
+
+        device = "cpu"
+        for int_dypte, float_dtype in zip(
+            [torch.int64, torch.int32, torch.int16, torch.int8],
+            [torch.float64, torch.float32, torch.float16, torch.bfloat16],
+        ):
+            x = torch.randint(
+                low=0, high=100, size=(16, 24, 59), dtype=int_dypte, device=device
+            )
+            y = torch.randn(16, 24, 59, dtype=float_dtype, device=device)
+            self.common(
+                fn,
+                (
+                    x,
+                    y,
+                ),
+            )
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -4065,6 +4101,24 @@ class CPUReproTests(TestCase):
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    def test_relu_permute_reshape_reinterpret_view(self):
+        def fn(x):
+            n, c, h, w = x.shape
+            return torch.relu(x).permute(0, 2, 3, 1).reshape(n, h * w, c)
+
+        x = torch.randn(2, 32, 4, 4).to(memory_format=torch.channels_last)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated kernel
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            # check that there is no transpose
+            FileCheck().check_count("transpose_mxn", 0, exactly=True).run(code)
+
     def test_attention_size_mismatch(self):
         class Attention(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
@@ -4329,6 +4383,19 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
+
+    def test_float32_to_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/156788
+        @torch.compile
+        def fn(x):
+            return x.to(torch.uint8)
+
+        x = torch.tensor([-1.0, -2.0, -3.0, -4.0], dtype=torch.float32, device="cpu")
+        self.assertEqual(
+            x.to(torch.uint8),
+            fn(x),
+            msg=f"Expected {x.to(torch.uint8)} but got {fn(x)}",
+        )
 
     def test_non_contiguous_reduction_store(self):
         # https://github.com/pytorch/pytorch/issues/113018
@@ -5404,6 +5471,24 @@ class CPUReproTests(TestCase):
 
                 # Verify correctness with explicit samples (should match exactly)
                 torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+
+    def test_outer_looop_fusion_with_local_buf(self):
+        def fn(
+            xs: torch.Tensor,
+            Ls: torch.Tensor,
+        ):
+            arr = -torch.einsum("i...,i->i...", xs, Ls)
+            temp = torch.exp(arr)
+            Q = torch.einsum("i...->i", temp)
+            ans = torch.einsum("i,i...->i...", 1 / Q, temp)
+            return ans
+
+        xs = torch.ones((5, 1, 32, 32), requires_grad=False)
+        Ls = torch.ones((5), requires_grad=False)
+        expected = fn(xs, Ls)
+        compiled_func = torch.compile(fn, backend="inductor")
+        result = compiled_func(xs, Ls)
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":

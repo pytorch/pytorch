@@ -145,7 +145,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_name,
             co.co_qualname,  # type: ignore[attr-defined]
             co.co_firstlineno,
-            co.co_lnotab,
+            co.co_linetable,
             co.co_exceptiontable,  # type: ignore[attr-defined]
             co.co_freevars,
             co.co_cellvars,
@@ -435,7 +435,6 @@ class Tracer(TracerBase):
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
-
         return super().create_arg(a)
 
     @compatibility(is_backward_compatible=True)
