@@ -1,9 +1,6 @@
 # ---[ cuda
 
-# Poor man's include guard
-if(TARGET torch::cudart)
-  return()
-endif()
+include_guard(GLOBAL)
 
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
@@ -151,39 +148,22 @@ endif()
 # libraries installed. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
 
-# cuda
-add_library(caffe2::cuda INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::cuda_driver)
-
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
 else()
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart)
 endif()
 
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
+# NOTE: cublas is always linked dynamically
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        # NOTE: cublas is always linked dynamically
-        CUDA::cublas CUDA::cublasLt)
-    set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static rt)
+  target_link_libraries(caffe2::cublas INTERFACE CUDA::cublas CUDA::cublasLt CUDA::cudart_static)
 else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cublas CUDA::cublasLt)
+  target_link_libraries(caffe2::cublas INTERFACE CUDA::cublas CUDA::cublasLt)
 endif()
 
 # cudnn interface
@@ -255,13 +235,9 @@ endif()
 if(CAFFE2_USE_CUFILE)
   add_library(torch::cufile INTERFACE IMPORTED)
   if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile_static)
+    target_link_libraries(torch::cufile INTERFACE CUDA::cuFile_static CUDA::culibos)
   else()
-      set_property(
-          TARGET torch::cufile PROPERTY INTERFACE_LINK_LIBRARIES
-          CUDA::cuFile)
+    target_link_libraries(torch::cufile INTERFACE CUDA::cuFile CUDA::culibos)
   endif()
 else()
   message(STATUS "USE_CUFILE is set to 0. Compiling without cuFile support")
@@ -270,32 +246,30 @@ endif()
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand_static)
+  target_link_libraries(caffe2::curand INTERFACE CUDA::curand_static)
 else()
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand)
+  target_link_libraries(caffe2::curand INTERFACE CUDA::curand)
 endif()
 
 # cufft
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft_static_nocallback)
+  target_link_libraries(caffe2::cufft INTERFACE CUDA::cufft_static_nocallback)
 else()
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft)
+  target_link_libraries(caffe2::cufft INTERFACE CUDA::cufft)
 endif()
 
 # nvrtc
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc caffe2::cuda)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+  set_property(
+      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc_static CUDA::cuda_driver)
+else()
+  set_property(
+      TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
+      CUDA::nvrtc CUDA::cuda_driver)
+endif()
 
 # Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
