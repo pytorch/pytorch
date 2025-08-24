@@ -5456,7 +5456,7 @@ def new_subgroups(
 
     ranks = get_process_group_ranks(group=group)
     if _use_batched:
-        ranks_per_subgroup_list = [list(chunk) for chunk in batched(ranks, group_size)]
+        ranks_per_subgroup_list = list(map(list, batched(ranks, group_size)))
     else:
         ranks_per_subgroup_list = [
             ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
