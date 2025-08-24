@@ -30,6 +30,10 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif // USE_XPU
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#endif
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
@@ -71,6 +75,24 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+RAIIDataPtr RAII_gpuMalloc_with_caching_allocator(
+    size_t num_bytes,
+    int32_t device_index) {
+  void* data_ptr = nullptr;
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  c10::cuda::CUDAGuard device_guard(device_index);
+  data_ptr = c10::cuda::CUDACachingAllocator::raw_alloc(num_bytes);
+  auto deleter = [](void* ptr) {
+    c10::cuda::CUDACachingAllocator::raw_delete(ptr);
+  };
+#else
+  AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+#endif
   return RAIIDataPtr(data_ptr, deleter);
 }
 
@@ -323,7 +345,14 @@ class AOTInductorModelBase {
     if (!include_weights) {
       return;
     }
-#if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
+#if defined(USE_CUDA)
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+    constant_blob_ =
+        RAII_gpuMalloc_with_caching_allocator(blob_size, device_idx_);
+#else
+    constant_blob_ = RAII_gpuMalloc(blob_size);
+#endif // AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+#elif defined(USE_XPU) || defined(USE_MPS)
     constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
     constant_blob_ = RAII_cpuMalloc(blob_size);
