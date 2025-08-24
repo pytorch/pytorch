@@ -47,6 +47,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
+#include <ATen/native/transformers/hip/gemm_kernel_utils.h>
 // MemoryEfficient Attention Specific Imports for ROCM
 #ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
