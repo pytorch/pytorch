@@ -7,7 +7,7 @@ if [[ "$GPU_ARCH_VERSION" == *"12.9"* ]]; then
     export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
 fi
 if [[ "$GPU_ARCH_VERSION" == *"13.0"* ]]; then
-    export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;11.0;12.0;12.1"
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;10.3;11.0;12.0;12.1"
 fi
 
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
