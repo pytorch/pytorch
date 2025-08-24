@@ -13,11 +13,11 @@ from typing import Any, Optional
 from typing_extensions import TypeIs
 
 import sympy
-from packaging.version import Version
 
 import torch
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.utils import clear_on_fresh_cache
+from torch._vendor.packaging.version import Version
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
