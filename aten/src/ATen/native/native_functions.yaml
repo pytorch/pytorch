@@ -1769,6 +1769,10 @@
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)
 
+- func: _convolution_transpose_mode(Tensor input, Tensor weight, Tensor? bias, SymInt[] stride, str padding, SymInt[] output_padding, SymInt groups, SymInt[] dilation) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: _convolution_transpose_mode_symint
+
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, SymInt[1] stride=1, SymInt[1] padding=0, SymInt[1] output_padding=0, SymInt groups=1, SymInt[1] dilation=1) -> Tensor
   dispatch:
@@ -1781,6 +1785,18 @@
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, SymInt[3] stride=1, SymInt[3] padding=0, SymInt[3] output_padding=0, SymInt groups=1, SymInt[3] dilation=1) -> Tensor
   dispatch:
     CompositeImplicitAutograd: conv_transpose3d_symint
+
+- func: conv_transpose1d.padding(Tensor input, Tensor weight, Tensor? bias=None, SymInt[1] stride=1, str padding="valid", SymInt[1] output_padding=0, SymInt groups=1, SymInt[1] dilation=1) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: conv_transpose1d_padding_symint
+
+- func: conv_transpose2d.padding(Tensor input, Tensor weight, Tensor? bias=None, SymInt[2] stride=1, str padding="valid", SymInt[2] output_padding=0, SymInt groups=1, SymInt[2] dilation=1) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: conv_transpose2d_padding_symint
+
+- func: conv_transpose3d.padding(Tensor input, Tensor weight, Tensor? bias=None, SymInt[3] stride=1, str padding="valid", SymInt[3] output_padding=0, SymInt groups=1, SymInt[3] dilation=1) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: conv_transpose3d_padding_symint
 
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
