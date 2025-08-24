@@ -119,3 +119,111 @@ def dp_knapsack(
     max_runtime = dp[n][quantized_max_memory].item()
 
     return max_runtime, saved_items, recomputable_items
+
+
+def dp_knapsack_sliding_hirschberg(
+    memory: list[float], runtime: list[float], max_memory: float
+) -> tuple[float, list[int], list[int]]:
+    # Scaling factor to convert floating point weights to integers
+    S = 10000
+
+    # Quantize the memory weights
+    quantized_memory = torch.tensor(
+        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
+    )
+    runtimes = torch.tensor(runtime, dtype=torch.float32, device="cpu")
+
+    # Quantized pseudopolynomial DP for 0-1 Knapsack
+    quantized_max_memory = int(round(max_memory * S))
+
+    # Hirschberg algorithm:
+    # split memory, solve dp for each half and recurse with best memory budget
+    saved_items, recomputable_items = dp_knapsack_recurse(
+        memory_indices=list(range(len(memory))),
+        quantized_max_memory=quantized_max_memory,
+        quantized_memory=quantized_memory,
+        runtimes=runtimes,
+    )
+
+    max_runtime = sum(runtime[i] for i in saved_items)
+
+    recomputable_items.reverse()
+
+    return max_runtime, saved_items, recomputable_items
+
+
+def dp_knapsack_recurse(
+    memory_indices, quantized_max_memory, quantized_memory, runtimes
+):
+    if quantized_max_memory <= 0:
+        return [], memory_indices
+
+    if len(memory_indices) == 1:
+        if quantized_memory[memory_indices[0]] <= quantized_max_memory:
+            return memory_indices, []
+        else:
+            return [], memory_indices
+
+    memory_split = len(memory_indices) // 2
+    left_part_memory = memory_indices[:memory_split]
+    right_part_memory = memory_indices[memory_split:]
+
+    # sliding window: for each memory budget, compute dp profile for a half using only a previous one
+    prev_dp_profile = torch.zeros(
+        quantized_max_memory + 1, dtype=torch.float32, device="cpu"
+    )
+    dp_profile = prev_dp_profile
+    for i in left_part_memory:
+        current_memory = quantized_memory[i]
+        current_runtime = runtimes[i]
+
+        if current_memory == 0:
+            dp_profile = prev_dp_profile + current_runtime
+        else:
+            dp_profile[current_memory:] = torch.maximum(
+                prev_dp_profile[current_memory:],
+                prev_dp_profile[:-current_memory] + current_runtime,
+            )
+        prev_dp_profile = dp_profile
+
+    left_part_dp = dp_profile
+
+    prev_dp_profile = torch.zeros(
+        quantized_max_memory + 1, dtype=torch.float32, device="cpu"
+    )
+    dp_profile = prev_dp_profile
+    for i in right_part_memory:
+        current_memory = quantized_memory[i]
+        current_runtime = runtimes[i]
+
+        if current_memory == 0:
+            dp_profile = prev_dp_profile + current_runtime
+        else:
+            dp_profile[current_memory:] = torch.maximum(
+                prev_dp_profile[current_memory:],
+                prev_dp_profile[:-current_memory] + current_runtime,
+            )
+        prev_dp_profile = dp_profile
+
+    right_part_dp = dp_profile.flip(-1)
+
+    _, next_memory_split = torch.max(left_part_dp + right_part_dp, dim=0)
+
+    saved_items_left, recomputable_items_left = dp_knapsack_recurse(
+        memory_indices=left_part_memory,
+        quantized_max_memory=next_memory_split,
+        quantized_memory=quantized_memory,
+        runtimes=runtimes,
+    )
+
+    saved_items_right, recomputable_items_right = dp_knapsack_recurse(
+        memory_indices=right_part_memory,
+        quantized_max_memory=quantized_max_memory - next_memory_split,
+        quantized_memory=quantized_memory,
+        runtimes=runtimes,
+    )
+
+    return (
+        saved_items_left + saved_items_right,
+        recomputable_items_left + recomputable_items_right,
+    )
