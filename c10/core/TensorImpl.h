@@ -2078,8 +2078,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::HIPBit,
            BackendComponent::XPUBit,
            BackendComponent::HPUBit,
-           BackendComponent::MTIABit,
-           BackendComponent::PrivateUse1Bit});
+           BackendComponent::MTIABit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
@@ -2089,8 +2088,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::CUDABit,
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
-           BackendComponent::XPUBit,
-           BackendComponent::PrivateUse1Bit});
+           BackendComponent::XPUBit});
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };

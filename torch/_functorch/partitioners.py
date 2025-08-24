@@ -18,7 +18,12 @@ import torch._inductor.inductor_prims
 import torch.distributed
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import counters, is_node_meta_valid
+from torch._dynamo.utils import (
+    counters,
+    custom_backend_name,
+    is_node_meta_valid,
+    torch_custom_backend,
+)
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
@@ -1315,9 +1320,6 @@ def functionalize_rng_ops(
     # Unique id to generate name
     uid = itertools.count()
 
-    # for external backend
-    custom_backend_name = torch._C._get_privateuse1_backend_name()
-
     def get_rng_ops(gmod):
         random_nodes = {}
         for node in gmod.graph.nodes:
@@ -1358,7 +1360,7 @@ def functionalize_rng_ops(
             if device is not None and device.type == "cuda":
                 return fake_mode.from_tensor(torch.cuda.get_rng_state())
             if device == custom_backend_name:
-                return fake_mode.from_tensor(getattr(torch, custom_backend_name).get_rng_state())
+                return fake_mode.from_tensor(torch_custom_backend.get_rng_state())
             return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.

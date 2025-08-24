@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.types import _device, _dtype
+from torch._dynamo.utils import custom_backend_name, torch_custom_backend
 
 
 def throw_on_non_cuda(device):
@@ -137,7 +138,6 @@ def get_device(args, kwargs):
             device = torch.device(device)
         return device.type
 
-    custom_backend_name = torch._C._get_privateuse1_backend_name()
     devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
     if any(dev == "cuda" for dev in devices):
         return "cuda"
@@ -186,8 +186,7 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(DispatchKey.PrivateUse1)
     def impl_privateuse1(op, *args, **kwargs):
-        custom_backend_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
-        return custom_backend_mod.get_rng_state(), op(*args, **kwargs)
+        return torch_custom_backend.get_rng_state(), op(*args, **kwargs)
 
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
@@ -196,7 +195,7 @@ def register_run_and_save_rng_state_op():
             "cpu": impl_cpu,
             "hpu": impl_hpu,
             "xpu": impl_xpu,
-            torch._C._get_privateuse1_backend_name(): impl_privateuse1,
+            custom_backend_name: impl_privateuse1,
         }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"
@@ -272,12 +271,10 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(DispatchKey.PrivateUse1)
     def impl_privateuse1(rng_state, op, *args, **kwargs):
-        # use local var to avoid circular import
-        custom_backend_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
-        current_state = custom_backend_mod.get_rng_state()
-        custom_backend_mod.set_rng_state(rng_state)
+        current_state = torch_custom_backend.get_rng_state()
+        torch_custom_backend.set_rng_state(rng_state)
         out = op(*args, **kwargs)
-        custom_backend_mod.set_rng_state(current_state)
+        torch_custom_backend.set_rng_state(current_state)
         return out
 
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
@@ -300,7 +297,7 @@ def register_run_with_rng_state_op():
             "cpu": impl_cpu,
             "hpu": impl_hpu,
             "xpu": impl_xpu,
-            torch._C._get_privateuse1_backend_name(): impl_privateuse1,
+            custom_backend_name: impl_privateuse1,
         }
         device = get_device(args, kwargs)
         assert device in impl_map, f"Backend not supported for {device}"

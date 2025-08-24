@@ -181,6 +181,31 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
 
+custom_backend_name: str = torch._C._get_privateuse1_backend_name()
+torch_custom_backend: Optional[Callable] = None
+amp_autocast_modules = [
+    torch.amp.autocast_mode.autocast,
+    torch.cuda.amp.autocast,
+    torch.cpu.amp.autocast,
+]
+
+
+def _detect_custom_backend() -> bool:
+    global torch_custom_backend
+    global amp_autocast_modules
+    def _non_available():
+        return False
+    if custom_backend_mod := getattr(torch, custom_backend_name, None):
+        torch_custom_backend = custom_backend_mod
+        is_available = getattr(custom_backend_mod, "is_available", _non_available)()
+        if is_available:
+            amp_autocast_modules.append(torch_custom_backend.amp.autocast)
+        return is_available
+    return False
+
+
+is_custom_backend_available: bool = _detect_custom_backend()
+
 
 # Abstraction on top of counters.
 class ReInplaceTrigger(enum.Enum):
@@ -2213,9 +2238,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             gpu_rng_state = torch.clone(torch.cuda.get_rng_state())
-        elif custom_backend_mod := getattr(torch, torch._C._get_privateuse1_backend_name(), None):
-            if getattr(custom_backend_mod, "is_available")():
-                gpu_rng_state = torch.clone(getattr(custom_backend_mod, "get_rng_state")())
+        elif is_custom_backend_available and hasattr(torch_custom_backend, "get_rng_state"):
+            gpu_rng_state = torch.clone(torch_custom_backend.get_rng_state())
     try:
         yield
     finally:
@@ -2223,9 +2247,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(gpu_rng_state)  # type: ignore[possibly-undefined]
-            elif custom_backend_mod := getattr(torch, torch._C._get_privateuse1_backend_name(), None):
-                if getattr(custom_backend_mod, "is_available")():
-                    getattr(custom_backend_mod, "set_rng_state")(gpu_rng_state)
+            elif is_custom_backend_available and hasattr(torch_custom_backend, "set_rng_state"):
+                torch_custom_backend.set_rng_state(gpu_rng_state)
 
 
 def is_jit_model(

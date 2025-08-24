@@ -38,7 +38,14 @@ from ..device_interface import get_interface_for_device
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
-from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
+from ..utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    amp_autocast_modules,
+    custom_backend_name,
+    is_custom_backend_available,
+    torch_custom_backend,
+)
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -877,15 +884,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(func, args, kwargs):
-        if custom_backend_mod := getattr(torch, torch._C._get_privateuse1_backend_name(), None):
-            custom_autocast_list = [custom_backend_mod.amp.autocast]
-        else:
-            custom_autocast_list = []
-        assert func in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ] + custom_autocast_list
+        assert func in amp_autocast_modules
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -896,14 +895,11 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if key == "device_type" and func in [
-                torch.cuda.amp.autocast,
-                torch.cpu.amp.autocast,
-            ] + custom_autocast_list:
+            if key == "device_type" and func in amp_autocast_modules:
                 if func is torch.cuda.amp.autocast:
                     arg = "cuda"
-                elif func in custom_autocast_list:
-                    arg = torch._C._get_privateuse1_backend_name()
+                elif is_custom_backend_available and func in amp_autocast_modules:
+                    arg = custom_backend_name
                 else:
                     arg = "cpu"
             else:
