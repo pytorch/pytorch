@@ -106,10 +106,10 @@ class _ToTorchTensor(torch.autograd.Function):
         )
 
         return (
-            DTensor(
+            DTensor.from_local(
                 grad_output,
-                grad_spec,
-                requires_grad=grad_output.requires_grad,
+                mesh,
+                grad_placements,
             ),
             None,
         )
