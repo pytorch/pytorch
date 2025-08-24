@@ -2206,7 +2206,8 @@ class BuiltinVariable(VariableTracker):
                 value = getattr(self.fn, name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
-            return VariableTracker.build(tx, value, source)
+            if not callable(value):
+                return VariableTracker.build(tx, value, source)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_getattr(
