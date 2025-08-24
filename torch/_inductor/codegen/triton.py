@@ -3106,11 +3106,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{module}.{reduction_type}2({value}, {dim})", value.shape
                 )
             elif reduction_type == "dot":
+                # Native matmul is a special case because accumulator shape is fixed to (Y,X)
                 is_bmm = len(self.dense_size_list()) == 4
                 if is_bmm:
-                    value = f"{value}[None,:,:,None]"  # (Y,X) to (Z=1,Y,X,R=1)
+                    result = f"{value}[None,:,:,None]"  # (Y,X) to (Z=1,Y,X,R=1)
+                    shape = [1, *value.shape, 1]
                 else:
-                    value = f"{value}[:,:,None]"  # (Y,X) to (Y,X,R=1)
+                    result = f"{value}[:,:,None]"  # (Y,X) to (Y,X,R=1)
+                    shape = [*value.shape, 1]
             else:
                 result, shape = self.reduction_resize_and_shape(
                     f"{module}.{reduction_type}({value}, {dim})", value.shape
