@@ -69,10 +69,10 @@ class Vectorized<c10::complex<double>> {
   operator __m512d() const {
     return values;
   }
-  template <int64_t mask>
   static Vectorized<c10::complex<double>> blend(
       const Vectorized<c10::complex<double>>& a,
-      const Vectorized<c10::complex<double>>& b) {
+      const Vectorized<c10::complex<double>>& b,
+      int64_t mask) {
     // convert c10::complex<V> index mask to V index mask: xy -> xxyy
     // NOLINTNEXTLINE(clang-diagnostic-warning)
     switch (mask) {
