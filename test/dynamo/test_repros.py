@@ -4186,6 +4186,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend=counter)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_get_type_hints(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            typing.get_type_hints(Foo, include_extras=True)
+            return torch.sin(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
