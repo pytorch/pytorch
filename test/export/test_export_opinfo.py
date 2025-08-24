@@ -50,17 +50,11 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
-    xfail("nn.functional.grid_sample"),
     xfail("to_sparse"),
     # cannot xfail as it is passing for cpu-only build
+    skip("nn.functional.grid_sample"),
     skip("nn.functional.conv2d"),
     skip("nn.functional.scaled_dot_product_attention"),
-    # following are failing due to OptionalDeviceGuard
-    xfail("__getitem__"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.instance_norm"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nonzero"),
 }
 
 fake_decomposition_failures = {

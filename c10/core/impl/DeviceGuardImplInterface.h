@@ -371,5 +371,7 @@ inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }
 
+void C10_API ensureCUDADeviceGuardSet();
+
 } // namespace impl
 } // namespace c10
