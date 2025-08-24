@@ -97,6 +97,8 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "pinned_num_register_threads") {
       i = parsePinnedNumRegisterThreads(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "per_process_memory_fraction") {
+      i = parsePerProcessMemoryFraction(tokenizer, i);
     } else {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
@@ -145,6 +147,19 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
           std::to_string(maxThreads),
       "");
   m_pinned_num_register_threads = val2;
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePerProcessMemoryFraction(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  double fraction{tokenizer.toDouble(++i)};
+
+  TORCH_CHECK_VALUE(
+      fraction >= 0.0 && fraction <= 1.0,
+      "per_process_memory_fraction is invalid, set it in (0.0, 1.0)");
+  m_per_process_memory_fraction = fraction;
   return i;
 }
 
