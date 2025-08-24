@@ -142,7 +142,7 @@ def get_bucketing_plan(
     has_reduce_scatter: bool,
     comm_cache,
     comp_cache,
-    non_bucketable_pg,
+    non_bucketable_ir_nodes,
     verbose: bool = False,
 ) -> list[list["scheduler.BaseSchedulerNode"]]:
     all_gather_plan = []
@@ -183,7 +183,7 @@ def get_bucketing_plan(
     for idx, snode in enumerate(snodes):
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             has_fsdp_comm = True
             pg_info = get_ag_node_pg_info(snode)
             if pg_info is None:
@@ -191,7 +191,7 @@ def get_bucketing_plan(
             fsdp_world_size = pg_info[0]
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             has_fsdp_comm = True
             pg_info = get_rs_node_pg_info(
                 snode, return_reduce_op=True
@@ -206,7 +206,7 @@ def get_bucketing_plan(
         return [[]], [[]]
 
     comp_time_dict, memory_dict, peak_memory_dict = calibrate_with_cache(
-        sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter, non_bucketable_pg
+        sched, snodes, comm_cache, comp_cache, memories_at_nodes, has_reduce_scatter, non_bucketable_ir_nodes
     )
     total_comp_time = sum(comp_time_dict.values())
     peak_memory = 0
@@ -231,7 +231,7 @@ def get_bucketing_plan(
         # we only bucket on FSDP comm
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             fsdp_ag_idx += 1
             seen_new_fsdp_ag = True
             total_comp_time -= comp_time_dict[fsdp_ag_idx]
@@ -348,9 +348,7 @@ def get_bucketing_plan(
                     reduce_scatter_plan.append(current_rs_bucket)
                     for key, value in reduce_scatter_plan[-1].items():
                         print("sub info current_rs_bucket", key, len(value), [v.node.get_name() for v in value])
-                    heuristic_info["last_step_rs_comm_size"] = 2 * (
-                        rs_comm_size_inp + rs_comm_size_out
-                    )  # rs copy-in + rs data
+                    heuristic_info["last_step_rs_comm_size"] = rs_comm_size_inp + rs_comm_size_out # rs copy-in + rs data
                     current_rs_bucket = defaultdict(list)
 
                 (
@@ -367,7 +365,7 @@ def get_bucketing_plan(
                 ) = 0, 0
         elif is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             node_info = get_node_tensor_info(snode)[:-2] + get_rs_node_pg_info(snode)
             current_rs_bucket[node_info].append(snode)
 

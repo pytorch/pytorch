@@ -33,44 +33,41 @@ def get_fx_node(
     return origins_with_expected_op[0]
 
 
-def get_non_bucketable_pg(snodes):
-    non_bucketable_pg = set()
-    accept_op_list = ["all_gather_into_tensor", "convert_element_type", "primals", "sum"]
-    def _check_op_in_accept_op_list(inputs_node_origins):
-        for op in inputs_node_origins:
-            seen_in_accept_op_list = False
-            for op_name in accept_op_list:
-                if op_name in str(op):
-                    seen_in_accept_op_list = True
-            if not seen_in_accept_op_list:
-                return False
-        return True
-
+def get_non_bucketable_ir_nodes(snodes, name_to_fused_node, name_to_buf):
+    non_bucketable_ir_nodes = set()
     for snode in snodes:
         # If the origin has op outside of accept_op_list, it means there will be strong dependency with previous comp
         # thus, this means it's not bucketable
         if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default):
-            ir_node = snode.node
-            ir_node_origins = list(getattr(ir_node, "origins", None))
-            if ir_node_origins is None:
-                continue
-            ag_fx_node = get_fx_node(
+            ag_related_snode_set = OrderedSet()
+            _find_recursive_deps_of_snode(
                 snode,
-                expected_op=torch.ops._c10d_functional.all_gather_into_tensor.default,
+                ag_related_snode_set,
+                name_to_buf,
+                name_to_fused_node,
+                allow_weak_dep=False,
             )
-            ag_input_fx_nodes = [ag_fx_node.args[0]]
+            if len(ag_related_snode_set) > 2: # 2 is cast + all_gather
+                non_bucketable_ir_nodes.add(snode.node.get_name())
+        elif is_collective(snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
+            wait_snode = snode.get_outputs()[0].users[0].node
+            wait_snode_recursive_users = OrderedSet()
+            _find_recursive_users_of_snode(
+                    wait_snode,
+                    wait_snode_recursive_users,
+                    name_to_buf,
+                    name_to_fused_node,
+                )
+            if len(wait_snode_recursive_users) > 1: # 1 is wait
+                non_bucketable_ir_nodes.add(snode.node.get_name())
 
-            if not _check_op_in_accept_op_list(ir_node_origins) or not _check_op_in_accept_op_list(ag_input_fx_nodes):
-                non_bucketable_pg.add(snode.node.constant_args[1])
-                print("AG snode.node.constant_args[1]", snode.node.get_name(), snode.node.constant_args[0], snode.node.constant_args[1], "ir_node_origins", ir_node_origins, ag_fx_node, "ag_input_fx_nodes", ag_input_fx_nodes)
+    return non_bucketable_ir_nodes
 
-    return non_bucketable_pg
-
-def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"], non_bucketable_pg) -> bool:
+def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"], non_bucketable_ir_nodes) -> bool:
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             return True
     return False
 

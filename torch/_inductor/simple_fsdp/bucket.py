@@ -30,7 +30,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
     all_gather_bucket_plan: Dict[str, list["scheduler.BaseSchedulerNode"]],
-    non_bucketable_pg,
+    non_bucketable_ir_nodes,
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out all_gather nodes and bucket them according to `all_gather_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that all_gather nodes are bucketed.
@@ -69,7 +69,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             ag_exists = True
             ag_snode = snode
             ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
@@ -332,7 +332,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     name_to_buf: Dict[str, "scheduler.SchedulerBuffer"],
     name_to_fused_node: Dict[str, "scheduler.BaseSchedulerNode"],
     reduce_scatter_bucket_plan: Dict[str, list["scheduler.BaseSchedulerNode"]],
-    non_bucketable_pg,
+    non_bucketable_ir_nodes,
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out reduce_scatter nodes and bucket them according to `reduce_scatter_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that reduce_scatter nodes are bucketed.
@@ -367,7 +367,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ) and _check_ir_node_fsdp(snode.node, non_bucketable_pg):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             rs_exists = True
             rs_snode = snode
 
@@ -426,11 +426,13 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
         all_wait_snodes = []
         all_wait_snode_recursive_users = []
         all_rs_snodes = []
+        group_sizes = []
+        group_names = []
         for rs_info, rs_snodes in rs_bucket.items():
             if len(rs_snodes) == 0:
                 continue
             example_rs_fx_node = get_fx_node(
-                list(rs_snode_to_wait_snode.keys())[0],
+                rs_snodes[0],
                 expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
             _, reduce_op, group_size, group_name = example_rs_fx_node.args
@@ -473,11 +475,13 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
             all_wait_snodes.append(wait_snodes)
             all_wait_snode_recursive_users.append(wait_snode_recursive_users)
             all_rs_snodes.append(rs_snodes)
+            group_sizes.append(group_size)
+            group_names.append(group_name)
         bucket_id_to_bucketed_op_info[bucket_id] = (
             all_rs_input_ir_nodes,
             reduce_op,
-            group_size,
-            group_name,
+            group_sizes,
+            group_names,
             all_rs_snodes,
             all_wait_snodes,
             all_wait_snode_recursive_users,
@@ -506,8 +510,8 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 (
                     all_rs_input_ir_nodes,
                     reduce_op,
-                    group_size,
-                    group_name,
+                    group_sizes,
+                    group_names,
                     all_orig_rs_snodes,
                     all_orig_wait_snodes,
                     all_orig_wait_snode_recursive_users,
@@ -520,12 +524,16 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                     orig_rs_snodes,
                     orig_wait_snodes,
                     orig_wait_snode_recursive_users,
+                    group_size,
+                    group_name,
                 ) in enumerate(
                     zip(
                         all_rs_input_ir_nodes,
                         all_orig_rs_snodes,
                         all_orig_wait_snodes,
                         all_orig_wait_snode_recursive_users,
+                        group_sizes,
+                        group_names,
                     )
                 ):
                     if len(rs_input_ir_nodes) == 1:
