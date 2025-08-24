@@ -1518,13 +1518,32 @@ class FakeTensorOperatorInvariants(TestCase):
         # it clearly will not work on CPU runner
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             return
-        with FakeTensorMode():
-            torch.empty(10, device=GPU_TYPE)
-            torch.ones(10, device=GPU_TYPE)
-            torch.zeros(10, device=GPU_TYPE)
-            torch.rand(10, device=GPU_TYPE)
-            torch.tensor(3.14, device=GPU_TYPE)
-            torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE)
+
+        cpu_tensor = torch.ones(2, device="cpu")
+        gpu_device = torch.device(GPU_TYPE, 0)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            self.assertEqual(torch.empty(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.ones(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.zeros(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.rand(10, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(torch.tensor(3.14, device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(
+                torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
+            )
+
+            self.assertEqual(cpu_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(cpu_tensor.to(device=gpu_device).device, gpu_device)
+
+    def test_move_meta_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            return
+
+        meta_tensor = torch.ones(2, device="meta")
+        gpu_device = torch.device(GPU_TYPE, 1)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            self.assertEqual(meta_tensor.to(device="cpu").device.type, "cpu")
+            self.assertEqual(meta_tensor.to(device=GPU_TYPE).device.type, GPU_TYPE)
+            self.assertEqual(meta_tensor.to(device=gpu_device).device, gpu_device)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
