@@ -1433,6 +1433,9 @@ class SIMDScheduling(BaseScheduling):
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
+        """
+        Generate code for nodes in kernel_features
+        """
         node_schedule = kernel_features.node_schedule
 
         tiling, tiling_score = self.get_tiling_and_scores(
@@ -1474,7 +1477,16 @@ class SIMDScheduling(BaseScheduling):
                 node.mark_run()
 
         self.codegen_comment(node_schedule)
+
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_begin()
+            V.graph.wrapper_code.write_kernel_context_guard(
+                final_kernel.kernel_name,
+                node_schedule,  # type: ignore[arg-type]
+            )
         final_kernel.call_kernel(final_kernel.kernel_name)
+        if config.cpp.enable_kernel_profile:
+            V.graph.wrapper_code.write_kernel_context_guard_end()
 
         if config.nan_asserts:
             final_kernel.codegen_nan_check()

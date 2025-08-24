@@ -5434,7 +5434,16 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
+            if config.cpp.enable_kernel_profile:
+                V.graph.wrapper_code.write_kernel_context_guard_begin()
+                V.graph.wrapper_code.write_kernel_context_guard(
+                    kernel_name,
+                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
+                )
             self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
+            if config.cpp.enable_kernel_profile:
+                V.graph.wrapper_code.write_kernel_context_guard_end()
+
         self.reset_kernel_group()
         self._set_flush_status(False)
 

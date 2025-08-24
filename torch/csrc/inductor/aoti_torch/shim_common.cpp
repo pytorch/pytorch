@@ -7,6 +7,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/inductor/aoti_runtime/kernel_context_tls.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
@@ -1729,4 +1730,8 @@ AOTITorchError aoti_torch_get_current_stream(
 AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_device_index = at::accelerator::getDeviceIndex(); });
+}
+
+namespace torch::aot_inductor {
+thread_local KernelContext* tls_kernel_context = nullptr;
 }
