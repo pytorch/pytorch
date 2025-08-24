@@ -232,10 +232,6 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self._device.type == "hpu":
             self._device_handle.unset_rng_ctx("philox")
 
-    def _manual_seed(self, parallel_seed: int) -> None:
-        # TODO double check this is ok- I think it is already defunct
-        pass
-
     @contextlib.contextmanager
     def _distribute_region(
         self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
@@ -284,8 +280,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         will be the same.
 
         Args:
-            TODO
-            name (str): The name of the generator to use (should be a key in self.rng_states)
+            state (:class:`Tensor`): The generator state to modify
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we prepare the offset for running random ops.
 
@@ -404,7 +399,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         random ops.
 
         Args:
-            name (str): The name of the generator to use (should be a key in self.rng_states)
+            state (:class:`Tensor`): The generator state to modify.
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we post-process the offset for running random ops.
 
