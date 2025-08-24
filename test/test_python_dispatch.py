@@ -16,7 +16,6 @@ from torch.cuda.jiterator import _create_jit_fn
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.library import _scoped_library, fallthrough_kernel, impl, Library
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -48,6 +47,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils.weak import StorageWeakRef
 
 
 # used as DataLoader collate_fn below; named here to avoid trying to pickle a lambda

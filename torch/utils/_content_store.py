@@ -40,7 +40,7 @@ import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 
 
 def lazy_compile(**compile_kwargs):
