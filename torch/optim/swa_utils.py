@@ -4,7 +4,7 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from typing import Any, Callable, cast, Literal, Optional, Union
 
@@ -215,7 +215,7 @@ class AveragedModel(Module):
         https://paperswithcode.com/method/polyak-averaging
     """
 
-    n_averaged: Tensor
+    n_averaged: int
 
     def __init__(
         self,
@@ -234,9 +234,7 @@ class AveragedModel(Module):
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.register_buffer(
-            "n_averaged", torch.tensor(0, dtype=torch.long, device=device)
-        )
+        self.n_averaged = 0
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
@@ -259,12 +257,11 @@ class AveragedModel(Module):
         )
         self_param_detached: list[Optional[Tensor]] = []
         model_param_detached: list[Optional[Tensor]] = []
-        copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
-            if copy_param:
+            if self.n_averaged == 0:
                 p_averaged.detach().copy_(p_model_)
 
         if self.n_averaged > 0:
@@ -280,7 +277,7 @@ class AveragedModel(Module):
                         self.multi_avg_fn(
                             self_params,  # type: ignore[arg-type]
                             model_params,  # type: ignore[arg-type]
-                            self.n_averaged.to(device),
+                            self.n_averaged,
                         )
                     elif (
                         device is not None
@@ -288,20 +285,18 @@ class AveragedModel(Module):
                     ):
                         multi_avg_fn = get_swa_multi_avg_fn()
                         multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)
+                            self_params, model_params, self.n_averaged
                         )
                     else:
                         avg_fn = get_swa_avg_fn()
-                        n_averaged = self.n_averaged.to(device)
                         for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
-                            p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
+                            p_averaged.copy_(avg_fn(p_averaged, p_model, self.n_averaged))
             else:
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
-                    n_averaged = self.n_averaged.to(p_averaged.device)
                     p_averaged.detach().copy_(
-                        self.avg_fn(p_averaged.detach(), p_model, n_averaged)
+                        self.avg_fn(p_averaged.detach(), p_model, self.n_averaged)
                     )
 
         if not self.use_buffers:
@@ -310,6 +305,14 @@ class AveragedModel(Module):
             for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
                 b_swa.detach().copy_(b_model.detach().to(b_swa.device))
         self.n_averaged += 1
+
+    def get_extra_state(self) -> dict[str, Any]:
+        """Return extra state for serialization."""
+        return {"n_averaged": self.n_averaged}
+
+    def set_extra_state(self, state: dict[str, Any]) -> None:
+        """Set extra state from deserialization."""
+        self.n_averaged = state["n_averaged"]
 
 
 @torch.no_grad()
