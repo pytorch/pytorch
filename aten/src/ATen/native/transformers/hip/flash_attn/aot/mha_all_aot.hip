@@ -703,8 +703,11 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
 #if AOTRITON_ALWAYS_V3_API
     using sdp::aotriton_adapter::mklazy_empty_like;
     using sdp::aotriton_adapter::mklazy_fp32zeros;
-    params.D = mklazy_empty_like<2>(softmax_lse_cont, "delta");
-    params.DQ_ACC = mklazy_fp32zeros<4>(dq_t, "dq_acc");
+    using sdp::aotriton_adapter::LazyTensorContext;
+    LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
+    LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
+    params.D = mklazy_empty_like<2>(lazy_delta);
+    params.DQ_ACC = mklazy_fp32zeros<4>(lazy_dq_acc);
 #else
     at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
     params.D = mk_aotensor<2>(delta, "delta");
@@ -953,8 +956,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
 #if AOTRITON_ALWAYS_V3_API
       using sdp::aotriton_adapter::mklazy_empty_like;
       using sdp::aotriton_adapter::mklazy_fp32zeros;
-      params.D = mklazy_empty_like<2>(softmax_lse_cont, "delta");
-      params.DQ_ACC = mklazy_fp32zeros<4>(dq_padded, "dq_acc");
+      using sdp::aotriton_adapter::LazyTensorContext;
+      LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
+      LazyTensorContext lazy_dq_acc { .like_tensor = dq_padded, .tensor_name = "dq_acc" };
+      params.D = mklazy_empty_like<2>(lazy_delta);
+      params.DQ_ACC = mklazy_fp32zeros<4>(lazy_dq_acc);
 #else
       at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
       params.D = mk_aotensor<2>(delta, "delta");

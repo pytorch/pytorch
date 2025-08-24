@@ -131,12 +131,14 @@ inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
 
-template<int kRank, bool kRequireZeros>
 struct LazyTensorContext {
   at::Tensor like_tensor;
-  at::Tensor tensor;
   std::string_view tensor_name;
+  at::Tensor tensor;
+}
 
+template<int kRank, bool kRequireZeros>
+struct LazyTensorFunctions : public LazyTensorContext {
   static aotriton::TensorView<kRank> acquire(void* cookie) {
     auto ctx = (LazyTensorContext*)cookie;
     if (!ctx->tensor.defined()) {
@@ -152,21 +154,17 @@ struct LazyTensorContext {
   }
 
   static void dispose(void* cookie) {
-    auto ctx = (LazyTensorContext*)cookie;
-    delete ctx;
   }
 };
 
 template<int kRank, bool kRequireZeros>
-aotriton::LazyTensor<kRank> mklazy_common(const at::Tensor& q, std::string_view tensor_name)
+aotriton::LazyTensor<kRank> mklazy_common(LazyTensorContext* cookie)
 {
-  auto cookie = new LazyTensorContext<kRank, kRequireZeros>();
-  cookie->like_tensor = q;
-  cookie->tensor_name = tensor_name;
+  using LTF = LazyTensorFunctions<kRank, kRequireZeros>;
   return aotriton::LazyTensor<kRank> {
     .cookie = cookie,
-    .acquire = &LTH::acquire,
-    .dispose = &LTH::dispose
+    .acquire = &LTF::acquire,
+    .dispose = &LTF::dispose
   };
 }
 
