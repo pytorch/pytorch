@@ -5433,6 +5433,7 @@ def new_subgroups(
                 "please pass in 'group_size' correctly."
             )
         group_size = torch.cuda.device_count()
+
     if group_size <= 0:
         raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
 
@@ -5446,11 +5447,21 @@ def new_subgroups(
             f"The world size ({world_size}) must be divisible by '{group_size=}'"
         )
 
-    # TODO: Use itertools.batched(get_process_group_ranks(group=group), group_size) instead when Python 3.12 is supported.
+    # TODO can be dropped once compat for <=cp3.11 is dropped
+    try:
+        from itertools import batched
+        _use_batched = True
+    except ImportError:
+        _use_batched = False
+
     ranks = get_process_group_ranks(group=group)
-    ranks_per_subgroup_list = [
-        ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
-    ]
+    if _use_batched:
+        ranks_per_subgroup_list = [list(chunk) for chunk in batched(ranks, group_size)]
+    else:
+        ranks_per_subgroup_list = [
+            ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
+        ]
+    
     return new_subgroups_by_enumeration(
         ranks_per_subgroup_list,
         timeout=timeout,
