@@ -178,6 +178,7 @@ void initJITBindings(PyObject* module) {
   static py::handle exc =
       py::exception<JITException>(m, "JITException").release();
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   py::register_exception_translator([](std::exception_ptr p) {
     try {
       if (p) {
@@ -816,6 +817,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_nvfuser_set_comparison_callback",
+          // NOLINTNEXTLINE(performance-unnecessary-value-param)
           [](bool, py::function) {
             TORCH_WARN(
                 "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
@@ -2131,10 +2133,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_set_unwrap_func",
           // Intentionally not releasing GIL as this just does an assign
-          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+          [](PythonFutureWrapper& self, const py::function& unwrapFunc) {
             auto functionGuard =
-                std::make_shared<torch::jit::PythonFunctionGuard>(
-                    std::move(unwrapFunc));
+                std::make_shared<torch::jit::PythonFunctionGuard>(unwrapFunc);
 
             std::function<void(py::object)> pf =
                 [functionGuard(std::move(functionGuard))](
@@ -2330,9 +2331,9 @@ void initJITBindings(PyObject* module) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
-    toIValue(std::move(obj), type);
-  });
+  m.def(
+      "_jit_assert_is_instance",
+      [](const py::object& obj, const TypePtr& type) { toIValue(obj, type); });
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
   m.def("_set_print_stack_traces_on_fatal_signal", [](bool print) {
