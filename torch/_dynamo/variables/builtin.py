@@ -2199,13 +2199,15 @@ class BuiltinVariable(VariableTracker):
         return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        # for builtins, we can just directly read the attribute
-        try:
-            value = getattr(self.fn, name)
-        except AttributeError:
-            raise_observed_exception(AttributeError, tx)
         source = self.source and AttrSource(self.source, name)
-        return VariableTracker.build(tx, value, source)
+        if self.fn is object:
+            # for object, we can just directly read the attribute
+            try:
+                value = getattr(self.fn, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+            return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_getattr(
         self,
