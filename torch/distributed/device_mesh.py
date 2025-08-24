@@ -266,7 +266,7 @@ else:
                     if backend_override is None:
                         backend_override = ((None, None),) * self.mesh.ndim
                     if torch.equal(
-                        self.mesh,
+                        self.mesh.flatten().sort().values,
                         torch.arange(
                             get_world_size(),
                             device=self.mesh.device,
