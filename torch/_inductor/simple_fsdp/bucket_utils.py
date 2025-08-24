@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import math
-from typing import Any, Callable, cast, Dict, Union, TYPE_CHECKING
+from typing import Any, Callable, cast, Dict, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from .. import ir, scheduler
 from ..dependencies import StarDep, WeakDep
 from ..utils import buf_name_to_fused_snode, is_collective
 from ..virtualized import V
+from .reorder import _check_ir_node_fsdp
 
 
 def get_fx_node(
@@ -26,15 +27,47 @@ def get_fx_node(
             f"Expected BaseSchedulerNode or IRNode, got {type(snode_or_ir_node)}. Offending value: {snode_or_ir_node}"
         )
     origins_with_expected_op = [o for o in origins if o.target == expected_op]
-    assert len(origins_with_expected_op) == 1
+    if len(origins_with_expected_op) != 1:
+        print("[Get FX exception happen]origins_with_expected_op", origins_with_expected_op, "expected_op", expected_op, "snode_or_ir_node", snode_or_ir_node)
+        return None
     return origins_with_expected_op[0]
 
 
-def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"]) -> bool:
+def get_non_bucketable_ir_nodes(snodes, name_to_fused_node, name_to_buf):
+    non_bucketable_ir_nodes = set()
+    for snode in snodes:
+        # If the origin has op outside of accept_op_list, it means there will be strong dependency with previous comp
+        # thus, this means it's not bucketable
+        if is_collective(snode.node, op=torch.ops._c10d_functional.all_gather_into_tensor.default):
+            ag_related_snode_set = OrderedSet()
+            _find_recursive_deps_of_snode(
+                snode,
+                ag_related_snode_set,
+                name_to_buf,
+                name_to_fused_node,
+                allow_weak_dep=False,
+            )
+            if len(ag_related_snode_set) > 2: # 2 is cast + all_gather
+                non_bucketable_ir_nodes.add(snode.node.get_name())
+        elif is_collective(snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default):
+            wait_snode = snode.get_outputs()[0].users[0].node
+            wait_snode_recursive_users = OrderedSet()
+            _find_recursive_users_of_snode(
+                    wait_snode,
+                    wait_snode_recursive_users,
+                    name_to_buf,
+                    name_to_fused_node,
+                )
+            if len(wait_snode_recursive_users) > 1: # 1 is wait
+                non_bucketable_ir_nodes.add(snode.node.get_name())
+
+    return non_bucketable_ir_nodes
+
+def has_reduce_scatter_in_nodes(snodes: list["scheduler.BaseSchedulerNode"], non_bucketable_ir_nodes) -> bool:
     for snode in snodes:
         if is_collective(
             snode.node, op=torch.ops._c10d_functional.reduce_scatter_tensor.default
-        ):
+        ) and _check_ir_node_fsdp(snode.node, non_bucketable_ir_nodes):
             return True
     return False
 
@@ -310,7 +343,7 @@ def bucket_all_gathers(
             param_all_gather_outputs_flattened,
             inp_split_sizes,
             all_gather_input_numel,
-            example_ag_input_tensor.device.index,
+            example_ag_input_tensor.device.index % group_size,
         ),
         {},
     )
@@ -398,7 +431,7 @@ def bucket_reduce_scatters(
     )
     assert all(n.meta["val"].dtype == reduce_dtype for n in unsharded_grads_fx_nodes)
     device = unsharded_grads_fx_nodes[0].meta["val"].device
-    rank = device.index
+    rank = device.index % group_size
     # TODO(yf225): need more work if we want to support non-dim-0 sharding (e.g. search for `shard_dim` in FSDP2 codebase)
     shard_dim = 0
 

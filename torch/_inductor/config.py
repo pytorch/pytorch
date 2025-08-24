@@ -374,6 +374,7 @@ class simplefsdp:
     bucketing_type = "manual"
     bucketing_plan = []
     relax_ratio = 0.01
+    benchmark_ratio = 0.2
 
 
 # DEPRECATED. This setting is ignored.

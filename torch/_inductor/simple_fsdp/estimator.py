@@ -2,7 +2,7 @@ import statistics
 import time
 from collections.abc import Sequence
 from functools import reduce
-from typing import Any, Callable, cast, Union, TYPE_CHECKING
+from typing import Any, Callable, cast, Union
 
 from sympy import Expr
 
@@ -12,13 +12,16 @@ import torch.utils._pytree as pytree
 from torch._inductor.codecache import PyCodeCache
 from torch.utils._mode_utils import no_dispatch
 
-from .. import ir
+from .. import config, ir
 from ..utils import contains_collective, contains_wait
+
 
 kernel_name_to_comm_op: dict[str, Callable[..., Any]] = {
     "torch.ops._c10d_functional.all_gather_into_tensor.default": c10d.all_gather_into_tensor,
     "torch.ops._c10d_functional.reduce_scatter_tensor.default": c10d.reduce_scatter_tensor,
     "torch.ops._c10d_functional.all_gather_into_tensor_out.default": c10d.all_gather_into_tensor,
+    "torch.ops._c10d_functional.all_reduce_.default": c10d.all_reduce,
+    "torch.ops._c10d_functional.all_to_all_single.default": c10d.all_to_all_single,
 }
 
 
@@ -33,6 +36,24 @@ OpType = Union[
     torch._ops.OpOverloadPacket,
     torch._ops.HigherOrderOperator,
 ]
+
+
+def get_sample_list(input_size_list, cali_num_samples):
+    input_size_min, input_size_max = (
+        min(input_size_list),
+        int(config.simplefsdp.benchmark_ratio * sum(input_size_list)),
+    )
+    # ensure the min transmitted data volume is not 0
+    input_size_min = max(100, input_size_min)
+    sample_list = [
+        int(
+            input_size_min
+            + i * (input_size_max - input_size_min) / (cali_num_samples - 1)
+        )
+        for i in range(cali_num_samples)
+    ]
+    sample_list = [s // 100 * 100 for s in sample_list]
+    return sample_list
 
 
 def _convert_str_to_op(full_name: str) -> OpType:
@@ -73,6 +94,8 @@ class CommPerfCache:
         self.threshold = threshold
         self.ag_max_inp_size = -1
         self.rs_max_out_size = -1
+        self.all_reduce_max_input_size = -1
+        self.all_to_all_max_input_size = -1
 
     def _calculate_distance(self, size1, size2):
         word_size1 = get_data_size(size1)
@@ -89,6 +112,14 @@ class CommPerfCache:
                 self.rs_max_out_size = max(
                     self.rs_max_out_size, get_data_size(list(k[1]))
                 )
+            if k[2] == "torch.ops._c10d_functional.all_reduce_.default":
+                self.all_reduce_max_input_size = max(
+                    self.all_reduce_max_input_size, get_data_size(list(k[0]))
+                )
+            if k[2] == "torch.ops._c10d_functional.all_to_all_single.default":
+                self.all_to_all_max_input_size = max(
+                    self.all_to_all_max_input_size, get_data_size(list(k[0]))
+                )
 
     def add_comm_time(self, tensor_input_size, tensor_output_size, comm_func, value):
         key = (tuple(tensor_input_size), tuple(tensor_output_size), comm_func)
@@ -100,6 +131,14 @@ class CommPerfCache:
         if comm_func == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
             self.rs_max_out_size = max(
                 self.rs_max_out_size, get_data_size(tensor_output_size)
+            )
+        if comm_func == "torch.ops._c10d_functional.all_reduce_.default":
+            self.all_reduce_max_input_size = max(
+                self.all_reduce_max_input_size, get_data_size(tensor_input_size)
+            )
+        if comm_func == "torch.ops._c10d_functional.all_to_all_single.default":
+            self.all_to_all_max_input_size = max(
+                self.all_to_all_max_input_size, get_data_size(tensor_input_size)
             )
 
     def get_comm_time(
@@ -132,6 +171,9 @@ class CommPerfCache:
         if closest_key:
             return self.cache[closest_key]
 
+        # fall back to 0 if the data has been calibrated, but we cannot find a match
+        if calibrated:
+            return 0
         return None
 
 
@@ -264,25 +306,33 @@ def estimate_comm_time(
         estimate,
         verbose=verbose,
     )
+    tensor_input.cpu()
+    tensor_output.cpu()
+    del tensor_input, tensor_output
     return comm_time
 
 
 def benchmark_comm_func(
-    tensor_input, tensor_output, comm_func_name, comm_cache, estimate, verbose=False
+    tensor_input,
+    tensor_output,
+    comm_func_name,
+    comm_cache,
+    group_size,
+    process_group,
+    estimate,
+    verbose=False,
 ):
     rank = c10d.distributed_c10d.get_rank()
     device = torch.device(f"cuda:{rank:d}")
-    process_group = c10d.distributed_c10d._get_default_group()
+
     if comm_func_name == "torch.ops._c10d_functional.all_gather_into_tensor.default":
         input_args = {"input_tensor": tensor_input, "output_tensor": tensor_output}
     elif comm_func_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
         input_args = {"input": tensor_input, "output": tensor_output}
-    if comm_cache is not None:
-        comm_time = comm_cache.get_comm_time(
-            tensor_input.size(), tensor_output.size(), comm_func_name
-        )
-        if comm_time is not None:
-            return comm_time
+    elif comm_func_name == "torch.ops._c10d_functional.all_reduce_.default":
+        input_args = {"tensor": tensor_input}
+    elif comm_func_name == "torch.ops._c10d_functional.all_to_all_single.default":
+        input_args = {"input": tensor_input, "output": tensor_output}
 
     comm_func = kernel_name_to_comm_op.get(comm_func_name, None)
     assert comm_func is not None, f"Unsupported comm op {comm_func}"
@@ -293,7 +343,7 @@ def benchmark_comm_func(
         comm_time = cm.estimated_time
     else:
         torch.cuda.synchronize()
-        comm_func(**input_args)
+        comm_func(**input_args, group=process_group)
 
         nruns = 2
         comm_time = 0
@@ -304,7 +354,7 @@ def benchmark_comm_func(
             start_evt = torch.cuda.Event(enable_timing=True)
             end_evt = torch.cuda.Event(enable_timing=True)
             start_evt.record()
-            comm_func(**input_args)
+            comm_func(**input_args, group=process_group)
             end_evt.record()
             end_evt.synchronize()
 
@@ -322,6 +372,8 @@ def benchmark_comm_func(
         comm_cache.add_comm_time(
             tensor_input.size(), tensor_output.size(), comm_func_name, comm_time
         )
+    tensor_input.cpu()
+    tensor_output.cpu()
     del tensor_input, tensor_output
     return comm_time
 
@@ -335,7 +387,12 @@ def estimate_comp_time(
     # Estimate the runtime of a compute node
     # FusedSchedulerNode & BaseSchedulerNode: get the generated triton code and use `do_bench` mode to obtain runtime
     # ExternKernelSchedulerNode: get python kernel and run the kernel to obtain runtime
-    from ..scheduler import BaseSchedulerNode, ExternKernelSchedulerNode, FusedSchedulerNode
+    from ..scheduler import (
+        BaseSchedulerNode,
+        ExternKernelSchedulerNode,
+        FusedSchedulerNode,
+    )
+
     device = cast(torch.device, snode.get_device())
 
     if isinstance(snode, FusedSchedulerNode):
@@ -375,7 +432,8 @@ def benchmark_extern_node(
         return 0
 
     python_kernel_name = getattr(node, "python_kernel_name", "")
-
+    if python_kernel_name is None:
+        return 0
     if python_kernel_name.startswith("extern_kernels"):
         func = kernel_name_to_comp_op.get(python_kernel_name, None)
     elif python_kernel_name.startswith("torch.ops.aten"):
@@ -442,6 +500,13 @@ def benchmark_extern_node(
                     out._coalesced_(e.is_coalesced())
                 return out
 
+            def delete_tensor_in_list(l: list[Any]) -> None:
+                for i in range(len(l)):
+                    if isinstance(l[i], torch.Tensor):
+                        l[i].cpu()
+                        del l[i]
+                        break
+
             flat_args = [to_real_tensor(a) for a in flat_args]
             args, kwargs = pytree.tree_unflatten(flat_args, args_property)
             func(*args, **kwargs)
@@ -458,7 +523,11 @@ def benchmark_extern_node(
             cpu_time = cpu_end - cpu_start
             total_op_time = start_event.elapsed_time(end_event) - cpu_time
             mean_op_time = total_op_time / num_iters
+            delete_tensor_in_list(flat_args)
+            delete_tensor_in_list(args)
             del flat_args
+            del args
+            del kwargs
 
     mean_op_time = mean_op_time * 1e3
     if comp_cache is not None:
