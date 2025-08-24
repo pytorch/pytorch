@@ -20,7 +20,13 @@ def cache_dir() -> str:
 
 
 def default_cache_dir() -> str:
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    try:
+        username = getpass.getuser()
+    except:
+        # getuser() can fail if e.g. there's no pwd entry for user
+        username = "uid_" + str(os.getuid())
+
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", username)
     return os.path.join(
         tempfile.gettempdir() if not is_fbcode() else "/var/tmp",
         "torchinductor_" + sanitized_username,
