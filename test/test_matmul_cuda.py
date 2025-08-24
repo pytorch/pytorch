@@ -1315,18 +1315,26 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
-        ):
-            torch._scaled_mm(
+        def e5m2():
+            out = torch._scaled_mm(
                 x_fp8,
                 y_fp8.to(e5m2_type),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
+            return out
+
+        if torch.cuda.get_device_capability() == (9, 0):
+            out = e5m2()
+            self.assertEqual(out, torch.ones_like(out) * 128.)
+        else:
+            # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+            ):
+                e5m2()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
