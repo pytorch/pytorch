@@ -249,3 +249,25 @@ def wrap_inline_with_set_fullgraph(
                 return fn(*args, **kwargs)
 
     return wrapper
+
+
+def filter_out_const_values(tup: tuple[Any, ...], mask: list[bool]) -> tuple[Any, ...]:
+    out = []
+    for mask_idx, m in enumerate(mask):
+        if not m:
+            out.append(tup[mask_idx])
+    return tuple(out)
+
+
+def insert_const_values_with_mask(
+    tup: tuple[Any, ...], mask: list[bool], values: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    out = []
+    idx = 0
+    for mask_idx, m in enumerate(mask):
+        if m:
+            out.append(values[mask_idx])
+        else:
+            out.append(tup[idx])
+            idx += 1
+    return tuple(out)
