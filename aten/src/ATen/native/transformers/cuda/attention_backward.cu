@@ -40,11 +40,11 @@
 #include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
 #endif
 #ifdef USE_MEM_EFF_ATTENTION
+#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #ifndef USE_ROCM
 // MemoryEfficient Attention Specific Imports for CUDA
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h>
-#include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
