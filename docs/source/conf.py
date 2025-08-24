@@ -1740,6 +1740,7 @@ coverage_ignore_functions = [
     "std",
     "std_mean",
     "sub",
+    "swiglu",
     "t",
     "take",
     "tan",

@@ -1202,6 +1202,21 @@ def module_inputs_torch_nn_SiLU(module_info, device, dtype, requires_grad, train
                     reference_fn=lambda m, p, x, *_: x * torch.sigmoid(x))]
 
 
+def module_inputs_torch_nn_SwiGLU(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((5, 6)))),
+        ModuleInput(constructor_input=FunctionInput(1),
+                    forward_input=FunctionInput(make_input((5, 6, 7))),
+                    desc='dim'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input((4,))),
+                    desc='no_batch_dim',
+                    reference_fn=no_batch_dim_reference_fn)]
+
+
 def module_inputs_torch_nn_Softmax(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4011,6 +4026,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GLU,
                module_inputs_func=module_inputs_torch_nn_GLU,
+               ),
+    ModuleInfo(torch.nn.SwiGLU,
+               module_inputs_func=module_inputs_torch_nn_SwiGLU,
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
