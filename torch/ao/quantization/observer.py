@@ -1902,10 +1902,18 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
             else:
                 scale, zero_point = self.calculate_qparams()
                 scale_node = create_getattr_from_value(
-                    model, model.graph, "_scale", scale
+                    model,
+                    model.graph,
+                    "_scale",
+                    scale,
+                    scale.device,
                 )
                 zero_point_node = create_getattr_from_value(
-                    model, model.graph, "_zero_point", zero_point
+                    model,
+                    model.graph,
+                    "_zero_point",
+                    zero_point,
+                    zero_point.device,
                 )
 
             q_node = model.graph.call_function(
