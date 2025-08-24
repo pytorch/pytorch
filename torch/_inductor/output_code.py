@@ -581,6 +581,19 @@ class CompiledFxGraph(OutputCode):
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
+
+        if torch._inductor.debug.RECORD_GRAPH_EXECUTION:
+            graph_id = self.fx_kwargs.get("graph_id")
+            compile_id = (
+                torch._inductor.debug.GRAPH_COMPILE_IDS.get(graph_id)
+                if graph_id is not None
+                else None
+            )
+            torch._inductor.debug.GRAPH_EXECUTION_ORDER.append(
+                {
+                    "compile_id": compile_id,
+                }
+            )
         try:
             with record_function(
                 f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
