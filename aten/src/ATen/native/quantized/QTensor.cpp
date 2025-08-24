@@ -68,7 +68,10 @@ Tensor quantize_per_tensor_tensor_qparams(
     const Tensor& scale,
     const Tensor& zero_point,
     ScalarType dtype) {
-  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
+  auto scale_item = scale.item();
+  TORCH_CHECK(!(scale_item.isComplex() && scale_item.toComplexDouble().imag() != 0),
+              "Complex type `scale` with imag != 0 is not supported for quantization.");
+  auto quantizer = make_per_tensor_affine_quantizer(scale_item.toDouble(), zero_point.item().toLong(), dtype);
   return quantizer->quantize(self);
 }
 
