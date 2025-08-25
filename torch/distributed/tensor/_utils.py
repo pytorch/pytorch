@@ -284,7 +284,7 @@ def compute_global_tensor_shape(
     if isinstance(placements[0], Replicate):
         return shape
     elif isinstance(placements[0], Shard):
-        local_shape = torch.tensor(list(shape))
+        local_shape = torch.tensor(list(shape), device=mesh.device_type)
         gathered_shaped_tensors = [
             torch.empty_like(local_shape, device=local_shape.device)
             for _ in range(mesh.size())
