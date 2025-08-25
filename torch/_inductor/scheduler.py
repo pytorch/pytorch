@@ -4004,7 +4004,6 @@ class Scheduler:
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if (shared_data_score < config.score_fusion_memory_threshold and isinstance(node1, SchedulerNode)):
-            breakpoint()
             node1.replace_boundary_with_mask(0, 4) # hack to mask node1 from [2,3] to [4,3]. TODO: generalize
             shared_data_score = self.score_fusion_memory(node1, node2)
 

@@ -243,12 +243,11 @@ class LoopBody:
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
-            # index_dtype = iter_idx[dimension].get_dtype()
-            mask = ops.lt(
-                ops.index_expr(iter_idx[dimension], torch.int64),
-                ops.index_expr(original_range, torch.int64),
-            )
-            return ops.masked(mask, lambda: old_body(iter_idx, reduce_idx), 0)
+
+            new_iter_idx = list(iter_idx)
+            new_iter_idx[dimension] = iter_idx[dimension] % original_range
+
+            return old_body(new_iter_idx, reduce_idx)
 
         loop_body = LoopBody(
             new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
