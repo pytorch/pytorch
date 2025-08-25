@@ -1151,7 +1151,7 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
         if remove_dims and not select_dims:
             # TODO: shall we also check that all remove_dims have Replicate() shardings
             # (i.e. dim_map[x] == -1)???
-            # TODO: remove multiple dims is possible
+            # NOTE: remove multiple dims is possible
             out_dim_map = [
                 map for dim, map in enumerate(out_dim_map) if dim in free_dims
             ]
@@ -1221,23 +1221,31 @@ def index_tensor_strategy(op_schema: OpSchema) -> OpStrategy:
             insert_dim_map = index_input_spec.dim_map
             old_out_dim_map = out_dim_map
             first_select_dim = min(first_remove_dim, first_select_dim)
-            # TODO: select multiple dims is possible.
-            out_dim_map = (
-                [
-                    map
-                    for dim, map in enumerate(out_dim_map[:first_select_dim])
-                    if dim in free_dims
+            # NOTE: select multiple dims is possible.
+            # if select dims and remove dims are consecutive
+            new_dims = sorted(select_dims + remove_dims)
+            if all(prev + 1 == curr for prev, curr in zip(new_dims[:-1], new_dims[1:])):
+                out_dim_map = (
+                    [
+                        map
+                        for dim, map in enumerate(out_dim_map[:first_select_dim])
+                        if dim in free_dims
+                    ]
+                    + insert_dim_map
+                    + [
+                        map
+                        for dim, map in enumerate(out_dim_map[first_select_dim:])
+                        if first_select_dim + dim in free_dims
+                    ]
+                )
+            else:
+                out_dim_map = insert_dim_map + [
+                    map for dim, map in enumerate(out_dim_map) if dim in free_dims
                 ]
-                + insert_dim_map
-                + [
-                    map
-                    for dim, map in enumerate(out_dim_map[first_select_dim:])
-                    if dim in free_dims
-                ]
-            )
+
             self_input_placements = self_input_spec.placements
             print(
-                f"out_dim_map={out_dim_map}, from {old_out_dim_map}[:{first_select_dim}] + {insert_dim_map} + {old_out_dim_map}[{first_select_dim + insert_ndim} : ]"
+                f"out_dim_map={out_dim_map}, from {old_out_dim_map} + {insert_dim_map}"
             )
             out_spec = DTensorSpec.from_dim_map(
                 mesh=self_input_spec.mesh,
