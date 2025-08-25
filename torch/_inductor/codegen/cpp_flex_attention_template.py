@@ -783,9 +783,10 @@ extern "C"
   const scalar_t* v_data = value;
   scalar_t* out_data = output;
 
-  auto actual_kvSize = kvSize / batchSize;
-  auto num_partitions =
-      (actual_kvSize + PARTITION_SIZE - 1) / PARTITION_SIZE;
+  // TODO: Support score / mask mod dependant on batch_size / num_head
+  int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
+  int64_t num_kvblocks_per_partition = PARTITION_SIZE / kvBlockSize;
+  int64_t num_partitions = (num_kvblocks_per_seq + num_kvblocks_per_partition - 1) / num_kvblocks_per_partition;
 
   // Allocate temp buf (accumulate type)
   int64_t _accum_buff_size =
@@ -809,7 +810,6 @@ extern "C"
   auto tmp_out_strideH = num_partitions * headSize_v;
   auto tmp_out_strideS = headSize_v;
 
-  // TODO: For GQA, the parallelism dim of q_num_head can be changed to kv_num_head
   // Attention loop
   at::parallel_for(0, batchSize * num_head * num_partitions, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, partition_id = 0;
@@ -822,18 +822,14 @@ extern "C"
             : nullptr;
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-      auto n_offset = i * actual_kvSize;
-      auto partition_start = n_offset + partition_id * PARTITION_SIZE;
-      auto partition_end =
-              std::min(partition_start + PARTITION_SIZE, kvSize);
-
+      auto kvblock_offset = num_kvblocks_per_partition * partition_id;
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
       auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
       auto kv_logical_num_data = kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH;
-      int kv_indice_num = *kv_logical_num_data;
-      std::vector<int> kv_indice_list(kv_indice_num);
-      for(int kv_i = 0; kv_i < kv_indice_num; kv_i++){
+      int64_t kv_indice_num = *kv_logical_num_data;
+      std::vector<int64_t> kv_indice_list(kv_indice_num);
+      for(int64_t kv_i = 0; kv_i < kv_indice_num; kv_i++){
         auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
                                   j_kvi * kviStrideH + kv_i;
         kv_indice_list[kv_i] = *kv_logical_data;
@@ -841,9 +837,9 @@ extern "C"
 {%- if has_full_kv_block %}
       auto full_kv_logical_num_data = full_kv_num_blocks_data + i_kvi * num_kviStrideB +
                               j_kvi * num_kviStrideH;
-      int full_kv_indice_num = *full_kv_logical_num_data;
-      std::vector<int> full_kv_indice_list(full_kv_indice_num);
-      for(int kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
+      int64_t full_kv_indice_num = *full_kv_logical_num_data;
+      std::vector<int64_t> full_kv_indice_list(full_kv_indice_num);
+      for(int64_t kv_i = 0; kv_i < full_kv_indice_num; kv_i++){
         auto full_kv_logical_data = full_kv_indices_data + i_kvi * full_kviStrideB +
                                   j_kvi * full_kviStrideH + kv_i;
         full_kv_indice_list[kv_i] = *full_kv_logical_data;
@@ -867,15 +863,12 @@ extern "C"
       // 1) calculate the matmul(query, key) for this partition
       int64_t token_num = 0;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num); n_idx += 1) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = 0; n_idx < kv_indice_num ; n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num); n_idx += 1) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
-        if (n < partition_start || n >= partition_end) {
-          continue;
-        }
 
         auto cur_n = n/kvSplitSize;
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
@@ -966,15 +959,12 @@ extern "C"
       token_num = 0;
       bool skipped_partition = true;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = 0; n_idx < kv_indice_num + full_kv_indice_num ; n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num); n_idx += 1) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = 0; n_idx < kv_indice_num ; n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num); n_idx += 1) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
-        if (n < partition_start || n >= partition_end) {
-          continue;
-        }
         skipped_partition = false;
         int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
 
@@ -1408,9 +1398,9 @@ class CppFlexAttentionTemplate(CppTemplate):
     ):
       # choose from FLEX_ATTENTION or FLEX_DECODING
       FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
-      q_batch_size = query.data.data.layout.size[0]
-      q_num_heads = query.data.data.layout.size[1]
-      q_seq_len = query.data.data.layout.size[2]
+      q_batch_size = query.data.data.layout.size[0]  # type: ignore[attr-defined]
+      q_num_heads = query.data.data.layout.size[1]  # type: ignore[attr-defined]
+      q_seq_len = query.data.data.layout.size[2]  # type: ignore[attr-defined]
       if all(
           sympy.sympify(val).is_number
           for val in [q_batch_size, q_num_heads, q_seq_len, num_threads]
