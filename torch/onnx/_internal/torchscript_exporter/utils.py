@@ -1352,7 +1352,7 @@ def _get_module_attributes(module):
 def _trigger_symbolic_function_registration():
     """Trigger the registration of symbolic functions for all supported opsets."""
 
-    from torch.onnx._internal.torchscript_exporter import (  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401
+    from torch.onnx._internal.torchscript_exporter import (  # noqa: F401
         symbolic_opset10,
         symbolic_opset11,
         symbolic_opset12,
