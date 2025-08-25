@@ -981,7 +981,7 @@ def _sink_waits_iterative_internal(
 
         for n in [candidate, *gns]:
             post_alloc = _post_alloc_update[n]
-            snodes_allocfree[n].size_free += _size_free_delta_update[n]
+            snodes_allocfree[n].size_free += _size_free_delta_update.get(n, 0)
             _curr_memory[n] = (
                 post_alloc,
                 post_alloc - snodes_allocfree[n].size_free,
