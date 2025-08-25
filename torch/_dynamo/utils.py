@@ -1292,6 +1292,7 @@ class CompilationMetrics:
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
     stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
     graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install

@@ -52,7 +52,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -75,7 +75,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: cuda12.8
@@ -83,6 +83,6 @@ jobs:
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

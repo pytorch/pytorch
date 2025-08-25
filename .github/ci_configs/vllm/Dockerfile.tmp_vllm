@@ -67,6 +67,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
 
 #################### TORCH NIGHTLY  BASE IMAGE ####################
 
@@ -90,6 +92,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
 
 WORKDIR /workspace
 
@@ -112,6 +116,7 @@ ARG PINNED_TORCH_VERSION
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
+        echo "[INFO] Installing torch wheels to build vllm"; \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
@@ -119,10 +124,10 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
-        echo "[INFO] Installing pinned torch nightly version: $PINNED_TORCH_VERSION"; \
+        echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
         uv pip install --system "$PINNED_TORCH_VERSION" --index-url https://download.pytorch.org/whl/nightly/cu128; \
     else \
-        echo "[INFO] Installing torch nightly with latest one"; \
+        echo "[INFO] Installing torch nightly with latest one to build vllm"; \
         uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128; \
     fi
 
@@ -136,15 +141,22 @@ uv pip install --system -r requirements/common.txt
 
 
 # Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+ARG exformer_cuda_arch_list='7.5;8.0+PTX;9.0a'
+ENV TORCH_CUDA_ARCH_LIST=${exformer_cuda_arch_list}
+
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 
+RUN echo ${TORCH_CUDA_ARCH_LIST}
+RUN echo ${MAX_JOBS}
+RUN pip freeze | grep -E 'ninja'
+
 # Build xformers with cuda and torch nightly/wheel
 # following official xformers guidance: https://github.com/facebookresearch/xformers#build
-ARG XFORMERS_COMMIT=f2de641ef670510cadab099ce6954031f52f191c
+# sha for https://github.com/facebookresearch/xformers/tree/v0.0.31
+ARG XFORMERS_COMMIT=eb0946a363464da96ea40afd1a7f72a907c25497
 ENV CCACHE_DIR=/root/.cache/ccache
+
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
     echo 'git clone xformers...' \
@@ -157,14 +169,14 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
     && cd .. \
     && rm -rf xformers
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system xformers-dist/*.whl --verbose
 
 # Build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
 # track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-RUN cat  torch_build_versions.txt
-
+RUN cat torch_build_versions.txt
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
 
 #################### BASE BUILD IMAGE ####################
@@ -177,6 +189,8 @@ ARG TARGETPLATFORM
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
 
 COPY . .
 
@@ -192,7 +206,7 @@ RUN --mount=type=bind,source=.git,target=.git \
 # Max jobs used by Ninja to build extensions
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
-ARG nvcc_threads=2
+ARG nvcc_threads=4
 ENV NVCC_THREADS=$nvcc_threads
 ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
@@ -216,11 +230,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && export SCCACHE_S3_NO_CREDENTIALS=${SCCACHE_S3_NO_CREDENTIALS} \
         && export SCCACHE_IDLE_TIMEOUT=0 \
         && export CMAKE_BUILD_TYPE=Release \
+        && export VLLM_DOCKER_BUILD_CONTEXT=1 \
         && sccache --show-stats \
         && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
     fi
 
+ARG vllm_target_device="cuda"
+ENV VLLM_TARGET_DEVICE=${vllm_target_device}
 ENV CCACHE_DIR=/root/.cache/ccache
 RUN --mount=type=cache,target=/root/.cache/ccache \
     --mount=type=cache,target=/root/.cache/uv \
@@ -229,6 +246,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         # Clean any existing CMake artifacts
         rm -rf .deps && \
         mkdir -p .deps && \
+        export VLLM_DOCKER_BUILD_CONTEXT=1 && \
         python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
     fi
 
@@ -296,6 +314,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
@@ -308,7 +328,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         torch_whl=$(find /dist -maxdepth 1 -name 'torch-*.whl' -print -quit); \
         vision_whl=$(find /dist/vision -name 'torchvision*.whl' | head -n1 | xargs); \
         audio_whl=$(find /dist/audio -name 'torchaudio*.whl' | head -n1 | xargs); \
-        echo "Found: '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
+        echo "[INFO] Use wheels to build : '${torch_whl}' '${audio_whl}' '${vision_whl}'"; \
         uv pip install --system "${torch_whl}[opt-einsum]"; \
         uv pip install --system "${vision_whl}"; \
         uv pip install --system "${audio_whl}"; \
@@ -364,6 +384,8 @@ FROM vllm-base as test
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
 
 COPY tests/ tests/
 COPY examples examples

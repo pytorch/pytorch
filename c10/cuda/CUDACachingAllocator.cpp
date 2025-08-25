@@ -4153,11 +4153,8 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom,
-    bool symmetric)
-    : allocator_(allocator),
-      is_user_created_(is_user_created),
-      symmetric_(symmetric) {
+    bool use_on_oom)
+    : allocator_(allocator), is_user_created_(is_user_created) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4178,10 +4175,6 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
-}
-
-bool MemPool::is_symmetric() {
-  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {

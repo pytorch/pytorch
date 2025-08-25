@@ -10,7 +10,11 @@
 #include <ATen/cuda/cub.cuh>
 
 // NVSHMEM minimum SM arch
+#if CUDA_VERSION >= 13000
+#define _NVSHMEM_MIN_SM_ARCH 800
+#else
 #define _NVSHMEM_MIN_SM_ARCH 700
+#endif
 
 // Some NVSHMEM device APIs do not compile on older SM archs
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH)

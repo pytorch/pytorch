@@ -48,6 +48,7 @@ jobs:
       fail-fast: false
       matrix:
         include: [
+          { tag: "cuda13.0" },
           { tag: "cuda12.9" },
           { tag: "cuda12.8" },
           { tag: "cuda12.6" },

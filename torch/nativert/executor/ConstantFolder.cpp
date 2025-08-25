@@ -41,6 +41,8 @@ void ConstantFolder::unlinkConstants(
   const auto* input = &*graph_.nodes().begin();
   const auto* output = &*graph_.nodes().end();
 
+  c10::FastSet<const Node*> run_const_graph_nodes;
+
   { // ignore prim.Input and prim.Output
     auto ct = 0;
     for (auto& n : graph_.nodes()) {
@@ -49,6 +51,19 @@ void ConstantFolder::unlinkConstants(
       }
       nodeDynInputs[&n] = n.numInputs();
       nodeKernels[&n] = &kernels[++ct];
+
+      if (n.target() == "torch.ops.higher_order.run_const_graph") {
+        run_const_graph_nodes.insert(&n);
+      }
+    }
+  }
+
+  for (const auto* run_const_graph_node : run_const_graph_nodes) {
+    for (auto* user : run_const_graph_node->users()) {
+      if (user == input || user == output) {
+        continue;
+      }
+      nodeDynInputs[user] -= 1;
     }
   }
 

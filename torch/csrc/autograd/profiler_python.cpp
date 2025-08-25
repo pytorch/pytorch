@@ -704,7 +704,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyFrameObject* frame,
       int what,
       PyObject* arg);
-
+  void register_gc_callback() override;
   void stop() override;
   void restart() override;
   std::vector<std::shared_ptr<Result>> getEvents(
@@ -723,6 +723,8 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyFrameObject* frame,
       bool is_startup_frame);
 
+  static PyObject* gc_event_callback(PyObject* self, PyObject* args);
+
   void recordCCall(
       ThreadLocalResults& tls,
       PyFrameObject* frame,
@@ -733,6 +735,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   std::atomic<bool> active_lock_{false};
   bool active_{false};
+  bool gc_callback_registered_{false};
 
   torch::profiler::impl::RecordQueue* queue_;
   PyInterpreterState* interpreter_{nullptr};
@@ -973,6 +976,27 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
   return out;
 }
 
+// we are only registering on main thread while holding GIL so this should be
+// safe
+static PyObject* py_gc_callback = nullptr;
+// The C function to be called by Python's GC
+PyObject* PythonTracer::gc_event_callback(PyObject* self, PyObject* args) {
+  const char* phase;
+  PyObject* info;
+  if (!PyArg_ParseTuple(args, "sO", &phase, &info)) {
+    return nullptr;
+  }
+  PythonTracer* instance =
+      reinterpret_cast<PythonTracer*>(PyCapsule_GetPointer(self, nullptr));
+  if (!instance) {
+    PyErr_SetString(PyExc_RuntimeError, "Invalid tracer instance");
+    return nullptr;
+  }
+  instance->queue_->getSubqueue()->emplace_gc_call(
+      phase, c10::getApproximateTime());
+  Py_RETURN_NONE;
+}
+
 PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     : queue_(queue),
 
@@ -1045,8 +1069,74 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 #endif
 }
 
+void unregister_gc_callback() {
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  PyObject* gc_module = PyImport_ImportModule("gc");
+  if (!gc_module) {
+    PyErr_Print();
+    PyGILState_Release(gstate);
+    return;
+  }
+  PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
+  if (!callbacks || !PyList_Check(callbacks)) {
+    PyErr_Print();
+    Py_XDECREF(gc_module);
+    Py_XDECREF(callbacks);
+    PyGILState_Release(gstate);
+    return;
+  }
+  Py_ssize_t idx = PySequence_Index(callbacks, py_gc_callback);
+  if (idx >= 0) {
+    PySequence_DelItem(callbacks, idx);
+  } else {
+    // Not found, maybe already removed
+  }
+  Py_DECREF(callbacks);
+  Py_DECREF(gc_module);
+  Py_XDECREF(py_gc_callback);
+  py_gc_callback = nullptr;
+  PyGILState_Release(gstate);
+}
+
+void PythonTracer::register_gc_callback() {
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  PyObject* gc_module = PyImport_ImportModule("gc");
+  if (!gc_module) {
+    PyErr_Print();
+    PyGILState_Release(gstate);
+    return;
+  }
+  PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
+  if (!callbacks || !PyList_Check(callbacks)) {
+    PyErr_Print();
+    Py_XDECREF(gc_module);
+    Py_XDECREF(callbacks);
+    PyGILState_Release(gstate);
+    return;
+  }
+  static PyMethodDef method_def = {
+      "gc_event_callback",
+      (PyCFunction)gc_event_callback,
+      METH_VARARGS,
+      nullptr};
+  PyObject* capsule = PyCapsule_New(this, nullptr, nullptr);
+  py_gc_callback = PyCFunction_New(&method_def, capsule);
+  Py_DECREF(capsule); // PyCFunction_New increments refcount
+  if (PyList_Append(callbacks, py_gc_callback) < 0) {
+    PyErr_Print();
+  }
+  gc_callback_registered_ = true;
+  Py_DECREF(callbacks);
+  Py_DECREF(gc_module);
+  PyGILState_Release(gstate);
+}
+
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
+  if (gc_callback_registered_) {
+    unregister_gc_callback();
+    gc_callback_registered_ = false;
+  }
   if (active_) {
     for (const auto thread_state : interpreterThreads()) {
       if (thread_state->c_profilefunc == &PythonTracer::pyProfileFn) {

@@ -1584,6 +1584,32 @@ class OutputGraph(OutputGraphGuardsState):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def bypass_package(self, reason: str = "", **kwargs: Any) -> None:
+        """
+        Do not save this output graph to the CompilePackage
+        """
+        if not self.package:
+            return
+        if torch._dynamo.config.strict_precompile:
+            raise torch._dynamo.exc.PackageError(
+                "Detected a package bypass: %s", reason
+            )
+        log.warning("Detected a package bypass: %s", reason)
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "precompile_cache_bypass",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {
+                # precede with underscore so it always appear first in JSON in tlparse
+                "_reason": reason,
+                **kwargs,
+            },
+        )
+        self.package.bypass_current_entry()
+        self.package = None
+
     def get_graph_sizes_structured(self) -> dict[str, list[Union[int, str]]]:
         ret: dict[str, list[Union[int, str]]] = {}
         for node in self.graph.nodes:
@@ -1740,7 +1766,20 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
-            gm._backend_id = name
+            if next(gm.parameters(), None) is not None:
+                # If dynamo produces a graph with parameters, skip package stuff
+                # Bypass output graph
+                self.bypass_package(
+                    "Graph contains named parameters: either inline_inbuilt_nn_modules=False or there are static addresses.",
+                    inline_builtin_nn_modules=torch._dynamo.config.inline_inbuilt_nn_modules,
+                    gm=gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+
+            if self.package is not None:
+                gm._backend_id = name
+
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()

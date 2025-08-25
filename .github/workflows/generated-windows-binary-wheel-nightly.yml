@@ -287,7 +287,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -399,7 +399,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -507,7 +507,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cuda12_6
@@ -525,7 +525,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -637,7 +637,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -745,7 +745,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cuda12_8
@@ -763,7 +763,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -875,7 +875,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
@@ -983,7 +983,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cuda12_9
@@ -1472,7 +1472,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -1584,7 +1584,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -1692,7 +1692,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cuda12_6
@@ -1710,7 +1710,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -1822,7 +1822,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -1930,7 +1930,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cuda12_8
@@ -1948,7 +1948,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -2060,7 +2060,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
@@ -2168,7 +2168,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cuda12_9
@@ -2657,7 +2657,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -2769,7 +2769,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -2877,7 +2877,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
       build_name: wheel-py3_11-cuda12_6
@@ -2895,7 +2895,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -3007,7 +3007,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -3115,7 +3115,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
       build_name: wheel-py3_11-cuda12_8
@@ -3133,7 +3133,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -3245,7 +3245,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
@@ -3353,7 +3353,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.11"
       build_name: wheel-py3_11-cuda12_9
@@ -3842,7 +3842,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -3954,7 +3954,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -4062,7 +4062,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
       build_name: wheel-py3_12-cuda12_6
@@ -4080,7 +4080,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -4192,7 +4192,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -4300,7 +4300,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
       build_name: wheel-py3_12-cuda12_8
@@ -4318,7 +4318,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -4430,7 +4430,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
@@ -4538,7 +4538,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.12"
       build_name: wheel-py3_12-cuda12_9
@@ -5027,7 +5027,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5139,7 +5139,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5247,7 +5247,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
       build_name: wheel-py3_13-cuda12_6
@@ -5265,7 +5265,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5377,7 +5377,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5485,7 +5485,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
       build_name: wheel-py3_13-cuda12_8
@@ -5503,7 +5503,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5615,7 +5615,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
@@ -5723,7 +5723,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13"
       build_name: wheel-py3_13-cuda12_9
@@ -6212,7 +6212,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6324,7 +6324,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6432,7 +6432,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13t"
       build_name: wheel-py3_13t-cuda12_6
@@ -6450,7 +6450,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6562,7 +6562,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6670,7 +6670,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13t"
       build_name: wheel-py3_13t-cuda12_8
@@ -6688,7 +6688,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6800,7 +6800,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
@@ -6908,7 +6908,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.13t"
       build_name: wheel-py3_13t-cuda12_9
@@ -7397,7 +7397,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -7509,7 +7509,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -7617,7 +7617,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14"
       build_name: wheel-py3_14-cuda12_6
@@ -7635,7 +7635,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -7747,7 +7747,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -7855,7 +7855,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14"
       build_name: wheel-py3_14-cuda12_8
@@ -7873,7 +7873,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -7985,7 +7985,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
@@ -8093,7 +8093,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14"
       build_name: wheel-py3_14-cuda12_9
@@ -8582,7 +8582,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -8694,7 +8694,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -8802,7 +8802,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu126
-      GPU_ARCH_VERSION: 12.6
+      GPU_ARCH_VERSION: "12.6"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14t"
       build_name: wheel-py3_14t-cuda12_6
@@ -8820,7 +8820,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -8932,7 +8932,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -9040,7 +9040,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu128
-      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_VERSION: "12.8"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14t"
       build_name: wheel-py3_14t-cuda12_8
@@ -9058,7 +9058,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -9170,7 +9170,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
@@ -9278,7 +9278,7 @@ jobs:
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu129
-      GPU_ARCH_VERSION: 12.9
+      GPU_ARCH_VERSION: "12.9"
       GPU_ARCH_TYPE: cuda
       DESIRED_PYTHON: "3.14t"
       build_name: wheel-py3_14t-cuda12_9

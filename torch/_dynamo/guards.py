@@ -31,6 +31,7 @@ import math
 import pickle
 import sys
 import textwrap
+import traceback
 import types
 import warnings
 import weakref
@@ -3438,9 +3439,17 @@ class CheckFunctionManager:
             from torch._dynamo.output_graph import OutputGraph
 
             assert isinstance(self.output_graph, OutputGraph)
-            self.guards_state = self.serialize_guards(
-                builder, sorted_guards, self.output_graph
-            )
+            try:
+                self.guards_state = self.serialize_guards(
+                    builder, sorted_guards, self.output_graph
+                )
+            except exc.PackageError as e:
+                if torch._dynamo.config.strict_precompile:
+                    raise e
+                self.output_graph.bypass_package(
+                    f"Guard evaluation failed: {str(e)}",
+                    traceback=traceback.format_exc().split("\n"),
+                )
 
         # TODO: don't do the string rep, do something more structured here
         torch._logging.trace_structured(

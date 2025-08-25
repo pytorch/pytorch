@@ -12858,6 +12858,7 @@ fn
                 complex(real=1),
                 complex(imag=1, real=2),
                 complex("1+2j"),
+                complex(1, 2).conjugate(),
             )
             return [x + z for z in c]
 

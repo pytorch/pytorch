@@ -400,6 +400,7 @@ def package_pt2(
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
+        or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
         # TODO: turn this into an error
         logger.warning(

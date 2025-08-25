@@ -37,7 +37,6 @@ __all__ = [
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
-    "enable_fake_mode",
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
@@ -47,7 +46,6 @@ import torch
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
-from ._internal._exporter_legacy import enable_fake_mode
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._type_utils import JitScalarType
 from .errors import OnnxExporterError
@@ -90,7 +88,6 @@ if TYPE_CHECKING:
 JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
-enable_fake_mode.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
@@ -169,7 +166,10 @@ def export(
         output_names: names to assign to the output nodes of the graph, in order.
         opset_version: The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7.
+            to target. You should set ``opset_version`` according to the supported opset versions
+            of the runtime backend or compiler you want to run the exported model with.
+            Leave as default (``None``) to use the recommended version, or refer to
+            the ONNX operators documentation for more information.
         dynamic_axes:
 
             By default the exported model will have the shapes of all input and output tensors

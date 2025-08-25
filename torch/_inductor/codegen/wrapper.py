@@ -228,11 +228,18 @@ def user_defined_kernel_grid_fn_code(
                 key=lambda x: len(x[1].kwargs),
                 reverse=True,
             ):
+                guardslist = []
                 if c.kwargs:
-                    guards = [
-                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
-                    ]
-                    guards = " and ".join(guards)
+                    # Remove AMD specific kwargs.
+                    for kwarg in c.kwargs:
+                        if kwarg not in [
+                            "matrix_instr_nonkdim",
+                            "waves_per_eu",
+                            "kpack",
+                        ]:
+                            guardslist.append(f"meta['{kwarg}'] == {c.kwargs[kwarg]}")
+                if guardslist:
+                    guards = " and ".join(guardslist)
                 else:
                     guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid, example_grid)
@@ -1887,32 +1894,13 @@ class PythonWrapperCodegen(CodeGen):
         arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
-    def codegen_dynamic_select_index(self, node, clamp):
+    def codegen_dynamic_select_index(self, node):
         index_str = f"{node.index} + {node.size} if {node.index} < 0 else {node.index}"
-        if clamp:
-            index_str = f"max(0, min({node.size}, {index_str}))"
         self.writeline(
             f"{node.unbacked_offset_symbol} = {node.base_offset} + {node.base_dim_stride} * ({index_str})"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
-
-    def codegen_dynamic_slice_size(self, node):
-        def clamp_index(x):
-            pos = self.codegen_sizevar(sympy.Max(0, sympy.Min(x, node.size)))
-            neg = self.codegen_sizevar(
-                sympy.Max(0, sympy.Min(x + node.size, node.size))
-            )
-            return f"{pos} if {x} >= 0 else {neg}"
-
-        # codegen start, end
-        sym = node.unbacked_size_symbol
-        start = clamp_index(node.start)
-        end = clamp_index(node.end)
-        self.writeline(f"{sym}_start = {start}")
-        self.writeline(f"{sym}_end = {end}")
-        self.writeline(f"{sym} = max(0, {sym}_end - {sym}_start)")
-        self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)

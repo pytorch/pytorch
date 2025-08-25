@@ -3,6 +3,7 @@ import dataclasses
 import json
 import logging
 import queue
+import threading
 from typing import Any, Optional
 
 import torch
@@ -203,15 +204,52 @@ class HuggingFaceStorageReader(FileSystemReader):
     A reader that reads a checkpoint in the huggingface safetensors format.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, thread_count: int = 1) -> None:
         """
         Initialize the huggingface reader pointing to path.
 
         Args:
             path: directory where the checkpoint will be read from.
+            thread_count: Number of threads to use to read distributed checkpoint. Default to 1.
         """
 
         super().__init__(path=path)
+        self.thread_count = thread_count
+
+    def _process_read_request(self, f, req: ReadItem, planner: LoadPlanner) -> None:
+        """Helper function to process a single read request."""
+        # Create slices for each dimension based on offsets and lengths
+        slices = tuple(
+            slice(offset, offset + length)
+            for offset, length in zip(req.storage_offsets, req.lengths)
+        )
+        tensor = f.get_slice(req.storage_index.fqn)[slices]
+        target_tensor = planner.resolve_tensor(req).detach()
+
+        assert target_tensor.size() == tensor.size(), (
+            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+        )
+
+        target_tensor.copy_(tensor)
+        planner.commit_tensor(req, target_tensor)
+
+    def _read_files_from_queue(
+        self,
+        file_queue: queue.Queue,
+        result_queue: queue.Queue,
+        planner: LoadPlanner,
+    ) -> None:
+        from safetensors import safe_open  # type: ignore[import]
+
+        try:
+            while True:
+                file_name, reqs = file_queue.get_nowait()
+                with safe_open(filename=file_name, framework="pt") as f:
+                    for req in reqs:
+                        self._process_read_request(f, req, planner)
+                result_queue.put(True)  # Signal that this file has been processed
+        except queue.Empty:
+            pass
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         from safetensors import safe_open  # type: ignore[import]
@@ -223,25 +261,47 @@ class HuggingFaceStorageReader(FileSystemReader):
             file_name = item_md.relative_path
             per_file.setdefault(file_name, []).append(read_item)
 
-        for file_name, reqs in per_file.items():
-            with safe_open(filename=file_name, framework="pt") as f:
-                for req in reqs:
-                    item_md = self.storage_data[req.storage_index]
+        if self.thread_count <= 1 or len(per_file) <= 1:
+            for file_name, reqs in per_file.items():
+                with safe_open(filename=file_name, framework="pt") as f:
+                    for req in reqs:
+                        self._process_read_request(f, req, planner)
+        else:
+            # Use parallel implementation with thread pool
+            file_queue: queue.Queue = queue.Queue()
+            result_queue: queue.Queue = queue.Queue()
 
-                    # Create slices for each dimension based on offsets and lengths
-                    slices = tuple(
-                        slice(offset, offset + length)
-                        for offset, length in zip(req.storage_offsets, req.lengths)
-                    )
-                    tensor = f.get_slice(req.storage_index.fqn)[slices]
-                    target_tensor = planner.resolve_tensor(req).detach()
+            # Fill the queue with files to process
+            for file_name, reqs in per_file.items():
+                file_queue.put((file_name, reqs))
 
-                    assert target_tensor.size() == tensor.size(), (
-                        f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                    )
+            # Create and start worker threads
+            threads = []
+            num_threads = min(self.thread_count, len(per_file))
+            for _ in range(num_threads):
+                t = threading.Thread(
+                    target=self._read_files_from_queue,
+                    args=(file_queue, result_queue, planner),
+                )
+                t.start()
+                threads.append(t)
 
-                    target_tensor.copy_(tensor)
-                    planner.commit_tensor(req, target_tensor)
+            # Wait for all threads to complete
+            for t in threads:
+                t.join()
+
+            # Check if all files were processed
+            processed_count = 0
+            try:
+                while True:
+                    result_queue.get_nowait()
+                    processed_count += 1
+            except queue.Empty:
+                pass
+
+            assert processed_count == len(per_file), (
+                f"Not all files were processed: {processed_count} out of {len(per_file)}"
+            )
 
         fut: Future = Future()
         fut.set_result(None)

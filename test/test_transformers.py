@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_CK_SDPA,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -85,7 +86,6 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
-TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
     golden: torch.Tensor,
@@ -2656,7 +2656,6 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm  # No cuDNN Attention
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
-    @unittest.expectedFailure  # cuDNN currently doesn't support this on SM100+/fails graph validation
     def test_cudnn_attention_d256_heuristic(self, device):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -2667,18 +2666,24 @@ class TestSDPACudaOnly(NNTestCase):
         v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
         query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
 
-        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION], set_priority=True):
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-            actual.backward(torch.randn_like(actual))
-        with sdpa_kernel(backends=[SDPBackend.MATH]):
-            math_ref = torch.nn.functional.scaled_dot_product_attention(
-                query.contiguous().to(torch.float32),
-                key.contiguous().to(torch.float32),
-                value.contiguous().to(torch.float32),
-                attn_mask=None, dropout_p=0.0, is_causal=False)
+        def test():
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION], set_priority=True):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+                actual.backward(torch.randn_like(actual))
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                math_ref = torch.nn.functional.scaled_dot_product_attention(
+                    query.contiguous().to(torch.float32),
+                    key.contiguous().to(torch.float32),
+                    value.contiguous().to(torch.float32),
+                    attn_mask=None, dropout_p=0.0, is_causal=False)
+            self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+        if torch.cuda.get_device_capability() in [(9, 0)]:
+            test()
+        else:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                test()
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
@@ -3572,10 +3577,12 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: list[int]):
+                                               head_dim: int, is_causal: bool, dropout_p: float,
+                                               dtype: torch.dtype, scale: str, enable_gqa: bool,
+                                               n_heads: list[int], sdpa_backend: str):
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3585,8 +3592,14 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_CK and dropout_p != 0:
-            self.skipTest("CK does not support tensor format dropout masks")
+
+        # ROCm now supports 2 different backends for SDPA that require different set up.
+        TEST_WITH_CK = False
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+            # When no args are given to preferred_rocm_fa_library, it acts as a getter
+            TEST_WITH_CK = (torch.backends.cuda.preferred_rocm_fa_library() == torch._C._ROCmFABackend.Ck)
+
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
 
@@ -3642,15 +3655,24 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
+
+            # This is the default implementation for the mask but we need to match CK if we are using it
             dropout_mask = softmax_mask >= 0
+
+            # This logic matches how CK calculates the dropout mask.
+            # This is necessary because CK doesn't support passing in custom dropout masks
+            # So we use this logic to ensure we are comparing apples to apples.
+            if TEST_WITH_CK:
+                dropout_mask = (softmax_mask <= int((1.0 - dropout_p) * 255.0)).to(torch.float32)
+
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
-                dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
+                query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p,
+                is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -3670,17 +3692,33 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 4,
         }
         if TEST_WITH_ROCM:
-            fudge_factors['grad_key'] = 45.0
-            fudge_factors['grad_query'] = 360.0
-            if seq_len_k >= 1024:
-                fudge_factors['grad_key'] = 70.0
-            if seq_len_k >= 2048:
-                fudge_factors['grad_key'] = 190.0
-                fudge_factors['grad_query'] = 650.0
-                if seq_len_q >= 2048:
-                    fudge_factors['grad_query'] = 1100.0
-            if dtype == torch.float32:
-                fudge_factors['grad_key'] = 90.0
+            if TEST_WITH_CK:
+                fudge_factors['out'] = 5
+                fudge_factors['grad_key'] = 145.0
+                fudge_factors['grad_query'] = 855.0  # ck min = 855.0
+                fudge_factors['grad_value'] = 6
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 1550.0  # NEW CK MIN
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factors['grad_key'] = 90.0
+            else:
+                fudge_factors['grad_key'] = 45.0
+                fudge_factors['grad_query'] = 360.0
+                if seq_len_k >= 1024:
+                    fudge_factors['grad_key'] = 70.0
+                if seq_len_k >= 2048:
+                    fudge_factors['grad_key'] = 190.0
+                    fudge_factors['grad_query'] = 650.0
+                    if seq_len_q >= 2048:
+                        fudge_factors['grad_query'] = 1100.0
+                if dtype == torch.float32:
+                    fudge_factors['grad_key'] = 90.0
+
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),

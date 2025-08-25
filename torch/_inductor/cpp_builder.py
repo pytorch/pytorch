@@ -2,6 +2,7 @@
 # The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
 
 import copy
+import ctypes
 import errno
 import functools
 import json
@@ -18,7 +19,7 @@ import tempfile
 import textwrap
 import warnings
 from collections.abc import Sequence
-from ctypes import cdll
+from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -141,11 +142,201 @@ def check_compiler_exist_windows(compiler: str) -> None:
         pass
 
 
+class WinPeFileVersionInfo:
+    def __init__(self, file_path: str) -> None:
+        self.file_path = file_path
+        self.version_dll = ctypes.WinDLL("version.dll")  # type: ignore[attr-defined]
+        self._setup_functions()
+        self._get_version_info()
+
+    def _setup_functions(self) -> None:
+        self.version_dll.GetFileVersionInfoSizeW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPDWORD,
+        ]
+        self.version_dll.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+
+        self.version_dll.GetFileVersionInfoW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+        ]
+        self.version_dll.GetFileVersionInfoW.restype = wintypes.BOOL
+
+        self.version_dll.VerQueryValueW.argtypes = [
+            wintypes.LPCVOID,
+            wintypes.LPCWSTR,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.UINT),
+        ]
+        self.version_dll.VerQueryValueW.restype = wintypes.BOOL
+
+    def _get_version_info(self) -> None:
+        dummy = wintypes.DWORD()
+        size = self.version_dll.GetFileVersionInfoSizeW(
+            self.file_path, ctypes.byref(dummy)
+        )
+
+        if size == 0:
+            raise RuntimeError(f"Can't get version info size of {self.file_path}.")
+
+        self.version_info = ctypes.create_string_buffer(size)
+        success = self.version_dll.GetFileVersionInfoW(
+            self.file_path, 0, size, self.version_info
+        )
+
+        if not success:
+            raise RuntimeError(f"Can't get version info of {self.file_path}.")
+
+    def get_language_id(self) -> int:
+        lp_buffer = ctypes.c_void_p()
+        u_len = wintypes.UINT()
+
+        success = self.version_dll.VerQueryValueW(
+            self.version_info,
+            r"\VarFileInfo\Translation",
+            ctypes.byref(lp_buffer),
+            ctypes.byref(u_len),
+        )
+
+        if not success or u_len.value == 0:
+            return 0
+
+        translations = []
+        lang_id: int = 0
+        if lp_buffer.value is not None:
+            for i in range(u_len.value // 4):
+                offset = i * 4
+                data = ctypes.string_at(lp_buffer.value + offset, 4)
+                lang_id = int.from_bytes(data[:2], "little")
+                code_page = int.from_bytes(data[2:4], "little")
+                translations.append((lang_id, code_page))
+        else:
+            # Handle the case where lp_buffer.value is None
+            print("Buffer is None")
+
+        return lang_id
+
+
+@functools.cache
+def check_msvc_cl_language_id(compiler: str) -> None:
+    """
+    Torch.compile() is only work on MSVC with English language pack well.
+    Check MSVC's language pack: https://github.com/pytorch/pytorch/issues/157673#issuecomment-3051682766
+    """
+
+    def get_msvc_cl_path() -> tuple[bool, str]:
+        """
+        Finds the path to cl.exe using vswhere.exe.
+        """
+        vswhere_path = os.path.join(
+            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            "Microsoft Visual Studio",
+            "Installer",
+            "vswhere.exe",
+        )
+        if not os.path.exists(vswhere_path):
+            vswhere_path = os.path.join(
+                os.environ.get("ProgramFiles", "C:\\Program Files"),
+                "Microsoft Visual Studio",
+                "Installer",
+                "vswhere.exe",
+            )
+            if not os.path.exists(vswhere_path):
+                return False, ""  # vswhere.exe not found
+
+        try:
+            # Get the Visual Studio installation path
+            cmd = [
+                vswhere_path,
+                "-latest",
+                "-prerelease",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ]
+            vs_install_path = subprocess.check_output(
+                cmd, text=True, encoding="utf-8"
+            ).strip()
+
+            if not vs_install_path:
+                return False, ""
+
+            # Find the latest MSVC toolset version within the installation
+            msvc_tools_path = os.path.join(vs_install_path, "VC", "Tools", "MSVC")
+            if not os.path.exists(msvc_tools_path):
+                return False, ""
+
+            # Get the latest toolset version directory
+            toolset_versions = [
+                d
+                for d in os.listdir(msvc_tools_path)
+                if os.path.isdir(os.path.join(msvc_tools_path, d))
+            ]
+            if not toolset_versions:
+                return False, ""
+            latest_toolset_version = sorted(toolset_versions, reverse=True)[0]
+
+            # Construct the full cl.exe path
+            cl_path = os.path.join(
+                msvc_tools_path,
+                latest_toolset_version,
+                "bin",
+                "HostX64",
+                "x64",
+                "cl.exe",
+            )
+            if os.path.exists(cl_path):
+                return True, cl_path
+            else:
+                # Fallback for older versions or different architectures if needed
+                cl_path = os.path.join(
+                    msvc_tools_path,
+                    latest_toolset_version,
+                    "bin",
+                    "HostX86",
+                    "x86",
+                    "cl.exe",
+                )
+                if os.path.exists(cl_path):
+                    return True, cl_path
+
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False, ""
+
+        return False, ""
+
+    if not _is_msvc_cl(compiler):
+        return
+
+    if os.path.exists(compiler):
+        # Passed compiler with path.
+        cl_exe_path = compiler
+    else:
+        b_ret, cl_exe_path = get_msvc_cl_path()
+        if b_ret is False:
+            return
+
+    version_info = WinPeFileVersionInfo(cl_exe_path)
+    lang_id = version_info.get_language_id()
+    if lang_id != 1033:
+        # MSVC English language id is 0x0409, and the DEC value is 1033.
+        raise RuntimeError(
+            "Torch.compile() is only support MSVC with English language pack,"
+            "Please reinstall its language pack to English."
+        )
+
+
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
+        check_msvc_cl_language_id(compiler)
     else:
         if config.is_fbcode():
             return build_paths.cc
@@ -565,6 +756,9 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
             "EHsc",
             # For Intel oneAPI, ref: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
             "Zc:__cplusplus",
+            # Enable max compatible to msvc for oneAPI headers.
+            # ref: https://github.com/pytorch/pytorch/blob/db38c44ad639e7ada3e9df2ba026a2cb5e40feb0/cmake/public/utils.cmake#L352-L358 # noqa: B950
+            "permissive-",
         ]
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
@@ -582,23 +776,42 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
     return cflags
 
 
-def _get_ffast_math_flags() -> list[str]:
-    # ffast-math is equivalent to these flags as in
-    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
-    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
-    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
-    # are added by linking in crtfastmath.o. This is done by the spec file which
-    # only does globbing for -ffast-math.
-    flags = [
-        "fno-trapping-math",
-        "funsafe-math-optimizations",
-        "ffinite-math-only",
-        "fno-signed-zeros",
-        "fno-math-errno",
-    ]
+def _get_os_related_cpp_definitions(cpp_compiler: str) -> list[str]:
+    os_definitions: list[str] = []
+    if _IS_WINDOWS:
+        # On Windows, we need disable min/max macro to avoid C2589 error, as PyTorch CMake:
+        # https://github.com/pytorch/pytorch/blob/9a41570199155eee92ebd28452a556075e34e1b4/CMakeLists.txt#L1118-L1119
+        os_definitions.append("NOMINMAX")
+    else:
+        pass
+    return os_definitions
 
-    if is_gcc():
-        flags.append("fexcess-precision=fast")
+
+def _get_ffast_math_flags() -> list[str]:
+    if _IS_WINDOWS:
+        flags = []
+    else:
+        # ffast-math is equivalent to these flags as in
+        # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+        # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+        # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+        # are added by linking in crtfastmath.o. This is done by the spec file which
+        # only does globbing for -ffast-math.
+        flags = [
+            "fno-trapping-math",
+            "funsafe-math-optimizations",
+            "ffinite-math-only",
+            "fno-signed-zeros",
+            "fno-math-errno",
+        ]
+
+        flags.append("fno-finite-math-only")
+        if not config.cpp.enable_unsafe_math_opt_flag:
+            flags.append("fno-unsafe-math-optimizations")
+        flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
+
+        if is_gcc():
+            flags.append("fexcess-precision=fast")
 
     return flags
 
@@ -646,25 +859,24 @@ def _get_optimization_cflags(
             cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
 
     cflags += _get_ffast_math_flags()
-    cflags.append("fno-finite-math-only")
-    if not config.cpp.enable_unsafe_math_opt_flag:
-        cflags.append("fno-unsafe-math-optimizations")
-    cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
-    if sys.platform != "darwin":
-        # on macos, unknown argument: '-fno-tree-loop-vectorize'
-        if _is_gcc(cpp_compiler):
-            cflags.append("fno-tree-loop-vectorize")
-        # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
-        # `-march=native` is unrecognized option on M1
-        if not config.is_fbcode():
-            if platform.machine() == "ppc64le":
-                cflags.append("mcpu=native")
-            else:
-                cflags.append("march=native")
+    if _IS_WINDOWS:
+        pass
+    else:
+        if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            if _is_gcc(cpp_compiler):
+                cflags.append("fno-tree-loop-vectorize")
+            # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
+            # `-march=native` is unrecognized option on M1
+            if not config.is_fbcode():
+                if platform.machine() == "ppc64le":
+                    cflags.append("mcpu=native")
+                else:
+                    cflags.append("march=native")
 
-    if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
-        cflags.append("flto=thin")
+        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+            cflags.append("flto=thin")
 
     return cflags, ldflags
 
@@ -708,6 +920,8 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    definitions += _get_os_related_cpp_definitions(cpp_compiler)
 
     if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
         ldflags.append("fuse-ld=lld")
@@ -1384,7 +1598,8 @@ def get_cpp_torch_device_options(
             ze_root = os.getenv("LEVEL_ZERO_V1_SDK_PATH")
             if ze_root is None:
                 raise OSError(xpu_error_string)
-            include_dirs = [os.path.join(ze_root, "include")]
+            include_dirs += [os.path.join(ze_root, "include")]
+            libraries_dirs += [os.path.join(ze_root, "lib")]
             libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
         else:
             # Suppress multi-line comment warnings in sycl headers
