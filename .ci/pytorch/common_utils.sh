@@ -152,6 +152,10 @@ function get_pinned_commit() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]] && command -v nvidia-smi; then
+    TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    export TORCH_CUDA_ARCH_LIST
+  fi
   pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
