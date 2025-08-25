@@ -601,7 +601,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ = grad_output_.contiguous(mfmt);
+  grad_output_ = grad_output_.to(mfmt);
+  if (!grad_output_.is_contiguous())
+    grad_output_ = grad_output_.contiguous(mfmt);
+
   weight_ = weight_.contiguous(mfmt);
   input_ = input_.contiguous(mfmt);
 
