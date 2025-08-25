@@ -2512,7 +2512,7 @@ def _reduction_configs(
                 register_intensive=register_intensive,
             )
 
-    def make_outer_config():
+    def outer_config_opt():
         # Default to 64 for vectorized loads
         max_x_block, x_block = 256, 64
         load_factor = inductor_meta.get("num_load", 0)
@@ -2582,7 +2582,7 @@ def _reduction_configs(
         return [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
         if not torch.version.hip:
-            return [make_outer_config(), outer_config]
+            return [outer_config_opt(), outer_config]
         else:
             return [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
