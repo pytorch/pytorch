@@ -93,8 +93,8 @@ calculate_swa(std::optional<int64_t> window_size_left,
   int window_left = max_seqlen_q;
   int window_right = max_seqlen_k;
   if (is_causal) {
-    window_left = WindowValue::TopLeftAligned;
-    window_right = WindowValue::TopLeftAligned;
+    window_left = WindowValue::BottomRightAligned;
+    window_right = WindowValue::BottomRightAligned;
   }
   if (window_size_left.has_value() || window_size_right.has_value()) {
     needs_swa = true;
