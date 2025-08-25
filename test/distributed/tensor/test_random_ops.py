@@ -110,14 +110,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
             self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
 
-        # ensure that we do not cache the 'seed' of `rng` from the first time we see it in DTensor
-        # TODO: we have a semantics decision to make
-        # There is a discontinuity between how the default RNG and a user-supplied RNG behaves with DTensor:
-        # (a) if the user calls `torch.manual_seed` after already using the default RNG with DTensor,
-        #     they may be surprised that it has no effect on DTensor.  They must instead call this private API
-        #     (`torch.distributed.tensor._random._rng_tracker._manual_seed`)
-        # (b) If we try to match the semantics of (a) with a user-supplied RNG, they may be very surprised to find that
-        #     their RNG object never advances its state after using it with DTensor.
+        # ensure that we do not cache the 'seed' from the first time we see it in DTensor
+        # this is a behavior change, DTensor used to cache the generator state and not modify the original generator,
+        # now it modifies the original generator instead.
         torch.manual_seed(55)
         rng.manual_seed(55)
         torch.nn.init.uniform_(t1, 0.0, 1.0)
