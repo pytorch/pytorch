@@ -3472,7 +3472,6 @@ def binary_cross_entropy(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between the target and input probabilities.
 
@@ -3491,11 +3490,9 @@ def binary_cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
     Examples::
+
         >>> input = torch.randn(3, 2, requires_grad=True)
         >>> target = torch.rand(3, 2, requires_grad=False)
         >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
@@ -3511,7 +3508,6 @@ def binary_cross_entropy(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
-            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3527,13 +3523,6 @@ def binary_cross_entropy(
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    assert 0 <= label_smoothing <= 1, (
-        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
-    )
-
-    if label_smoothing > 0:
-        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
-
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
@@ -3545,7 +3534,6 @@ def binary_cross_entropy_with_logits(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
-    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between target and input logits.
 
@@ -3572,11 +3560,9 @@ def binary_cross_entropy_with_logits(
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
     Examples::
+
          >>> input = torch.randn(3, requires_grad=True)
          >>> target = torch.empty(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
@@ -3593,7 +3579,6 @@ def binary_cross_entropy_with_logits(
             reduce=reduce,
             reduction=reduction,
             pos_weight=pos_weight,
-            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3604,13 +3589,6 @@ def binary_cross_entropy_with_logits(
         raise ValueError(
             f"Target size ({target.size()}) must be the same as input size ({input.size()})"
         )
-
-    assert 0 <= label_smoothing <= 1, (
-        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
-    )
-
-    if label_smoothing > 0:
-        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum
