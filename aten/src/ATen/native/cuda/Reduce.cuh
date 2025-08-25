@@ -802,7 +802,6 @@ struct ReduceOp {
 #else // [CMTSTRS]
       // In architectures with split caches, global fences are costly.
       // Here we preempt need for fences by committing stores to global memory.
-      // We do so by converting the stores to atomics with a return.
       cmtdStore(&reduce_buffer[offset], value);
 #endif
     }
