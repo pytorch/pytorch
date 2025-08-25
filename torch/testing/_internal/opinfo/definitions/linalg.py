@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoMagmaAndNoCusolver,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
+    skipXPU,
     tol,
     toleranceOverride,
 )
@@ -1296,6 +1297,19 @@ op_db: list[OpInfo] = [
                 "test_out",
                 device_type="xpu",
             ),
+            # RuntimeError: Complex datatype matmul is not supported in oneDNN
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_backward",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_forward_ad",
+                device_type="xpu",
+            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1331,7 +1345,7 @@ op_db: list[OpInfo] = [
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipXPU],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),

@@ -617,7 +617,7 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @onlyOn(['cuda', 'xpu'])
+    @onlyOn(["cuda", "xpu"])
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -1169,7 +1169,6 @@ class TestCommon(TestCase):
         with self.assertRaises(RuntimeError, msg=msg), maybe_skip_size_asserts(op):
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
-    @skipXPU
     @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
         def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
@@ -1394,7 +1393,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
@@ -1430,7 +1428,6 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
-    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
@@ -1666,7 +1663,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
     # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(
@@ -1825,6 +1821,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
+    @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2161,6 +2158,7 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
+    @skipXPU
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
@@ -2202,6 +2200,7 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
+    @skipXPU
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
@@ -2857,8 +2856,8 @@ class TestFakeTensor(TestCase):
 
 
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
