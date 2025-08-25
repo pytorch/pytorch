@@ -34,7 +34,6 @@ def _zeropower_via_newtonschulz(
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
     eps: float,
-    use_addmm: bool,
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -63,18 +62,12 @@ def _zeropower_via_newtonschulz(
     # Ensure spectral norm is at most 1
     ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
     # Perform the NS iterations
-    if use_addmm:
-        for _ in range(ns_steps):
-            gram_matrix = ortho_grad @ ortho_grad.T
-            gram_update = torch.addmm(
-                gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
-            )
-            ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
-    else:
-        for _ in range(ns_steps):
-            gram_matrix = ortho_grad @ ortho_grad.T
-            gram_update = b * gram_matrix + c * gram_matrix @ gram_matrix
-            ortho_grad = a * ortho_grad + gram_update @ ortho_grad
+    for _ in range(ns_steps):
+        gram_matrix = ortho_grad @ ortho_grad.T
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
 
     if grad.size(0) > grad.size(1):
         ortho_grad = ortho_grad.T
@@ -108,7 +101,6 @@ class Muon(Optimizer):
         eps: float = EPS,
         ns_steps: int = DEFAULT_NS_STEPS,
         adjust_lr_fn: Optional[str] = None,
-        use_addmm: bool = False,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
@@ -135,7 +127,6 @@ class Muon(Optimizer):
             "eps": eps,
             "ns_steps": ns_steps,
             "adjust_lr_fn": adjust_lr_fn,
-            "use_addmm": use_addmm,
         }
         super().__init__(params, defaults)
 
@@ -211,7 +202,6 @@ class Muon(Optimizer):
                 eps=group["eps"],
                 ns_steps=group["ns_steps"],
                 adjust_lr_fn=group["adjust_lr_fn"],
-                use_addmm=group["use_addmm"],
                 has_complex=has_complex,
             )
         return loss
@@ -287,8 +277,6 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original" and "match_rms_adamw".
             If not specified, we will default to use "original". (default: None)
-        use_addmm (bool, optional): If True, uses `addmm` for matrix multiplications in Newton–Schulz
-            orthogonalization, which can accelerate the computation. (default: False)
 
     .. _Muon\: An optimizer for hidden layers in neural networks:
         https://kellerjordan.github.io/posts/muon/
@@ -312,7 +300,6 @@ def _single_tensor_muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: Optional[str],
-    use_addmm: bool,
     has_complex: bool,
 ) -> None:
     lr = _to_scalar(lr)
@@ -328,9 +315,7 @@ def _single_tensor_muon(
         buf.lerp_(grad, 1 - momentum)
         update = grad.lerp(buf, momentum) if nesterov else buf
 
-        update = _zeropower_via_newtonschulz(
-            update, ns_coefficients, ns_steps, eps, use_addmm
-        )
+        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
@@ -353,7 +338,6 @@ def muon(
     ns_steps: int,
     eps: float,
     adjust_lr_fn: Optional[str],
-    use_addmm: bool,
     has_complex: bool,
 ):
     r"""Functional API that performs Muon algorithm computation.
@@ -377,6 +361,5 @@ def muon(
         ns_steps=ns_steps,
         eps=eps,
         adjust_lr_fn=adjust_lr_fn,
-        use_addmm=use_addmm,
         has_complex=has_complex,
     )
