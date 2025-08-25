@@ -5717,6 +5717,19 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_complex_from_real_imag(self):
+        def fn(x, y):
+            return aten.complex.default(x, y)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        self.common(
+            fn,
+            (a, a),
+            exact_stride=True,
+            reference_in_float=False,
+        )
+
     def test_view_as_complex(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -10573,6 +10586,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(dynamic, dynamic_specialized)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @config.patch({"force_disable_caches": True})
+    def test_mark_dynamic_with_hint_override(self):
+        @torch.compile
+        def no_override(x):
+            return x.sum(dim=0)
+
+        @torch.compile
+        def override(x):
+            return x.sum(dim=0)
+
+        x_small = torch.randn(4096, 512, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_dynamic(x_small, 0)
+        code1 = run_and_get_triton_code(no_override, x_small)
+
+        torch._dynamo.reset_code_caches()
+
+        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 10)
+        code2 = run_and_get_triton_code(override, x_small)
+        self.assertNotEqual(code1, code2)
+
+        self.assertEqual(no_override(x_small), override(x_small))
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -13753,6 +13793,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
         has_lowered = not re.search(r"repeat_interleave.Tensor", code)
         self.assertEqual(has_lowered, can_lower)
+
+    @staticmethod
+    def _is_triggering_buffer_reuse(fn, *inputs):
+        with config.patch(allow_buffer_reuse=True):
+            _, (code_allowed,) = run_and_get_code(fn, *inputs)
+        with config.patch(allow_buffer_reuse=False):
+            _, (code_disallowed,) = run_and_get_code(fn, *inputs)
+        code_allowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_allowed)
+        code_disallowed = re.sub(r"AOT ID: .*", "AOT ID: ['test']", code_disallowed)
+        return code_allowed != code_disallowed
+
+    def test_allow_reuse_disable_if_exceed_peak(self):
+        @torch.compile
+        def fn(inp):  # 1*N^2
+            a = inp.mean(-1)  # 1*N^2 + N
+            b = (inp - a) ** 2  # 2*N^2 + N
+            c = b @ b  # 3*N^2 (!!) since this is the peak, can not reuse across
+            d = c.mean(-1)  # 2*N^2 + N
+            return d  # 1*N^2 + N
+
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertFalse(CommonTemplate._is_triggering_buffer_reuse(fn, inp))
+
+    def test_allow_reuse_active_if_under_peak(self):
+        def g(inp):
+            return (inp - torch.logsumexp(inp, -1)) ** 2
+
+        @torch.compile
+        def fn(m, inp):
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            inp = m @ g(inp)
+            return inp
+
+        m = torch.randn(100, 100, device=self.device)
+        inp = torch.randn(100, 100, device=self.device)
+        self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
     # end of class CommonTemplate - add new tests here
 
