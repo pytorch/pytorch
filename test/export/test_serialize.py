@@ -22,6 +22,7 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _dict_to_dataclass,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -279,6 +280,25 @@ def forward(self, x):
         exp_out = ep.module()(*inp)
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
+
+    def test_serialize_param_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter = torch.nn.Parameter(torch.ones(4, 4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.parameter.div_(2)
+                return x + self.parameter
+
+        foo = Foo()
+        ep = torch.export.export(foo, (torch.rand(4, 4),)).run_decompositions()
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+        val = loaded_ep.graph_signature.parameters_to_mutate
+        self.assertEqual({"div": "parameter"}, val)
 
     def test_serialize_constant_outputs(self):
         class MyModule(torch.nn.Module):
@@ -1440,6 +1460,20 @@ def forward(self, x):
             m = MyModule()
             inputs = (torch.ones(2, 3),)
             self.check_graph(m, inputs, strict=False)
+
+    def test_forward_compatibility(self):
+        self.assertEqual(
+            schema.TensorArgument(
+                name="x",
+            ),
+            _dict_to_dataclass(
+                schema.TensorArgument,
+                {
+                    "shiny_new_field": "hello world",
+                    "name": "x",
+                },
+            ),
+        )
 
 
 instantiate_parametrized_tests(TestDeserialize)

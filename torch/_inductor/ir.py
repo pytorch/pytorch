@@ -6,6 +6,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import textwrap
 import traceback
 from collections.abc import Container, Generator, Iterable, Iterator, Sequence
@@ -155,6 +156,9 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
+autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -549,9 +553,6 @@ class IRNode:
     # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
-    # trace backs to user model code
-    # a single IRNode could correspond to multiple lines of code
-    stack_traces: dict[str, str] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -590,34 +591,6 @@ class IRNode:
         )
         self._post_init_setattr("origin_node", None)
 
-        # Group nodes by their stack traces to deduplicate
-        nodes_to_stack_trace = {}
-        if config.trace.provenance_tracking:
-            for node in origins:
-                if node.stack_trace:
-                    # nodes in the backward graph don't have mapping to pre_grad_graph
-                    nodes_to_stack_trace["post_grad+" + node.name] = node.stack_trace
-                else:
-                    if (
-                        "postToPre"
-                        not in torch._inductor.debug._inductor_post_to_pre_grad_nodes
-                    ):
-                        continue
-                    node_names = torch._inductor.debug._inductor_post_to_pre_grad_nodes[
-                        "postToPre"
-                    ].get(node.name, None)
-                    if node_names:
-                        for node_name in node_names:
-                            stack_trace = torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
-                                node_name, None
-                            )
-                            if stack_trace:
-                                nodes_to_stack_trace["pre_grad+" + node_name] = (
-                                    stack_trace
-                                )
-
-        self._post_init_setattr("stack_traces", nodes_to_stack_trace)
-
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
 
@@ -630,17 +603,48 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
+    def get_stack_traces(self) -> OrderedSet[str]:
+        # Return stack traces to user model code
+        # A single IRNode could correspond to multiple lines of code
+        stack_traces: OrderedSet[str] = OrderedSet()
+        origins = self.origins
+        if isinstance(self, ExternKernel):
+            origin_node = self.get_origin_node()
+            if self.origin_node:
+                origins = OrderedSet([origin_node])
+        for node in origins:
+            if hasattr(node, "stack_trace") and node.stack_trace:
+                # nodes in the backward graph don't have mapping to pre_grad_graph
+                stack_traces.add(node.stack_trace)
+            else:
+                pre_grad_nodes = (
+                    torch._inductor.debug._inductor_post_to_pre_grad_nodes.get(
+                        "postToPre", {}
+                    ).get(node.name, [])
+                )
+                if not isinstance(pre_grad_nodes, list):
+                    continue
+                for node_name in pre_grad_nodes:
+                    stack_trace = (
+                        torch._inductor.debug._inductor_pre_grad_node_stack_trace.get(
+                            node_name, None
+                        )
+                    )
+                    if stack_trace:
+                        stack_traces.add(stack_trace)
+        return stack_traces
+
     def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
-        if not self.stack_traces:
+        if not self.get_stack_traces():
             return [origins]
 
         stack_trace_str = []
-        for stack_trace in self.stack_traces.values():
-            stack_trace_str.append("stack_traces = {{")
+        for stack_trace in self.get_stack_traces():
+            stack_trace_str.append("stack_traces = {")
             stack_trace_str += stack_trace.split("\n")
             stack_trace_str.append("}")
         return [origins] + stack_trace_str
@@ -1594,9 +1598,10 @@ class Reduction(Loops):
             reduction_hint = hint
         if split == -1:
             assert input_node is not None
-            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
-                input_node
-            )
+            with patch.object(FlexibleLayout, "allow_indexing", True):
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
             assert new_ranges is not None
             assert new_reduction_ranges is not None
             return cls.create_multilayer_existing_ranges(
@@ -3550,12 +3555,21 @@ class IndexingConstant(BaseConstant):
 def is_contiguous_strides_for_shape(
     stride: Sequence[_IntLike], shape: Sequence[_IntLike]
 ) -> bool:
-    return all(
-        size == 1 or left == right
-        for left, right, size in zip(
-            stride, FlexibleLayout.contiguous_strides(shape), shape
-        )
-    )
+    expected_stride = 1
+    expected_stride_max = 1
+    for x, y in reversed(tuple(zip(shape, stride))):
+        if x == 1:
+            continue
+
+        if not V.graph.sizevars.statically_known_equals(
+            y, expected_stride
+        ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
+            return False
+
+        expected_stride_max *= sympy.Max(1, x)
+        expected_stride *= x
+
+    return True
 
 
 def get_align_for_dtype(dtype: torch.dtype) -> int:
@@ -3570,6 +3584,11 @@ class OutputSpec:
         raise NotImplementedError(type(self).__name__)
 
     def storage_size(self) -> int:
+        raise NotImplementedError(type(self).__name__)
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
         raise NotImplementedError(type(self).__name__)
 
 
@@ -3805,6 +3824,15 @@ class Layout(OutputSpec):
     def storage_size(self) -> Expr:
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type]
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return (
+            get_free_symbols(self.size, unbacked_only)
+            | get_free_symbols(self.stride, unbacked_only)
+            | get_free_symbols(self.offset, unbacked_only)
+        )
+
 
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
@@ -3996,6 +4024,16 @@ class NonOwningLayout(Layout):
         from .utils import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        assert isinstance(self.view, ReinterpretView)
+        box = self.view.data
+        assert isinstance(box, StorageBox), type(box)
+        input_buffer = box.data
+        assert isinstance(input_buffer, Buffer), type(box)
+        return input_buffer.layout.get_free_symbol_uses(unbacked_only)
 
 
 class CommBufferType(Enum):
@@ -4380,6 +4418,10 @@ class ShapeAsConstantBuffer(IRNode):
 
 @ir_dataclass(frozen=False)
 class ComputedBuffer(OperationBuffer):
+    """
+    Represents a buffer that is computed during kernel execution rather than being an input.
+    """
+
     data: Loops
 
     def get_computed_buffer_name(self) -> Optional[str]:
@@ -4435,21 +4477,20 @@ class ComputedBuffer(OperationBuffer):
         # those symbols that establishes a dependency).  However, we haven't
         # started codegen yet so we can't directly reuse that logic.
         #
-        # For now, I'm just yoloing with the size of the buffer.  Not sure if
-        # it is enough.
-        #
         # One thing you might wonder is if this is enough for a ComputedBuffer
         # denoting a reduction over i0.  Empirically, it is enough, but for an
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
-        return (
-            get_free_symbols(self.get_size(), unbacked_only)
-            | get_free_symbols(self.get_stride(), unbacked_only)
-            | get_free_symbols(self.get_offset(), unbacked_only)
-            | self.data.get_free_symbol_uses(unbacked_only)
-            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
-        )
+        result = self.layout.get_free_symbol_uses(
+            unbacked_only
+        ) | self.data.get_free_symbol_uses(unbacked_only)
+
+        if self.has_store_function() and isinstance(
+            self.get_store_function(), LoopBody
+        ):
+            result |= self.get_read_writes().get_free_symbol_uses(unbacked_only)
+        return result
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         if (
@@ -4460,6 +4501,9 @@ class ComputedBuffer(OperationBuffer):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
         return super().make_loader()
+
+    def has_store_function(self) -> bool:
+        return isinstance(self.data, (Reduction, Scan, Sort, Pointwise))
 
     def get_store_function(self) -> Callable[..., None]:
         indexer = self.get_layout().as_fixed().make_indexer()
@@ -4910,9 +4954,13 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        benchmark_configs = {
+            "warmup": autotune_warmup,
+            "rep": autotune_rep,
+        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args))
-        return benchmarker.benchmark(algo, args, {"out": out})
+            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)
+        return benchmarker.benchmark(algo, args, {"out": out}, **benchmark_configs)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -5086,6 +5134,37 @@ class CppTemplateBuffer(TemplateBuffer):
             return super().get_layout()
 
 
+class CuteDSLTemplateBuffer(TemplateBuffer):
+    """
+    Buffer for CuteDSL (CUTLASS Python DSL) template kernels.
+    Similar to other template buffers but specialized for CuteDSL operations.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        make_kernel_render: Callable[_P, _T],
+        template: Any,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ) -> None:
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.mutated_inputs = mutated_inputs
+        self.outputs: list[Buffer] = [self]
+
+        if mutated_inputs is not None:
+            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
+            device = self.inputs[0].get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
 ) -> TypeIs[Sequence[IRNode]]:
@@ -5163,6 +5242,18 @@ class InputsKernel(OperationBuffer):
 
     def num_reads(self) -> int:
         return 1
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        r = OrderedSet[sympy.Symbol]()
+        for inp in self.inputs:
+            if isinstance(inp, IRNode):
+                r |= inp.get_free_symbol_uses(unbacked_only)
+            else:
+                for inner_inp in inp:
+                    r |= inner_inp.get_free_symbol_uses(unbacked_only)
+        return r
 
 
 class NopKernel(InputsKernel):
@@ -5325,6 +5416,11 @@ class ConcatKernel(NopKernel):
             and isinstance(src.data.layout, FlexibleLayout)
             and not isinstance(src.data, ExternKernelAlloc)
         )
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
@@ -5520,7 +5616,10 @@ class ExternKernel(InputsKernel):
         from .codegen.cpp_wrapper_cpu import CppWrapperCpu
 
         device = d.type if (d := self.get_device()) else V.graph.device_type
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            assert self.python_kernel_name is not None
+            return self.python_kernel_name
+        elif V.graph.cpp_wrapper:
             assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
                 V.graph.wrapper_code
             )
@@ -5688,8 +5787,7 @@ class ExternKernel(InputsKernel):
         if (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
-            and isinstance(x_unwrap_view, (ReinterpretView, Buffer))
-            # and hasattr(x_unwrap_view, "layout")
+            and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
                 x_unwrap_view_fx_node.meta["val"].is_contiguous(
@@ -6226,7 +6324,7 @@ class ExternKernel(InputsKernel):
         maybe_get_symbols = (
             maybe_free_unbacked_symbols if unbacked_only else maybe_free_symbols
         )
-        r = OrderedSet[sympy.Symbol]()
+        r = InputsKernel.get_free_symbol_uses(self, unbacked_only)
         for arg in self.constant_args:
             r |= maybe_get_symbols(arg)
         for arg in self.kwargs.values():
@@ -6622,6 +6720,9 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
+            if name in constexpr_names and triton_version_uses_attrs_dict():
+                # see #160000 - we don't pass in constexpr args to speed up runtime.
+                continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
             if isinstance(arg, IRNode):
@@ -7070,10 +7171,10 @@ class DeviceCopy(ExternKernelOut):
             # x.get_stride() may be unimplemented if x's size is empty
             stride = x.get_stride()
         is_destination_pinned = (
-            x_device.type == "cuda" and device.type == "cpu" and non_blocking
+            is_gpu(x_device.type) and device.type == "cpu" and non_blocking
         )
         is_source_pinned = (
-            x_device.type == "cpu" and device.type == "cuda" and non_blocking
+            x_device.type == "cpu" and is_gpu(device.type) and non_blocking
         )
         if is_source_pinned and is_storage_and_layout(x):
             x.get_layout().is_pinned = True
@@ -7211,7 +7312,10 @@ class AssertScalar(ExternKernel):
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
-        if V.graph.cpp_wrapper:
+        if V.graph.fx_wrapper:
+            # TODO fix
+            pass
+        elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
@@ -7560,7 +7664,7 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         )
 
-        V.graph.extern_kernel_nodes.append(node)
+        V.extern_kernel_nodes.append(node)
 
         return [*args, *ordered_kwargs]
 
@@ -8194,7 +8298,7 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(operand, ShapeAsConstantBuffer):
+            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -8423,6 +8527,8 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
+    """IR node for while_loop, which supports input mutations"""
+
     carried_inputs: Optional[Sequence[IRNode]] = None
     additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
@@ -8454,6 +8560,38 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    # Accidental aliasing can be created due to cse, where the empty buffers we
+    # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
+    # See test_scan_multiple_layers_gradient for a concrete example.
+    @staticmethod
+    def _clone_aliased_inputs(carried_inputs: Sequence[IRNode]) -> Sequence[IRNode]:
+        if not _has_aliased_buffers(carried_inputs):
+            return carried_inputs
+
+        # Import clone from lowering module
+        from .lowering import clone
+
+        # Unwrap views to get the underlying buffers for comparison
+        unwrapped_buffers = [
+            buffer.unwrap_view() if isinstance(buffer, ReinterpretView) else buffer
+            for buffer in carried_inputs
+        ]
+
+        # Track which buffers we've seen and their indices
+        seen_buffers: OrderedSet[int] = OrderedSet()
+        result = []
+
+        for i, (original_input, unwrapped_buffer) in enumerate(
+            zip(carried_inputs, unwrapped_buffers)
+        ):
+            if id(unwrapped_buffer) in seen_buffers:
+                result.append(clone(original_input))
+            else:
+                seen_buffers.add(id(unwrapped_buffer))
+                result.append(original_input)
+
+        return result
 
     @classmethod
     def create(
@@ -8490,6 +8628,7 @@ class WhileLoop(ExternKernel):
         fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
 
         carried_inputs_ = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs_ = WhileLoop._clone_aliased_inputs(carried_inputs_)
         carried_inputs_ = _require_exact_strides(carried_inputs_, fake_carried_inputs)
         additional_inputs_ = [cls.realize_input(x) for x in additional_inputs]
         additional_inputs_ = _require_exact_strides(
@@ -8590,38 +8729,38 @@ class WhileLoop(ExternKernel):
         )[3]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
-        real_outputs = {
-            idx: out
-            for idx, out in enumerate(body_outputs)
-            if idx not in mutated_idx_set
-        }
-        real_outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),  # type: ignore[arg-type]
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                    is_pinned=output.get_layout().is_pinned,
-                ),
-                while_loop,
-                [(list, idx)],
-            )
-            for idx, output in real_outputs.items()
-        ]
-        while_loop.outputs = real_outputs
-        while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[attr-defined, union-attr]
-            for inp in mutated_inputs
-        ]
 
-        outputs_iter = iter(real_outputs)
+        # Create all outputs first
         mutated_inputs_iter = iter(mutated_inputs)
-        all_outputs = [
-            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
-            for idx in range(len(body_outputs))
-        ]
+        all_outputs = []
+        while_loop.outputs = []
+        while_loop.mutation_outputs = []
+
+        for idx, output in enumerate(body_outputs):
+            if idx in mutated_idx_set:
+                assert idx < len(carried_inputs), "only carries can be mutated."
+                # Create MutationOutput for mutated inputs
+                mutated_input = next(mutated_inputs_iter)
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
+                all_outputs.append(mutated_input)
+            else:
+                # Create MultiOutput for regular outputs
+                multi_out = MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),  # type: ignore[arg-type]
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    while_loop,
+                    [(list, idx)],
+                )
+                while_loop.outputs.append(multi_out)
+                all_outputs.append(multi_out)
+
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
@@ -8684,7 +8823,10 @@ class EffectfulKernel(FallbackKernel):
 
 
 class NonTensorObj(IRNode):
-    pass
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
 
 @ir_dataclass
