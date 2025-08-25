@@ -98,7 +98,8 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
         """
         Make sure autotuning mm_plus_mm with zero-size input works without crashes.
         """
@@ -112,7 +113,9 @@ class TestMaxAutotune(TestCase):
         c = torch.randn(m, k).to(GPU_TYPE)
         d = torch.randn(k, n).to(GPU_TYPE)
 
-        with config.patch({"max_autotune": True}):
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_search_space": search_space}
+        ):
             torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
 
     @unittest.skipIf(
@@ -532,7 +535,8 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
-    def test_autotune_conv1x1(self):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_autotune_conv1x1(self, search_space):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
             torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
@@ -549,7 +553,11 @@ class TestMaxAutotune(TestCase):
         )
 
         with config.patch(
-            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_search_space": search_space,
+            }
         ):
 
             @torch.compile()
@@ -661,7 +669,9 @@ class TestMaxAutotune(TestCase):
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
 
     @config.patch(max_autotune=True)
-    def test_empty_conv_input(self, kernel_size=3):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @parametrize("kernel_size", (1, 3))
+    def test_empty_conv_input(self, search_space, kernel_size):
         x = torch.randn(0, 256, 14, 14, device=GPU_TYPE)
         weight = torch.randn(256, 256, kernel_size, kernel_size, device=GPU_TYPE)
 
@@ -678,17 +688,15 @@ class TestMaxAutotune(TestCase):
                 groups=1,
             )
 
-        opt_f = torch.compile(f)
-        ref = f(x, weight)
-        act = opt_f(x, weight)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
-
-    @config.patch(max_autotune=True)
-    def test_empty_conv_input_with_1x1_kernel(self):
-        self.test_empty_conv_input(kernel_size=1)
+        with config.patch({"max_autotune_gemm_search_space": search_space}):
+            opt_f = torch.compile(f)
+            ref = f(x, weight)
+            act = opt_f(x, weight)
+            self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
 
     @config.patch(max_autotune_gemm_backends="TRITON")
-    def test_baddmm(self):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_baddmm(self, search_space):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -707,11 +715,12 @@ class TestMaxAutotune(TestCase):
         )
         mod = M().to(GPU_TYPE)
 
-        m_c = torch.compile(mode="max-autotune")(mod)
-        out, code = run_and_get_code(m_c, x)
-        self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
+        with config.patch({"max_autotune_gemm_search_space": search_space}):
+            m_c = torch.compile(mode="max-autotune")(mod)
+            out, code = run_and_get_code(m_c, x)
+            self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
 
-        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
+            FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
@@ -846,7 +855,8 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
 
-    def test_conv_cat(self):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_conv_cat(self, search_space):
         class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -858,24 +868,28 @@ class TestMaxAutotune(TestCase):
                 x = self.conv(x)
                 return torch.cat((x, x + 1))
 
-        with torch.no_grad():
-            m = ToyModel().to(device=GPU_TYPE)
-            input_tensor = torch.randn(32, 3, 64, 64).to(device=GPU_TYPE)
+        with config.patch({"max_autotune_gemm_search_space": search_space}):
+            with torch.no_grad():
+                m = ToyModel().to(device=GPU_TYPE)
+                input_tensor = torch.randn(32, 3, 64, 64).to(device=GPU_TYPE)
 
-            # convolution is not currently plannable
-            m = torch.compile(m, mode="max-autotune-no-cudagraphs")
-            out, code = run_and_get_code(m, input_tensor)
-            self.assertEqual(out, m(input_tensor))
+                # convolution is not currently plannable
+                m = torch.compile(m, mode="max-autotune-no-cudagraphs")
+                out, code = run_and_get_code(m, input_tensor)
+                self.assertEqual(out, m(input_tensor))
 
-            if not TEST_WITH_ROCM:
-                FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
+                if not TEST_WITH_ROCM:
+                    FileCheck().check("def triton_poi_fused_add_cat_").run(code[0])
 
-    def test_conv3d(self):
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    def test_conv3d(self, search_space):
         fn = torch.nn.functional.conv3d
         image = torch.randn([1, 3, 8, 16, 32])
         filt = torch.randn([3, 3, 7, 7, 7])
 
-        with config.patch({"max_autotune": True}):
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_search_space": search_space}
+        ):
             expected = fn(image, filt)
             actual = torch.compile(fn)(image, filt)
             torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
@@ -1919,8 +1933,9 @@ class TestMaxAutotuneSubproc(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_addmm(self, dynamic=False):
+    def test_max_autotune_addmm(self, search_space, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -1933,7 +1948,13 @@ class TestMaxAutotuneSubproc(TestCase):
         x = torch.randn(100).to(GPU_TYPE)
         a = torch.randn(100, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
-        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_search_space": search_space,
+            }
+        ):
             Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
             Y = addmm(x, a, b)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
