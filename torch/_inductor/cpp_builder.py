@@ -67,6 +67,8 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+_IS_X8664 = platform.machine() == "x86_64"
+
 SUBPROCESS_DECODE_ARGS = ("utf-8",) if _IS_WINDOWS else ()
 
 log = logging.getLogger(__name__)
@@ -1306,8 +1308,9 @@ def _get_openmp_args(
         else:
             cflags.append("openmp")
             cflags.append("openmp:experimental")
-            libs.append("libiomp5md")  # intel-openmp
-            ldflags.append("nodefaultlib:vcomp")
+            if _IS_X8664:
+                libs.append("libiomp5md")  # intel-openmp
+                ldflags.append("nodefaultlib:vcomp")
     else:
         if config.is_fbcode():
             include_dir_paths.append(build_paths.openmp_include)
