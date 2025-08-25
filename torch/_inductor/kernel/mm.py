@@ -733,7 +733,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout):
         # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template.name, "mm"
         ):
             mm_template.maybe_append_choice(
@@ -741,11 +741,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
             )
 
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template params using the new unified function
-            for kwargs in V.choices.get_mm_configs(
+            for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, persistent_tma_mm_template.name, "mm"
             ):
                 persistent_tma_mm_template.maybe_append_choice(
@@ -757,11 +758,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         device=mat1.get_device(),
                     ),
                     **kwargs,
+                    **extra_kwargs,
                 )
 
         # Only do split-k optimization if K is much larger than m, n and m, n are small
         if use_decompose_k_choice(m, n, k):
-            for kwargs in V.choices.get_mm_configs(
+            for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, decompose_k_subgraph_template.name, "mm"
             ):
                 decompose_k_subgraph_template.maybe_append_choice(
@@ -769,6 +771,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     input_nodes=kernel_inputs.nodes(),
                     layout=layout,
                     **kwargs,
+                    **extra_kwargs,
                 )
 
     if (
@@ -803,7 +806,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, _ in V.choices.get_mm_configs(
             # TODO(coconutruben): remove once we deprecate ah
             # mm-extra is a hack to keep the ah functionality alive
             # while we transition to the unified kwargs retrieval
@@ -900,7 +903,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template.name, "int_mm"
         ):
             mm_template.maybe_append_choice(
@@ -908,6 +911,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
             )
 
     return autotune_select_algorithm("int_mm", choices, kernel_inputs.nodes(), layout)
@@ -1000,7 +1004,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if is_nonzero and use_triton_template(layout):
         # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template.name, "addmm"
         ):
             mm_template.maybe_append_choice(
@@ -1008,6 +1012,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
@@ -1015,7 +1020,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Get TMA template params using the new unified function
-            for kwargs in V.choices.get_mm_configs(
+            for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, persistent_tma_mm_template.name, "addmm"
             ):
                 persistent_tma_mm_template.maybe_append_choice(
@@ -1027,6 +1032,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                         device=mat1.get_device(),
                     ),
                     **kwargs,
+                    **extra_kwargs,
                     prefix_args=1,
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
@@ -1230,7 +1236,7 @@ def tuned_scaled_mm(
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
             # Get TMA template params using the new unified function
-            for kwargs in V.choices.get_mm_configs(
+            for kwargs, extra_kwargs in V.choices.get_mm_configs(
                 kernel_inputs, layout, scaled_mm_device_tma_template.name, "scaled_mm"
             ):
                 kwargs["USE_FAST_ACCUM"] = use_fast_accum
@@ -1243,10 +1249,11 @@ def tuned_scaled_mm(
                         device=mat_a.get_device(),
                     ),
                     **kwargs,
+                    **extra_kwargs,
                 )
 
         # Get template params using the new unified function
-        for kwargs in V.choices.get_mm_configs(
+        for kwargs, extra_kwargs in V.choices.get_mm_configs(
             kernel_inputs, layout, mm_template.name, "scaled_mm"
         ):
             kwargs["USE_FAST_ACCUM"] = use_fast_accum
@@ -1265,6 +1272,7 @@ def tuned_scaled_mm(
                 input_nodes=kernel_inputs.nodes(),
                 layout=layout,
                 **kwargs,
+                **extra_kwargs,
                 suffix_args=suffix_args,
                 epilogue_fn=scale_mm_epilogue(),
                 epilogue_fn_hash="scale_mm_epilogue",

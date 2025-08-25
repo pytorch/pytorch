@@ -24,3 +24,18 @@ class TemplateConfigHeuristics:
         # NOTE: not an abstract class, because that clashed below for the mixin
         # functionality. Can be adjusted, but not a high priority
         yield from []
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        layout: Layout,
+        op_name: str,
+    ) -> dict[str, Any]:
+        """
+        Get extra kwargs for the given inputs/op for the template.
+
+        Use this to return kwargs that are needed for the template, but
+        do not change depending on the config/choice, but are rather
+        always the same, for all configs
+        """
+        return {}
