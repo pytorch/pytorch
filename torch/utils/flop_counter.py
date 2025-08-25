@@ -33,12 +33,14 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    # print("Registering flop formula for", targets)
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target):
-            if not isinstance(target, torch._ops.OpOverloadPacket):
+            # Want to enable registering custom kernel defs here
+            if not isinstance(target, torch._ops.OpOverloadPacket | torch._library.custom_ops.CustomOpDef):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
                     f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
@@ -46,6 +48,45 @@ def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]]
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
             flop_registry[target] = flop_formula
+
+        # To handle allowing multiple aten_ops at once
+        torch.utils._pytree.tree_map_(register, targets)
+
+        return flop_formula
+
+    return register_fun
+
+
+triton_flop_registry: dict[Any, Any] = {}
+def register_flop_formula_for_triton_kernel(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    """
+    This API is used to register flop formula for triton kernel specifically
+    
+    This API needs to fork because triton kernel currently gets decomposed into
+    `triton_kernel_wrapper_functional(kernel)` in aot autograd. This func then 
+    specifcaly will search for this wrapper function and requires an addtional
+    `register_torch_dispatch` to register the flop formula for the triton kernel
+
+    For BC purposes; if there is a flop formula registered for the triton kernel,
+    we will attempt to map this 1:1 with the wrapper function.  In the event it further
+    decomposes, we will throw an error and suggest moving to this API instead
+    """
+    # print("Registering flop formula for", targets)
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
+        if not get_raw:
+            flop_formula = shape_wrapper(flop_formula)
+
+        def register(target):
+            # Want to enable registering custom kernel defs here
+            if not isinstance(target, torch._ops.OpOverloadPacket | torch._library.custom_ops.CustomOpDef):
+                raise ValueError(
+                    f"register_flop_formula(targets): expected each target to be "
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
+                    f"{target} which is of type {type(target)}")
+            if target in triton_flop_registry:
+                raise RuntimeError(f"duplicate registrations for {target}")
+            print("Registering flop formula for", target)
+            triton_flop_registry[target] = flop_formula
 
         # To handle allowing multiple aten_ops at once
         torch.utils._pytree.tree_map_(register, targets)
@@ -652,6 +693,7 @@ class FlopCounterMode:
             **flop_registry,
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
+        self.triton_flop_registry = {**triton_flop_registry}
         self.mod_tracker = ModuleTracker()
 
     def get_total_flops(self) -> int:
@@ -747,12 +789,19 @@ class FlopCounterMode:
         return b
 
     def _count_flops(self, func_packet, out, args, kwargs):
+        print("AHHHHH")
+        print(func_packet)
+        print(self.triton_flop_registry)
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
-
+        elif func_packet in self.triton_flop_registry:
+            flop_count_func = self.triton_flop_registry[func_packet]
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
+            for par in set(self.mod_tracker.parents):
+                self.flop_counts[par][func_packet] += flop_count
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
@@ -832,7 +881,7 @@ class _FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-
+        print("Dispatch?")
         # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
         if func in {torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
@@ -853,14 +902,15 @@ class _FlopCounterMode(TorchDispatchMode):
 
         if isinstance(func, torch._ops.HigherOrderOperator):
             return self._handle_higher_order_ops(func, types, args, kwargs)
-
         # If we don't have func in flop_registry, see if it can decompose
         if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
             with self:
                 r = func.decompose(*args, **kwargs)
+                print("DECOMP")
                 if r is not NotImplemented:
                     return r
 
         # no further decomposition; execute & count flops
         out = func(*args, **kwargs)
+        print("AHHHHH")
         return self.counter._count_flops(func._overloadpacket, out, args, kwargs)
