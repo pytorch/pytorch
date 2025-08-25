@@ -375,7 +375,12 @@ class OpSchema:
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
-                first_op_strategy = arg.children[0]
+                first_op_strategy_idx = 0
+                while first_op_strategy_idx < len(arg.children):
+                    if isinstance(arg.children[first_op_strategy_idx], OpStrategy):
+                        break
+                    first_op_strategy_idx += 1
+                first_op_strategy = arg.children[first_op_strategy_idx]
                 assert isinstance(first_op_strategy, OpStrategy)
                 mesh_shape = first_op_strategy.mesh_shape
                 args_schema.append(str(arg))
