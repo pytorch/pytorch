@@ -14,6 +14,13 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
+from ..kernel.bmm import bmm_template
+from ..kernel.mm import (
+    mm_template,
+    persistent_tma_mm_template,
+    scaled_mm_device_tma_template,
+)
+from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import (
     get_backend_num_stages,
@@ -1334,19 +1341,6 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             )
             yield template_kwargs
 
-    @staticmethod
-    def _get_input_precision(
-        m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
-    ) -> str:
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-        result = "tf32" if allow_tf32 else "ieee"
-
-        # wrap in quotes, because the string will be dropped into the templates
-        return f'"{result}"'
-
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
@@ -1366,10 +1360,16 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            FLOAT32_PRECISION=MMTemplateConfigMixin._get_input_precision(m, n, k),
+            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(layout.dtype),
             num_stages=triton_config.num_stages,
@@ -1493,6 +1493,24 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        """
+        override hook to enable checks for ScaledMM that are not valid for TMA version
+        """
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
+        )
+        _, _, k = kernel_inputs.mnk_symbolic()
+        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+            # Triton crashes however uncommon for real workloads
+            return False
+
+        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
+            return False
+        return True
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -1588,16 +1606,9 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
 
-        _, _, k = kernel_inputs.mnk_symbolic()
+        if not self._valid(kernel_inputs):
+            return
 
-        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
-            # Triton crashes however uncommon for real workloads
-            yield from []
-
-        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
-        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
-            yield from []
         # Get base template configs from superclass
         for template_kwargs in super().get_template_configs(
             kernel_inputs, layout, op_name, max_autotune
@@ -1618,6 +1629,9 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
     This is for scaled MM templates that use device TMA.
     This inherits from ScaledMMConfigMixin and adds TMA-specific options.
     """
+
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        return True
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1671,12 +1685,12 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
 @register_template_heuristic(
-    torch._inductor.kernel.bmm.bmm_template.uid,
+    bmm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -1686,7 +1700,7 @@ class CUDAMMTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic):
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="mm-ah",
@@ -1702,7 +1716,7 @@ class CUDAMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, CUDAConfigHeuristic
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.persistent_tma_mm_template.uid,
+    persistent_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -1716,7 +1730,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(TMAConfigMixin, CUDAConfigHeurist
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
@@ -1736,7 +1750,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.scaled_mm_device_tma_template.uid,
+    scaled_mm_device_tma_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -1755,7 +1769,7 @@ class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuri
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.uid,
+    mm_plus_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
 )
@@ -1776,7 +1790,7 @@ class CUDAMMPlusMMTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="int_mm",
@@ -1799,12 +1813,12 @@ class CUDAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CUDAConfigHeu
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is not None,
 )
 @register_template_heuristic(
-    torch._inductor.kernel.bmm.bmm_template.uid,
+    bmm_template.uid,
     "cuda",
     register=torch.version.hip is not None,
 )
@@ -1825,7 +1839,7 @@ class ROCmMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is not None,
     op_name="scaled_mm",
@@ -1845,7 +1859,7 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid,
+    mm_template.uid,
     "cuda",
     register=torch.version.hip is not None,
     op_name="int_mm",
@@ -1865,7 +1879,7 @@ class ROCmInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, ROCmConfigHeu
 
 
 @register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.uid,
+    mm_plus_mm_template.uid,
     "cuda",
     register=torch.version.hip is not None,
 )
@@ -1891,15 +1905,13 @@ class ROCmMMPlusMMTemplateConfigHeuristic(
 # CPU template-specific classes
 
 
-@register_template_heuristic(torch._inductor.kernel.mm.mm_template.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.bmm_template.uid, "cpu")
+@register_template_heuristic(mm_template.uid, "cpu")
+@register_template_heuristic(bmm_template.uid, "cpu")
 class CPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, CPUConfigHeuristic):
     """Standard MM template heuristic for CPU"""
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "cpu", op_name="scaled_mm"
-)
+@register_template_heuristic(mm_template.uid, "cpu", op_name="scaled_mm")
 class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic):
     """Scaled MM template heuristic for CPU (non-TMA)"""
 
@@ -1914,9 +1926,7 @@ class CPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CPUConfigHeuristic
         self.exhaustive_configs = self.scaled_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "cpu", op_name="int_mm"
-)
+@register_template_heuristic(mm_template.uid, "cpu", op_name="int_mm")
 class CPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CPUConfigHeuristic):
     """Int8 MM template heuristic for CPU"""
 
@@ -1931,9 +1941,7 @@ class CPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, CPUConfigHeuri
         self.exhaustive_configs = self.int8_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.uid, "cpu"
-)
+@register_template_heuristic(mm_plus_mm_template.uid, "cpu")
 class CPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, CPUConfigHeuristic
 ):
@@ -1953,15 +1961,13 @@ class CPUMMPlusMMTemplateConfigHeuristic(
 # XPU template-specific classes
 
 
-@register_template_heuristic(torch._inductor.kernel.mm.mm_template.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.bmm_template.uid, "xpu")
+@register_template_heuristic(mm_template.uid, "xpu")
+@register_template_heuristic(bmm_template.uid, "xpu")
 class XPUMMTemplateConfigHeuristic(MMTemplateConfigMixin, XPUConfigHeuristic):
     """Standard MM template heuristic for XPU"""
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "xpu", op_name="scaled_mm"
-)
+@register_template_heuristic(mm_template.uid, "xpu", op_name="scaled_mm")
 class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic):
     """Scaled MM template heuristic for XPU (non-TMA)"""
 
@@ -1976,9 +1982,7 @@ class XPUScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, XPUConfigHeuristic
         self.exhaustive_configs = self.scaled_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "xpu", op_name="int_mm"
-)
+@register_template_heuristic(mm_template.uid, "xpu", op_name="int_mm")
 class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuristic):
     """Int8 MM template heuristic for XPU"""
 
@@ -1993,9 +1997,7 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
         self.exhaustive_configs = self.int8_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.uid, "xpu"
-)
+@register_template_heuristic(mm_plus_mm_template.uid, "xpu")
 class XPUMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, XPUConfigHeuristic
 ):
@@ -2015,15 +2017,13 @@ class XPUMMPlusMMTemplateConfigHeuristic(
 # MTIA template-specific classes
 
 
-@register_template_heuristic(torch._inductor.kernel.mm.mm_template.uid, "mtia")
-@register_template_heuristic(torch._inductor.kernel.bmm.bmm_template.uid, "mtia")
+@register_template_heuristic(mm_template.uid, "mtia")
+@register_template_heuristic(bmm_template.uid, "mtia")
 class MTIAMMTemplateConfigHeuristic(MMTemplateConfigMixin, MTIAConfigHeuristic):
     """Standard MM template heuristic for MTIA"""
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "mtia", op_name="scaled_mm"
-)
+@register_template_heuristic(mm_template.uid, "mtia", op_name="scaled_mm")
 class MTIAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, MTIAConfigHeuristic):
     """Scaled MM template heuristic for MTIA (non-TMA)"""
 
@@ -2038,9 +2038,7 @@ class MTIAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, MTIAConfigHeurist
         self.exhaustive_configs = self.scaled_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm.mm_template.uid, "mtia", op_name="int_mm"
-)
+@register_template_heuristic(mm_template.uid, "mtia", op_name="int_mm")
 class MTIAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, MTIAConfigHeuristic):
     """Int8 MM template heuristic for MTIA"""
 
@@ -2055,9 +2053,7 @@ class MTIAInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, MTIAConfigHeu
         self.exhaustive_configs = self.int8_mm_configs
 
 
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.mm_plus_mm_template.uid, "mtia"
-)
+@register_template_heuristic(mm_plus_mm_template.uid, "mtia")
 class MTIAMMPlusMMTemplateConfigHeuristic(
     MMPlusMMTemplateConfigMixin, MTIAConfigHeuristic
 ):
