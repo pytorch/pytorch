@@ -23,21 +23,21 @@ def forward_block_mn(
 
     # -- load k --
     # NB reversed order to since K is transposed
+    kv_base_offset = kv_start + kv_offset
     {%- if USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
-        [kv_start + kv_offset, 0],
+        [kv_base_offset, 0],
     )
     {%- else %}
 
     # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    offs_n_load = kv_start + kv_offset + tl.arange(0, BLOCK_N)
+    offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
     k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
     {%- endif %}
 
-    if not USE_TMA:
-        k = tl.trans(k)
+    k = tl.trans(k)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -104,10 +104,10 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start + kv_offset, 0],
+        [kv_base_offset, 0],
     )
     {%- else %}
-    # Calculate offsets for V loading - reuse offs_n_load from K loading
+    # Calculate offsets for V loading - reuse kv_base_offset from K loading
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
     v = load_checked_2d(V, offs_n_load, offs_v, stride_vn, stride_vk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
     {%- endif %}
