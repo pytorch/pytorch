@@ -1267,6 +1267,7 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
+        self.is_leaf_tracer = False
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
             return self.inline_generator_function(fn, args, kwargs)
         else:
@@ -2927,8 +2928,22 @@ class InstructionTranslatorBase(
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
+    @break_graph_if_unsupported(push=0)
+    def graph_break_on_leaf_function(self, inst: Instruction) -> None:
+        if self.is_leaf_tracer:
+            unimplemented_v2(
+                gb_type="Forced graph break on leaf function",
+                context="",
+                explanation="Forced graph break for nested graph break testing purposes",
+                hints=[
+                    "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False",
+                ],
+            )
+
     def NOP(self, inst: Instruction) -> None:
-        pass
+        # Dynamo-specific testing behavior
+        if inst.argval == "GRAPH_BREAK_IF_LEAF":
+            self.graph_break_on_leaf_function(inst)
 
     def POP_TOP(self, inst: Instruction) -> None:
         self.pop()
