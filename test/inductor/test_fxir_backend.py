@@ -21,7 +21,6 @@ from torch._inductor.codegen.common import register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper_fxir import FxConverter, WrapperFxCodegen
-from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
@@ -152,7 +151,7 @@ class FxirTestCase(InductorTestCase):
         (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=1)
 
         # Check for the extern kernel
-        num_extern = self._count_ops(gm, extern_kernels.addmm)
+        num_extern = self._count_ops(gm, torch.ops.aten.addmm.out)
         self.assertEqual(num_extern, 1)
 
     def test_fallback(self):
@@ -544,6 +543,18 @@ class FxirTestCase(InductorTestCase):
         (shape, stride) = empty_strided.args
         if use_dynamic_shapes:
             self.assertEqual(type(shape[0]), torch.fx.Node)
+
+    def test_output_slice_view(self):
+        """
+        Test when the output is a view of the input.
+        The sliced strides create a TensorBox in the output IR.
+        """
+
+        def foo(x):
+            return x[0:2:2].T[3:].squeeze(0)
+
+        args = [torch.rand([4, 4, 4, 4], device=self.device)]
+        self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
 
 class AOTFxirTestCase(InductorTestCase):
