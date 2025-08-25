@@ -3,7 +3,9 @@
 import sys
 
 import torch
+from torch import nn
 from torch.distributed.tensor import (
+    DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
@@ -29,20 +31,34 @@ if TEST_WITH_DEV_DBG_ASAN:
 funcol = torch.ops.c10d_functional
 
 
+def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
+    """
+    Shards on the given dimension if possible, else replicate
+    Args:
+        mod: (nn.Module) Module to shard or replicate
+        shard_dim: (int) Dimension to shard on if possible
+        device_mesh: (DeviceMesh) 1D Device Mesh
+
+    Returns:
+        Sharded DTensor
+    """
+
+    def shard_module_params(name, module, device_mesh):
+        for name, param in module.named_parameters():
+            placement = Replicate()
+            if shard_dim < len(param.size()):
+                placement = Shard(shard_dim)
+            dist_param = torch.nn.Parameter(
+                distribute_tensor(param, device_mesh, [placement])
+            )
+            name = name.split(".")[-1]
+            module.register_parameter(name, dist_param)
+
+    sharded_mod = distribute_module(mod, device_mesh, shard_module_params)
+    return sharded_mod
+
+
 class TestEmbeddingOp(DTensorTestBase):
-    def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
-        def shard_embedding_fn(name, module, device_mesh):
-            for name, param in module.named_parameters():
-                dist_param = torch.nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(shard_dim)])
-                )
-                module.register_parameter(name, dist_param)
-
-        sharded_embedding = distribute_module(
-            embedding_mod, device_mesh, shard_embedding_fn
-        )
-        return sharded_embedding
-
     def _run_embedding_op_test(
         self,
         device_mesh,
@@ -72,9 +88,7 @@ class TestEmbeddingOp(DTensorTestBase):
             local_embedding.weight.detach().clone()
         )
 
-        sharded_embedding = self._apply_sharding(
-            sharded_embedding, shard_dim, device_mesh
-        )
+        sharded_embedding = _apply_sharding(sharded_embedding, shard_dim, device_mesh)
 
         # Run sharded computation
         torch.manual_seed(10)
@@ -171,7 +185,7 @@ class TestEmbeddingOp(DTensorTestBase):
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
-        sharded_embedding = self._apply_sharding(embedding_mod, 0, mesh)
+        sharded_embedding = _apply_sharding(embedding_mod, 0, mesh)
         inp = torch.randint(0, 10, (8, 8), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_embedding(replicated_inp)
@@ -197,11 +211,11 @@ class TestEmbeddingOp(DTensorTestBase):
         # and MaskBuffer, because of cache hit from sharding propagation
 
         emb1 = torch.nn.Embedding(10, 23, device=self.device_type)
-        sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
+        sharded_emb1 = _apply_sharding(emb1, 0, mesh)
         output1 = sharded_emb1(replicated_inp)
 
         emb2 = torch.nn.Embedding(10, 29, device=self.device_type)
-        sharded_emb2 = self._apply_sharding(emb2, 0, mesh)
+        sharded_emb2 = _apply_sharding(emb2, 0, mesh)
         output2 = sharded_emb2(replicated_inp)
 
         partial_placement1 = output1.placements[0]
@@ -218,7 +232,7 @@ class TestEmbeddingOp(DTensorTestBase):
         # thus they will have different _MaskPartial placements (with no cache hit)
 
         emb3 = torch.nn.Embedding(10, 29, device=self.device_type)
-        sharded_emb3 = self._apply_sharding(emb3, 0, mesh)
+        sharded_emb3 = _apply_sharding(emb3, 0, mesh)
         output3 = sharded_emb3(replicated_inp)
         partial_placement3 = output3.placements[0]
         self.assertIsInstance(partial_placement3, _MaskPartial)
@@ -226,6 +240,29 @@ class TestEmbeddingOp(DTensorTestBase):
 
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
+
+    @with_comms
+    def test_compile_embedding_redistribute(self):
+        mesh = self.build_device_mesh()
+
+        class Network(nn.Module):
+            def __init__(self, embedding, mesh):
+                super().__init__()
+                self.mesh = mesh
+                self.embedding = _apply_sharding(embedding, 0, self.mesh)
+
+            def forward(self, x):
+                x = self.embedding(x)
+                x = x.redistribute(self.mesh, [Shard(1)])
+                return x
+
+        embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        inp = torch.randint(0, 10, (8,), device=self.device_type)
+        ref_out = embedding(inp)
+        sharded_net = torch.compile(Network(embedding, mesh))
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        output = sharded_net(replicated_inp)
+        self.assertEqual(output.full_tensor(), ref_out)
 
 
 if __name__ == "__main__":
