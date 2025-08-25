@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, Protocol
 from weakref import ReferenceType
 
 import torch
@@ -1625,7 +1625,7 @@ def first_real_inst_idx(code: CodeType) -> int:
     raise RuntimeError("RESUME instruction not found in code")
 
 
-class ConvertFrameProtocol(typing.Protocol):
+class ConvertFrameProtocol(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,

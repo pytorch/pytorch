@@ -280,7 +280,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
-    def is_matching_cls(value):
+    def is_matching_cls(value) -> bool:
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
@@ -1829,7 +1829,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     def call_tensor_method(self, tx, args, kwargs):
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
-    def is_tensor_method(self):
+    def is_tensor_method(self) -> bool:
         from ..trace_rules import get_tensor_method
 
         return (
@@ -1860,7 +1860,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
 
-    def is_constant_fold_method(self, name):
+    def is_constant_fold_method(self, name) -> bool:
         return name in ["has"]
 
     def call_method(

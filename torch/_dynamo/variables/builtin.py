@@ -950,7 +950,7 @@ class BuiltinVariable(VariableTracker):
             k: v.as_python_constant() for k, v in kwargs.items()
         }
 
-    def has_constant_handler(self, args, kwargs):
+    def has_constant_handler(self, args, kwargs) -> bool:
         return self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         )

@@ -114,7 +114,6 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
 
-
 try:
     import numpy as np
 except ModuleNotFoundError:

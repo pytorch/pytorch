@@ -38,7 +38,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -118,15 +118,15 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-def is_standard_setattr(val):
+def is_standard_setattr(val) -> bool:
     return val in (object.__setattr__, BaseException.__setattr__)
 
 
-def is_standard_delattr(val):
+def is_standard_delattr(val) -> bool:
     return val in (object.__delattr__, BaseException.__delattr__)
 
 
-def is_forbidden_context_manager(ctx):
+def is_forbidden_context_manager(ctx) -> bool:
     f_ctxs = []
 
     try:
@@ -144,7 +144,7 @@ def is_forbidden_context_manager(ctx):
     return ctx in f_ctxs
 
 
-def is_cython_function(obj):
+def is_cython_function(obj: Any) -> bool:
     return (
         callable(obj)
         and hasattr(type(obj), "__name__")
@@ -232,7 +232,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         }.union(exceptions)
 
     @staticmethod
-    def is_supported_new_method(value):
+    def is_supported_new_method(value) -> bool:
         # TODO(anijain2305) - Extend this to support objects with default tp_new
         # functions.
         return value in UserDefinedClassVariable.supported_c_new_functions()
@@ -240,7 +240,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key) -> bool:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
@@ -815,7 +815,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
         return super().call_function(tx, args, kwargs)
 
-    def is_standard_new(self):
+    def is_standard_new(self) -> bool:
         """Check for __new__ being overridden"""
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
@@ -924,7 +924,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_underlying_vt_modified(self, side_effects):
+    def is_underlying_vt_modified(self, side_effects) -> bool:
         return False
 
     def python_type(self):
@@ -1146,7 +1146,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def next_variable(self, tx):
         return self.call_method(tx, "__next__", [], {})
 
-    def is_supported_random(self):
+    def is_supported_random(self) -> bool:
         try:
             return self.value in self._supported_random_functions()
         except TypeError:
@@ -1214,7 +1214,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _check_for_getattr(self):
         return get_custom_getattr(self.value)
 
-    def _is_c_defined_property(self, subobj):
+    def _is_c_defined_property(self, subobj) -> bool:
         if not isinstance(subobj, property):
             return False
 
@@ -1273,7 +1273,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return (descriptor, setter)
         return None
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
+    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key) -> bool:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
@@ -1821,7 +1821,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
-    def is_matching_object(obj):
+    def is_matching_object(obj) -> bool:
         mod = sys.modules.get("torchrec.sparse.jagged_tensor")
         return mod is not None and type(obj) is mod.KeyedJaggedTensor
 
@@ -1846,7 +1846,7 @@ class IntWrapperVariable(UserDefinedObjectVariable):
     # Dummy class to check if the object is an IntWrapper, and turn it into a
     # symint
     @staticmethod
-    def is_matching_object(obj):
+    def is_matching_object(obj) -> bool:
         mod = sys.modules.get("torch.export.dynamic_shapes")
         return mod is not None and type(obj) is mod._IntWrapper
 
@@ -1952,7 +1952,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             return self._dict_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_underlying_vt_modified(self, side_effects):
+    def is_underlying_vt_modified(self, side_effects) -> bool:
         return side_effects.is_modified(self._dict_vt)
 
     @property
@@ -2031,7 +2031,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def items(self):
         return self._set_vt.items
 
-    def is_underlying_vt_modified(self, side_effects):
+    def is_underlying_vt_modified(self, side_effects) -> bool:
         return side_effects.is_modified(self._set_vt)
 
     def install_dict_keys_match_guard(self):
@@ -2080,7 +2080,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
             return self._list_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_underlying_vt_modified(self, side_effects):
+    def is_underlying_vt_modified(self, side_effects) -> bool:
         return side_effects.is_modified(self._list_vt)
 
 

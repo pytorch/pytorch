@@ -44,7 +44,7 @@ import weakref
 from collections.abc import Generator, Sequence
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing_extensions import TypeAlias, TypeGuard, TypeIs
 from unittest.mock import patch
 
 import torch
@@ -454,7 +454,7 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     return impl
 
 
-def is_stdlib(mod: object) -> bool:
+def is_stdlib(mod: Any) -> TypeGuard[types.ModuleType]:
     if sys.version_info < (3, 10):
         # For < 3.10, no easy way to identify a stdlib module name.
         return False

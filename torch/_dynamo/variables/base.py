@@ -187,11 +187,11 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
-def _is_top_level_scope(scope_id):
+def _is_top_level_scope(scope_id) -> bool:
     return scope_id == 1
 
 
-def is_side_effect_safe(m: MutationType):
+def is_side_effect_safe(m: MutationType) -> bool:
     scope_id = current_scope_id()
 
     # In the top-level scope (if no HigherOrderOperators are involved),
@@ -353,7 +353,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 hints=[],
             )
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         try:
             self.as_python_constant()
             return True
@@ -381,7 +381,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 
-    def is_proxy(self):
+    def is_proxy(self) -> bool:
         try:
             self.as_proxy()
             return True
@@ -573,7 +573,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
         return self
 
-    def is_realized(self):
+    def is_realized(self) -> bool:
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
@@ -585,14 +585,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.USER_ERROR],
         )
 
-    def is_strict_mode(self, tx):
+    def is_strict_mode(self, tx) -> bool:
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
-    def is_mutable(self):
+    def is_mutable(self) -> bool:
         """Whether Dynamo allows mutation on this variable."""
         return not self.is_immutable()
 
-    def is_immutable(self):
+    def is_immutable(self) -> bool:
         """Whether Dynamo bans mutation on this variable."""
         return self.mutation_type is None
 
