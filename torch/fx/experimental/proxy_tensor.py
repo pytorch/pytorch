@@ -2334,7 +2334,20 @@ class _MakefxTracer:
             self._error_on_data_dependent_ops,
         )
         with sub_tracer._init_modes_from_parent(self):
-            return sub_tracer._trace_inner(f, *args)
+            gm = sub_tracer._trace_inner(f, *args)
+            if (
+                self.fake_tensor_mode is not None
+                and self.fake_tensor_mode.shape_env is not None
+            ):
+                from torch.fx.passes.runtime_assert import (
+                    insert_deferred_runtime_asserts,
+                )
+
+                insert_deferred_runtime_asserts(
+                    gm, self.fake_tensor_mode.shape_env, "reenter_make_fx"
+                )
+                gm.recompile()
+            return gm
 
 
 _CURRENT_MAKE_FX_TRACER: Optional[_MakefxTracer] = None
