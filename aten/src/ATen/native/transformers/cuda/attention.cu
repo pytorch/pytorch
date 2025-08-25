@@ -1401,7 +1401,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
       is_causal = false;
     } else {
+#if AOTRITON_V3_API == 0
       TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+#endif
     }
 
     at::Tensor atomic_counter;
@@ -1430,6 +1432,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 #if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
+      using aotriton::v3::flash::WindowValue;
       aotriton::v3::flash::attn_fwd_params params;
       params.Q = mk_aotensor(q_t, "q");
       params.K = mk_aotensor(k_t, "k");
@@ -1448,8 +1451,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
       params.persistent_atomic_counter = persistent_counter;
       params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      params.window_left = params.Max_seqlen_q;
-      params.window_right = params.Max_seqlen_k;
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+        params.window_left = WindowValue::TopLeftAligned;
+        params.window_right = WindowValue::TopLeftAligned;
+      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.window_left = WindowValue::BottomRightAligned;
+        params.window_right = WindowValue::BottomRightAligned;
+      }
       if (bias.has_value()) {
         params.B = mk_aotensor(bias.value(), "bias");
       }

@@ -551,7 +551,9 @@ _efficient_attention_backward(
     } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
       is_causal = false;
     } else {
+#if AOTRITON_V3_API == 0
       TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
+#endif
     }
     at::Tensor q_t = query.permute({0,2,1,3});
     at::Tensor k_t = key.permute({0,2,1,3});
@@ -574,6 +576,7 @@ _efficient_attention_backward(
 #if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
+      using aotriton::v3::flash::WindowValue;
       aotriton::v3::flash::attn_bwd_params params;
       params.Q = mk_aotensor(q_t, "q");
       params.K = mk_aotensor(k_t, "k");
@@ -594,8 +597,13 @@ _efficient_attention_backward(
       params.philox_offset1 = mk_aoscalartensor(philox_offset);
       params.philox_offset2 = 0;
       params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      params.window_left = params.Max_seqlen_q;
-      params.window_right = params.Max_seqlen_k;
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+        params.window_left = WindowValue::TopLeftAligned;
+        params.window_right = WindowValue::TopLeftAligned;
+      } else if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
+        params.window_left = WindowValue::BottomRightAligned;
+        params.window_right = WindowValue::BottomRightAligned;
+      }
 #if AOTRITON_ALWAYS_V3_API
       using sdp::aotriton_adapter::mklazy_empty_like;
       using sdp::aotriton_adapter::mklazy_fp32zeros;
