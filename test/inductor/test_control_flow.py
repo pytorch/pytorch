@@ -959,6 +959,23 @@ class WhileLoopModels:
             )
             return out1 + 1, out2 + 2
 
+    class ZeroLoop4(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return torch.clip(a_view.sum(), 0, 1) < 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out2.sin_(), a_view.cos_()
+
     class UnbackedSymIntClosure(torch.nn.Module):
         def forward(self, c, a, b):
             d = a.sum().to(torch.int64).item()
@@ -1281,6 +1298,7 @@ class WhileLoopTests(TestCase):
             WhileLoopModels.ZeroLoop(),
             WhileLoopModels.ZeroLoop2(),
             WhileLoopModels.ZeroLoop3(),
+            WhileLoopModels.ZeroLoop4(),
         ]:
             self._run_test(
                 model=model,
