@@ -1272,6 +1272,7 @@ def _compile(
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
+        exception_stack_trace: Optional[list[str]] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
@@ -1300,6 +1301,7 @@ def _compile(
             # info here and add it to the metrics context below.
             fail_type = type(e).__qualname__
             fail_reason = str(e)
+            exception_stack_trace = [traceback.format_exc()]
             exception_handler(e, code, frame, export=export)
             # NB: this is the post-mutation exception
             torch._logging.trace_structured(
@@ -1420,6 +1422,7 @@ def _compile(
                 ),
                 "stack_trace": stack_trace,
                 "graph_node_shapes": str(graph_node_shapes),
+                "exception_stack_trace": exception_stack_trace,
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events
