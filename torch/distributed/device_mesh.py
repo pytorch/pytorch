@@ -11,7 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
-from torch.distributed._cute_layout import _Layout, init_layouts_from_mesh
+from torch.distributed._mesh_layout import _Layout, _MeshLayout, MeshLayoutType
 from torch.utils._typing_utils import not_none
 
 
@@ -73,6 +73,10 @@ else:
             self.mesh_dim_group_options: dict[
                 int, tuple[Optional[str], Optional[C10dBackend.Options]]
             ] = {}
+            # Use a dict per root mesh to bookkeep the mapping between layout and pg
+            self.layouts_to_groups: dict[DeviceMesh, dict[_Layout, str]] = {}
+            # Use a dict per root mesh to bookkeep the mapping between mesh_dim_name and layout
+            self.names_to_layouts: dict[DeviceMesh, dict[str, _Layout]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -145,7 +149,7 @@ else:
             """
             mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
             layout = device_mesh._layouts[mesh_dim]
-            pg_ranks_by_dim = layout.layout_to_global_ranks(device_mesh.size())
+            pg_ranks_by_dim = layout.global_ranks(device_mesh.size())
             cur_rank = device_mesh.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -155,7 +159,6 @@ else:
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
                 )
-                submesh._backend = device_mesh._backend
                 submesh._layouts = device_mesh._layouts if cur_rank in mesh_1d else ()
                 res_submeshes.append(submesh)
 
@@ -171,219 +174,6 @@ else:
         return the corresponding module.
         """
         return getattr(torch, device_type, None)
-
-    class _DeviceMeshBackend:
-        def __init__(
-            self,
-            device_type: str,
-        ) -> None:
-            """
-            _DeviceMeshBackend acts as a class which handles all the mechanical bookkeepings
-            for the backend initialization of the DeviceMesh and all the following transformations.
-
-            Also we only use a singleton for one DeviceMesh universe, which means all the DeviceMesh
-            objects share the same backend initialization if they are transformed from the same device mesh.
-            If users initialize a new DeviceMesh object from scratch, we will create a new singleton.
-            """
-            self.device_type = device_type
-            self.layouts_to_groups: dict[_Layout, str] = {}
-            self.names_to_layouts: dict[str, _Layout] = {}
-
-            # always try to create default (world) pg, even if it is not initialized
-            # already. The world pg is used for device mesh identity (rank) on each
-            # process (we need to know if the current global rank is in the mesh or not).
-            self._setup_world_group_and_device()
-
-        def _setup_world_group_and_device(self):
-            default_initialized = is_initialized()
-            # TODO: think about how to allow pg options to be passed to world group
-            # or mesh dimension groups
-            if not default_initialized:
-                init_process_group()
-
-            world_size = get_world_size()
-
-            # ONLY set the device if the current device is not initialized, if user already
-            # set the device before DeviceMesh init, we respect the user's choice.
-            device_handle = _get_device_handle(self.device_type)
-            if device_handle and not device_handle.is_initialized():
-                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
-                # env variable from launchers, we use it to set the device.
-                if "LOCAL_RANK" in os.environ:
-                    local_rank = int(os.environ["LOCAL_RANK"])
-                    logger.info(
-                        "Setting default device for the current process based on LOCAL_RANK=%s",
-                        local_rank,
-                    )
-                    device_handle.set_device(local_rank)
-                else:
-                    warnings.warn(
-                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
-                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
-                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
-                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
-                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
-                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
-                    )
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
-                    if (
-                        world_size > num_devices_per_host
-                        and world_size % num_devices_per_host != 0
-                    ):
-                        raise RuntimeError(
-                            f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                        )
-                    device_handle.set_device(get_rank() % num_devices_per_host)
-
-            return _get_default_group()
-
-        def _maybe_create_backend(
-            self,
-            layout: _Layout,
-            dim: int,
-            name: Optional[str] = None,
-            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
-                None,
-                None,
-            ),
-            group: Optional[ProcessGroup] = None,
-        ) -> None:
-            """
-            Creates or retrieves a process group backend for a given layout and dimension.
-
-            This method manages the mapping between layouts, dimension names, and process groups.
-            It ensures that each layout has a corresponding process group, and each named dimension
-            maps to exactly one layout. If the layout already has a process group, it validates
-            the existing mappings and returns early.
-
-            Args:
-                layout (_Layout): The layout object representing the communication pattern
-                dim (int): The dimension index in the device mesh
-                name (Optional[str]): Optional name for the mesh dimension
-                backend_override (tuple[Optional[str], Optional[C10dBackend.Options]]):
-                    Optional backend type and options to override default settings
-                group (Optional[ProcessGroup]): Optional existing process group to use instead of creating a new one
-
-            Note:
-                - If a layout already has a process group, any backend_override or explicit group will be ignored
-                - If a name is provided, it will be mapped to the layout for future reference
-                - For world-size layouts with no overrides, it will try to use the default process group
-                - For other layouts, it creates appropriate subgroups using either split_group (more efficient and it only
-                available for nccl communicators) or new_group
-                - Because process group itself is not serializable, we only store the group name in the mapping
-            """
-            # Every mesh_dim_name will only map to one and only one layout.
-            # When the layout has backend initiated, we want to ensure that
-            if layout in self.layouts_to_groups:
-                if name is not None:
-                    if name in self.names_to_layouts:
-                        assert self.names_to_layouts[name] == layout, (
-                            f"dim_name {name} has been mapped to another layout"
-                        )
-                    else:
-                        self.names_to_layouts[name] = layout
-                if backend_override != (None, None):
-                    warnings.warn(
-                        f"Group for {layout} ({name=}) already exists, ignoring backend override"
-                    )
-                if group is not None:
-                    warnings.warn(
-                        f"Group for {layout} ({name=}) already exists, ignoring explicit group"
-                    )
-                return
-
-            # Let mesh_dim_name maps to the current layout whose backend has not been initialized.
-            # If mesh_dim_name has already mapped to another layout, we throw an error.
-            if name is not None:
-                assert name not in self.names_to_layouts, (
-                    f"Mesh dim name {name} has been mapped to other backend initiated layout already"
-                )
-                self.names_to_layouts[name] = layout
-
-            # When user explicitly pass in a process group, we directly reuse that PG as backend rather
-            # than creating a new one.
-            if group is not None:
-                self.layouts_to_groups[layout] = group.group_name
-                return
-
-            default_group = _get_default_group()
-
-            if layout == _Layout(((get_world_size(), 1),)) and backend_override == (
-                None,
-                None,
-            ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
-                # Otherwise, create new pg.
-                ranks = list(range(get_world_size()))
-                group = (
-                    new_group(
-                        backend="cpu:gloo,cuda:nccl",
-                        ranks=ranks,
-                        group_desc="mesh_default",
-                    )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
-            else:
-                # Generate the pg_ranks_by_dim for pg_creation from the layout.
-                pg_ranks_by_dim = layout.layout_to_global_ranks(get_world_size())
-                backend, pg_options = backend_override
-
-                # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
-                # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
-                # If the mesh doesn't not have a mesh_dim_names, then the group description of the
-                # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
-                group_desc = f"mesh_{name}" if name is not None else f"mesh_dim_{dim}"
-
-                # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
-                # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
-                # In this case, we only need to make one API call (`split_group``) for the subgroup creation
-                # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
-                # all the subgroups.
-                # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
-                # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
-                # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
-                group = None
-                if (
-                    getattr(default_group, "bound_device_id", None) is not None
-                    and torch.cuda.is_available()
-                    and (
-                        backend is None
-                        or default_group._get_backend(torch.device("cuda")).name()
-                        == backend
-                    )
-                ):
-                    group = split_group(
-                        parent_pg=default_group,
-                        pg_options=pg_options,
-                        split_ranks=pg_ranks_by_dim,
-                        group_desc=group_desc,
-                    )
-                else:
-                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
-                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-                    # along with appending information to the `dim_group_names` list whenever necessary.
-                    for subgroup_ranks in pg_ranks_by_dim:
-                        # We temporarily revert the reuse subgroup, since it breaks two internal tests.
-                        # Temporarily reverting to resolve test timeout while root-causing.
-                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        maybe_group = new_group(
-                            ranks=subgroup_ranks,
-                            backend=backend,
-                            pg_options=pg_options,
-                            group_desc=group_desc,
-                        )
-                        if maybe_group != GroupMember.NON_GROUP_MEMBER:
-                            assert group is None
-                            group = maybe_group
-
-            assert group is not None
-            self.layouts_to_groups[layout] = group.group_name
 
     class DeviceMesh:
         """
@@ -434,8 +224,8 @@ else:
         device_type: str
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
-        _layouts: tuple[_Layout, ...]
-        _backend: Optional[_DeviceMeshBackend] = None
+        _layouts: MeshLayoutType
+        _init_backend: bool
 
         def __init__(
             self,
@@ -458,45 +248,310 @@ else:
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             # Internal bookkeeping for the device mesh.
-            self._layouts = init_layouts_from_mesh(self.mesh.size(), self.mesh.stride())
+            self._layouts = _MeshLayout.to_single_depth_layouts(
+                self.mesh.size(), self.mesh.stride()
+            ).layouts
+            self._init_backend = _init_backend
+
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._thread_id = None
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if not _init_backend or device_type == "xla":
+            if device_type != "xla":
+                # always try to create default (world) pg, even if it is not initialized
+                # already. The world pg is used for device mesh identity (rank) on each
+                # process (we need to know if the current global rank is in the mesh or not).
+                if _init_backend:
+                    self._setup_world_group_and_device()
+                    if backend_override is None:
+                        backend_override = ((None, None),) * self.mesh.ndim
+                    if torch.equal(
+                        self.mesh.flatten().sort().values,
+                        torch.arange(
+                            get_world_size(),
+                            device=self.mesh.device,
+                            dtype=self.mesh.dtype,
+                        ),
+                    ):
+                        for i, layout in enumerate(self._layouts):
+                            backend_override_ = backend_override[i]
+                            global_override = (
+                                _mesh_resources.mesh_dim_group_options.get(
+                                    i, (None, None)
+                                )
+                            )
+                            if backend_override_ == (None, None):
+                                backend_override_ = global_override
+                            elif global_override != (None, None):
+                                raise RuntimeError(
+                                    f"Dimension {i} present both in the backend_override argument "
+                                    "and via _mesh_resources._set_mesh_dim_group_options"
+                                )
+                            self._maybe_create_backend(
+                                layout,
+                                i,
+                                self.mesh_dim_names[i] if self.mesh_dim_names else None,
+                                backend_override=backend_override_,
+                            )
+                    else:
+                        # For BC, DeviceMesh takes in a random ArrayList as mesh, for example [0,1,3]
+                        # or [[0], [3]] as tested in test/distributed/tensor/test_init.py so we need
+                        # need to keep the old logic which is not compatible with layout semantics.
+                        # create sub pgs base on the mesh argument specified
+                        for dim in range(self.mesh.ndim):
+                            # swap the current dim to the last dim
+                            # then reshape to flatten out other dims
+                            array_mesh = self.mesh.swapdims(-1, dim).reshape(
+                                -1, self.mesh.size(dim)
+                            )
+                            backend_override_ = backend_override[dim]
+                            global_override = (
+                                _mesh_resources.mesh_dim_group_options.get(
+                                    dim, (None, None)
+                                )
+                            )
+                            if backend_override_ == (None, None):
+                                backend_override_ = global_override
+                            elif global_override != (None, None):
+                                raise RuntimeError(
+                                    f"Dimension {dim} present both in the backend_override argument "
+                                    "and via _mesh_resources._set_mesh_dim_group_options"
+                                )
+                            self._maybe_create_backend(
+                                self._layouts[dim],
+                                dim,
+                                self.mesh_dim_names[dim]
+                                if self.mesh_dim_names
+                                else None,
+                                backend_override=backend_override_,
+                                array_mesh=array_mesh,
+                            )
+
+                if is_initialized() and get_backend() == "threaded":
+                    self._thread_id = threading.get_ident()
+
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == get_rank()).nonzero()
+                assert rank_coords.size(0) in (0, 1)
+                self._coordinate_on_dim: Optional[list[int]] = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                )
+
+        def _maybe_create_backend(
+            self,
+            layout: _Layout,
+            dim: int,
+            name: Optional[str] = None,
+            backend_override: tuple[Optional[str], Optional[C10dBackend.Options]] = (
+                None,
+                None,
+            ),
+            array_mesh: Optional[torch.Tensor] = None,
+            group: Optional[ProcessGroup] = None,
+        ) -> None:
+            """
+            Creates or retrieves a process group backend for a given layout and dimension.
+
+            This method manages the mapping between layouts, dimension names, and process groups.
+            It ensures that each layout has a corresponding process group, and each named dimension
+            maps to exactly one layout. If the layout already has a process group, it validates
+            the existing mappings and returns early.
+
+            Args:
+                layout (_Layout): The layout object representing the communication pattern
+                dim (int): The dimension index in the device mesh
+                name (Optional[str]): Optional name for the mesh dimension
+                backend_override (tuple[Optional[str], Optional[C10dBackend.Options]]):
+                    Optional backend type and options to override default settings
+                group (Optional[ProcessGroup]): Optional existing process group to use instead of creating a new one
+
+            Note:
+                - If a layout already has a process group, any backend_override or explicit group will be ignored
+                - If a name is provided, it will be mapped to the layout for future reference
+                - For world-size layouts with no overrides, it will try to use the default process group
+                - For other layouts, it creates appropriate subgroups using either split_group (more efficient and it only
+                available for nccl communicators) or new_group. The former sometimes is called "eager init" which means
+                we eagerly initialize the nccl communicator when we initialize the device mesh and the later is called
+                "lazy init" which means we lazily initialize the nccl communicator when we first hit first collective
+                - Because process group itself is not serializable, we only store the group name in the mapping
+            """
+            # Every mesh_dim_name will only map to one and only one layout.
+            # When the layout has backend initiated, we want to ensure that
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            layouts_to_groups_map = _mesh_resources.layouts_to_groups.setdefault(
+                root_mesh, {}
+            )
+            names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                root_mesh, {}
+            )
+            # Let mesh_dim_name maps to the current layout whose backend has not been initialized.
+            # If mesh_dim_name has already mapped to another layout, we throw an error.
+            if name is not None:
+                if (
+                    name in names_to_layouts_map
+                    and names_to_layouts_map[name] != layout
+                ):
+                    raise ValueError(
+                        f"Mesh_dim_name {name} has already mapped to layout {layout}."
+                    )
+                names_to_layouts_map[name] = layout
+
+            # If the layout has already been mapped to a process group backend, we ignore the
+            # backend_override and group, and return early. We also throw a warning for that.
+            if layout in layouts_to_groups_map:
+                # TODO: We need to bookkeep pg_option together with the group name.
+                if backend_override != (None, None):
+                    warnings.warn(
+                        f"Group for {layout} ({name=}) already exists, ignoring backend override"
+                    )
+                if group is not None:
+                    warnings.warn(
+                        f"Group for {layout} ({name=}) already exists, ignoring explicit group"
+                    )
                 return
+
+            # When user explicitly pass in a process group, we directly reuse that PG as backend rather
+            # than creating a new one.
+            if group is not None:
+                layouts_to_groups_map[layout] = group.group_name
+                return
+
+            default_group = _get_default_group()
+
+            if layout == _Layout((get_world_size(),), (1,)) and backend_override == (
+                None,
+                None,
+            ):
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
+                # Otherwise, create new pg.
+                ranks = list(range(get_world_size()))
+                group = (
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
+                    if torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
+            else:
+                # Generate the pg_ranks_by_dim for pg_creation from the layout.
+                pg_ranks_by_dim = (
+                    array_mesh
+                    if array_mesh is not None
+                    else layout.global_ranks(get_world_size())
+                )
+                backend, pg_options = backend_override
+
+                # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
+                # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
+                # If the mesh doesn't not have a mesh_dim_names, then the group description of the
+                # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
+                group_desc = f"mesh_{name}" if name is not None else f"mesh_dim_{dim}"
+
+                # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
+                # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
+                # In this case, we only need to make one API call (`split_group``) for the subgroup creation
+                # for each mesh dimension. In a 2 * 4 mesh, we only need to make 2 API calls per ranks to create
+                # all the subgroups.
+                # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
+                # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
+                # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
+                group = None
+                if (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    and torch.cuda.is_available()
+                    and (
+                        backend is None
+                        or default_group._get_backend(torch.device("cuda")).name()
+                        == backend
+                    )
+                ):
+                    group = split_group(
+                        parent_pg=default_group,
+                        pg_options=pg_options,
+                        split_ranks=pg_ranks_by_dim,  # type: ignore[arg-type]
+                        group_desc=group_desc,
+                    )
+                else:
+                    # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
+                    # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
+                    # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
+                    # along with appending information to the `dim_group_names` list whenever necessary.
+                    for subgroup_ranks in pg_ranks_by_dim:
+                        # We temporarily revert the reuse subgroup, since it breaks two internal tests.
+                        # Temporarily reverting to resolve test timeout while root-causing.
+                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        maybe_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
+                            pg_options=pg_options,
+                            group_desc=group_desc,
+                        )
+                        if maybe_group != GroupMember.NON_GROUP_MEMBER:
+                            assert group is None
+                            group = maybe_group
+
+            assert group is not None or array_mesh is not None
+            if group is not None:
+                layouts_to_groups_map[layout] = group.group_name
+
+        def _setup_world_group_and_device(self):
+            default_initialized = is_initialized()
+            # TODO: think about how to allow pg options to be passed to world group
+            # or mesh dimension groups
+            if not default_initialized:
+                init_process_group()
 
             world_size = get_world_size()
             if self.mesh.numel() > world_size:
                 raise RuntimeError(
                     f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
-            self._backend = _DeviceMeshBackend(device_type)
-            if backend_override is None:
-                backend_override = ((None, None),) * self.mesh.ndim
 
-            for i, layout in enumerate(self._layouts):
-                backend_override_ = backend_override[i]
-                global_override = _mesh_resources.mesh_dim_group_options.get(
-                    i, (None, None)
-                )
-                if backend_override_ == (None, None):
-                    backend_override_ = global_override
-                elif global_override != (None, None):
-                    raise RuntimeError(
-                        f"Dimension {i} present both in the backend_override argument "
-                        "and via _mesh_resources._set_mesh_dim_group_options"
+            # ONLY set the device if the current device is not initialized, if user already
+            # set the device before DeviceMesh init, we respect the user's choice.
+            device_handle = _get_device_handle(self.device_type)
+            if device_handle and not device_handle.is_initialized():
+                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
+                # env variable from launchers, we use it to set the device.
+                if "LOCAL_RANK" in os.environ:
+                    local_rank = int(os.environ["LOCAL_RANK"])
+                    logger.info(
+                        "Setting default device for the current process based on LOCAL_RANK=%s",
+                        local_rank,
                     )
-                self._backend._maybe_create_backend(
-                    layout,
-                    i,
-                    self.mesh_dim_names[i] if self.mesh_dim_names else None,
-                    backend_override=backend_override_,
-                )
+                    device_handle.set_device(local_rank)
+                else:
+                    warnings.warn(
+                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
+                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
+                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
+                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
+                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
+                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. "
+                    )
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    if (
+                        world_size > num_devices_per_host
+                        and world_size % num_devices_per_host != 0
+                    ):
+                        raise RuntimeError(
+                            f"DeviceMesh only support homogeneous hardware, but found "
+                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                        )
+                    device_handle.set_device(get_rank() % num_devices_per_host)
+
+            return _get_default_group()
 
         @staticmethod
-        def _from_backend(
+        def _from_layouts(
             device_type: str,
-            backend: _DeviceMeshBackend,
             layouts: tuple[_Layout, ...],
             cur_rank: int,
             *,
@@ -538,15 +593,17 @@ else:
                 or transforming an existing DeviceMesh.
             """
             # Extract sizes and strides from layouts
-            size_l, stride_l, mesh_size = [], [], []
+            size_l: list[int] = []
+            stride_l: list[int] = []
+            mesh_size: list[int] = []
             for layout in layouts:
                 size_l.extend(layout.sizes)
                 mesh_size.append(layout.numel())
                 stride_l.extend(layout.strides)
 
             # Create combined layout and get ranks
-            layout = _Layout(tuple(zip(size_l, stride_l)))
-            pg_ranks_by_dim = layout.layout_to_global_ranks(not_none(get_world_size()))
+            layout = _Layout(tuple(size_l), tuple(stride_l))
+            pg_ranks_by_dim = layout.global_ranks(not_none(get_world_size()))
 
             # Create tensor representation of the mesh
             tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
@@ -563,23 +620,22 @@ else:
                 f"Could not find the mesh containing the current rank {cur_rank}"
             )
 
+            mesh_dim_names = None
+            if dim_names:
+                mesh_dim_names = (
+                    (dim_names,) if isinstance(dim_names, str) else tuple(dim_names)
+                )
+
             # Create device mesh without initializing backend
             device_mesh = DeviceMesh(
                 device_type,
                 nd_mesh,
                 _init_backend=False,
+                mesh_dim_names=mesh_dim_names,
             )
 
             # Set backend and layouts
-            device_mesh._backend = backend
             device_mesh._layouts = layouts
-
-            # Set dimension names if provided, we also need to ensure it is a tuple
-            # so it is hashable
-            if dim_names:
-                device_mesh.mesh_dim_names = (
-                    (dim_names,) if isinstance(dim_names, str) else tuple(dim_names)
-                )
 
             return device_mesh
 
@@ -611,11 +667,11 @@ else:
             if not self._hash:
                 self._hash = hash(
                     (
-                        id(self._backend),
-                        self._layouts,
+                        self._flatten_mesh_list,
                         self.mesh.shape,
                         self.device_type,
                         self.mesh_dim_names,
+                        self._thread_id,
                     )
                 )
             return self._hash
@@ -627,11 +683,11 @@ else:
                 return True
             else:
                 return (
-                    id(self._backend) == id(other._backend)
-                    and self._layouts == other._layouts
+                    self._flatten_mesh_list == other._flatten_mesh_list
                     and self.mesh.shape == other.mesh.shape
                     and self.device_type == other.device_type
                     and self.mesh_dim_names == other.mesh_dim_names
+                    and self._thread_id == other._thread_id
                 )
 
         def __getitem__(
@@ -682,7 +738,7 @@ else:
             """
             if not self.mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
-            if not self._backend:
+            if not self._init_backend:
                 raise NotImplementedError(
                     "Slicing a DeviceMesh without backend initialized is not supported!"
                 )
@@ -694,14 +750,16 @@ else:
             if mesh_dim_names == self.mesh_dim_names:
                 return self
             else:
-                if not set(mesh_dim_names) <= self._backend.names_to_layouts.keys():
+                root_mesh = _mesh_resources.get_root_mesh(self)
+                names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                    root_mesh, {}
+                )
+                if not set(mesh_dim_names) <= names_to_layouts_map.keys():
                     raise KeyError(
                         f"Invalid mesh_dim_names {mesh_dim_names} specified."
                     )
 
-                layouts_sliced = [
-                    self._backend.names_to_layouts[n] for n in mesh_dim_names
-                ]
+                layouts_sliced = [names_to_layouts_map[n] for n in mesh_dim_names]
                 # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
@@ -724,13 +782,13 @@ else:
                             raise RuntimeError(
                                 f"slicing overlapping dim_names {mesh_dim_names} is not allowed"
                             )
-                    res_mesh = DeviceMesh._from_backend(
+                    res_mesh = DeviceMesh._from_layouts(
                         self.device_type,
-                        self._backend,
                         tuple(layouts_sliced),
                         self.get_rank(),
                         dim_names=mesh_dim_names,
                     )
+                    res_mesh._init_backend = True
                 _mesh_resources.child_to_root_mapping[res_mesh] = (
                     _mesh_resources.get_root_mesh(self)
                 )
@@ -749,10 +807,17 @@ else:
             Returns:
                 A :class:`ProcessGroup` object.
             """
-            if not self._backend or not all(
-                layout in self._backend.layouts_to_groups for layout in self._layouts
+            root_mesh = _mesh_resources.get_root_mesh(self)
+            layouts_to_groups_map = _mesh_resources.layouts_to_groups.setdefault(
+                root_mesh, {}
+            )
+            names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+                root_mesh, {}
+            )
+            if not self._init_backend or not all(
+                layout in layouts_to_groups_map for layout in self._layouts
             ):
-                raise RuntimeError("DeviceMesh backend not initialized!")
+                raise RuntimeError("process groups not initialized!")
 
             if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
@@ -765,9 +830,7 @@ else:
             # Quick return if the current device_mesh is a 1D mesh.
             if self.ndim == 1 and mesh_dim is None:
                 return not_none(
-                    _resolve_process_group(
-                        self._backend.layouts_to_groups[self._layouts[0]]
-                    )
+                    _resolve_process_group(layouts_to_groups_map[self._layouts[0]])
                 )
 
             if isinstance(mesh_dim, str):
@@ -775,7 +838,7 @@ else:
                     raise ValueError(
                         "Cannot get group by name on a DeviceMesh without names"
                     )
-                if mesh_dim not in self._backend.names_to_layouts:
+                if mesh_dim not in names_to_layouts_map:
                     raise ValueError(
                         f"Invalid named dim {mesh_dim!r} for DeviceMesh with names {self.mesh_dim_names}"
                     )
@@ -786,13 +849,11 @@ else:
                     )
 
             if isinstance(mesh_dim, str):
-                layout = self._backend.names_to_layouts[mesh_dim]
+                layout = names_to_layouts_map[mesh_dim]
             else:
                 layout = self._layouts[not_none(mesh_dim)]
 
-            return not_none(
-                _resolve_process_group(self._backend.layouts_to_groups[layout])
-            )
+            return not_none(_resolve_process_group(layouts_to_groups_map[layout]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -858,7 +919,19 @@ else:
                         f"Invalid mesh {mesh_list} for ProcessGroup with ranks {group_ranks}"
                     )
                 mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int)
-                group = [group]
+                # For BC, DeviceMesh takes in a random ArrayList as mesh, we need to handle that case as well.
+                device_mesh = DeviceMesh(
+                    device_type,
+                    mesh,
+                    mesh_dim_names=mesh_dim_names,
+                    _init_backend=False,
+                )
+                name = mesh_dim_names[0] if mesh_dim_names else None
+                device_mesh._maybe_create_backend(
+                    _Layout((mesh.size(0),), (mesh.stride(0),)), 0, name, group=group
+                )
+                device_mesh._init_backend = True
+                return device_mesh
 
             # nD scenario
             if len(group) == 0:
@@ -880,19 +953,24 @@ else:
                     f"mesh {mesh.tolist()} and {len(group)} ProcessGroups"
                 )
 
-            backend = _DeviceMeshBackend(device_type)
-            layouts = init_layouts_from_mesh(mesh.size(), mesh.stride())
+            layouts = _MeshLayout.to_single_depth_layouts(
+                mesh.size(), mesh.stride()
+            ).layouts
+
             if len(layouts) != len(group):
                 raise ValueError(
                     f"zip arguments must have equal lengths for layouts {layouts} and groups {group}"
                 )
+            device_mesh = DeviceMesh._from_layouts(
+                device_type, layouts, get_rank(), dim_names=mesh_dim_names
+            )
+            # Update bookkeeping for layout to ProcessGroup mapping
             for i, (l, g) in enumerate(zip(layouts, group)):
                 name = mesh_dim_names[i] if mesh_dim_names else None
-                backend._maybe_create_backend(l, i, name, group=g)
+                device_mesh._maybe_create_backend(l, i, name, group=g)
+            device_mesh._init_backend = True
 
-            return DeviceMesh._from_backend(
-                device_type, backend, layouts, get_rank(), dim_names=mesh_dim_names
-            )
+            return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return (
@@ -961,8 +1039,7 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            ranks = [get_rank(pg) for pg in self.get_all_groups()]
-            return ranks if all(r != -1 for r in ranks) else None
+            return self._coordinate_on_dim if self._coordinate_on_dim else None
 
         def _flatten(
             self,
@@ -988,7 +1065,7 @@ else:
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
-            if not self._backend:
+            if not self._init_backend:
                 raise NotImplementedError(
                     "flatten a device mesh without backend initialized is not supported!"
                 )
@@ -1013,30 +1090,33 @@ else:
                         "and via _mesh_resources._set_mesh_dim_group_options"
                     )
 
-            flattened_layout = _Layout(
-                tuple(
-                    sorted(
-                        [ss for l in self._layouts for ss in l.sizes_and_strides],
-                        key=lambda x: x[1],
-                        reverse=True,
-                    )
+            res_sizes, res_strides = zip(
+                *sorted(
+                    [ss for l in self._layouts for ss in l.sizes_and_strides],
+                    key=lambda x: x[1],
+                    reverse=True,
                 )
-            ).coalesce()
+            )
+            flattened_layout = _Layout(tuple(res_sizes), tuple(res_strides)).coalesce()
 
-            self._backend._maybe_create_backend(
+            res_mesh = DeviceMesh._from_layouts(
+                self.device_type,
+                (flattened_layout,),
+                self.get_rank(),
+                dim_names=(mesh_dim_name,) if mesh_dim_name else None,
+            )
+            _mesh_resources.child_to_root_mapping[res_mesh] = (
+                _mesh_resources.get_root_mesh(self)
+            )
+            res_mesh._maybe_create_backend(
                 flattened_layout,
                 0,
                 mesh_dim_name,
                 backend_override=backend_override_tuple,
             )
+            res_mesh._init_backend = True
 
-            return DeviceMesh._from_backend(
-                self.device_type,
-                self._backend,
-                (flattened_layout,),
-                self.get_rank(),
-                dim_names=(mesh_dim_name,) if mesh_dim_name else None,
-            )
+            return res_mesh
 
         def _unflatten(
             self,
