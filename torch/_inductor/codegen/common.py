@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
-    from ..shape_propagation import BlockShapeType
+    from ..shape_propagation import BlockShapeType 
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
