@@ -41,7 +41,6 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
-    get_k_splits,
     get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
@@ -760,32 +759,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                     **kwargs,
                 )
 
-        from torch._inductor.ir import get_free_symbols
-
         # Only do split-k optimization if K is much larger than m, n and m, n are small
-        # and if there aren't any unbacked symbols
-        unbacked_symbols = any(
-            len(get_free_symbols(itr, unbacked_only=True)) > 0
-            for itr in (
-                mat1.get_size(),
-                mat1.get_stride(),
-                mat2.get_size(),
-                mat2.get_stride(),
-            )
-        )
-        if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            k_splits = get_k_splits(m, n, k)
-            for k_split in k_splits:
-                if not V.graph.sizevars.statically_known_true(
-                    sympy.Eq(sympy.Mod(k, k_split), 0)
-                ):
-                    continue
-
+        if use_decompose_k_choice(m, n, k):
+            for kwargs in V.choices.get_mm_configs(
+                kernel_inputs, layout, decompose_k_subgraph_template.name, "mm"
+            ):
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
                     input_nodes=kernel_inputs.nodes(),
                     layout=layout,
-                    k_split=k_split,
+                    **kwargs,
                 )
 
     if (
