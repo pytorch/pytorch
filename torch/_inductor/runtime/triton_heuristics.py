@@ -2571,10 +2571,7 @@ def _reduction_configs(
         register_intensive=register_intensive,
     )
 
-    if torch.version.hip:
-        outer_config = make_config(64, 8, register_intensive=register_intensive)
-    else:
-        outer_config = outer_config_opt()
+    outer_config = make_config(64, 8, register_intensive=register_intensive)
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:
         pass
@@ -2585,6 +2582,8 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.INNER:
         return [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
+        if not torch.version.hip:
+            outer_config = outer_config_opt()
         return [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return [tiny_config]
