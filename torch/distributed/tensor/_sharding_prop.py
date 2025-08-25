@@ -273,8 +273,10 @@ class ShardingPropagator:
             elif (
                 isinstance(spec, (list, tuple))
                 and len(spec) > 0
-                and isinstance(spec[0], DTensorSpec)
+                # and isinstance(spec[0], DTensorSpec)  # TODO: not always true. For example, aten.index.Tensor can have args: [None, DTensorSpec]
+                and any(isinstance(s, DTensorSpec) for s in spec)
             ):
+                print(f"tuple: {spec}")
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
@@ -323,7 +325,9 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
+            print(f"op_schema: {op_schema}")
             strategy_schema = self._wrap_with_op_strategy(op_schema)
+            print(f"strategy_schema: {strategy_schema}")
 
             # run sharding strategy propagation/generation
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
@@ -331,6 +335,7 @@ class ShardingPropagator:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
+                print(f"after prop, output_strategy: {output_strategy}")
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
@@ -354,6 +359,9 @@ class ShardingPropagator:
                         desired_spec.shallow_copy_with_tensor_meta(
                             input_spec.tensor_meta
                         )
+                    )
+                    print(
+                        f"[idx {idx}] input_spec: {input_spec.placements}, desired_spec: {desired_spec.placements}"
                     )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
@@ -545,9 +553,9 @@ class ShardingPropagator:
 
         op_spec_costs: list[float] = []
         for op_spec in strategy.strategies:
-            assert op_spec.redistribute_cost is not None, (
-                "must set redistribute cost each OpSpec!"
-            )
+            assert (
+                op_spec.redistribute_cost is not None
+            ), "must set redistribute cost each OpSpec!"
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
