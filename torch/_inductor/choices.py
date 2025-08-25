@@ -300,7 +300,7 @@ class InductorChoices:
         """
         if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
-        ) and False: # TODO: update the heuristic so we try fuse more
+        ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
                 common_buf_names: OrderedSet[str] = (
                     node1.read_writes.buffer_names() & node2.read_writes.buffer_names()
@@ -369,7 +369,7 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if shared_data_score < config.score_fusion_memory_threshold and False: # do not fuse if two nodes are large
+        if shared_data_score < config.score_fusion_memory_threshold:
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
