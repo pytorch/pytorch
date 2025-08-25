@@ -1068,10 +1068,8 @@ class WhileLoopModels:
             self.linear = torch.nn.Linear(3, 3, device=device)
 
         def forward(self, c, x):
-            c = torch.tensor(0, dtype=torch.int64)
-
             def cond_fn(c, x):
-                return c < x.size(0) + 5
+                return c < x.size(0)
 
             def body_fn(c, x):
                 return c + 1, self.linear(x)

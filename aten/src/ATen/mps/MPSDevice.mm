@@ -85,10 +85,36 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   }
 }
 
+std::string MPSDevice::getName() const {
+  @autoreleasepool {
+    return [[_mtl_device name] UTF8String];
+  }
+}
+
+unsigned MPSDevice::getCoreCount() const {
+  io_iterator_t iterator = 0;
+  io_registry_entry_t entry = 0;
+  int core_count = 0;
+  auto matchingDict = IOServiceMatching("AGXAccelerator");
+  TORCH_INTERNAL_ASSERT(matchingDict, "Failed to create matching dict");
+  const auto status = IOServiceGetMatchingServices(kIOMainPortDefault, matchingDict, &iterator);
+  TORCH_INTERNAL_ASSERT(status == KERN_SUCCESS);
+  while ((entry = IOIteratorNext(iterator)) != 0) {
+    auto property = IORegistryEntryCreateCFProperty(entry, CFSTR("gpu-core-count"), kCFAllocatorDefault, 0);
+    auto found = CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberIntType, &core_count);
+    CFRelease(property);
+    IOObjectRelease(entry);
+    if (found) {
+      break;
+    }
+  }
+  IOObjectRelease(iterator);
+  return core_count;
+}
+
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
   return getIMPSAllocator(useSharedAllocator);
 }
-
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
 }
