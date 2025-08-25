@@ -18,6 +18,7 @@
 #include <thrust/pair.h>
 
 #include <ATen/native/cuda/jit_utils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 namespace at::native {
 
@@ -802,31 +803,7 @@ struct ReduceOp {
       // In architectures with split caches, global fences are costly.
       // Here we preempt need for fences by committing stores to global memory.
       // We do so by converting the stores to atomics with a return.
-      int constexpr num_long_per_val = sizeof(value)/sizeof(long);
-      int constexpr num_int_per_val = sizeof(value)/sizeof(int);
-      int constexpr num_short_per_val = sizeof(value)/sizeof(short);
-      int constexpr num_char_per_val = sizeof(value)/sizeof(char);
-      union pnr { std::array<arg_t, output_vec_size> v;
-                  long l[num_long_per_val];
-                  int i[num_int_per_val];
-                  short s[num_short_per_val];
-                  char c[num_char_per_val]; }
-            _pnr = {.v = value };
-      if constexpr (num_long_per_val*sizeof(long) == sizeof(value))
-        for (int i=0; i<num_long_per_val; i++)
-          __hip_atomic_store(reinterpret_cast<long *>(&reduce_buffer[offset])+i, _pnr.l[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      else if constexpr (num_int_per_val*sizeof(int) == sizeof(value))
-        for (int i=0; i<num_int_per_val; i++)
-          __hip_atomic_store(reinterpret_cast<int *>(&reduce_buffer[offset])+i, _pnr.i[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      else if constexpr (num_short_per_val*sizeof(short) == sizeof(value))
-        for (int i=0; i<num_short_per_val; i++)
-          __hip_atomic_store(reinterpret_cast<short *>(&reduce_buffer[offset])+i, _pnr.s[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      else if constexpr (num_char_per_val*sizeof(char) == sizeof(value))
-        for (int i=0; i<num_char_per_val; i++)
-          __hip_atomic_store(reinterpret_cast<char *>(&reduce_buffer[offset])+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
-      asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+      cmtdStore(&reduce_buffer[offset], value);
 #endif
     }
 
