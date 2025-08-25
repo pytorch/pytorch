@@ -475,10 +475,6 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
-  if(WIN32) # Windows doesn't support Composable Kernels and Triton
-    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
-      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
-  endif()
 
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
