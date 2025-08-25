@@ -7,7 +7,6 @@ from expecttest import assert_expected_inline
 import torch
 from torch._inductor.test_case import TestCase
 from torch._inductor.virtualized import V
-
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
 

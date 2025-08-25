@@ -14,9 +14,11 @@ from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwi
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
-
-from torch.testing._internal.inductor_utils import MockGraphHandler
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA_AND_TRITON,
+    MockGraphHandler,
+)
 
 
 if try_import_cutlass():
