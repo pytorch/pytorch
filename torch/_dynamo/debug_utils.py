@@ -15,6 +15,7 @@ Key classes:
 - NNModuleToString: Converts nn.Modules to string representations
 - BuckTargetWriter: Manages Buck build system integration
 """
+
 from __future__ import annotations
 
 import atexit
@@ -32,9 +33,8 @@ import sys
 import tempfile
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
 from importlib import import_module
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -43,13 +43,18 @@ from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
-from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.storage import UntypedStorage
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch.hub import tqdm
+    from torch.storage import UntypedStorage
 
 
 log = logging.getLogger(__name__)
@@ -562,7 +567,7 @@ class NopInputReader:
         storage_hash: Optional[str],
         nbytes: int,
         *,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> None:
         self.total += 1
@@ -593,7 +598,7 @@ class InputReader:
         storage_hash: Optional[str],
         nbytes: int,
         *,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> UntypedStorage:
         if self.pbar is not None:
@@ -620,8 +625,8 @@ class InputReader:
     def tensor(
         self,
         storage: UntypedStorage,
-        shape: "torch._prims_common.ShapeType",
-        stride: Optional["torch._prims_common.StrideType"] = None,
+        shape: torch._prims_common.ShapeType,
+        stride: Optional[torch._prims_common.StrideType] = None,
         *,
         storage_offset: Optional[int] = None,
         dtype: Optional[torch.dtype] = None,
@@ -699,7 +704,7 @@ class InputWriter:
         self,
         untyped_storage: UntypedStorage,
         *,
-        device_hint: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device_hint: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> str:
         ws = StorageWeakRef(untyped_storage)
@@ -842,9 +847,7 @@ def aot_graph_input_parser(
         )
         return sym_shapes_dict.get(symint, default_sym_shape)  # type: ignore[return-value]
 
-    def gen_tensor(
-        shape: "torch._prims_common.ShapeType", dtype: torch.dtype
-    ) -> Tensor:
+    def gen_tensor(shape: torch._prims_common.ShapeType, dtype: torch.dtype) -> Tensor:
         # Resolve symbolic shapes to concrete values
         resolved_shape = []
         dynamic_dims = []

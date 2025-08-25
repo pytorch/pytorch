@@ -16,6 +16,7 @@ The main components include:
 This is primarily used by PyTorch developers and researchers to debug issues in
 the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,7 +77,6 @@ from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -176,7 +176,7 @@ def wrap_compiler_debug(
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
 
-        def inner_debug_fn(real_inputs: Sequence["InputType"]) -> Any:
+        def inner_debug_fn(real_inputs: Sequence[InputType]) -> Any:
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is

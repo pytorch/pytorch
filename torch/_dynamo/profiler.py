@@ -11,6 +11,7 @@ This module provides profiling functionality for Dynamo, including:
 The profiler helps measure and optimize the performance of Dynamo-compiled code
 by tracking both captured and total operations, timing, and graph statistics.
 """
+
 from __future__ import annotations
 
 import dataclasses

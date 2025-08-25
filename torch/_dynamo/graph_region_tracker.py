@@ -12,6 +12,7 @@ The core functionality revolves around the GraphRegionTracker class which mainta
 mappings between nodes and their duplicates, enabling efficient graph analysis and
 optimization operations.
 """
+
 from __future__ import annotations
 
 import copyreg
