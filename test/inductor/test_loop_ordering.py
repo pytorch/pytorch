@@ -1101,6 +1101,7 @@ class TestIndexInversion(TestCase):
                 True,
                 1000,
             ),
+            (4 * p, False, 64),  # expr and inverse not bijections
             # when sorted, invertible
             (ModularIndexing(p, 1, 10) + 10 * ModularIndexing(p, 10, 10), True, None),
             # Wrong coefficient ratios: 4 ≠ 1×2 ❌
@@ -1119,9 +1120,6 @@ class TestIndexInversion(TestCase):
             reconstruction = generate_inverse_formula(expr, p)
 
             if should_invert:
-                if reconstruction is None:
-                    breakpoint()
-                    generate_inverse_formula(expr, p)
                 self.assertIsNotNone(reconstruction, f"Expected invertible: {expr}")
                 # Test correctness on sample values
                 test_vals = [0, 1, test_range - 1] if test_range else []

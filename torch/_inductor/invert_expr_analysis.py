@@ -164,10 +164,6 @@ def analyze_expression_properties(
         elif static_eq(base, var):
             return None, divisor  # Unbounded range, multiplier is div
 
-    # Just the variable itself
-    if static_eq(expr, var):
-        return None, 1  # Unbounded range, multiplier is 1
-
     return None, None
 
 
@@ -184,24 +180,19 @@ def check_invertibility(terms: list[Term]) -> bool:
         return False
 
     # Check mixed-radix property: each coeff[i] = coeff[i+1] * range[i+1]
-    for i in range(len(terms) - 1):
-        t_i_coeff = terms[i].coefficient
-        t_j_coeff = terms[i + 1].coefficient
-        t_j_range = terms[i + 1].range
-
-        if t_j_range is None:
+    expected_coeff = 1
+    for term in reversed(terms):
+        if not static_eq(term.coefficient, expected_coeff):
             return False
-
-        if not static_eq(t_i_coeff, t_j_coeff * t_j_range):
-            return False
+        if term.range is not None:
+            expected_coeff *= term.range
 
     return True
 
 
 def generate_reconstruction_expr(terms: list[Term], var: sympy.Symbol) -> sympy.Expr:
-    """Generate the full reconstruction expression."""
     y = var
-    reconstruction = 0
+    reconstruction = sympy.S.Zero
     remainder = y
 
     for i, term in enumerate(terms):
@@ -209,9 +200,9 @@ def generate_reconstruction_expr(terms: list[Term], var: sympy.Symbol) -> sympy.
             component = FloorDiv(remainder, term.coefficient)
             remainder = ModularIndexing(remainder, 1, term.coefficient)
         else:
-            component = remainder
+            # Last term should also divide by its coefficient
+            component = FloorDiv(remainder, term.coefficient)
 
-        # Use the pre-computed reconstruction multiplier
         reconstruction += component * term.reconstruction_multiplier
 
     return reconstruction
