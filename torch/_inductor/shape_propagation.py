@@ -120,6 +120,10 @@ class ShapePropagationOpsHandler:
         return value.shape
 
     @staticmethod
+    def dot(a: sympy.Expr, b: sympy.Expr) -> BlockShapeType:
+        return tuple(['YBLOCK', 'XBLOCK'])
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:
         # shape is implicitly embedded in expr.
         return None
