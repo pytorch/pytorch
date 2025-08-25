@@ -1,4 +1,28 @@
 # mypy: allow-untyped-defs
+"""
+DTensor operator schema definitions and utilities.
+
+This module defines the core data structures and utilities for describing and managing
+distributed tensor operations in PyTorch's DTensor system. It provides the foundational
+schema types used for sharding propagation, operator strategy selection, and distributed
+execution planning.
+
+Key components:
+- OpSpec: Describes acceptable sharding placements for operations
+- OpStrategy: Represents the possible sharding strategies for an operator
+- TupleStrategy: Container for multiple strategies when ops have tuple/list of tensors input
+- OpSchema: Describes operator input/output schemas with DTensorSpecs
+- OutputSharding: Manages output sharding specifications and redistribution
+- RuntimeSchemaInfo: Runtime execution metadata for operators
+- OpInfo: Complete runtime operator execution information
+
+These schema definitions enable the DTensor system to:
+1. Propagate tensor sharding information to the operator outputs
+2. Greedily select sharding strategies for distributed operations
+3. Plan and execute tensor redistributions when needed
+4. Cache sharding decisions for performance optimization
+"""
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
@@ -449,6 +473,12 @@ class OpSchema:
         # if this is an out variant, it might not
         # be entirely correct, but it's good enough for now.
         return "out" in self.op._schema.overload_name
+
+    def is_view_op(self) -> bool:
+        return any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in self.op._schema.arguments
+        )
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
