@@ -242,15 +242,25 @@ def is_corresponding_collective_wait(collective_snode, wait_snode):
 
 
 def _op_runtime_estimate_mult(snode):
-    # Empirically comparing "benchmark" estimations:
-    # mm was underestimated x2-3
-    # collectives were overestimated x3-4
-    # TODO(ivankobzarev): Tune estimations to be more reliable,
+    # Apply multipliers for faster experimentation.
+    # TODO(ivankobzarev): Remove after confirmation that runtime estimations are correct.
     if contains_collective(snode):
         return config.reorder_sink_runtime_estimations_comm_mult
     elif is_gemm_like(snode):
         return config.reorder_sink_runtime_estimations_mm_mult
     return 1.0
+
+
+def is_async_collective(snode):
+    if python_kernel_name := getattr(snode.node, "python_kernel_name", None):
+        if "torch.ops._dtensor.shard_dim_alltoall.default" in python_kernel_name:
+            return False
+
+    return True
+
+
+def contains_async_collective(snode):
+    return contains_collective(snode, is_async_collective)
 
 
 def _reorder_communication_preserving_peak_memory_internal(
@@ -297,14 +307,21 @@ def _reorder_communication_preserving_peak_memory_internal(
         # assumes a linear schedule and computes the overlap of the collective with the remaining nodes
         comm_time = runtimes[collective_snode]
         compute_time = 0.0
+        collective_outs = OrderedSet(
+            o.get_name() for o in collective_snode.get_outputs()
+        )
         for snode in remaining_snodes:
-            if contains_collective(snode):
-                continue
+            # We may have some ops without Wait,
+            # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
+            unmet_deps = OrderedSet(
+                d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+            )
 
-            if contains_wait(snode) and is_corresponding_collective_wait(
-                collective_snode, snode
-            ):
+            if unmet_deps & collective_outs:
                 break
+
+            if contains_async_collective(snode):
+                continue
 
             def accumulate_time(_snode: BaseSchedulerNode) -> None:
                 nonlocal compute_time
@@ -459,8 +476,6 @@ def _reorder_communication_preserving_peak_memory_internal(
     curr: Optional[BaseSchedulerNode] = _head
     debug_iterative_memory_recompute = config.reorder_iterative_debug_memory_recompute
     iterative_recompute_error = False
-    # TODO(ivankobzarev): Replace this heuristic with reliable runtime estimations.
-    num_swapped_gemm_like_limit = config.reorder_iterative_swapped_gemm_like_limit
 
     while curr is not None and _next[curr] is not None:
         _next_curr = _next[curr]
@@ -483,7 +498,6 @@ def _reorder_communication_preserving_peak_memory_internal(
             group_tail = curr
             group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
 
-            num_swapped_gemm_like = 0
             while candidate is not None:
                 if (
                     config.reorder_iterative_limit_by_runtime_estimations
@@ -529,7 +543,12 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if contains_collective(candidate):
                             return False, "contains_collective"
 
-                        if contains_gemm_like(candidate):
+                        # TODO(ivankobzarev): Replace this heuristic, that
+                        # helps 1D case, but does not help 2D with runtime estimations.
+                        if (
+                            not config.reorder_iterative_group_with_gemm
+                            and contains_gemm_like(candidate)
+                        ):
                             return False, "contains_gemm_like"
                         return True, None
 
@@ -552,21 +571,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                         )
                         info.limiting_factor = msg
                         break
-
-                # Check if we already have enough overlap
-                if (
-                    num_swapped_gemm_like_limit is not None
-                    and contains_gemm_like(candidate)
-                    and num_swapped_gemm_like >= num_swapped_gemm_like_limit
-                ):
-                    info.limiting_factor = (
-                        f"gemm_like_swap_limit:{num_swapped_gemm_like}"
-                        f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
-                        f"\n group:{_group_names(gns)}"
-                    )
-                    break
-                else:
-                    num_swapped_gemm_like += 1
 
                 candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
                 candidate_delta_mem: int = (
@@ -611,7 +615,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                         f"peak memory new:{potential_peak} vs base:{peak_memory}"
                     )
                     break
-
                 info.moves += 1
                 total_moves += 1
 
@@ -1038,7 +1041,7 @@ def _sink_waits_iterative_internal(
 
         for n in [candidate, *gns]:
             post_alloc = _post_alloc_update[n]
-            snodes_allocfree[n].size_free += _size_free_delta_update[n]
+            snodes_allocfree[n].size_free += _size_free_delta_update.get(n, 0)
             _curr_memory[n] = (
                 post_alloc,
                 post_alloc - snodes_allocfree[n].size_free,
@@ -1081,7 +1084,6 @@ def _sink_waits_iterative_internal(
     )
 
     iterative_recompute_error = False
-    num_swapped_gemm_like_limit = config.sink_waits_iterative_swapped_gemm_like_limit
     while curr is not None and _prev[curr] is not None:
         _prev_curr = _prev[curr]
         if iterative_recompute_error:
@@ -1104,19 +1106,6 @@ def _sink_waits_iterative_internal(
             group_tail = curr
             group_peak_memory = _curr_memory[curr][0]
 
-            # Pushing wait later is not free for memory,
-            # as we deallocate collective input only after wait.
-            # Then we can have a situation, when sinking Wait does not regress peak_memory
-            # immediately, but will block sinking of other waits in future.
-            # We need reliable runtime estimations to find out,
-            # when we sinked the Wait enough, to not imped future reorderings,
-            # by moving non peak memory closer to the peak.
-            #
-            # For now we do not have estimations,
-            # Using workaround to count number of gemm_like ops that we jumped over.
-            # TODO(ivankobzarev): Replace this heuristic with reliable runtime estimations.
-
-            num_swapped_gemm_like = 0
             while candidate is not None:
                 if (
                     config.sink_waits_iterative_limit_by_runtime_estimations
@@ -1124,6 +1113,7 @@ def _sink_waits_iterative_internal(
                 ):
                     info.limiting_factor = "unexposed by runtime estimations"
                     break
+
                 gns: list[BaseSchedulerNode] = _group_nodes(group_head, group_tail)
                 group = GroupedSchedulerNode(
                     wait_snode.scheduler,
@@ -1161,7 +1151,10 @@ def _sink_waits_iterative_internal(
                                 False,
                                 f"candidate contains collective {snode.get_name()}",
                             )
-                        if contains_gemm_like(snode):
+                        if (
+                            not config.sink_iterative_group_with_gemm
+                            and contains_gemm_like(candidate)  # type: ignore[arg-type]
+                        ):
                             return (
                                 False,
                                 f"candidate contains gemm_like {snode.get_name()}",
@@ -1198,32 +1191,17 @@ def _sink_waits_iterative_internal(
                         )
                         break
 
-                # Check if we already have sinked enough
-                if (
-                    num_swapped_gemm_like_limit is not None
-                    and contains_gemm_like(candidate)
-                    and num_swapped_gemm_like >= num_swapped_gemm_like_limit
-                ):
-                    info.limiting_factor = (
-                        f"gemm_like_swap_limit:{num_swapped_gemm_like}"
-                        f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
-                        f"\n group:{_group_names(gns)}"
-                    )
-                    break
-                else:
-                    num_swapped_gemm_like += 1
-
                 # if our group contains some compute and candidate is wait,
                 # reordering will decrease overlap of candidate.
                 # We do not have runtime estimations to estimate
                 # total advantage/disadvantage of the swap.
                 # Conservatively prohibit such swaps.
-                # TODO(ivankobzarev): Rewrite once we get runtime estimations.
-                if len(gns) > 1 and is_wait(candidate.node):
-                    info.limiting_factor = (
-                        f"candidate is wait, group not only wait({_group_names(gns)})"
-                    )
-                    break
+                # TODO(ivankobzarev): Use runtime estimations for this decision.
+                # if len(gns) > 1 and is_wait(candidate.node):
+                #     info.limiting_factor = (
+                #         f"candidate is wait, group not only wait({_group_names(gns)})"
+                #     )
+                #     break
 
                 candidate_allocfree: SNodeMemory = snodes_allocfree[candidate]
                 candidate_delta_mem = (
