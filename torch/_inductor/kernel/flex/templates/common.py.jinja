@@ -29,11 +29,10 @@ def forward_block_mn(
         [kv_start + kv_offset, 0],
     )
     {%- else %}
-    # Calculate offsets for K loading
-    # K is stored as (QK_HEAD_DIM, KV_LEN) so we load with swapped indices
+    
+    # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_n_load = kv_start + kv_offset + tl.arange(0, BLOCK_N)
-    # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
     {%- endif %}
 
