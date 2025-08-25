@@ -516,6 +516,7 @@ def try_match_insignificant_strides(
         old_layout.offset,
         old_layout.is_pinned,
     )
+    raise ValueError() #XXX
     return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
