@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 11)
+SCHEMA_VERSION = (8, 12)
 TREESPEC_VERSION = 1
 
 
@@ -447,6 +447,27 @@ class ExportedProgram:
 #########################################################################
 # Container types for inference tasks, not being used directly for export.
 #########################################################################
+
+
+# The metadata for payload saved in PT2 archive.
+# payload includes params, buffers, tensor constants, and custom objects.
+@dataclass
+class PayloadMeta:
+    # the path of the payload in the archive file, e.g. "weight_0"
+    path_name: Annotated[str, 10]
+    is_param: Annotated[bool, 20]
+    # whether the payload is serialized using pickle.
+    # Only custom objects and tensor subclasses that are not fake tensors
+    # are serialized using pickle.
+    use_pickle: Annotated[bool, 30]
+    # Custom Objects don't have tensor_meta and will be serialized using pickle
+    tensor_meta: Annotated[Optional[TensorMeta], 40]
+
+
+# The mapping from payload FQN to its metadata.
+@dataclass
+class PayloadConfig:
+    config: Annotated[dict[str, PayloadMeta], 10]
 
 
 #
