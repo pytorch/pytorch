@@ -487,6 +487,7 @@ class DTensor(torch.Tensor):
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        device_order: Optional[Sequence[int]] = None,
         *,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
@@ -560,9 +561,16 @@ class DTensor(torch.Tensor):
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
+        device_order = tuple(device_order) if device_order is not None else None
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
-            self, device_mesh, placements, async_op, forward_dtype, backward_dtype
+            self,
+            device_mesh,
+            placements,
+            device_order,
+            async_op,
+            forward_dtype,
+            backward_dtype,
         )
 
     def full_tensor(
@@ -662,6 +670,7 @@ def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
+    device_order: Optional[Sequence[int]] = None,
     *,
     src_data_rank: Optional[int] = 0,
 ) -> DTensor:
@@ -761,27 +770,33 @@ def distribute_tensor(
 
     local_tensor = tensor.detach()
 
-    # TODO(xilun): address sharding order
-    # distribute the tensor according to the placements.
     placements = list(placements)
-    for idx, placement in enumerate(placements):
+    device_order = device_order or tuple(range(device_mesh.ndim))
+    if device_order is not None:
+        if sorted(device_order) != list(range(device_mesh.ndim)):
+            raise ValueError(
+                f"device_order must be a permutation of list range(0, device_mesh.ndim)."
+                f"Found device_order {device_order}, and device_mesh.ndim: {device_mesh.ndim}."
+            )
+    sorted_placements = sorted(enumerate(placements), key=lambda x: device_order[x[0]])
+    for mesh_dim, placement in sorted_placements:
         if placement.is_shard():
             placement = cast(Shard, placement)
             if placement.dim < 0:
                 # normalize shard placement dim
                 placement = Shard(placement.dim + tensor.ndim)
-                placements[idx] = placement
+                placements[mesh_dim] = placement
             local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+                local_tensor, device_mesh, mesh_dim, src_data_rank
             )
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
+                local_tensor, device_mesh, mesh_dim, src_data_rank
             )
         else:
             raise RuntimeError(
-                f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
+                f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {mesh_dim}!"
             )
     placements = tuple(placements)
 
@@ -791,6 +806,7 @@ def distribute_tensor(
     spec = DTensorSpec(
         mesh=device_mesh,
         placements=placements,
+        device_order=tuple(device_order),
         tensor_meta=TensorMeta(
             shape=tensor.size(),
             stride=tensor.stride(),
