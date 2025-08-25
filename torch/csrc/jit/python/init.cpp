@@ -1964,7 +1964,8 @@ void initJITBindings(PyObject* module) {
           "overload_name",
           [](const FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
-          "arguments", [](const FunctionSchema& self) { return self.arguments(); })
+          "arguments",
+          [](const FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](const FunctionSchema& self) { return self.returns(); })
       .def(
@@ -2012,8 +2013,9 @@ void initJITBindings(PyObject* module) {
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);
           }))
-      .def_property_readonly(
-          "is_mutable", [](const FunctionSchema& self) { return self.is_mutable(); });
+      .def_property_readonly("is_mutable", [](const FunctionSchema& self) {
+        return self.is_mutable();
+      });
   py::class_<Argument>(m, "Argument")
       .def(py::init<
            std::string,
@@ -2022,8 +2024,10 @@ void initJITBindings(PyObject* module) {
            std::optional<IValue>,
            bool,
            std::optional<AliasInfo>>())
-      .def_property_readonly("name", [](const Argument& self) { return self.name(); })
-      .def_property_readonly("type", [](const Argument& self) { return self.type(); })
+      .def_property_readonly(
+          "name", [](const Argument& self) { return self.name(); })
+      .def_property_readonly(
+          "type", [](const Argument& self) { return self.type(); })
       .def_property_readonly(
           "real_type", [](const Argument& self) { return self.real_type(); })
       .def_property_readonly(
