@@ -863,10 +863,18 @@ extern "C"
       // 1) calculate the matmul(query, key) for this partition
       int64_t token_num = 0;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num); n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset;
+          n_idx < std::min(
+              kvblock_offset + num_kvblocks_per_partition,
+              kv_indice_num + full_kv_indice_num);
+          n_idx += 1) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num); n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset;
+          n_idx < std::min(
+              kvblock_offset + num_kvblocks_per_partition,
+              kv_indice_num);
+          n_idx += 1) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
 
@@ -959,10 +967,18 @@ extern "C"
       token_num = 0;
       bool skipped_partition = true;
 {%- if has_full_kv_block %}
-      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num + full_kv_indice_num); n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset;
+          n_idx < std::min(
+              kvblock_offset + num_kvblocks_per_partition,
+              kv_indice_num + full_kv_indice_num);
+          n_idx += 1) {
         auto n = n_idx < kv_indice_num ? kv_indice_list[n_idx]*kvSplitSize : full_kv_indice_list[n_idx - kv_indice_num]*kvSplitSize;
 {%- else %}
-      for (int64_t n_idx = kvblock_offset; n_idx < std::min(kvblock_offset + num_kvblocks_per_partition, kv_indice_num); n_idx += 1) {
+      for (int64_t n_idx = kvblock_offset;
+          n_idx < std::min(
+              kvblock_offset + num_kvblocks_per_partition,
+              kv_indice_num);
+          n_idx += 1) {
         auto n = kv_indice_list[n_idx]*kvSplitSize;
 {%- endif %}
         skipped_partition = false;
