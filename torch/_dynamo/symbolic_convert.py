@@ -22,6 +22,8 @@ This is a core part of TorchDynamo's tracing system that enables ahead-of-time
 optimization of PyTorch programs.
 """
 
+from __future__ import annotations
+
 import collections
 import collections.abc
 import contextlib
@@ -41,7 +43,6 @@ import threading
 import traceback
 import types
 import weakref
-from collections.abc import Generator, Sequence
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeIs
@@ -52,7 +53,6 @@ import torch._logging
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 from torch._logging.structured import dump_file
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
@@ -177,6 +177,10 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
     from .package import CompilePackage
 
 log = logging.getLogger(__name__)
@@ -238,7 +242,7 @@ class SpeculationEntry:
             restart_reason = "Unknown fail_and_restart_analysis"
         raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
 
-    def failed(self, tx: "InstructionTranslatorBase") -> bool:
+    def failed(self, tx: InstructionTranslatorBase) -> bool:
         if self._failed:
             assert self.error_on_graph_break is not None
             tx.error_on_graph_break = self.error_on_graph_break
@@ -364,7 +368,7 @@ def _step_logger() -> Callable[..., None]:
 
 @contextlib.contextmanager
 def save_and_restart_speculation_log(
-    tx: "InstructionTranslatorBase",
+    tx: InstructionTranslatorBase,
 ) -> Generator[None, None, None]:
     # When reconstructing a generator after a graph break, we advance it until
     # it is fully exhausted. This process adds new entries to the speculation
@@ -384,7 +388,7 @@ def save_and_restart_speculation_log(
 
 @contextlib.contextmanager
 def temporarely_allow_writes_to_output_graph(
-    tx: "InstructionTranslatorBase",
+    tx: InstructionTranslatorBase,
 ) -> Generator[None, None, None]:
     try:
         tmp = tx.output.should_exit
@@ -420,7 +424,7 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index - 1)
 
-    def exit(self, tx: "InstructionTranslatorBase", is_graph_break: bool) -> None:
+    def exit(self, tx: InstructionTranslatorBase, is_graph_break: bool) -> None:
         assert self.with_context is not None
         if (
             is_graph_break and self.with_context.exit_on_graph_break()
@@ -448,7 +452,7 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
-    def impl(self: "InstructionTranslator", inst: Instruction) -> None:
+    def impl(self: InstructionTranslator, inst: Instruction) -> None:
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
@@ -464,7 +468,7 @@ def is_stdlib(mod: object) -> bool:
 
 
 def _detect_and_normalize_assert_statement(
-    self: "InstructionTranslatorBase",
+    self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
     push: bool,
 ) -> bool:
@@ -615,7 +619,7 @@ def log_graph_break(
 
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
-) -> Callable[["InstructionTranslatorBase", Instruction], None]:
+) -> Callable[[InstructionTranslatorBase, Instruction], None]:
     # graph break message fields for data dependent branching
     _gb_type = "Data-dependent branching"
     _explanation = (
@@ -628,7 +632,7 @@ def generic_jump(
     ]
 
     def jump_graph_break(
-        self: "InstructionTranslatorBase",
+        self: InstructionTranslatorBase,
         inst: Instruction,
         value: VariableTracker,
         extra_msg: str = "",
@@ -679,7 +683,7 @@ def generic_jump(
         jump_inst.copy_positions(inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
-    def inner(self: "InstructionTranslatorBase", inst: Instruction) -> None:
+    def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
@@ -877,13 +881,13 @@ def generic_jump(
 def break_graph_if_unsupported(
     *, push: int
 ) -> Callable[
-    [Callable[..., None]], Callable[["InstructionTranslatorBase", Instruction], None]
+    [Callable[..., None]], Callable[[InstructionTranslatorBase, Instruction], None]
 ]:
     def decorator(
         inner_fn: Callable[..., None],
-    ) -> Callable[["InstructionTranslatorBase", Instruction], None]:
+    ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
         @functools.wraps(inner_fn)
-        def wrapper(self: "InstructionTranslatorBase", inst: Instruction) -> None:
+        def wrapper(self: InstructionTranslatorBase, inst: Instruction) -> None:
             speculation = self.speculate()
             if speculation.failed(self):
                 assert speculation.reason is not None
@@ -933,7 +937,7 @@ def break_graph_if_unsupported(
             speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
-            self: "InstructionTranslatorBase",
+            self: InstructionTranslatorBase,
             inst: Instruction,
             reason: GraphCompileReason,
         ) -> None:
@@ -1159,9 +1163,9 @@ class InstructionTranslatorBase(
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
     is_leaf_tracer: bool
-    parent: Optional["InstructionTranslatorBase"]
+    parent: Optional[InstructionTranslatorBase]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
-    package: Optional["CompilePackage"]
+    package: Optional[CompilePackage]
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -3298,7 +3302,7 @@ class InstructionTranslatorBase(
         distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
-        package: Optional["CompilePackage"] = None,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -3398,7 +3402,7 @@ class InstructionTranslatorBase(
 
 class InstructionTranslator(InstructionTranslatorBase):
     @staticmethod
-    def current_tx() -> "InstructionTranslator":
+    def current_tx() -> InstructionTranslator:
         return tls.current_tx
 
     @contextlib.contextmanager
@@ -3428,7 +3432,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
         distributed_state: Optional[DistributedState],
-        package: Optional["CompilePackage"],
+        package: Optional[CompilePackage],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -3886,7 +3890,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         func: VariableTracker,
         args: list[VariableTracker],
         kwargs: Any,
-    ) -> "InliningInstructionTranslator":
+    ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
             (
