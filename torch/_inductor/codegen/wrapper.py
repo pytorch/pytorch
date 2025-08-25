@@ -228,18 +228,11 @@ def user_defined_kernel_grid_fn_code(
                 key=lambda x: len(x[1].kwargs),
                 reverse=True,
             ):
-                guardslist = []
                 if c.kwargs:
-                    # Remove AMD specific kwargs.
-                    for kwarg in c.kwargs:
-                        if kwarg not in [
-                            "matrix_instr_nonkdim",
-                            "waves_per_eu",
-                            "kpack",
-                        ]:
-                            guardslist.append(f"meta['{kwarg}'] == {c.kwargs[kwarg]}")
-                if guardslist:
-                    guards = " and ".join(guardslist)
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
                 else:
                     guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid, example_grid)
