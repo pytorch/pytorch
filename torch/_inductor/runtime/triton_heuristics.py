@@ -2572,9 +2572,7 @@ def _reduction_configs(
     )
 
     if torch.version.hip:
-        outer_config = make_config(
-            64, 8, register_intensive=register_intensive
-        )
+        outer_config = make_config(64, 8, register_intensive=register_intensive)
     else:
         outer_config = outer_config_opt()
     # For 3d tiling, default to more autotuning initially
