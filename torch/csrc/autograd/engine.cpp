@@ -979,13 +979,13 @@ static void validate_outputs_impl(
     }
 
     if (grad.device() != metadata.device()) {
-      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
-      // should be eventually removed
-      if (!(metadata.is_tensor_subclass() ||
-            grad.unsafeGetTensorImpl()->is_python_dispatch())) {
-        if (grad.dim() == 0) {
-          grad = grad.to(metadata.device());
-        } else {
+      if (grad.dim() == 0) {
+        grad = grad.to(metadata.device());
+      } else {
+        // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
+        // should be eventually removed
+        if (!(metadata.is_tensor_subclass() ||
+              grad.unsafeGetTensorImpl()->is_python_dispatch())) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();

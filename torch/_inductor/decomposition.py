@@ -34,11 +34,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    guard_or_false,
-    guard_size_oblivious,
-    statically_known_true,
-)
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
 from .utils import (
@@ -404,10 +400,10 @@ def cat(
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        if len(x.shape) == 1 and guard_size_oblivious(x.shape[0] == 0):
+        if len(x.shape) == 1 and guard_or_false(x.shape[0] == 0):
             return False
 
-        if dim < len(x.shape) and guard_size_oblivious(x.shape[dim] == 0):
+        if dim < len(x.shape) and guard_or_false(x.shape[dim] == 0):
             return False
 
         return True
@@ -1154,3 +1150,25 @@ def rrelu_with_noise_functional(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope), torch.Tensor()
+
+
+@register_decomposition(aten.repeat_interleave.Tensor)
+def repeat_interleave_Tensor(
+    repeat: torch.Tensor,
+    output_size: Optional[int] = None,
+) -> torch.Tensor:
+    if config.triton.autotune_at_compile_time:
+        # We can't compile-time auto-tune this because
+        # it expects specific data in `repeat`
+        return NotImplemented
+    if output_size is None or type(output_size) is not int:
+        return NotImplemented
+    if repeat.device.type == "mps":
+        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
+    cumsum = repeat.cumsum(0)
+    pos = torch.arange(output_size, device=repeat.device)
+    return torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )
