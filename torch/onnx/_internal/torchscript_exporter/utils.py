@@ -7,28 +7,6 @@ converted to models which run on other deep learning frameworks.
 
 from __future__ import annotations
 
-import contextlib
-import copy
-import inspect
-import re
-import typing
-import warnings
-from typing import Any, Callable, cast
-from typing_extensions import deprecated
-
-import torch
-import torch._C._onnx as _C_onnx
-import torch.jit._trace
-import torch.serialization
-from torch import _C
-from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import jit_utils, onnx_proto_utils, registration
-
-
-if typing.TYPE_CHECKING:
-    from collections.abc import Collection, Mapping, Sequence
-
 
 __all__ = [
     "select_model_mode_for_export",
@@ -43,6 +21,32 @@ __all__ = [
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
 ]
+
+import contextlib
+import copy
+import inspect
+import re
+import typing
+import warnings
+from typing import Any, Callable, cast
+from typing_extensions import deprecated
+
+import torch
+import torch._C._onnx as _C_onnx
+import torch.jit._trace
+from torch import _C
+from torch.onnx import _constants, errors
+from torch.onnx._internal.torchscript_exporter import (
+    jit_utils,
+    onnx_proto_utils,
+    registration,
+    symbolic_helper,
+)
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -179,17 +183,6 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         setup_onnx_logging(verbose) as log_ctx,
     ):
         yield (mode_ctx, apex_ctx, log_ctx)
-
-
-def _get_torch_export_args(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any] | None,
-) -> tuple[tuple[Any, ...], dict[str, Any] | None]:
-    """Obtain the arguments for torch.onnx.export from the model and the input arguments."""
-    if not kwargs and args and isinstance(args[-1], dict):
-        kwargs = args[-1]
-        args = args[:-1]
-    return args, kwargs
 
 
 def export(
@@ -1356,6 +1349,27 @@ def _get_module_attributes(module):
     return attrs
 
 
+def _trigger_symbolic_function_registration():
+    """Trigger the registration of symbolic functions for all supported opsets."""
+
+    from torch.onnx._internal.torchscript_exporter import (  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401
+        symbolic_opset10,
+        symbolic_opset11,
+        symbolic_opset12,
+        symbolic_opset13,
+        symbolic_opset14,
+        symbolic_opset15,
+        symbolic_opset16,
+        symbolic_opset17,
+        symbolic_opset18,
+        symbolic_opset19,
+        symbolic_opset20,
+        symbolic_opset7,
+        symbolic_opset8,
+        symbolic_opset9,
+    )
+
+
 def _export(
     model,
     args,
@@ -1379,6 +1393,8 @@ def _export(
     autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
+
+    _trigger_symbolic_function_registration()
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
