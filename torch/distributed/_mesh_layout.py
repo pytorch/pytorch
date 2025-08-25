@@ -302,6 +302,10 @@ MeshLayoutType = tuple["_Layout", ...]
 class _MeshLayout:
     _layouts: MeshLayoutType
 
+    @property
+    def layouts(self) -> MeshLayoutType:
+        return self._layouts
+
     @staticmethod
     def to_single_depth_layouts(
         mesh_size: IntTupe, mesh_stride: IntTupe
