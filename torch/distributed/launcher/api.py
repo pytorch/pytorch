@@ -26,6 +26,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.multiprocessing.spawn import should_use_parallel_start
 from torch.numa.binding import NumaOptions
 
 
@@ -109,9 +110,11 @@ class LaunchConfig:
 
         if (
             self.numa_options is None
-            # NOTE: This filter isn't relevant for str entrypoints,
-            # but it's the default anyway.
-            and self.start_method == "spawn"
+            # The way we apply NUMA bindings currently depends
+            # on the processes being started sequentially.
+            # Technically, this filter does not matter for str entrypoints,
+            # but we ignore that nuance for now.
+            and not should_use_parallel_start(self.start_method)
             and torch.cuda.is_available()
             # We assume local_rank n uses cuda device n.
             and torch.cuda.device_count() == self.nproc_per_node

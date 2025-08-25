@@ -1629,6 +1629,7 @@ class InstructionTranslatorBase(
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
+        self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -3716,9 +3717,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             package_name = name
 
         if self.package is not None:
-            self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], function_name=package_name
-            )
+            if self.output.package is not None:
+                self.package.add_resume_function(
+                    new_code, self.f_globals["__name__"], function_name=package_name
+                )
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
