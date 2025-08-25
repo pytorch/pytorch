@@ -11,7 +11,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
-from torch.distributed._cute_layout import _Layout, init_layouts_from_mesh
+from torch.distributed._mesh_layout import _Layout, _MeshLayout, MeshLayoutType
 from torch.utils._typing_utils import not_none
 
 
@@ -149,7 +149,7 @@ else:
             """
             mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
             layout = device_mesh._layouts[mesh_dim]
-            pg_ranks_by_dim = layout.layout_to_global_ranks(device_mesh.size())
+            pg_ranks_by_dim = layout.global_ranks(device_mesh.size())
             cur_rank = device_mesh.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -224,7 +224,7 @@ else:
         device_type: str
         mesh: torch.Tensor
         mesh_dim_names: Optional[tuple[str, ...]]
-        _layouts: tuple[_Layout, ...]
+        _layouts: MeshLayoutType
         _init_backend: bool
 
         def __init__(
@@ -248,7 +248,9 @@ else:
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             # Internal bookkeeping for the device mesh.
-            self._layouts = init_layouts_from_mesh(self.mesh.size(), self.mesh.stride())
+            self._layouts = _MeshLayout.to_single_depth_layouts(
+                self.mesh.size(), self.mesh.stride()
+            ).layouts
             self._init_backend = _init_backend
 
             # private field to pre-generate DeviceMesh's hash
@@ -418,7 +420,7 @@ else:
 
             default_group = _get_default_group()
 
-            if layout == _Layout(((get_world_size(), 1),)) and backend_override == (
+            if layout == _Layout((get_world_size(),), (1,)) and backend_override == (
                 None,
                 None,
             ):
@@ -440,7 +442,7 @@ else:
                 pg_ranks_by_dim = (
                     array_mesh
                     if array_mesh is not None
-                    else layout.layout_to_global_ranks(get_world_size())
+                    else layout.global_ranks(get_world_size())
                 )
                 backend, pg_options = backend_override
 
@@ -591,15 +593,17 @@ else:
                 or transforming an existing DeviceMesh.
             """
             # Extract sizes and strides from layouts
-            size_l, stride_l, mesh_size = [], [], []
+            size_l: list[int] = []
+            stride_l: list[int] = []
+            mesh_size: list[int] = []
             for layout in layouts:
                 size_l.extend(layout.sizes)
                 mesh_size.append(layout.numel())
                 stride_l.extend(layout.strides)
 
             # Create combined layout and get ranks
-            layout = _Layout(tuple(zip(size_l, stride_l)))
-            pg_ranks_by_dim = layout.layout_to_global_ranks(not_none(get_world_size()))
+            layout = _Layout(tuple(size_l), tuple(stride_l))
+            pg_ranks_by_dim = layout.global_ranks(not_none(get_world_size()))
 
             # Create tensor representation of the mesh
             tensor = torch.tensor(pg_ranks_by_dim, device="cpu", dtype=torch.int).view(
@@ -924,7 +928,7 @@ else:
                 )
                 name = mesh_dim_names[0] if mesh_dim_names else None
                 device_mesh._maybe_create_backend(
-                    _Layout(((mesh.size(0), mesh.stride(0)),)), 0, name, group=group
+                    _Layout((mesh.size(0),), (mesh.stride(0),)), 0, name, group=group
                 )
                 device_mesh._init_backend = True
                 return device_mesh
@@ -949,7 +953,9 @@ else:
                     f"mesh {mesh.tolist()} and {len(group)} ProcessGroups"
                 )
 
-            layouts = init_layouts_from_mesh(mesh.size(), mesh.stride())
+            layouts = _MeshLayout.to_single_depth_layouts(
+                mesh.size(), mesh.stride()
+            ).layouts
 
             if len(layouts) != len(group):
                 raise ValueError(
@@ -1084,15 +1090,14 @@ else:
                         "and via _mesh_resources._set_mesh_dim_group_options"
                     )
 
-            flattened_layout = _Layout(
-                tuple(
-                    sorted(
-                        [ss for l in self._layouts for ss in l.sizes_and_strides],
-                        key=lambda x: x[1],
-                        reverse=True,
-                    )
+            res_sizes, res_strides = zip(
+                *sorted(
+                    [ss for l in self._layouts for ss in l.sizes_and_strides],
+                    key=lambda x: x[1],
+                    reverse=True,
                 )
-            ).coalesce()
+            )
+            flattened_layout = _Layout(tuple(res_sizes), tuple(res_strides)).coalesce()
 
             res_mesh = DeviceMesh._from_layouts(
                 self.device_type,
