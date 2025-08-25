@@ -414,7 +414,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation for Triton kernel wrapper
+        Test the dynamic launch grid calculation for Triton kernel wrapper
         """
         func = torch.add
         args = [torch.randn(shape, device=self.device) for shape in [(7, 12), (7, 1)]]
