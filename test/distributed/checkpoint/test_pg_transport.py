@@ -26,14 +26,14 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
     HAS_ACCELERATOR,
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_MULTI_ACCELERATOR,
     TestCase,
 )
 
@@ -232,7 +232,7 @@ class PgTransportCPU(MultiProcContinuousTest):
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
-class PgTransportGPU(MultiProcContinousTest):
+class PgTransportGPU(MultiProcContinuousTest):
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
 
@@ -246,21 +246,21 @@ class PgTransportGPU(MultiProcContinousTest):
 
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
     )
     def test_pg_transport(self) -> None:
         _test_pg_transport(self, self.device)
 
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
     )
     def test_pg_transport_with_mixed_content(self) -> None:
         _test_pg_transport_with_mixed_content(self, self.device)
 
     @requires_accelerator_dist_backend()
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTI_ACCELERATOR, "test requires 2+ accelerators"
+        not at_least_x_gpu(2), "test requires 2+ accelerators"
     )
     def test_pg_transport_with_sharded_tensor(self) -> None:
         _test_pg_transport_with_sharded_tensor(self, self.device)
