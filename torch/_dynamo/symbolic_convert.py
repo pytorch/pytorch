@@ -76,7 +76,6 @@ from .bytecode_transformation import (
     create_dup_top,
     create_instruction,
     create_jump_absolute,
-    create_reverse,
     create_swap,
     get_code_keys,
     Instruction,
@@ -2583,7 +2582,6 @@ class InstructionTranslatorBase(
         stack_len = len(self.stack) - len(
             all_stack_locals_metadata[-1].stack_null_idxes
         )
-        nargs = stack_len + len(argnames)
 
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
@@ -2673,16 +2671,24 @@ class InstructionTranslatorBase(
             [
                 create_instruction("POP_TOP"),
                 create_instruction("BUILD_LIST", arg=len(argnames)),
+                *create_swap(3),
+                # live_locals, frames[-1][0], frames
+                create_instruction("BUILD_LIST", arg=1),
+                *create_swap(2),
+                # live_locals, [frames], frames[-1][0]
                 create_instruction("LIST_EXTEND", arg=1),
-                # UNPACK_SEQUENCE reverses elements
-                create_instruction("UNPACK_SEQUENCE", arg=nargs),
-                *create_reverse(nargs),
+                *create_swap(2),
+                create_instruction("LIST_EXTEND", arg=1),
             ]
         )
-        # frames, *(stack + live locals)
+        # [frames, *(stack + live locals)]
 
-        cg.extend_output(create_call_function(nargs + 1, False))
-        cg.append_output(create_instruction("RETURN_VALUE"))
+        cg.extend_output(
+            [
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+                create_instruction("RETURN_VALUE"),
+            ]
+        )
         return cg.get_instructions()
 
     def should_compile_partial_graph(self) -> bool:
