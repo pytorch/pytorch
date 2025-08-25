@@ -15326,6 +15326,8 @@ op_db: list[OpInfo] = [
                # AssertionError: None mismatch: torch.complex64 is not None
                DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules', 'test_custom_rules',
                             dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
+                            dtypes=(torch.complex32,), device_type='xpu'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose3d',
@@ -15389,6 +15391,8 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.skip('Skipped for ROCm!'), 'TestCommon', 'test_complex_half_reference_testing',
                             dtypes=[torch.complex32], active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
+                            dtypes=(torch.complex32,), device_type='xpu'),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
