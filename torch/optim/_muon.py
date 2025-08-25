@@ -30,10 +30,7 @@ DEFAULT_NS_STEPS = 5
 
 
 def _zeropower_via_newtonschulz(
-    grad: Tensor,
-    ns_coefficients: tuple[float, float, float],
-    ns_steps: int,
-    eps: float,
+    grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
