@@ -211,10 +211,10 @@ class MLPModuleWithDw(torch.nn.Module):
         self.fc2_weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.fc2_bias = torch.nn.Parameter(torch.randn(d_hid))
 
-        torch.nn.init.uniform_(self.fc1_weight, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc2_weight, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc1_bias, -0.01, 0.01)
-        torch.nn.init.uniform_(self.fc2_bias, -0.01, 0.01)
+        torch.nn.init.uniform_(self.fc1_weight, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc2_weight, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc1_bias, -0.001, 0.001)
+        torch.nn.init.uniform_(self.fc2_bias, -0.001, 0.001)
 
         self.cached_context = {}
         self.cached_context["fc1"] = []

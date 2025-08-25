@@ -187,6 +187,8 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        with:
+          driver-version: ${{ startsWith(inputs.GPU_ARCH_VERSION, '13') && '580.65.06' || '570.133.07' }}
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: configure aws credentials
