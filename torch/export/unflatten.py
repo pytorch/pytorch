@@ -53,6 +53,16 @@ class _AttrKind(Enum):
     MODULE = "module"
 
 
+@dataclass(frozen=True)
+class _TensorID:
+    """Custom tensor identifier containing storage, stride, and size information."""
+
+    untyped_storage: torch.UntypedStorage
+    stride: tuple
+    size: tuple
+    storage_offset: int
+
+
 RUN_WITH_INTERPRETER = True
 
 
@@ -295,6 +305,17 @@ class UnflattenedModule(torch.nn.Module):
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
+        def _id(obj):
+            """Returns _TensorID dataclass for tensors, otherwise id()."""
+            if isinstance(obj, torch.Tensor):
+                return _TensorID(
+                    untyped_storage=obj.untyped_storage(),
+                    stride=obj.stride(),
+                    size=obj.size(),
+                    storage_offset=obj.storage_offset(),  # type: ignore[arg-type]
+                )
+            return id(obj)
+
         fqn_list = [entry.fqn for entry in export_module.module_call_graph]
         assert fqn_list[0] == ""
         export_graph = deepcopy(export_module.graph)
@@ -339,16 +360,18 @@ class UnflattenedModule(torch.nn.Module):
         # graph's forward pass (_sink_params).
         state_dict = export_module.state_dict
         assigned_params: set[str] = set()  # tracking unused params
-        id_to_param: dict[int, torch.nn.Parameter] = {}  # handling weight-sharing
+        id_to_param: dict[
+            Union[int, _TensorID], torch.nn.Parameter
+        ] = {}  # handling weight-sharing
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
-            if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(
+            if _id(param) not in id_to_param:
+                id_to_param[_id(param)] = torch.nn.Parameter(
                     param.clone(), requires_grad=param.requires_grad
                 )
 
             _assign_attr(
-                id_to_param[id(param)],
+                id_to_param[_id(param)],
                 self,
                 name,
                 attr_kind=_AttrKind.PARAMETER,
@@ -357,7 +380,7 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: set[str] = set()  # tracking unused buffers
-        id_to_buffer: dict[int, tuple[torch.nn.Parameter, bool]] = {}
+        id_to_buffer: dict[Union[int, _TensorID], tuple[torch.nn.Parameter, bool]] = {}
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -366,11 +389,11 @@ class UnflattenedModule(torch.nn.Module):
                 persistent = True
                 buffer = state_dict[name]
 
-            if id(buffer) not in id_to_buffer:
-                id_to_buffer[id(buffer)] = (buffer.clone(), persistent)
+            if _id(buffer) not in id_to_buffer:
+                id_to_buffer[_id(buffer)] = (buffer.clone(), persistent)
 
             _assign_attr(
-                id_to_buffer[id(buffer)][0],
+                id_to_buffer[_id(buffer)][0],
                 self,
                 name,
                 attr_kind=_AttrKind.BUFFER,
@@ -385,44 +408,46 @@ class UnflattenedModule(torch.nn.Module):
                 continue
 
             is_buffer = False
-            if id(tensor) in id_to_buffer or not isinstance(
+            if _id(tensor) in id_to_buffer or not isinstance(
                 tensor, torch.nn.Parameter
             ):  # aliased buffer
                 is_buffer = True
 
             if is_buffer:
                 if (
-                    id(tensor) not in id_to_buffer
+                    _id(tensor) not in id_to_buffer
                 ):  # this is completely unused (not weight-sharing)
-                    id_to_buffer[id(tensor)] = (
+                    id_to_buffer[_id(tensor)] = (
                         tensor,
                         True,
                     )  # assign to respect original model
                 _assign_attr(
-                    id_to_buffer[id(tensor)][0],
+                    id_to_buffer[_id(tensor)][0],
                     self,
                     name,
                     attr_kind=_AttrKind.BUFFER,
                     persistent=True,
                 )
             else:
-                if id(tensor) not in id_to_param:  # this is unused
-                    id_to_param[id(tensor)] = tensor
+                if _id(tensor) not in id_to_param:  # this is unused
+                    id_to_param[_id(tensor)] = tensor
                 _assign_attr(
-                    id_to_param[id(tensor)],
+                    id_to_param[_id(tensor)],
                     self,
                     name,
                     attr_kind=_AttrKind.PARAMETER,
                 )
 
         # use id map so we don't double-clone aliased constants
-        id_to_const: dict[int, Union[torch.Tensor, torch._C.ScriptObject]] = {}
+        id_to_const: dict[
+            Union[int, _TensorID], Union[torch.Tensor, torch._C.ScriptObject]
+        ] = {}
         for fqn, constant in export_module.constants.items():
-            if id(constant) not in id_to_const:
+            if _id(constant) not in id_to_const:
                 if isinstance(constant, torch.Tensor):
                     constant = constant.clone()
-                id_to_const[id(constant)] = constant
-            _constant = id_to_const[id(constant)]
+                id_to_const[_id(constant)] = constant
+            _constant = id_to_const[_id(constant)]
             _assign_attr(
                 _constant,
                 self,
@@ -432,14 +457,18 @@ class UnflattenedModule(torch.nn.Module):
 
         # This is to handle parameters/buffers that point to the same tensor
         # object id -> list of (node_name, target_name)
-        consts_map: dict[int, list[tuple[str, str]]] = defaultdict(list)
+        consts_map: dict[Union[int, _TensorID], list[tuple[str, str]]] = defaultdict(
+            list
+        )
         consts_targets: set[str] = set()
 
         def add_to_consts_map(obj_id, node_name, target_name):
             name_list = consts_map[obj_id]
             name_list.append((node_name, target_name))
 
-        added_params_buffers: set[str] = set()  # track aliased/unused params, buffers
+        # track aliased/unused params, buffers
+        # prefer using untyped_storage() over id() when it's available
+        added_params_buffers: set[str] = set()
         for s in self.graph_signature.input_specs:
             if s.kind == InputKind.PARAMETER or (
                 s.kind == InputKind.BUFFER and s.persistent
@@ -447,42 +476,47 @@ class UnflattenedModule(torch.nn.Module):
                 assert hasattr(s.arg, "name")
                 assert isinstance(s.target, str)
                 add_to_consts_map(
-                    id(export_module.state_dict[s.target]), s.arg.name, s.target
+                    _id(export_module.state_dict[s.target]),
+                    s.arg.name,
+                    s.target,
                 )
                 consts_targets.add(s.target)
                 added_params_buffers.add(s.target)
             elif (
-                (s.kind == InputKind.BUFFER and not s.persistent)
+                s.kind == InputKind.BUFFER
+                and not s.persistent
                 or s.kind == InputKind.CONSTANT_TENSOR
                 or s.kind == InputKind.CUSTOM_OBJ
             ):
                 assert hasattr(s.arg, "name")
                 assert isinstance(s.target, str)
                 add_to_consts_map(
-                    id(export_module.constants[s.target]), s.arg.name, s.target
+                    _id(export_module.constants[s.target]),
+                    s.arg.name,
+                    s.target,
                 )
                 consts_targets.add(s.target)
 
         # add constants that are aliased and don't appear in graph signature
         for const_name, const in export_module.constants.items():
             if const_name not in consts_targets:
-                assert id(const) in consts_map, (
-                    "Constants should be either aliased or appear in graph signature"
-                )
-                ph_name, _ = consts_map[id(const)][0]
-                add_to_consts_map(id(const), ph_name, const_name)
+                const_id = _id(const)
+                assert const_id in consts_map
+                ph_name, _ = consts_map[const_id][0]
+                add_to_consts_map(const_id, ph_name, const_name)
                 added_params_buffers.add(s.target)
 
         # add aliased/unused params and buffers that don't appear in graph signature
         for fqn, tensor in export_module.state_dict.items():
             if fqn not in added_params_buffers:
-                if id(tensor) not in consts_map:
+                tensor_id = _id(tensor)
+                if tensor_id not in consts_map:
                     # completely unused (no weight-sharing), ignore.
                     # this weight doesn't appear in graph module,
                     # so won't cause FQN assignment issues
                     continue
-                ph_name, _ = consts_map[id(tensor)][0]
-                add_to_consts_map(id(tensor), ph_name, fqn)
+                ph_name, _ = consts_map[tensor_id][0]
+                add_to_consts_map(tensor_id, ph_name, fqn)
 
         # node name -> list of possible targets
         inputs_to_state: dict[str, list[str]] = {}
