@@ -1083,7 +1083,7 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=fals
 
 static bool _grouped_mm_allowed_device() {
 #ifdef USE_ROCM
-    return False;
+    return false;
 #else
     auto dprops = at::cuda::getCurrentDeviceProperties();
     // CUDA capability 8.0 and greater
@@ -1795,6 +1795,7 @@ std::optional<c10::ScalarType> out_dtype) {
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
   } else {
     // fallback path, using for loops or bmm
+    TORCH_WARN("fallback path for `torch._grouped_mm`, performance may not be optimal");
     if (a_is_2d && !b_is_2d) {
       // 2d x 3d with offsets
       int group_start_idx = 0;
