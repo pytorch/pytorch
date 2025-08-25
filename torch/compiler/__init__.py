@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import io
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -639,3 +640,10 @@ def nested_compile_region(fn=None):
     )
 
     return _mark_compile_region(fn)
+
+
+def load_compiled_function(file: io.IOBase):
+    from torch._dynamo.aot_compile import CompileArtifacts
+
+    data = file.read()
+    return CompileArtifacts.deserialize(data).compiled_function()
