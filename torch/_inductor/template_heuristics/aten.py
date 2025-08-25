@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-import torch
 from torch._inductor import config as inductor_config
 
 from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
 from ..kernel.mm_plus_mm import aten_mm_plus_mm
-from ..kernel_inputs import MMKernelInputs
 from .base import TemplateConfigHeuristics
 
 
@@ -38,10 +36,6 @@ from .registry import register_template_heuristic
 @register_template_heuristic(aten_bmm.uid, "cpu")
 @register_template_heuristic(aten_bmm.uid, "xpu")
 @register_template_heuristic(aten_bmm.uid, "mtia")
-@register_template_heuristic(aten_baddbmm.uid, "cuda")
-@register_template_heuristic(aten_baddbmm.uid, "cpu")
-@register_template_heuristic(aten_baddbmm.uid, "xpu")
-@register_template_heuristic(aten_baddbmm.uid, "mtia")
 @register_template_heuristic(aten_mm_plus_mm.uid, "cuda")
 @register_template_heuristic(aten_mm_plus_mm.uid, "cpu")
 @register_template_heuristic(aten_mm_plus_mm.uid, "xpu")
@@ -68,6 +62,10 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 @register_template_heuristic(aten_addmm.uid, "cpu", op_name="addmm")
 @register_template_heuristic(aten_addmm.uid, "xpu", op_name="addmm")
 @register_template_heuristic(aten_addmm.uid, "mtia", op_name="addmm")
+@register_template_heuristic(aten_baddbmm.uid, "cuda", op_name="baddbmm")
+@register_template_heuristic(aten_baddbmm.uid, "cpu", op_name="baddbmm")
+@register_template_heuristic(aten_baddbmm.uid, "xpu", op_name="baddbmm")
+@register_template_heuristic(aten_baddbmm.uid, "mtia", op_name="baddbmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
