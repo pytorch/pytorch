@@ -29,7 +29,7 @@ def forward_block_mn(
         [kv_start + kv_offset, 0],
     )
     {%- else %}
-    
+
     # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_n_load = kv_start + kv_offset + tl.arange(0, BLOCK_N)

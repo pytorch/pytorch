@@ -4334,7 +4334,7 @@ class GraphModule(torch.nn.Module):
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
 
-    @largeTensorTest("12GB", "cuda")
+    @largeTensorTest("38GB", "cuda")  # emperically
     @skip_on_cpu
     def test_int64_indexing_large_stride(self, device):
         B = 1
@@ -4357,11 +4357,16 @@ class GraphModule(torch.nn.Module):
         k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
         v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
 
-        # This should raise NotImplementedError: 64-bit indexing is not yet implemented for triton templates
-        # with self.assertRaisesRegex(
-        #     torch._inductor.exc.InductorError, "64-bit indexing is not yet implemented"
-        # ):
-        torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        # Test forward and backward pass
+        out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+        loss = out.sum()
+        loss.backward()
+
+        # Basic correctness checks, doing full comapre consumes too much memory :/
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertTrue(q.grad is not None)
+        self.assertTrue(k.grad is not None)
+        self.assertTrue(v.grad is not None)
 
 
 class TestBlockMask(InductorTestCase):
