@@ -1960,6 +1960,12 @@ void initJITBindings(PyObject* module) {
            bool>())
       .def_property_readonly(
           "name",
+          // NOTE[decltype(auto) lambdas]: lambdas with no declared
+          // return type act like they return `auto`, not
+          // `decltype(auto)`, so simple wrapper lambdas like these
+          // will force copies if the thing they're returning is a
+          // reference. See https://godbolt.org/z/daG7x4xKc for a
+          // demonstration.
           [](const FunctionSchema& self) -> decltype(auto) {
             return self.name();
           })
@@ -2036,6 +2042,7 @@ void initJITBindings(PyObject* module) {
            std::optional<AliasInfo>>())
       .def_property_readonly(
           "name",
+          // See NOTE[decltype(auto) lambdas] above.
           [](const Argument& self) -> decltype(auto) { return self.name(); })
       .def_property_readonly(
           "type",
