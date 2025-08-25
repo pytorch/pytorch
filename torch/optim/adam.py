@@ -211,12 +211,17 @@ class Adam(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
-    def step(self, closure=None):
+    def step(self, closure=None, zero_grad=None):
         """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         self._cuda_graph_capture_health_check()
 
@@ -268,6 +273,7 @@ class Adam(Optimizer):
                 decoupled_weight_decay=group["decoupled_weight_decay"],
             )
 
+        super()._zero_grad(zero_grad)
         return loss
 
 
