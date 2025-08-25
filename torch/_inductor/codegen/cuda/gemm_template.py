@@ -1168,6 +1168,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op = self.swap_XW(op)
                 should_swap_xw = True
 
+        name_to_buffer = {node.get_name(): node for node in self.input_nodes}
+        # handle the fake output buffer during lowering
+        name_to_buffer[Y.get_name()] = Y  # type: ignore[assignment]
+
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
                 (
@@ -1179,12 +1183,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     Y.get_name(), epilogue_nodes, V.kernel.removed_buffers
                 )
 
+                # TODO: mlazos remove this by returning buffer metadata from
+                # ir_to_evt_python code
+                for name, buf in (
+                    V.graph.name_to_buffer | V.graph.graph_inputs
+                ).items():
+                    if name not in name_to_buffer:
+                        name_to_buffer[name] = buf  # type: ignore[assignment]
+
                 D_output_name = var_name_to_buffer_name["D"]
-                name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-                for name in V.graph.constants.keys():
-                    name_to_buffer[name] = V.graph.add_tensor_constant(
-                        V.graph.constants[name], name
-                    )
                 D_output_buffer = name_to_buffer[D_output_name]
                 Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
@@ -1229,6 +1236,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 op,
                 evt_py_code,
                 var_name_to_buffer_name,
+                name_to_buffer,
                 Y.get_dtype(),
                 acc_dtype,
             )
@@ -1327,6 +1335,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op: GemmOperation,
         evt_py_code: str,
         buffer_renames: dict[str, str],
+        name_to_buffer: dict[str, Buffer],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]  # noqa: F821
@@ -1488,23 +1497,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: GemmOperation,
         evt_py_code: str,
         var_name_to_buffer_name: dict[str, str],
+        name_to_buffer: dict[str, Buffer],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str, EVTArgRenames]:
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
-        name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-
-        for name in V.graph.constants.keys():
-            name_to_buffer[name] = V.graph.add_tensor_constant(
-                V.graph.constants[name], name
-            )
-
-        # handle the fake output buffer during lowering
-        name_to_buffer[self.output_node.get_name()] = self.output_node  # type: ignore[assignment]
-
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
+
         examples = create_example_tensors(
             var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
