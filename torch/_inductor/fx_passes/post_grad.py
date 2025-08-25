@@ -1088,7 +1088,7 @@ def view_dtype_noop(arg, dtype):
 # Note, we also always have a check for identical metadata, which is why these
 # are safe
 @register_noop_decomp([aten.copy], nop_arg=1)
-@register_noop_decomp([aten.alias, aten.clone, aten.lift_fresh_copy])
+@register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
 
