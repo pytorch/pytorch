@@ -7,7 +7,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._cute_layout import _Layout
+from torch.distributed._mesh_layout import _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -1252,35 +1252,34 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
         # ((3,2),(2,1)) -> (6,1)
-        l = _Layout(((3, 2), (2, 1)))
+        l = _Layout((3, 2), (2, 1))
         l = l.coalesce()
-        print(l.sizes_and_strides)
-        self.assertEqual(l.sizes_and_strides, ((6, 1),))
+        self.assertEqual(list(l.sizes_and_strides), [(6, 1)])
 
         # ((2,12),(3,4),(4,1)) -> (24,1)
-        l = _Layout(((2, 12), (3, 4), (4, 1)))
+        l = _Layout((2, 3, 4), (12, 4, 1))
         l = l.coalesce()
-        self.assertEqual(l.sizes_and_strides, ((24, 1),))
+        self.assertEqual(list(l.sizes_and_strides), [(24, 1)])
 
     def test_coalesce_non_coalescible(self):
         # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
-        l = _Layout(((3, 4), (2, 1)))
+        l = _Layout((3, 2), (4, 1))
         l = l.coalesce()
-        self.assertEqual(l.sizes_and_strides, ((3, 4), (2, 1)))
+        self.assertEqual(list(l.sizes_and_strides), [(3, 4), (2, 1)])
 
     def test_complement_n_group_layout(self):
         # complement((4,2), 8) = (2,1); together form (8,1)
-        pg_layout = _Layout(((4, 2),))
+        pg_layout = _Layout(
+            (4,),
+            (2,),
+        )
         outer = pg_layout.complement(world_size=8)
-        self.assertEqual(outer.sizes_and_strides, ((2, 1),))
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            pg_layout.layout_to_group_ranks(),
+            pg_layout.local_ranks(),
             [0, 2, 4, 6],
         )
-        groups = [
-            [o + i for i in pg_layout.layout_to_group_ranks()]
-            for o in outer.layout_to_group_ranks()
-        ]
+        groups = [[o + i for i in pg_layout.local_ranks()] for o in outer.local_ranks()]
         self.assertEqual(
             groups,
             [
@@ -1289,7 +1288,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         self.assertEqual(
-            pg_layout.layout_to_global_ranks(8),
+            pg_layout.global_ranks(8),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1297,13 +1296,13 @@ class CuTeLayoutTest(TestCase):
         )
         # complement((4,2), 16) = ((2,8), (2,1)); together form (16,1)
         outer = pg_layout.complement(world_size=16)
-        self.assertEqual(outer.sizes_and_strides, ((2, 8), (2, 1)))
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            outer.layout_to_group_ranks(),
+            outer.local_ranks(),
             [0, 1, 8, 9],
         )
         self.assertEqual(
-            pg_layout.layout_to_global_ranks(16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1313,19 +1312,19 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
-        pg_layout = _Layout(((2, 4), (2, 1)))
+        pg_layout = _Layout((2, 2), (4, 1))
         self.assertEqual(
-            pg_layout.layout_to_group_ranks(),
+            pg_layout.local_ranks(),
             [0, 1, 4, 5],
         )
         outer = pg_layout.complement(world_size=16)
-        self.assertEqual(outer.sizes_and_strides, ((2, 8), (2, 2)))
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
         self.assertEqual(
-            outer.layout_to_group_ranks(),
+            outer.local_ranks(),
             [0, 2, 8, 10],
         )
         self.assertEqual(
-            pg_layout.layout_to_global_ranks(16),
+            pg_layout.global_ranks(16),
             [
                 [0, 1, 4, 5],
                 [2, 3, 6, 7],
@@ -1335,13 +1334,13 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Test layout_to_global_ranks and layout_to_group_ranks
-        pg_layout = _Layout(((2, 4), (2, 2)))
+        pg_layout = _Layout((2, 2), (4, 2))
         self.assertEqual(
-            pg_layout.layout_to_group_ranks(),
+            pg_layout.local_ranks(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            pg_layout.layout_to_global_ranks(16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1349,13 +1348,31 @@ class CuTeLayoutTest(TestCase):
                 [9, 11, 13, 15],
             ],
         )
-        pg_layout = _Layout(((4, 2),))
+        outer = pg_layout.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        # Test when stride is not monotonically decreasing, the complement layout
+        # is same as the one sorted its stride.
+        pg_layout_r = _Layout((2, 2), (2, 4))
+        outer = pg_layout_r.complement(world_size=16)
+        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            pg_layout.layout_to_group_ranks(),
+            pg_layout_r.global_ranks(16),
+            [
+                [0, 4, 2, 6],
+                [1, 5, 3, 7],
+                [8, 12, 10, 14],
+                [9, 13, 11, 15],
+            ],
+        )
+
+        # Test just local_ranks and global_ranks.
+        pg_layout = _Layout((4,), (2,))
+        self.assertEqual(
+            pg_layout.local_ranks(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            pg_layout.layout_to_global_ranks(16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1366,13 +1383,13 @@ class CuTeLayoutTest(TestCase):
 
     def test_composition(self):
         # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,2)
-        orig_l = _Layout(((4, 2), (2, 1)))
-        right_l = _Layout(((2, 1),))
+        orig_l = _Layout((4, 2), (2, 1))
+        right_l = _Layout((2,), (1,))
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 1)
-        self.assertEqual(composed_list[0].sizes_and_strides, [(2, 2)])
+        self.assertEqual(list(composed_list[0].sizes_and_strides), [(2, 2)])
         self.assertEqual(
-            composed_list[0].layout_to_global_ranks(8),
+            composed_list[0].global_ranks(8),
             [
                 [0, 2],
                 [1, 3],
@@ -1382,12 +1399,12 @@ class CuTeLayoutTest(TestCase):
         )
 
         # self = ((4,2), (2,1)), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
-        right_l = _Layout(((2, 2), (2, 1)))
+        right_l = _Layout((2, 2), (2, 1))
         composed_list = orig_l.composition(right_l)
         self.assertEqual(len(composed_list), 2)
-        self.assertEqual(composed_list[0].sizes_and_strides, ((2, 4),))
+        self.assertEqual(list(composed_list[0].sizes_and_strides), [(2, 4)])
         self.assertEqual(
-            composed_list[0].layout_to_global_ranks(8),
+            composed_list[0].global_ranks(8),
             [
                 [0, 4],
                 [1, 5],
@@ -1401,14 +1418,14 @@ class CuTeLayoutTest(TestCase):
             AssertionError,
             "Layouts do not meet stride divisibility condition",
         ):
-            right_l = _Layout(((2, 3),))
+            right_l = _Layout((2,), (3,))
             composed_list = orig_l.composition(right_l)
 
         with self.assertRaisesRegex(
             AssertionError,
             "Layouts do not meet shape divisibility condition",
         ):
-            right_l = _Layout(((3, 2),))
+            right_l = _Layout((3,), (2,))
             composed_list = orig_l.composition(right_l)
 
 
