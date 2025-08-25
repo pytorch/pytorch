@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._prims_common import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
@@ -163,6 +164,7 @@ class OpDispatcher:
         output_sharding = op_info.output_sharding
         logger.debug("output_sharding for %s: %s", op_call, output_sharding)
         assert output_sharding is not None, "output sharding should not be None"
+        print(f"output_sharding for {op_call}: {output_sharding}")
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
@@ -221,6 +223,9 @@ class OpDispatcher:
             else:
                 # normal case, run local sharded op computation
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                print(
+                    f"op_call: {[l.shape for l in local_tensor_args if isinstance(l, torch.Tensor)]} -> {local_results.shape}"
+                )
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -419,9 +424,9 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert compute_mesh is not None, (
-            f"found no DeviceMesh from dtensor args for {op_call}!"
-        )
+        assert (
+            compute_mesh is not None
+        ), f"found no DeviceMesh from dtensor args for {op_call}!"
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
@@ -445,18 +450,18 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(spec, DTensorSpec), (
-                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-                )
+                assert isinstance(
+                    spec, DTensorSpec
+                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(spec, (list, tuple)), (
-                f"output spec does not match with output! Expected list/tuple, got {spec}."
-            )
+            assert spec is not None and isinstance(
+                spec, (list, tuple)
+            ), f"output spec does not match with output! Expected list/tuple, got {spec}."
             res_list = []
             for e, s in zip(res, spec):
                 res_list.append(OpDispatcher.wrap(e, s))

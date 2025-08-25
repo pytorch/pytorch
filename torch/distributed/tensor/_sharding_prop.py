@@ -335,6 +335,7 @@ class ShardingPropagator:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
+                print(f"after prop, output_strategy: {output_strategy}")
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
@@ -358,6 +359,9 @@ class ShardingPropagator:
                         desired_spec.shallow_copy_with_tensor_meta(
                             input_spec.tensor_meta
                         )
+                    )
+                    print(
+                        f"[idx {idx}] input_spec: {input_spec.placements}, desired_spec: {desired_spec.placements}"
                     )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
@@ -549,9 +553,9 @@ class ShardingPropagator:
 
         op_spec_costs: list[float] = []
         for op_spec in strategy.strategies:
-            assert op_spec.redistribute_cost is not None, (
-                "must set redistribute cost each OpSpec!"
-            )
+            assert (
+                op_spec.redistribute_cost is not None
+            ), "must set redistribute cost each OpSpec!"
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
