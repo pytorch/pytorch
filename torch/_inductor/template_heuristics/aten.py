@@ -5,6 +5,10 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor import config as inductor_config
 
+from ..kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
+from ..kernel.mm import aten__fp8_mm, aten__int_mm, aten_addmm, aten_bias_addmm, aten_mm
+from ..kernel.mm_plus_mm import aten_mm_plus_mm
+from ..kernel_inputs import MMKernelInputs
 from .base import TemplateConfigHeuristics
 
 
@@ -17,39 +21,31 @@ if TYPE_CHECKING:
 from .registry import register_template_heuristic
 
 
-@register_template_heuristic(torch._inductor.kernel.mm.aten_mm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_mm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_mm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_mm.uid, "mtia")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__fp8_mm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__fp8_mm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__fp8_mm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__fp8_mm.uid, "mtia")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__int_mm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__int_mm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__int_mm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten__int_mm.uid, "mtia")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_bmm_dtype.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_bmm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_bmm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_bmm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_bmm.uid, "mtia")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_baddbmm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_baddbmm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_baddbmm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.bmm.aten_baddbmm.uid, "mtia")
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.aten_mm_plus_mm.uid, "cuda"
-)
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.aten_mm_plus_mm.uid, "cpu"
-)
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.aten_mm_plus_mm.uid, "xpu"
-)
-@register_template_heuristic(
-    torch._inductor.kernel.mm_plus_mm.aten_mm_plus_mm.uid, "mtia"
-)
+@register_template_heuristic(aten_mm.uid, "cuda")
+@register_template_heuristic(aten_mm.uid, "cpu")
+@register_template_heuristic(aten_mm.uid, "xpu")
+@register_template_heuristic(aten_mm.uid, "mtia")
+@register_template_heuristic(aten__fp8_mm.uid, "cuda")
+@register_template_heuristic(aten__fp8_mm.uid, "cpu")
+@register_template_heuristic(aten__fp8_mm.uid, "xpu")
+@register_template_heuristic(aten__fp8_mm.uid, "mtia")
+@register_template_heuristic(aten__int_mm.uid, "cuda")
+@register_template_heuristic(aten__int_mm.uid, "cpu")
+@register_template_heuristic(aten__int_mm.uid, "xpu")
+@register_template_heuristic(aten__int_mm.uid, "mtia")
+@register_template_heuristic(aten_bmm_dtype.uid, "cuda")
+@register_template_heuristic(aten_bmm.uid, "cuda")
+@register_template_heuristic(aten_bmm.uid, "cpu")
+@register_template_heuristic(aten_bmm.uid, "xpu")
+@register_template_heuristic(aten_bmm.uid, "mtia")
+@register_template_heuristic(aten_baddbmm.uid, "cuda")
+@register_template_heuristic(aten_baddbmm.uid, "cpu")
+@register_template_heuristic(aten_baddbmm.uid, "xpu")
+@register_template_heuristic(aten_baddbmm.uid, "mtia")
+@register_template_heuristic(aten_mm_plus_mm.uid, "cuda")
+@register_template_heuristic(aten_mm_plus_mm.uid, "cpu")
+@register_template_heuristic(aten_mm_plus_mm.uid, "xpu")
+@register_template_heuristic(aten_mm_plus_mm.uid, "mtia")
 class ATenConfigHeuristics(TemplateConfigHeuristics):
     """
     Pseudo heuristic to make ATen choices go through the same flow as other templates
@@ -68,10 +64,10 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         yield dict()
 
 
-@register_template_heuristic(torch._inductor.kernel.mm.aten_addmm.uid, "cuda")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_addmm.uid, "cpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_addmm.uid, "xpu")
-@register_template_heuristic(torch._inductor.kernel.mm.aten_addmm.uid, "mtia")
+@register_template_heuristic(aten_addmm.uid, "cuda")
+@register_template_heuristic(aten_addmm.uid, "cpu")
+@register_template_heuristic(aten_addmm.uid, "xpu")
+@register_template_heuristic(aten_addmm.uid, "mtia")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
@@ -86,8 +82,36 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         kwargs["beta"] = beta
         return kwargs
 
+    def adjust_kernel_inputs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> KernelInputs:
+        """
+        For addmm, if we're not in max-autotune, we squeeze
+        the bias
+        """
+        # NOTE: debug why this changes numerics and why this is necessary
+        # we already know it does not help with performance
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for addmm"
+        )
+        nodes = kernel_inputs.nodes()
+        bias = nodes[0]
+        if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
+            from ..lowering import lowerings as L
 
-@register_template_heuristic(torch._inductor.kernel.mm.aten_bias_addmm.uid, "cuda")
+            aten = torch.ops.aten
+            bias = nodes[0]
+            bias = L[aten.squeeze](bias)
+        nodes[0] = bias
+        return kernel_inputs
+
+
+@register_template_heuristic(aten_bias_addmm.uid, "cuda")
+@register_template_heuristic(aten_bias_addmm.uid, "cpu")
+@register_template_heuristic(aten_bias_addmm.uid, "xpu")
+@register_template_heuristic(aten_bias_addmm.uid, "mtia")
 class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
     def get_template_configs(
         self,
@@ -95,10 +119,12 @@ class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
         layout: Layout,
         op_name: str,
     ) -> Generator[dict[str, Any], None, None]:
+        if inductor_config.max_autotune or inductor_config.max_autotune_gemm:
+            # NOTE: this preserves the original logic that if there is not max-autotune
+            # then we skip bias_addmm
+            return
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
         if bias.get_stride()[0] == 0 and inductor_config.triton.autotune_cublasLt:
             yield dict()
-        else:
-            yield from []
