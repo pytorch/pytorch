@@ -4,24 +4,10 @@
 
 // Expect to be included after headers of at::zeros_like and at::empty_like
 
-#include <aotriton/config.h>
 #include <aotriton/dtypes.h>
 #include <aotriton/util.h>
-
-#define AOTRITON_VERSION_INT(x, y) (x * 100 + y)
-#define AOTRITON_VERSION_CURRENT (AOTRITON_VERSION_MAJOR * 100 + AOTRITON_VERSION_MINOR)
-
-#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
-#define AOTRITON_ALWAYS_V3_API 1
-#else
-#define AOTRITON_ALWAYS_V3_API 0
-#endif
-
-#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 10)
-#define AOTRITON_V3_API 1
-#else
-#define AOTRITON_V3_API 0
-#endif
+#include <aotriton/config.h>
+#include "aotriton_versions.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
