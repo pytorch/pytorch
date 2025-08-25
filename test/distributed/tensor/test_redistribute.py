@@ -720,19 +720,23 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 ([Shard(0), Shard(0), Shard(0)], None),
                 ([Replicate(), Shard(0), Shard(0)], None),
             ),
-            # S(0)S(0)S(0)[1,0,2]-> S(0)S(0)S(1)[1,0,2]-> RS(0)S(1)[1,0,2]->
-            # RS(0)S(0)[1,0,2]
+            # Below comments we use <x> to represent the sequence of mesh axis,
+            # e.g., S(0)<1>S(0)<0> means we Shard(0) on mesh axis 1, then
+            # Shard(0) on mesh axis 0.
+            # S(0)<1>S(0)<0>S(0)<2> -> S(0)<1>S(0)<0>S(1)<0> -> RS(0)<0>S(1)<0>
+            # -> RS(0)<0>S(0)<1>
             (
                 ([Shard(0), Shard(0), Shard(0)], [1, 0, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
             ),
-            # S(0)S(0)S(0)[0,1,2]-> S(0)S(0)S(1)[0,1,2]-> S(0)S(2)S(1)[0,1,2]->
-            # RS(2)S(1)[0,1,2]-> RS(0)S(1)[0,1,2]-> RS(0)S(0)[0,1,2]
+            #  S(0)<0>S(0)<1>S(0)<2> -> S(0)<0>S(0)<1>S(1)<0> ->
+            #  S(0)<0>S(1)<1>S(1)<0> -> RS(1)<1>S(1)<0> -> RS(0)<0>S(1)<0> ->
+            #  RS(0)<0>S(0)<1>
             (
                 ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [2, 0, 1]),
             ),
-            # RS(0)S(0)[0,1,2]-> S(1)S(0)S(0)[0,1,2]-> S(1)S(0)R[0,1,2]
+            # RS(0)<0>S(0)<1> -> S(1)<0>S(0)<0>S(0)<1> -> S(1)<0>S(0)<0>R
             (
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
