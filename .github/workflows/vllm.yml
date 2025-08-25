@@ -5,6 +5,9 @@ on:
     tags:
       - ciflow/vllm/*
   workflow_dispatch:
+  schedule:
+    # Every 12 hours starting at 00:00 UTC (00:00 and 12:00)
+    - cron: '0 0,12 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -26,20 +29,42 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  torch-build-sm89:
-    name: sm89-vllm-test
+  torch-build:
+    name: ci-vllm-test
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-additional-packages: "vision audio torchao"
+      build-additional-packages: "vision audio"
       build-external-packages: "vllm"
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm89
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
-      cuda-arch-list: '8.9'
+      cuda-arch-list: '8.0;8.9;9.0'
       runner: linux.24xlarge.memory
       test-matrix: |
         { include: [
-          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu"  },
-          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config:  "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_entrypoints_test", shard: 1, num_shards: 1,runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_280_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_multi_model_processor_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_test", shard: 0, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_test", shard: 1, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_test", shard: 2, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_test", shard: 3, num_shards: 4,  runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_lora_tp_test_distributed", shard: 1, num_shards: 1, runner: "linux.aws.h100.4"},
         ]}
     secrets: inherit
+
+  vllm-test-sm89:
+      name: ci-vllm-test
+      uses: ./.github/workflows/_linux-test.yml
+      needs: [
+        torch-build,
+      ]
+      with:
+        build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+        docker-image: ${{ needs.torch-build.outputs.docker-image }}
+        test-matrix: ${{ needs.torch-build.outputs.test-matrix }}
+      secrets: inherit
