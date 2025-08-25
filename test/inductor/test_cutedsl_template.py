@@ -2,11 +2,13 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from expecttest import assert_expected_inline
+
 import torch
-from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
+
+from torch.testing._internal.inductor_utils import MockGraphHandler
 
 
 try:
@@ -21,25 +23,6 @@ if HAS_CUTLASS:
     from torch._inductor.codegen.cutedsl.cutedsl_kernel import CuteDSLTemplateKernel
     from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
     from torch._inductor.select_algorithm import PartialRender
-
-
-class MockGraphHandler(GraphLowering):
-    """Minimal mock graph handler for testing virtualized context."""
-
-    def __init__(self):
-        import torch._inductor.sizevars
-
-        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
-        self.name_to_buffer = {}
-        self.graph_inputs = {}
-        self.mutated_buffers = OrderedSet()
-        self.removed_buffers = OrderedSet()
-        self.constants = {}
-        self.scheduler = None
-
-    def get_dtype(self, buffer_name: str) -> torch.dtype:
-        """Return default dtype for any buffer (for testing)."""
-        return torch.float32
 
 
 CUTEDSL_ADD_TEMPLATE = r"""
@@ -322,17 +305,22 @@ def {{kernel_name}}_kernel():
             ENABLE_FEATURE=True,
         )
 
-        expected_lines = [
-            "THREADS_PER_BLOCK: cutlass.Constexpr = 256",
-            "BLOCK_SIZE: cutlass.Constexpr = 128",
-            "ENABLE_FEATURE: cutlass.Constexpr = True",
-        ]
-
-        for expected_line in expected_lines:
-            self.assertIn(expected_line, params)
+        assert_expected_inline(
+            params,
+            """\
+THREADS_PER_BLOCK: cutlass.Constexpr = 256
+BLOCK_SIZE: cutlass.Constexpr = 128
+ENABLE_FEATURE: cutlass.Constexpr = True
+""",
+        )
 
         params_float = kernel.gen_defines(SCALE_FACTOR=1.5)
-        self.assertIn("SCALE_FACTOR: cutlass.Constexpr = 1.5", params_float)
+        assert_expected_inline(
+            params_float,
+            """\
+SCALE_FACTOR: cutlass.Constexpr = 1.5
+""",
+        )
 
     def test_template_aliasing(self):
         """Test that template variables are correctly aliased to function arguments."""
@@ -363,6 +351,7 @@ def {{kernel_name}}_kernel():
             hook_fn = kernel.render_hooks["<DEF_KERNEL>"]
             generated_code = hook_fn()
 
+            # Check that the generated code contains the expected aliasing statements
             self.assertIn("custom_a = arg_custom_a", generated_code)
             self.assertIn("custom_b = arg_custom_b", generated_code)
 
