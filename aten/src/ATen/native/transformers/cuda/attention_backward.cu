@@ -546,13 +546,14 @@ _efficient_attention_backward(
     }
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
-    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-      is_causal = true;
-    } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
+    if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
       is_causal = false;
     } else {
+      is_causal = true;
 #if AOTRITON_V3_API == 0
-      TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
+      if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) != custom_mask_type) {
+        TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+      }
 #endif
     }
     at::Tensor q_t = query.permute({0,2,1,3});
