@@ -1120,7 +1120,7 @@ class TritonOverrides(OpOverrides):
         # 1. when there is broadcasting operands (A.repeat() @ B), adjust manually.
         # 2. Not here, but remove tl.broadcast_to in index expression.
         # 3. online softmax error happens on timm model but cannot reproduce.
-
+        
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
             if not 'r0_mask' in var.mask_vars:
@@ -2541,7 +2541,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             mask_vars.add(self._load_mask)
 
         self.filter_masks(mask_vars)
-
+        
         return IndexingOptions(
             index_str,
             mask_vars,
@@ -3059,16 +3059,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # because 3d (Z,Y,X) tl.dot is somehow slower than 2d tl.dot.
         # Instead, we force ZBLOCK to be always 1 during autotune.
         dense_size_str: str
-        if (
-            torch._inductor.config.triton.enable_native_matmul
-            and reduction_type == "dot"
-        ):
+        if self.is_native_matmul:
             dense_sizes = self.dense_size_list()
             assert len(dense_sizes) >= 3
             xy_sizes_only = [size for size in dense_sizes if "X" in size or "Y" in size]
             dense_size_str = f"[{', '.join(xy_sizes_only)}]"
+            value_shape = tuple(xy_sizes_only)
         else:
             dense_size_str = self.dense_size_str()
+            value_shape = tuple(self.dense_size_list())
 
         # Say we have
         #     tmp0 = ops.constant(1, torch.int64)
@@ -3081,7 +3080,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.compute,
                 f"tl.broadcast_to({v}, {dense_size_str})",
                 dtype=v.dtype,
-                shape=tuple(self.dense_size_list()),
+                shape=value_shape,
             ),
             value,
         )
