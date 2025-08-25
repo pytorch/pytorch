@@ -39,7 +39,7 @@ class TestCompileWorker(TestCase):
             pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_exception(self):
+    def test_exception_with_name(self):
         pool = SubprocPool(2)
         try:
             a = pool.submit(raise_testexc, name="testname")
