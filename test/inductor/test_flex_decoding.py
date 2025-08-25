@@ -679,8 +679,14 @@ class TestFlexDecoding(InductorTestCase):
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
         compiled_out, compiled_lse = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask,
-            device=device, kernel_options=kernel_options
+            score_mod,
+            q,
+            k,
+            v,
+            dtype,
+            block_mask,
+            device=device,
+            kernel_options=kernel_options,
         )
 
         self._check_out(
@@ -1714,9 +1720,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score * 2
 
         self.run_test_with_paged_attention(
-            score_mod,
-            device=device,
-            kernel_options={"PARTITION_SIZE": partition_size})
+            score_mod,device=device,kernel_options={"PARTITION_SIZE": partition_size}
+        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
