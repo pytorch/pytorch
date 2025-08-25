@@ -110,12 +110,33 @@ jobs:
           # Create new "clean" conda environment for testing
 
           SMOKE_TEST_PARAMS=""
-          if [[ $DESIRED_PYTHON == "3.13t" ]]; then
-            conda create -yn "test_conda_env" python="3.13" python-freethreading -c conda-forge
-            SMOKE_TEST_PARAMS="--torch-compile-check disabled"
-          else
-            conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
-          fi
+
+          EXTRA_CONDA_INSTALL_FLAGS=""
+          CONDA_ENV_CREATE_FLAGS=""
+          # shellcheck disable=SC2153
+          case $DESIRED_PYTHON in
+            3.14t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
+            3.14)
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge/label/python_rc -c conda-forge"
+              desired_python="3.14.0rc1"
+              ;;
+            3.13t)
+              CONDA_ENV_CREATE_FLAGS="python-freethreading"
+              EXTRA_CONDA_INSTALL_FLAGS="-c conda-forge"
+              desired_python="3.13"
+              ;;
+            *)
+              # shellcheck disable=SC2153
+              desired_python=${DESIRED_PYTHON}
+              ;;
+          esac
+
+          # shellcheck disable=SC2086
+          conda create -yn "test_conda_env" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS} ${EXTRA_CONDA_INSTALL_FLAGS}
           conda activate test_conda_env
           pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
 
