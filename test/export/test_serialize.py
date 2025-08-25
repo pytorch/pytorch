@@ -22,6 +22,7 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _dict_to_dataclass,
     _to_json_bytes,
     canonicalize,
     deserialize,
@@ -1459,6 +1460,20 @@ def forward(self, x):
             m = MyModule()
             inputs = (torch.ones(2, 3),)
             self.check_graph(m, inputs, strict=False)
+
+    def test_forward_compatibility(self):
+        self.assertEqual(
+            schema.TensorArgument(
+                name="x",
+            ),
+            _dict_to_dataclass(
+                schema.TensorArgument,
+                {
+                    "shiny_new_field": "hello world",
+                    "name": "x",
+                },
+            ),
+        )
 
 
 instantiate_parametrized_tests(TestDeserialize)
