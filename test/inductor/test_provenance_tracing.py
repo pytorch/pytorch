@@ -1,17 +1,22 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
+import io
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 import torch
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.debug import (
+    create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
     create_node_mapping_kernel_to_post_grad,
 )
@@ -19,13 +24,16 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
     from test_aot_inductor_utils import AOTIRunnerUtil
+
+
+trace_log = logging.getLogger("torch.__trace")
 
 
 class Model(torch.nn.Module):
@@ -61,8 +69,25 @@ class Model3(torch.nn.Module):
         return torch.nn.functional.linear(a, self.weight, self.bias)
 
 
+class Model4(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(10, 16)
+        self.relu = torch.nn.ReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, x, a, b, c):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.sigmoid(x)
+        d = a * 3.14
+        y = torch.addmm(c, d, b)
+        z = torch.nn.functional.gelu(y)
+        return x, z
+
+
 @config.patch("trace.enabled", True)
-@config.patch("trace.provenance_tracking", True)
+@config.patch("trace.provenance_tracking_level", 1)
 class TestProvenanceTracingArtifact(TestCase):
     """
     This test checks that generated provenance tracing artifact from "post_grad" to
@@ -229,7 +254,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_cuda(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cuda")
 
@@ -237,7 +262,7 @@ class TestProvenanceTracingArtifact(TestCase):
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
         M = 8
         N = 6
@@ -285,7 +310,7 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def _test_pt_tracing_combo_kernel(self, backend):
         """This test checks that generated provenance tracing artifact from triton combo kernel to post grad nodes"""
         a = torch.randn(10, 10, device="cuda")
@@ -320,7 +345,7 @@ class TestProvenanceTracingArtifact(TestCase):
             expected_data = {"triton_poi_fused_0": ["relu", "sigmoid", "tanh"]}
             self._check_provenance_tracing_artifact(filepath, expected_data)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_triton_kernel_to_post_grad_tracing_combo_kernel(self):
         self._test_pt_tracing_combo_kernel(backend="inductor")
         self._test_pt_tracing_combo_kernel(backend="aot_inductor")
@@ -437,7 +462,7 @@ class TestProvenanceTracingNodeMeta(TestCase):
         """
         return next(iter([node for node in gm.graph.nodes if node.target == target]))
 
-    @requires_cuda  # test only works for cuda pattern matcher
+    @requires_cuda_and_triton  # test only works for cuda pattern matcher
     def test_pattern_matcher_transfer_meta(self):
         """
         Test that stack trace is transfered when node is decomposed in post_grad_passes
@@ -481,6 +506,242 @@ class TestProvenanceTracingNodeMeta(TestCase):
 
         self.assertEqual(add_node.meta["stack_trace"], stack_trace)
         self.assertEqual(mm_node.meta["stack_trace"], stack_trace)
+
+
+class ProvenanceArtifactFilter(logging.Filter):
+    def filter(self, record):
+        if "artifact" in record.metadata:
+            return (
+                record.metadata["artifact"]["name"]
+                == "inductor_provenance_tracking_kernel_stack_traces"
+            )
+        return False
+
+
+class StructuredTracePayloadFormatter(logging.Formatter):
+    def format(self, record):
+        return record.payload.strip()
+
+
+class TestProvenanceTracingStackTraces(TestCase):
+    @contextlib.contextmanager
+    def _setup_provenance_capture(self):
+        """Helper to turn on and capture the 'inductor_tlparse_runtime' structured trace."""
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setLevel(logging.DEBUG)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(ProvenanceArtifactFilter())
+        trace_log.addHandler(payload_handler)
+        try:
+            yield payload_buffer
+        finally:
+            trace_log.removeHandler(payload_handler)
+
+    def extract_code_line(self, s):
+        # Extract last non-empty line
+        return s.split("\n")[-2].strip()
+
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "trace.provenance_tracking_level": 2}
+    )
+    @requires_cuda_and_triton
+    def test_tlparse_kernel_stack_traces(self):
+        device = "cuda"
+        model = Model4().to(device)
+        x = torch.randn(8, 10).to(device)
+        a = torch.randn(10, 20).to(device)
+        b = torch.randn(20, 30).to(device)
+        c = torch.randn(10, 30).to(device)
+        example_inputs = (x, a, b, c)
+
+        expected = {
+            "triton_poi_fused_addmm_relu_sigmoid_threshold_backward_0": [
+                "x = self.sigmoid(x)",
+                "x = self.fc1(x)",
+                "x = self.relu(x)",
+            ],
+            "triton_poi_fused_mul_1": [
+                "d = a * 3.14",
+            ],
+            "triton_poi_fused_addmm_gelu_2": [
+                "z = torch.nn.functional.gelu(y)",
+                "y = torch.addmm(c, d, b)",
+            ],
+            "extern_kernels.mm": [
+                "x = self.fc1(x)",
+                "y = torch.addmm(c, d, b)",
+            ],
+        }
+
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            compiled(*example_inputs)
+            payload_content = payload_buffer.getvalue().strip()
+            if payload_content:
+                data = json.loads(payload_content)
+                self.assertEqual(set(data.keys()), set(expected.keys()))
+                for key, expected_lines in expected.items():
+                    actual_lines = [self.extract_code_line(s) for s in data[key]]
+                    self.assertEqual(
+                        sorted(actual_lines),
+                        sorted(expected_lines),
+                        f"Mismatch for key: {key}",
+                    )
+
+    def _check_kernel_information_json(self, kernel_info, expected_kernels):
+        """Validate kernel information JSON structure and content."""
+        self.assertIsInstance(kernel_info, dict)
+
+        for expected in expected_kernels:
+            self.assertIn(
+                expected,
+                kernel_info,
+                f"Expected kernel {expected} not found in {list(kernel_info)}",
+            )
+
+        for data in kernel_info.values():
+            self.assertIsInstance(data, dict)
+            for field in ["stack_traces", "post_grad_nodes", "pre_grad_nodes"]:
+                self.assertIn(field, data)
+                self.assertIsInstance(data[field], list)
+                for item in data[field]:
+                    self.assertIsInstance(item, str)
+
+    @requires_cuda_and_triton
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
+    def test_kernel_information_generation(self):
+        """Test basic kernel information generation in AOTI packages."""
+
+        model = Model4().to("cuda")
+        x = torch.randn(8, 10, device="cuda")
+        a = torch.randn(10, 20, device="cuda")
+        b = torch.randn(20, 30, device="cuda")
+        c = torch.randn(10, 30, device="cuda")
+        inputs = (x, a, b, c)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, inputs, strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+
+            # Extract and check kernel_information.json exists in the package
+            with zipfile.ZipFile(pt2_file, "r") as zip_ref:
+                zip_ref.extractall(temp_dir)
+
+            json_path = os.path.join(
+                temp_dir,
+                "model",
+                "data",
+                "aotinductor",
+                "model",
+                "kernel_information.json",
+            )
+            self.assertTrue(
+                os.path.exists(json_path),
+                f"kernel_information.json not found in extracted package at {json_path}",
+            )
+
+            with open(json_path) as f:
+                kernel_info = json.load(f)
+
+            expected = {
+                "triton_poi_fused_addmm_relu_sigmoid_0": {
+                    "stack_traces": [
+                        "x = self.sigmoid(x)",
+                        "x = self.fc1(x)",
+                        "x = self.relu(x)",
+                    ],
+                    "post_grad_nodes": ["sigmoid", "relu", "add_tensor_1"],
+                    "pre_grad_nodes": ["sigmoid", "relu", "linear"],
+                },
+                "triton_poi_fused_mul_1": {
+                    "stack_traces": [
+                        "d = a * 3.14",
+                    ],
+                    "post_grad_nodes": ["mul"],
+                    "pre_grad_nodes": ["mul"],
+                },
+                "triton_poi_fused_addmm_gelu_2": {
+                    "stack_traces": [
+                        "z = torch.nn.functional.gelu(y)",
+                        "y = torch.addmm(c, d, b)",
+                    ],
+                    "post_grad_nodes": [
+                        "mul_3",
+                        "mul_1",
+                        "add_tensor",
+                        "add",
+                        "erf",
+                        "mul_2",
+                    ],
+                    "pre_grad_nodes": ["gelu", "addmm"],
+                },
+                "aoti_torch_cuda_mm_out": {
+                    "stack_traces": [
+                        "x = self.fc1(x)",
+                        "y = torch.addmm(c, d, b)",
+                    ],
+                    "post_grad_nodes": ["mm_default_1", "mm_default"],
+                    "pre_grad_nodes": ["linear", "addmm"],
+                },
+            }
+
+            self._check_kernel_information_json(kernel_info, expected.keys())
+
+            self.assertEqual(set(kernel_info.keys()), set(expected.keys()))
+            for key, data in expected.items():
+                all_lines = ",".join(kernel_info[key]["stack_traces"])
+                for s in data["stack_traces"]:
+                    self.assertTrue(s in all_lines)
+
+                self.assertEqual(
+                    sorted(kernel_info[key]["pre_grad_nodes"]),
+                    sorted(data["pre_grad_nodes"]),
+                    f"Mismatch for key: {key}",
+                )
+
+                self.assertEqual(
+                    sorted(kernel_info[key]["post_grad_nodes"]),
+                    sorted(data["post_grad_nodes"]),
+                    f"Mismatch for key: {key}",
+                )
+
+    @torch._inductor.config.patch("trace.provenance_tracking_level", 0)
+    def test_no_kernel_information_without_provenance_tracking(self):
+        """Test that kernel_information.json is not generated without provenance tracking."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x * 2.0
+
+        model = SimpleModel()
+        x = torch.randn(4, 8)
+
+        # Compile with AOTI but without provenance tracking
+        with tempfile.TemporaryDirectory() as temp_dir:
+            ep = torch.export.export(model, (x,), strict=False)
+            pt2_file = os.path.join(temp_dir, "model.pt2")
+            torch._inductor.aoti_compile_and_package(ep, package_path=pt2_file)
+
+            # Extract and check kernel_information.json was NOT created in the package
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            with zipfile.ZipFile(pt2_file, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            expected_json_path = os.path.join(extract_dir, "kernel_information.json")
+            self.assertFalse(
+                os.path.exists(expected_json_path),
+                "kernel_information.json should not exist in package when provenance tracking is disabled",
+            )
+
+    def test_create_kernel_information_json_function(self):
+        """Test the create_kernel_information_json function directly."""
+        # Test with empty state
+        result = create_kernel_information_json()
+        self.assertIsInstance(result, dict)
+        self.assertEqual(len(result), 0)  # Should be empty with no provenance data
 
 
 if __name__ == "__main__":

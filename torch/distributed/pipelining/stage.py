@@ -935,6 +935,60 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
         )
 
+    def _get_init_p2p_neighbors_ops(self) -> list[dist.P2POp]:
+        """
+        Get the operations to initialize the p2p communicators between previous and next stages.
+        This is done so by creating a dummy tensor and sending it to the next stage and receiving
+        from the previous stage.
+        """
+        ops: list[dist.P2POp] = []
+        next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
+        prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
+
+        recv_tensor = torch.zeros(1, device=self.device)
+        send_tensor = torch.tensor(self.stage_index, device=self.device)
+        # forward
+        if not self.is_first:
+            ops.append(
+                dist.P2POp(
+                    dist.irecv,
+                    recv_tensor,
+                    group_peer=prev_stage_peer_rank,
+                    group=self.group,
+                )
+            )
+        if not self.is_last:
+            ops.append(
+                dist.P2POp(
+                    dist.isend,
+                    send_tensor,
+                    group_peer=next_stage_peer_rank,
+                    group=self.group,
+                )
+            )
+
+        # backward
+        if not self.is_first:
+            ops.append(
+                dist.P2POp(
+                    dist.isend,
+                    send_tensor,
+                    group_peer=prev_stage_peer_rank,
+                    group=self.group,
+                )
+            )
+        if not self.is_last:
+            ops.append(
+                dist.P2POp(
+                    dist.irecv,
+                    recv_tensor,
+                    group_peer=next_stage_peer_rank,
+                    group=self.group,
+                )
+            )
+
+        return ops
+
 
 class _PipelineStage(_PipelineStageBase):
     def __init__(
