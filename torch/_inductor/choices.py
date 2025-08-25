@@ -10,11 +10,13 @@ import torch
 
 from . import config
 from .codecache import write_text
+from .ir import FixedLayout, FlexibleLayout
 from .kernel_inputs import KernelInputs  # noqa: TC001
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
     BaseConfigHeuristic,
@@ -24,6 +26,7 @@ from .template_heuristics.triton import (
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
 )
+from .utils import _use_autotune_backend
 from .virtualized import V
 
 
@@ -40,7 +43,6 @@ if TYPE_CHECKING:
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
     from .kernel_template_choice import KernelTemplateChoice
-    from .select_algorithm import ExternKernelChoice
 
 
 class Sortable(typing.Protocol):
@@ -163,12 +165,7 @@ class InductorChoices:
         # First pass: Create dict of template.uid to generator of KernelTemplateChoice objects
         template_choices = {}
         for template in templates:
-            # Extract template_name from the template object
-            template_name = template.uid
-
-            # Get the appropriate template-specific heuristic
-            heuristic = get_template_heuristic(template_name, device_type, op_name)
-
+            heuristic = get_template_heuristic(template.uid, device_type, op_name)
             cs = heuristic.get_template_configs(
                 kernel_inputs, layout, op_name, max_autotune
             )
@@ -197,13 +194,34 @@ class InductorChoices:
 
         # Second pass: Adjust the template choices
         adjusted_choices = self._adjust_mm_configs(template_choices)
-        choices = []
-        # Third pass: Get adjusted choices and collect non-None ChoiceCaller objects
-        for ktc in adjusted_choices:
-            if ktc.choice is not None:
-                choices.append(ktc.choice)
 
-        return choices
+        # Layout optimization: if all choices are ExternKernelChoice and layout is FixedLayout, convert to FlexibleLayout
+        if (
+            all(
+                isinstance(ktc.template, ExternKernelChoice) for ktc in adjusted_choices
+            )
+        ) and not (
+            _use_autotune_backend("CUTLASS"),
+            _use_autotune_backend("CK"),
+            _use_autotune_backend("CKTILE"),
+            _use_autotune_backend("CPP"),
+            # do not run this optimization if we're using CPP,CK,CUTLASS as those paths do not go through
+            # here yet, so we don't know if this is safe to do.
+            # TODO(coconutruben): remove this once CPP,CK,CUTLASS are supported
+        ):
+            for ktc in adjusted_choices:
+                if isinstance(ktc.layout, FixedLayout):
+                    ktc.layout = FlexibleLayout(
+                        device=ktc.layout.device,
+                        dtype=ktc.layout.dtype,
+                        size=ktc.layout.size,
+                    )
+                    # for good measure, delete the cached ChoiceCaller from the ktc if it existed.
+                    # ExternKernelChoice are cheap to generate
+                    if hasattr(ktc, "_choice"):
+                        del ktc._choice
+        # Third pass: Convert to ChoiceCaller objects
+        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
 
     def triton_kernel_kwargs(
         self,
