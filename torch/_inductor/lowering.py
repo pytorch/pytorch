@@ -1334,7 +1334,11 @@ def _assert_async(cond, msg):
     cond = to_dtype(cond, torch.bool)
 
     def inner_fn(index):
-        with cond.data.data.force_load():
+        if hasattr(cond.data, "data") and hasattr(cond.data.data, "force_load"):
+            with cond.data.data.force_load():
+                cond_loader = cond.make_loader()
+                return ops.device_assert_async(cond_loader(index), msg)
+        else:
             cond_loader = cond.make_loader()
             return ops.device_assert_async(cond_loader(index), msg)
 
