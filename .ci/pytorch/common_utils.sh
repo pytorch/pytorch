@@ -233,6 +233,7 @@ function install_torchrec_and_fbgemm() {
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
+    pip_install tbb       # needed for rocm fbgemm
 
     local wheel_dir=dist/fbgemm_gpu
     local found_whl=0
