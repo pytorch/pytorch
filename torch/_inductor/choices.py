@@ -34,9 +34,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from torch.utils._ordered_set import OrderedSet
-
     from triton import Config as TritonConfig
+
+    from torch.utils._ordered_set import OrderedSet
 
     from .codegen.common import KernelTemplate
     from .codegen.simd_kernel_features import SIMDKernelFeatures
