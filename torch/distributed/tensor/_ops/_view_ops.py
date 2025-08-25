@@ -531,22 +531,20 @@ def propagate_shape_and_sharding(
                         maybe_get_shard_mesh_dim_and_placement(dim)
                     )
                     input_sharded = shard_mesh_dim is not None
-                    if i > 0:
-                        can_shard_dim = False
-                        if strict_view and input_sharded:
-                            raise RuntimeError(
-                                f"Attempted to flatten sharded dimension {i}, ",
-                                "but only the leftmost dim of a Flatten can be sharded.",
-                            )
-                    elif input_sharded:
+                    if input_sharded:
                         assert (
                             shard_placement is not None and shard_mesh_dim is not None
                         )
+                        can_shard_dim = False
                         tensor_dim_size = global_input_shape[shard_placement.dim]
                         mesh_dim_size = mesh_sizes[shard_mesh_dim]
-                        if tensor_dim_size % mesh_dim_size != 0:
-                            can_shard_dim = False
-                            if strict_view:
+                        if strict_view and (tensor_dim_size % mesh_dim_size != 0):
+                            if i > 0:
+                                raise RuntimeError(
+                                    f"Attempted to flatten sharded dimension {i}, ",
+                                    "but only the leftmost dim of a Flatten can be sharded.",
+                                )
+                            else:
                                 raise RuntimeError(
                                     f"Attempted to flatten unevenly sharded dimension {i}, "
                                     "which would require resharding the input. "
