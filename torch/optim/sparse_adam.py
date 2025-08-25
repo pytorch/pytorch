@@ -67,10 +67,10 @@ class SparseAdam(Optimizer):
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
-            zero_grad (str, optional):
-                * ``"to_zero"`` - set grad to `0`.
-                * ``"to_none"`` - set grad to None.
-                * `None`(default), not change grad.
+            zero_grad (str, optional): Reset the gradients of all optimized :class:`torch.Tensor` s after the step.
+                * ``"to_zero"`` - set gradients to ``0``.
+                * ``"to_none"`` - set gradients to ``None``.
+                * ``None`` - default, not change gradients.
         """
         loss = None
         if closure is not None:
