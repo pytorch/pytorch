@@ -182,7 +182,7 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 custom_backend_name: str = torch._C._get_privateuse1_backend_name()
-torch_custom_backend: Optional[Callable] = None
+torch_custom_backend: Optional[Callable] = None  # type: ignore[type-arg]
 amp_autocast_modules = [
     torch.amp.autocast_mode.autocast,
     torch.cuda.amp.autocast,
@@ -193,13 +193,14 @@ amp_autocast_modules = [
 def _detect_custom_backend() -> bool:
     global torch_custom_backend
     global amp_autocast_modules
-    def _non_available():
+
+    def _non_available() -> None:
         return False
     if custom_backend_mod := getattr(torch, custom_backend_name, None):
         torch_custom_backend = custom_backend_mod
         is_available = getattr(custom_backend_mod, "is_available", _non_available)()
-        if is_available:
-            amp_autocast_modules.append(torch_custom_backend.amp.autocast)
+        if is_available and hasattr(torch_custom_backend, "amp"):
+            amp_autocast_modules.append(torch_custom_backend.amp.autocast)  # type: ignore[union-attr]
         return is_available
     return False
 
@@ -2239,7 +2240,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
         if torch.cuda.is_available():
             gpu_rng_state = torch.clone(torch.cuda.get_rng_state())
         elif is_custom_backend_available and hasattr(torch_custom_backend, "get_rng_state"):
-            gpu_rng_state = torch.clone(torch_custom_backend.get_rng_state())
+            gpu_rng_state = torch.clone(torch_custom_backend.get_rng_state())  # type: ignore[union-attr]
     try:
         yield
     finally:
@@ -2248,7 +2249,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(gpu_rng_state)  # type: ignore[possibly-undefined]
             elif is_custom_backend_available and hasattr(torch_custom_backend, "set_rng_state"):
-                torch_custom_backend.set_rng_state(gpu_rng_state)
+                torch_custom_backend.set_rng_state(gpu_rng_state)  # type: ignore[union-attr,possibly-undefined]
 
 
 def is_jit_model(
