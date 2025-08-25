@@ -4478,10 +4478,6 @@ class TestAttnBias(NNTestCase):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
-        if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
-            self.skipTest("No support for LOWER_RIGHT variant for now")
-            return
-
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
         make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
@@ -4512,10 +4508,6 @@ class TestAttnBias(NNTestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
-        if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
-            self.skipTest("No support for LOWER_RIGHT variant for now")
-            return
-
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
