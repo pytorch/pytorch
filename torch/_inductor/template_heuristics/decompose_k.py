@@ -7,6 +7,7 @@ import sympy
 import torch
 
 from ..ir import get_free_symbols
+from ..kernel.mm import decompose_k_subgraph_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_k_splits
 from ..virtualized import V
@@ -21,7 +22,10 @@ if TYPE_CHECKING:
 
 
 @register_template_heuristic(
-    "decompose_k", "cuda", register=torch.version.hip is None, op_name="mm"
+    decompose_k_subgraph_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="mm",
 )
 class DecomposeKConfigHeuristics(TemplateConfigHeuristics):
     def get_template_configs(
