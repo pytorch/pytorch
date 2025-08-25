@@ -19,7 +19,7 @@ namespace vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+#if (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE)) && defined(__ARM_FEATURE_BF16)
 
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
@@ -230,8 +230,6 @@ __attribute__((optimize("no-tree-vectorize")))
 #endif
 inline std::tuple<Vectorized<float>, Vectorized<float>>
 convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
-  static_assert(
-      Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   auto zero = svreinterpret_bf16_f32(svdup_n_f32(0.0f));
   auto bf16_vec1 = svzip1_bf16(zero, a);
   auto bf16_vec2 = svzip2_bf16(zero, a);
@@ -243,19 +241,18 @@ convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
 inline Vectorized<c10::BFloat16> convert_float_bfloat16(
     const Vectorized<float>& a,
     const Vectorized<float>& b) {
-  static_assert(
-      Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   svbfloat16_t x1 = svcvt_bf16_f32_z(ptrue, a);
   svbfloat16_t x2 = svcvt_bf16_f32_z(ptrue, b);
   return Vectorized<c10::BFloat16>(svuzp1_bf16(x1, x2));
 }
 
 inline void load_fp32_from_bf16(const BFloat16* data, Vectorized<float>& out) {
-  __at_align__ float values[Vectorized<float>::size()];
+  __at_align__ float * values = new float[Vectorized<float>::size()];
   for (const auto k : c10::irange(Vectorized<float>::size())) {
     values[k] = data[k];
   }
   out = Vectorized<float>::loadu(values);
+  delete[] values;
 }
 
 inline void load_fp32_from_bf16(
@@ -308,8 +305,8 @@ Vectorized<c10::BFloat16> inline operator/(
 }
 
 inline Vectorized<BFloat16>::Vectorized() {
-  const short zero = 0;
-  values = svdup_n_bf16(c10::bit_cast<bfloat16_t>(zero));
+  auto vals_f = svdup_n_f32(0);
+  values = convert_float_bfloat16(vals_f, vals_f);
 }
 
 inline Vectorized<BFloat16>::Vectorized(int val) {

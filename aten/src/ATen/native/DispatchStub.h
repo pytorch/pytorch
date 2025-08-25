@@ -64,8 +64,9 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
-#elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
-  SVE256 = 1,
+#elif defined(HAVE_SVE_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
+  SVE=1,
+  SVE256 = 2,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -115,7 +116,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , void *SVE
       , void *SVE256
 #endif
   );
@@ -136,7 +138,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+    , void *SVE
     , void *SVE256
 #endif
   );
@@ -157,7 +160,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , void *SVE
       , void *SVE256
 #endif
   );
@@ -181,7 +185,8 @@ struct TORCH_API DispatchStubImpl {
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
     , void *ZVECTOR
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+    , void *SVE
     , void *SVE256
 #endif
   );
@@ -238,7 +243,8 @@ private:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , reinterpret_cast<void*>(ZVECTOR)
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE)
       , reinterpret_cast<void*>(SVE256)
 #endif
       )
@@ -299,7 +305,8 @@ public:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
       , reinterpret_cast<void*>(ZVECTOR)
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+      , reinterpret_cast<void*>(SVE)
       , reinterpret_cast<void*>(SVE256)
 #endif
       );
@@ -322,7 +329,8 @@ public:
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
   static TORCH_API FnPtr ZVECTOR;
 #endif
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+  static TORCH_API FnPtr SVE;
   static TORCH_API FnPtr SVE256;
 #endif
 private:
@@ -426,9 +434,11 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_ZVECTOR_DISPATCH(name, fn)
 #endif
 
-#ifdef HAVE_SVE256_CPU_DEFINITION
+#ifdef HAVE_SVE_CPU_DEFINITION
+#define REGISTER_SVE_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, SVE256, fn)
 #else
+#define REGISTER_SVE_DISPATCH(name, fn)
 #define REGISTER_SVE256_DISPATCH(name, fn)
 #endif
 
@@ -440,6 +450,7 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_AVX2_DISPATCH(name, fn)                                             \
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)                                          \
+  REGISTER_SVE_DISPATCH(name, fn)                                              \
   REGISTER_SVE256_DISPATCH(name, fn)
 
 #define REGISTER_NO_CPU_DISPATCH(name)                                         \
@@ -488,6 +499,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 #define ALSO_REGISTER_AVX512_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
+#define ALSO_REGISTER_SVE_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #define ALSO_REGISTER_SVE256_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif
 } // namespace at::native
