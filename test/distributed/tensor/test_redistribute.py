@@ -721,25 +721,24 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                 ([Replicate(), Shard(0), Shard(0)], None),
             ),
             # S(0)S(0)S(0)[1,0,2]-> S(0)S(0)S(1)[1,0,2]-> RS(0)S(1)[1,0,2]->
-            # RRS(1)[1,0,2]-> RS(0)S(1)[0,1,2]-> RS(0)S(0)[0,1,2]
+            # RS(0)S(0)[1,0,2]
             (
                 ([Shard(0), Shard(0), Shard(0)], [1, 0, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
             ),
-            # S(0)S(0)S(0)[0,1,2]-> S(0)S(0)R[0,1,2]-> S(0)RR[0,1,2]->
-            # RRR[1,0,2]-> RS(0)R[2,0,1]-> RS(0)S(0)[2,0,1]
+            # S(0)S(0)S(0)[0,1,2]-> S(0)S(0)S(1)[0,1,2]-> S(0)S(2)S(1)[0,1,2]->
+            # RS(2)S(1)[0,1,2]-> RS(0)S(1)[0,1,2]-> RS(0)S(0)[0,1,2]
             (
                 ([Shard(0), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Replicate(), Shard(0), Shard(0)], [2, 0, 1]),
             ),
-            # RS(0)S(0)[0,1,2]-> RS(0)R[0,1,2]-> RRR[0,2,1]-> RS(0)R[1,2,0]->
-            # S(1)S(0)R[1,2,0]
+            # RS(0)S(0)[0,1,2]-> S(1)S(0)S(0)[0,1,2]-> S(1)S(0)R[0,1,2]
             (
                 ([Replicate(), Shard(0), Shard(0)], [0, 1, 2]),
                 ([Shard(1), Shard(0), Replicate()], [1, 2, 0]),
             ),
         ]
-        excepted_comm_counts = [3, 3, 4, 3, 2]
+        excepted_comm_counts = [3, 3, 3, 5, 1]
         comm_mode = CommDebugMode()
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
             sharding_src_dst_pairs_with_order
