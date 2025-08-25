@@ -90,8 +90,10 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str, name:str) -> None:
-        super().__init__(f"An exception occurred in a subprocess:\n\nName={name}\n{details}")
+    def __init__(self, details: str, name: str) -> None:
+        super().__init__(
+            f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
+        )
 
 
 class SubprocPickler:
@@ -127,7 +129,7 @@ class SubprocPool:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
         self.kind = kind
-        self.names = {}
+        self.names: dict[int, str] = {}
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
@@ -189,9 +191,11 @@ class SubprocPool:
         self.read_thread.start()
 
     def submit(
-        self, job_fn: Callable[_P, _T], *args: _P.args,
+        self,
+        job_fn: Callable[_P, _T],
+        *args: _P.args,
         name: str = "",
-        **kwargs: _P.kwargs
+        **kwargs: _P.kwargs,
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
