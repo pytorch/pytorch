@@ -543,7 +543,7 @@ struct ExpandableSegment {
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
   }
 
- private:
+ protected:
   // Runtime-related methods that must be implemented by derived classes.
 
   // Returns the reserved virtual memory size for this segment, which may be
