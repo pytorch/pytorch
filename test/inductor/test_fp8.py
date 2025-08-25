@@ -6,8 +6,10 @@ from typing import Union
 
 import torch
 from torch import Tensor
+from torch._C import FileCheck
 from torch._inductor import config, utils
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -588,6 +590,46 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_mx_fusion(self):
+        from torchao.prototype.mx_formats.mx_tensor import MXTensor
+        from torchao.prototype.mx_formats.utils import to_blocked
+
+        def scaled_matmul(A, B):
+            """Convert matrices to fp8/fp4 and perform scaled matmul."""
+            a_mx = MXTensor.to_mx(A, torch.float8_e4m3fn, 32)
+            b_mx = MXTensor.to_mx(B, torch.float8_e4m3fn, 32)
+
+            a_data = a_mx._data
+            b_data = b_mx._data
+            assert b_data.is_contiguous()
+            b_data = b_data.transpose(-1, -2)
+
+            a_scale = a_mx._scale_e8m0.view(M, K // 32)
+            b_scale = b_mx._scale_e8m0.view(N, K // 32)
+
+            a_scale_block = to_blocked(a_scale, use_triton_kernel=False)
+            b_scale_block = to_blocked(b_scale, use_triton_kernel=False)
+
+            out = torch._scaled_mm(
+                a_data, b_data, a_scale_block, b_scale_block, out_dtype=torch.bfloat16
+            )
+            return out
+
+        # Run with largest shape
+        M, K, N = 8192, 8192, 8192
+        device = "cuda"
+
+        torch.manual_seed(42)
+        A = torch.randn(M, K, dtype=torch.float32, device=device)
+        B = torch.randn(K, N, dtype=torch.float32, device=device)
+
+        f_c = torch.compile(fullgraph=True)(scaled_matmul)
+
+        out, code = run_and_get_code(f_c, A, B)
+        self.assertEqual(out, scaled_matmul(A, B))
+        FileCheck().check("call").check_count(".run(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("M", (1, 3, 33, 257, 1024))
