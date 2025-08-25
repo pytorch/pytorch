@@ -64,10 +64,10 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         yield dict()
 
 
-@register_template_heuristic(aten_addmm.uid, "cuda")
-@register_template_heuristic(aten_addmm.uid, "cpu")
-@register_template_heuristic(aten_addmm.uid, "xpu")
-@register_template_heuristic(aten_addmm.uid, "mtia")
+@register_template_heuristic(aten_addmm.uid, "cuda", op_name="addmm")
+@register_template_heuristic(aten_addmm.uid, "cpu", op_name="addmm")
+@register_template_heuristic(aten_addmm.uid, "xpu", op_name="addmm")
+@register_template_heuristic(aten_addmm.uid, "mtia", op_name="addmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(
         self,
@@ -82,36 +82,11 @@ class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
         kwargs["beta"] = beta
         return kwargs
 
-    def adjust_kernel_inputs(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> KernelInputs:
-        """
-        For addmm, if we're not in max-autotune, we squeeze
-        the bias
-        """
-        # NOTE: debug why this changes numerics and why this is necessary
-        # we already know it does not help with performance
-        assert isinstance(kernel_inputs, MMKernelInputs), (
-            "Expect MMKernelInputs for addmm"
-        )
-        nodes = kernel_inputs.nodes()
-        bias = nodes[0]
-        if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
-            from ..lowering import lowerings as L
 
-            aten = torch.ops.aten
-            bias = nodes[0]
-            bias = L[aten.squeeze](bias)
-        nodes[0] = bias
-        return kernel_inputs
-
-
-@register_template_heuristic(aten_bias_addmm.uid, "cuda")
-@register_template_heuristic(aten_bias_addmm.uid, "cpu")
-@register_template_heuristic(aten_bias_addmm.uid, "xpu")
-@register_template_heuristic(aten_bias_addmm.uid, "mtia")
+@register_template_heuristic(aten_bias_addmm.uid, "cuda", op_name="addmm")
+@register_template_heuristic(aten_bias_addmm.uid, "cpu", op_name="addmm")
+@register_template_heuristic(aten_bias_addmm.uid, "xpu", op_name="addmm")
+@register_template_heuristic(aten_bias_addmm.uid, "mtia", op_name="addmm")
 class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
     def get_template_configs(
         self,
