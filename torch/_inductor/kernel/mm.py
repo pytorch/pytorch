@@ -568,18 +568,21 @@ def lazy_register_extern_choice(fn):
     return ExternKernelChoice(fn)
 
 
-aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
+aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 
 aten_addmm = ExternKernelChoice(
-    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
 )
 
-aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm_out")
+aten__int_mm = ExternKernelChoice(
+    torch._int_mm, "at::_int_mm_out", op_overload=aten._int_mm.out
+)
 
 aten__sparse_semi_structured_mm = ExternKernelChoice(
     torch._sparse_semi_structured_mm,
     "at::_sparse_semi_structured_mm",
     has_out_variant=False,
+    op_overload=aten._sparse_semi_structured_mm.default,
 )
 
 aten__fp8_mm = ExternKernelChoice(
