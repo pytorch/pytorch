@@ -212,6 +212,10 @@ def create_jump_absolute(target: Instruction) -> Instruction:
     return create_instruction(inst, target=target)
 
 
+def is_jump_absolute(target: Instruction) -> bool:
+    return target.opname in ("JUMP_FORWARD", "JUMP_ABSOLUTE")
+
+
 def create_load_const(val: Any, checked: bool = True) -> Instruction:
     """
     In general we should only create `LOAD_CONST` for immutable objects, but
@@ -502,15 +506,6 @@ def create_binary_slice(
             create_instruction("BUILD_SLICE", arg=2),
             create_instruction(inst_name),
         ]
-
-
-def create_reverse(n: int) -> list[Instruction]:
-    # Reverse the top n values on the stack
-    # UNPACK_SEQUENCE reverses the sequence
-    return [
-        create_instruction("BUILD_TUPLE", arg=n),
-        create_instruction("UNPACK_SEQUENCE", arg=n),
-    ]
 
 
 def lnotab_writer(
