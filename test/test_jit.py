@@ -3068,12 +3068,9 @@ class TestScript(JitTestCase):
                 new_h = torch.tanh(x + h)
                 return new_h, new_h
 
-            def __init__(self, x):
-               self.x = x
-
             def __add__(self, other):
                 if isinstance(other, MyCell):
-                    return MyCell(self.x + other.x)
+                    return MyCell(self + other)
                 else:
                     raise TypeError("Unsupported operand type for +")
 
