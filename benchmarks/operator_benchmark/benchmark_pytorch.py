@@ -3,6 +3,12 @@ import time
 
 import torch
 
+# Import the C++ extension to register the _consume operator
+try:
+    import benchmark_cpp_extension  # noqa: F401
+except ImportError:
+    # If the extension isn't built, define a simple Python fallback
+    print("Failed to import C++ extension, please build it using \ncd pt_extension \npython -m pip install .")
 
 """PyTorch performance microbenchmarks.
 
@@ -71,6 +77,17 @@ class TorchBenchmarkBase(torch.nn.Module):
         for _ in range(iters):
             torch.ops.operator_benchmark._consume(self.forward_impl())
 
+    @torch._dynamo.optimize("inductor")
+    def forward_impl_dynamo(self):
+        # This is to supply the inputs to the forward function which
+        # will be called in both the eager and compile mode of local runs
+        return self.forward(*self.get_inputs())
+
+    def forward_consume_dynamo(self, iters: int):
+        # Dynamo version of forward_consume without decorators (compilation handled by torch.compile)
+        for _ in range(iters):
+            torch.ops.operator_benchmark._consume(self.forward_impl_dynamo())
+
     def module_name(self):
         """this is used to label the operator being benchmarked"""
         if self.user_given_name:
@@ -117,17 +134,31 @@ class PyTorchOperatorTestCase:
         self.framework = "PyTorch"
         self.time_series = []
         self._jit_forward_graph = None
+        self._compile_forward_graph = None
 
     def _generate_jit_forward_graph(self):
         """generate a graph for the forward function via scripting"""
         scripted_op_bench = torch.jit.script(self.op_bench)
         return scripted_op_bench.forward_consume
 
+    def _generate_compile_forward_graph(self):
+        """generate a compiled graph for the forward function via torch.compile"""
+        compiled_forward_consume_dynamo = torch.compile(
+            self.op_bench.forward_consume_dynamo, backend="inductor"
+        )
+        return compiled_forward_consume_dynamo
+
     def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """Run the forward path of an op with JIT mode"""
         if self._jit_forward_graph is None:
             self._jit_forward_graph = self._generate_jit_forward_graph()
         self._jit_forward_graph(num_runs)
+
+    def run_compile_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
+        """Run the forward path of an op with compile mode"""
+        if self._compile_forward_graph is None:
+            self._compile_forward_graph = self._generate_compile_forward_graph()
+        self._compile_forward_graph(num_runs)
 
     def _print_per_iter(self):
         # print last 50 values
