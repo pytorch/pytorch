@@ -1060,7 +1060,7 @@ class Optimizer:
             self.zero_grad(set_to_none=True)
         else:
             raise ValueError(
-                f'Expected `zero_grad` to be one of (None, "to_zero", "to_none"), but got {zero_grad}.'
+                f'Expect `zero_grad` to be one of (None, "to_zero", "to_none"), but got {zero_grad}.'
             )
 
     @overload
