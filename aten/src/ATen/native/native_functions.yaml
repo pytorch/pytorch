@@ -2931,6 +2931,7 @@
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
+    MPS: grid_sampler_3d_mps
   autogen: grid_sampler_3d.out
 
 # `grid_sampler_3d_backward` takes in `output_mask` to optimize performance for
