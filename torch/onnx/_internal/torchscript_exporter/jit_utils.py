@@ -86,7 +86,6 @@ class GraphContext:
             The value representing the single output of this operator (see the `outputs`
             keyword argument for multi-return nodes).
         """
-        # FIXME(justinchuby): Add the return type back once we know how to handle mypy
         return _add_op(self, opname, *raw_args, outputs=outputs, **kwargs)
 
     def aten_op(self, operator: str, *args, overload_name: str = "", **kwargs):
@@ -207,8 +206,6 @@ def _add_op(
 
     The set of operators and the inputs/attributes they take
     is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
-
-    This function is monkey-patched onto Graph.
 
     Args:
         graph_context: The Torch Graph or Block.
@@ -334,7 +331,6 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     return getattr(node, f"{kind}_")(name, value)
 
 
-# TODO: Expose this to user when migrating symbolic helper functions to here.
 def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 

@@ -13,8 +13,6 @@ from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSp
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-
-# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _constants, errors
 from torch.onnx._internal.torchscript_exporter import _type_utils, jit_utils, utils
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
