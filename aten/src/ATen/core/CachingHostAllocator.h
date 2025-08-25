@@ -652,6 +652,25 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   // Resets the peak memory usage metrics
   virtual void reset_peak_stats() = 0;
+
+  virtual void begin_allocate_to_pool(
+      c10::MempoolId_t pool_id,
+      std::function<bool(c10::Stream)> filter) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
+  }
+
+  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
+  }
+
+  virtual void create_or_incref_pool(
+      c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_or_incref_pool");
+  }
+
+  virtual void release_pool(c10::MempoolId_t pool_id) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
+  }
 };
 
 template <typename T, c10::DeleterFnPtr deleteFunc>

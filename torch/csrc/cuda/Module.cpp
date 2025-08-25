@@ -549,6 +549,7 @@ PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+// so there is no way to empty out a specific cache...
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
@@ -1390,6 +1391,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [](cudaStream_t) { return true; });
+        at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(
+            mempool_id, [](c10::Stream) { return true; });
       });
 
   m.def(
@@ -1402,18 +1405,25 @@ static void registerCudaPluggableAllocator(PyObject* module) {
               auto current_tid = std::this_thread::get_id();
               return current_tid == tid;
             });
+        at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(
+            mempool_id, [=](c10::Stream) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
       });
 
   m.def(
       "_cuda_endAllocateToPool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
+        at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id);
       });
 
   m.def(
       "_cuda_releasePool",
       [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+        at::getHostAllocator(at::kCUDA)->release_pool(mempool_id);
       });
 
   m.def(

@@ -4,6 +4,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Deprecated.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 namespace at::cuda {
 

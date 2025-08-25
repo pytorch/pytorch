@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <iostream>
 #include <utility>
@@ -9,11 +10,8 @@
 
 namespace c10::cuda {
 
-using CaptureId_t = unsigned long long;
-
-// first is set if the instance is created by CUDAGraph::capture_begin.
-// second is set if the instance is created by at::cuda::graph_pool_handle.
-using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+// backwards compatibility
+using MempoolId_t = c10::MempoolId_t;
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.

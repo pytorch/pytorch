@@ -1,3 +1,5 @@
+#include <ATen/core/CachingHostAllocator.h>
+
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/core/impl/GPUTrace.h>
@@ -979,12 +981,6 @@ PrivatePoolState::PrivatePoolState(
     segments.emplace_back(head);
   }
 }
-
-struct MempoolIdHash {
-  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
-    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
-  }
-};
 
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
@@ -4157,13 +4153,18 @@ MemPool::MemPool(
   }
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
+  at::getHostAllocator(at::kCUDA)->create_or_incref_pool(id_);
   if (use_on_oom) {
     CUDACachingAllocator::setUseOnOOM(device_, id_);
   }
 }
 
 MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
+  // We used to assert that TORCH_INTERNAL_ASSERT(use_count() == 1);
+  // However, this assertion is not true if a memory pool is shared
+  // with a cuda graph. That CUDAGraph will increase the use count
+  // until it is reset.
+  at::getHostAllocator(at::kCUDA)->release_pool(id_);
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
 }
