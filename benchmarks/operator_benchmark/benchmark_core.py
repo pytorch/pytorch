@@ -191,6 +191,7 @@ class BenchmarkRunner:
         self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
+        self.use_compile = args.use_compile
         self.num_runs = args.num_runs
         self.print_per_iter = False
         self.output_csv = args.output_csv
@@ -241,7 +242,7 @@ class BenchmarkRunner:
                     )
                 )
         else:
-            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
+            print(f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}")
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -265,7 +266,7 @@ class BenchmarkRunner:
         out = {
             "test_name": test_case.test_config.test_name,
             "input_config": test_case.test_config.input_config,
-            "mode": "JIT" if self.use_jit else "Eager",
+            "mode": "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager",
             "run": "Backward" if test_case.test_config.run_backward else "Forward",
             "latency": round(reported_run_time_us[0], 3),
             "latency unit": "us",
@@ -330,6 +331,8 @@ class BenchmarkRunner:
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
+        if self.use_compile:
+            func = test_case.run_compile_forward
         forward_time = timeit.timeit(
             functools.partial(func, iters, print_per_iter, cuda_sync), number=1
         )
@@ -369,7 +372,7 @@ class BenchmarkRunner:
             time_trace.append(report_run_time)
             # Print out the time spent in each epoch in ms
             if self.args.report_aibench:
-                mode = "JIT" if self.use_jit else "Eager"
+                mode = "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager"
                 test_name = "_".join(
                     [test_case.framework, test_case.test_config.test_name, mode]
                 )
