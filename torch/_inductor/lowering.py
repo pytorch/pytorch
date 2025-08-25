@@ -2879,6 +2879,7 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
+make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 
 # Register with type_promotion_kind None.
@@ -6840,7 +6841,9 @@ def sym_size(a, dim):
     # int, but you KNOW that int must always be a constant,
     # then you do not need trace that call at all (and just
     # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6848,7 +6851,9 @@ def sym_size(a, dim):
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
     # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt)
+    assert isinstance(val, torch.SymInt), (
+        f"Expect val to be torch.SymInt but got val={val}"
+    )
     return val.node.expr
 
 
@@ -6931,17 +6936,17 @@ def resize(x, size, *, memory_format=None):
         and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
     ):
         if is_float_dtype(dtype):
-            uninitalized_val = float("nan")
+            uninitialized_val = float("nan")
         elif is_integer_dtype(dtype):
-            uninitalized_val = torch.iinfo(dtype).max
+            uninitialized_val = torch.iinfo(dtype).max
         else:
-            uninitalized_val = True
+            uninitialized_val = True
     else:
         # using zero as that is what empty does
-        uninitalized_val = 0.0
+        uninitialized_val = 0.0
 
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
-        return full(size, uninitalized_val, dtype=dtype, device=device)
+        return full(size, uninitialized_val, dtype=dtype, device=device)
 
     x_flat = as_strided(
         x,
@@ -6961,7 +6966,7 @@ def resize(x, size, *, memory_format=None):
         flat_index_expr = ops.index_expr(flat_index, torch.int64)
         limit = ops.index_expr(old_numel, torch.int64)
         mask = ops.lt(flat_index_expr, limit)
-        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitialized_val)
 
     out = Pointwise.create(
         device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
