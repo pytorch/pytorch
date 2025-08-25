@@ -4101,6 +4101,24 @@ class CPUReproTests(TestCase):
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    def test_relu_permute_reshape_reinterpret_view(self):
+        def fn(x):
+            n, c, h, w = x.shape
+            return torch.relu(x).permute(0, 2, 3, 1).reshape(n, h * w, c)
+
+        x = torch.randn(2, 32, 4, 4).to(memory_format=torch.channels_last)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            expected = fn(x)
+            compiled_fn = torch.compile(fn)
+            actual, code = run_and_get_cpp_code(compiled_fn, x)
+            self.assertEqual(expected, actual)
+            # 1 generated kernel
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            # check that there is no transpose
+            FileCheck().check_count("transpose_mxn", 0, exactly=True).run(code)
+
     def test_attention_size_mismatch(self):
         class Attention(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
@@ -5453,6 +5471,24 @@ class CPUReproTests(TestCase):
 
                 # Verify correctness with explicit samples (should match exactly)
                 torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+
+    def test_outer_looop_fusion_with_local_buf(self):
+        def fn(
+            xs: torch.Tensor,
+            Ls: torch.Tensor,
+        ):
+            arr = -torch.einsum("i...,i->i...", xs, Ls)
+            temp = torch.exp(arr)
+            Q = torch.einsum("i...->i", temp)
+            ans = torch.einsum("i,i...->i...", 1 / Q, temp)
+            return ans
+
+        xs = torch.ones((5, 1, 32, 32), requires_grad=False)
+        Ls = torch.ones((5), requires_grad=False)
+        expected = fn(xs, Ls)
+        compiled_func = torch.compile(fn, backend="inductor")
+        result = compiled_func(xs, Ls)
+        torch.testing.assert_close(result, expected)
 
 
 if __name__ == "__main__":
