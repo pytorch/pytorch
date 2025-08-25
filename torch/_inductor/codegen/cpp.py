@@ -933,8 +933,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar(dtype=torch.int32)
-        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32, shape=x.shape)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype, shape=x.shape)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -5158,11 +5158,19 @@ class CppScheduling(BaseScheduling):
                         ):
                             continue
                         # Local Buffer is a view of global buffer
+                        local_buffer_stride: list[int] = []
+                        stride = global_buffer_layout.stride[-1]
+                        local_buffer_size = get_call_ranges(scheduler_node)[
+                            size_offset:
+                        ]
+                        for sz in reversed(local_buffer_size):
+                            local_buffer_stride.insert(0, stride)
+                            stride *= sz
                         local_buffer_layout = ir.FixedLayout(
                             global_buffer_layout.device,
                             global_buffer_layout.dtype,
-                            global_buffer_layout.size[size_offset:],
-                            global_buffer_layout.stride[size_offset:],
+                            local_buffer_size,
+                            local_buffer_stride,
                         )
 
                         def try_share_local_buffer(local_buffer_layout, local_buffers):
@@ -5385,7 +5393,7 @@ class CppScheduling(BaseScheduling):
         )
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         # below add provenance tracing info for cpu CppKernel types
-        if config.trace.provenance_tracking:
+        if config.trace.provenance_tracking_level != 0:
             set_kernel_post_grad_provenance_tracing(nodes, kernel_name)
 
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
@@ -5467,7 +5475,7 @@ class KernelGroup:
             "win32",
         ]
         if enable_kernel_profile:
-            code.writelines(["#include <ATen/record_function.h>"])
+            code.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         code.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
 
         # 2. Function definition
@@ -5490,7 +5498,10 @@ class KernelGroup:
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        (
+                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                            f'record_{prefix + kernel_name}_("{prefix + kernel_name}", nullptr);'
+                        )
                     ]
                 )
             for old, new in self.args.aliases():
