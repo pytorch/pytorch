@@ -44,13 +44,82 @@ class DTensorRedistributePlanner:
     class DistState:
         placements: tuple[Placement, ...]
         device_order: tuple[int, ...]
-        # logical_shape: tuple[int, ...]
+        # Use the following attribute to deduplicate the case where different
+        # device order result in the same layout. E.g., RS(0) with device order
+        # [1,0] and RS(0) with device order [0,1].
+        _tensor_dim_to_mesh_dim_with_order: Optional[tuple[tuple[int, ...], ...]] = (
+            dataclasses.field(default=None, init=False, repr=False, compare=False)
+        )
+        _replicate_order: Optional[tuple[int, ...]] = dataclasses.field(
+            default=None, init=False, repr=False, compare=False
+        )
+        _hash: Optional[int] = dataclasses.field(
+            default=None, init=False, repr=False, compare=False
+        )
 
         def __str__(self):
             return f"{self.placements}{self.device_order})"
 
         def __repr__(self):
             return self.__str__()
+
+        def __post_init__(self):
+            sorted_placements = sorted(
+                enumerate(self.placements), key=lambda x: self.device_order[x[0]]
+            )
+            compressed_p: list[list[int]] = [[] for _ in range(len(self.placements))]
+            replicate_p: list[int] = []
+            for order, (mesh_dim, p) in enumerate(sorted_placements):
+                if isinstance(p, Shard):
+                    compressed_p[p.dim].append(mesh_dim)
+                elif isinstance(p, Replicate):
+                    replicate_p.append(mesh_dim)
+            object.__setattr__(
+                self,
+                "_tensor_dim_to_mesh_dim_with_order",
+                tuple(tuple(x) for x in compressed_p),
+            )
+            object.__setattr__(
+                self,
+                "_replicate_order",
+                tuple(replicate_p),
+            )
+            # precompute hash after all attributes are set
+            object.__setattr__(
+                self,
+                "_hash",
+                self._compute_hash(),
+            )
+
+        def __hash__(self) -> int:
+            return self._hash if self._hash is not None else self._compute_hash()
+
+        def _compute_hash(self) -> int:
+            return hash(
+                (
+                    self.placements,
+                    self._replicate_order,
+                    self._tensor_dim_to_mesh_dim_with_order,
+                )
+            )
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, DTensorRedistributePlanner.DistState):
+                return False
+            if self._hash != other._hash:
+                return False
+            # Technically, we could ignore `_replicate_order`. However, we
+            # include it here because we permute the replicate placement order
+            # to explore device order permutations.
+            return (
+                self.placements,
+                self._tensor_dim_to_mesh_dim_with_order,
+                self._replicate_order,
+            ) == (
+                other.placements,
+                other._tensor_dim_to_mesh_dim_with_order,
+                other._replicate_order,
+            )
 
     @classmethod
     def _create_cache_key(cls, device_mesh, tensor_dimension):
@@ -382,7 +451,6 @@ class DTensorRedistributePlanner:
         dst_state = self.DistState(dst_spec.placements, dst_device_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
-
         for cur_state, nxt_state in zip(state_path[:-1], state_path[1:]):
             # find the mesh_dim that is different between cur_state and nxt_state
             if cur_state.placements != nxt_state.placements:
