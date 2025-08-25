@@ -3264,6 +3264,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     xy_sizes_only = [
                         size for size in dense_sizes if "X" in size or "Y" in size
                     ]
+                    accumulator.shape = tuple(xy_sizes_only)
                     dense_size_str = f"[{', '.join(xy_sizes_only)}]"
                     self.body.writeline(
                         f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
