@@ -694,7 +694,7 @@ def _clone_meta(
         )
 
     # memory_format == torch.preserve_format
-    strides = input.stride() #strides = utils.compute_elementwise_output_strides(input) #
+    strides = input.stride()
     return torch.empty_strided(
         input.shape,
         strides,
