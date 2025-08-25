@@ -659,7 +659,10 @@ class TestFlexAttention(InductorTestCase):
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
-        converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)
+        kv_len_tensor = torch.full((KV_B,), KV_S, device=device, dtype=torch.int64)
+        converted_block_mask = paged_attention.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
         converted_score_mod = paged_attention.get_score_mod(score_mod)
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
@@ -5124,7 +5127,12 @@ class TestPagedAttention(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len, device=device
         )
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, kv_len=kv_len_tensor
+        )
 
         zeros = [0, 0, 0, 0]
         # Check that the new block mask is correct
@@ -5399,7 +5407,9 @@ class TestPagedAttention(InductorTestCase):
         )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, kv_len=max_seq_len
+        )
 
         compiled_sdpa = torch.compile(
             create_attention(

@@ -120,59 +120,11 @@
     kv_indices = KV_IDX + sparse_idx_hz_offset
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
     indices_idx = block_n_start // SPARSE_KV_MULTIPLE
-    off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
-    off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
-    # first kv block we're loading
-
-    # last valid block according to sparse mask
-    block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
-
-    K_block_ptr = tl.make_block_ptr(
-        base=K + k_offset,
-        shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
-        strides=(stride_kk, stride_kn),
-        offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-        order=(0, 1)
-    )
-    V_block_ptr = tl.make_block_ptr(
-        base=V + v_offset,
-        shape=(KV_LEN, V_HEAD_DIM),
-        strides=(stride_vn, stride_vk),
-        offsets=(off_n, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
-        order=(1, 0)
-    )
-    offs_n = tl.arange(0, BLOCK_N) + off_n
-
-    acc, l_i, m_i = forward_inner(
-        {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
-        # accumulatd values
-        acc, l_i, m_i,
-        #offsets
-        off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
-        None,
-        #block sparse data
-        kv_indices, kv_num_blocks,
-        block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
-        MATMUL_PRECISION,
-        IS_FULL_BLOCKS=False,
-    )
-
-
-    # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # We know these blocks are guaranteed to be "full", so we don't need to
-    # apply mask_mod to them - only score_mod
-    if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
-        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
-        block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
-        block_n_end = block_n_start + TILE_KV_MULTIPLE
-        indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+    # Early exit: skip CTA computation if indices_idx exceeds available KV blocks to prevent invalid memory access
+    if indices_idx <= MAX_VALID_KV_IDX:
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
+        # first kv block we're loading
 
         # last valid block according to sparse mask
         block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
@@ -207,8 +159,60 @@
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
             MATMUL_PRECISION,
-            IS_FULL_BLOCKS=True,
+            IS_FULL_BLOCKS=False,
         )
+
+
+    # ~~~~~~~~~~~~~~ "full" blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # We know these blocks are guaranteed to be "full", so we don't need to
+    # apply mask_mod to them - only score_mod
+    if HAS_FULL_BLOCKS:
+        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
+        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
+        block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
+        block_n_end = block_n_start + TILE_KV_MULTIPLE
+        indices_idx = block_n_start // SPARSE_KV_MULTIPLE
+        # Early exit: skip CTA computation if indices_idx exceeds available KV blocks to prevent invalid memory access
+        if indices_idx <= MAX_VALID_KV_IDX:
+            off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
+            off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
+
+            # last valid block according to sparse mask
+            block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+            K_block_ptr = tl.make_block_ptr(
+                base=K + k_offset,
+                shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
+                strides=(stride_kk, stride_kn),
+                offsets=(0, off_n),
+                block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
+                order=(0, 1)
+            )
+            V_block_ptr = tl.make_block_ptr(
+                base=V + v_offset,
+                shape=(KV_LEN, V_HEAD_DIM),
+                strides=(stride_vn, stride_vk),
+                offsets=(off_n, 0),
+                block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
+                order=(1, 0)
+            )
+            offs_n = tl.arange(0, BLOCK_N) + off_n
+
+            acc, l_i, m_i = forward_inner(
+                {{gen_argdefs()}},
+                q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
+                # accumulatd values
+                acc, l_i, m_i,
+                #offsets
+                off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+                None,
+                #block sparse data
+                kv_indices, kv_num_blocks,
+                block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
+                MATMUL_PRECISION,
+                IS_FULL_BLOCKS=True,
+            )
 
     m_offset = off_t * stride_mt + off_z * stride_mz
     l_offset = off_t * stride_lt + off_z * stride_lz
