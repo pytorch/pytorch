@@ -4647,6 +4647,20 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
 
+    def test_argmin_argmax_non_contiguous(self):
+        # https://github.com/pytorch/pytorch/issues/160740
+        mps_tensor_contiguous = torch.randn(5, 5, device='mps')
+        cpu_tensor_contiguous = mps_tensor_contiguous.detach().clone().cpu()
+        mps_tensor_transposed = mps_tensor_contiguous.t()
+        cpu_tensor_transposed = cpu_tensor_contiguous.t()
+        mps_tensor_strided = mps_tensor_contiguous[::2, ::2]
+        cpu_tensor_strided = cpu_tensor_contiguous[::2, ::2]
+
+        self.assertEqual(torch.argmax(mps_tensor_transposed), torch.argmax(cpu_tensor_transposed))
+        self.assertEqual(torch.argmax(mps_tensor_strided), torch.argmax(cpu_tensor_strided))
+        self.assertEqual(torch.argmin(mps_tensor_transposed), torch.argmin(cpu_tensor_transposed))
+        self.assertEqual(torch.argmin(mps_tensor_strided), torch.argmin(cpu_tensor_strided))
+
     def test_reduction_sum_max_long_val(self):
         x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
         x_cpu = x_mps.detach().clone().cpu()
