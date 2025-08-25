@@ -352,8 +352,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
-                   << std::uppercase << prop.device_id << std::dec
-                   << ", uuid=" << uuid_to_string(prop.uuid)
+                   << std::uppercase << prop.device_id << std::dec << ", uuid="
+                   << uuid_to_string(reinterpret_cast<const char*>(prop.uuid))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
