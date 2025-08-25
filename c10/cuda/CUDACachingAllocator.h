@@ -31,6 +31,13 @@
 // not counted as a word boundary, so you would otherwise have to list each
 // of these functions.
 
+namespace c10::CachingDeviceAllocator {
+template <>
+struct TraceEntryTraits<cuda::CUDAStream> {
+  using StreamHandleT = cudaStream_t;
+};
+} // namespace c10::CachingDeviceAllocator
+
 namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
@@ -62,11 +69,6 @@ struct SegmentInfo {
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
-};
-
-template <>
-struct TraceEntryTraits<cuda::CUDAStream> {
-  using StreamHandleT = cudaStream_t;
 };
 
 // Keep for BC reasons

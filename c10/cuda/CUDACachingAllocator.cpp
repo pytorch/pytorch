@@ -57,6 +57,19 @@ namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeMemoryCallbacksRegistry, FreeMemoryCallback)
 
+namespace CachingDeviceAllocator {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+template <>
+struct ExpandableSegmentTraits<cuda::CUDAStream> {
+  struct Handle {
+    CUmemGenericAllocationHandle handle;
+    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+  };
+  using HandleT = Handle*;
+};
+#endif
+} // namespace CachingDeviceAllocator
+
 namespace cuda::CUDACachingAllocator {
 
 using namespace c10::CachingAllocator;
@@ -236,15 +249,6 @@ bevhavior for allocator tensors that need to be used cross-process.
 Instead these mapping have to be done manually. The allocator now has an
 `enablePeerAccess` method to do this.
 */
-
-template <>
-struct ExpandableSegmentTraits<cuda::CUDAStream> {
-  struct Handle {
-    CUmemGenericAllocationHandle handle;
-    std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
-  };
-  using HandleT = Handle*;
-};
 
 struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
   SegmentRange map(SegmentRange range) override {
