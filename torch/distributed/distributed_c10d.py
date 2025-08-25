@@ -5458,7 +5458,7 @@ def new_subgroups(
         ranks_per_subgroup_list = [
             ranks[i : i + group_size] for i in range(0, len(ranks), group_size)
         ]
-    
+
     return new_subgroups_by_enumeration(
         ranks_per_subgroup_list,
         timeout=timeout,
