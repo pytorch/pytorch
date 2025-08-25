@@ -448,6 +448,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
+# Resume tracing in nested frames if a nested graph break occurs
+# Old behavior is to bubble up the graph break to the top level frame.
+nested_graph_breaks = False
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.

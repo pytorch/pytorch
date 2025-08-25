@@ -73,8 +73,10 @@ from .bytecode_analysis import (
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
+    create_dup_top,
     create_instruction,
     create_jump_absolute,
+    create_reverse,
     create_swap,
     get_code_keys,
     Instruction,
@@ -668,12 +670,14 @@ def generic_jump(
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, all_stack_locals_metadata
+            self.next_instruction, 0, all_stack_locals_metadata
         )
         if push:
             self.push(value)
         assert inst.target is not None
-        if_jump = self.create_call_resume_at(inst.target, all_stack_locals_metadata)
+        if_jump = self.create_call_resume_at(
+            inst.target, int(push), all_stack_locals_metadata
+        )
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
@@ -1006,7 +1010,7 @@ def break_graph_if_unsupported(
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
-                    self.next_instruction, all_stack_locals_metadata
+                    self.next_instruction, push, all_stack_locals_metadata
                 )
             )
 
@@ -1404,13 +1408,45 @@ class InstructionTranslatorBase(
         # where we call step_graph_break right now is when the stack is empty,
         # so let's enforce that for now.
         assert not self.stack
-        self.output.compile_subgraph(
+        # NOTE: if we support non-empty self.stack in the future, the `stack_pops` argument
+        # below should be set to the stack length to ensure that the stack is codegen'd
+        # for the rest of the function.
+        all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
+        # load locals from frame values
+        # current frame state
+        # [
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ],
+        cg = PyCodegen(self)
         self.output.add_output_instructions(
-            [create_jump_absolute(continue_inst)] + self.instructions
+            [
+                cg.create_load_const(-1),
+                cg.create_binary_subscr(),
+                cg.create_load_const(1),
+                cg.create_binary_subscr(),
+            ]
+        )
+        for local, idx in all_stack_locals_metadata[-1].locals_names.items():
+            self.output.add_output_instructions(
+                [
+                    create_dup_top(),
+                    cg.create_load_const(idx),
+                    cg.create_binary_subscr(),
+                    cg.create_store(local),
+                ]
+            )
+        self.output.add_output_instructions(
+            [
+                create_instruction("POP_TOP"),
+                create_jump_absolute(continue_inst),
+                *self.instructions,
+            ]
         )
 
     def run_ctx_mgr(self) -> Any:
@@ -1510,7 +1546,7 @@ class InstructionTranslatorBase(
                 )
 
         # for continuation functions
-        if name.startswith("__stack"):
+        if name.startswith("__stack") or name == "__nested_frame_values":
             self.symbolic_locals.pop(name)
 
     def LOAD_DEREF(self, inst: Instruction) -> None:
@@ -2415,7 +2451,9 @@ class InstructionTranslatorBase(
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
-            self.create_call_resume_at(self.next_instruction, all_stack_locals_metadata)
+            self.create_call_resume_at(
+                self.next_instruction, 0, all_stack_locals_metadata
+            )
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
@@ -2427,15 +2465,240 @@ class InstructionTranslatorBase(
         )
 
     def create_call_resume_at(
-        self, offset: Instruction, all_stack_locals_metadata: Any
+        self, inst: Instruction, push: int, all_stack_locals_metadata: Any
     ) -> list[Instruction]:
-        raise AssertionError(
-            f"create_call_resume_at not overridden by subclass {type(self)}"
+        self.instruction_pointer = None
+
+        if inst.opname == "RETURN_VALUE":
+            return [create_instruction("RETURN_VALUE")]
+        elif inst.opname == "RETURN_CONST":
+            return [create_instruction("RETURN_CONST", argval=inst.argval)]
+
+        cg = PyCodegen(self)
+
+        # current frame state
+        # [
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ], `push` values from running the unsupported instruction
+
+        # move the `push` stack values to the frame N stack
+        cg.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=push),
+                # frames_list, push_values_list
+                *create_swap(2),
+                create_dup_top(),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                # push_values_list, frames_list, frames_list[0][0]
+                *create_swap(3),
+                # frames_list[0][0] += push_values_list
+                create_instruction("LIST_EXTEND", arg=2),
+                *create_swap(2),
+                # frames_list, frames_list[0][0]
+                create_instruction("POP_TOP"),
+            ]
         )
 
+        # current frame state
+        # [
+        #   (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ],
+
+        #
+        txes = []
+        cur_tx: Optional[InstructionTranslatorBase] = self
+        while cur_tx is not None:
+            txes.append(cur_tx)
+            cur_tx = cur_tx.parent
+        assert len(txes) == len(all_stack_locals_metadata)
+
+        # Handle inactive context variables.
+        # The resume function assumes that context variables are the class, NOT the object.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
+        # NOTE: if the unsupported instruction modifies the inactive context variable, it may
+        # result in silent incorrectness!
+        for i, meta in enumerate(all_stack_locals_metadata):
+            for (j, _), j_orig in zip(meta.stack_ctx_args, meta.stack_ctx_idxes_orig):
+                # Replace the stack var with the context class
+                ctx = cast(ContextWrappingVariable, txes[i].stack[j_orig])
+                # frames[i][0][j] = reconstructed_ctx
+                cg.append_output(create_dup_top())
+                ctx.reconstruct_type(cg)
+                cg.extend_output(
+                    [
+                        *create_swap(2),
+                        cg.create_load_const(i),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(j),
+                        create_instruction("STORE_SUBSCR"),
+                    ]
+                )
+
+            for name, _ in meta.locals_ctx_args:
+                # Replace the local with the context class
+                ctx = cast(ContextWrappingVariable, txes[i].symbolic_locals[name])
+                # frames[i][1][meta.locals_names[name]] = reconstructed_ctx
+                cg.append_output(create_dup_top())
+                ctx.reconstruct_type(cg)
+                cg.extend_output(
+                    [
+                        *create_swap(2),
+                        cg.create_load_const(i),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(1),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(meta.locals_names[name]),
+                        create_instruction("STORE_SUBSCR"),
+                    ]
+                )
+
+        name = unique_id(f"__resume_at_{inst.offset}")
+
+        assert not config.nested_graph_breaks, "NYI"
+
+        # more locals may have been pruned after the unsupported instruction (e.g. branch)
+        reads = livevars_analysis(self.instructions, inst)
+        all_argnames = tuple(
+            k
+            for k in self.symbolic_locals.keys()
+            if k in reads and k not in self.cell_and_freevars()
+        )
+        argnames_null_set = set(all_stack_locals_metadata[-1].locals_null_keys)
+        argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
+        argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
+        # compile_subgraph did not codegen any NULLs,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(
+            all_stack_locals_metadata[-1].stack_null_idxes
+        )
+        nargs = stack_len + len(argnames)
+
+        new_code: types.CodeType = ContinueExecutionCache.lookup(
+            self.f_code,
+            self.lineno,
+            inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
+            stack_len,
+            argnames,
+            argnames_null,
+            tuple(b.resume_fn() for b in self.block_stack),
+            tuple(all_stack_locals_metadata[-1].stack_ctx_args),
+            tuple(all_stack_locals_metadata[-1].locals_ctx_args),
+            tuple(all_stack_locals_metadata[-1].stack_null_idxes),
+        )
+
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", lambda: None
+        )()
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
+
+        if new_code.co_freevars:
+            # expose code object for debugging purposes
+            self.output.install_global_unsafe(name, new_code)
+            cg.make_function_with_closure(name, new_code, True, 1)
+            package_name = None
+        else:
+            # This is safe: we pre-generate a unique name
+            self.output.install_global_unsafe(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
+            cg.extend_output(cg.load_function_name(name, True, 1))
+            package_name = name
+
+        if self.package is not None:
+            self.package.add_resume_function(
+                new_code, self.f_globals["__name__"], package_name
+            )
+
+        # load top level-frame; final stack state should be:
+        # [
+        #   (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
+        # ], frame 1 stack + frame 1 non-cell locals
+        cg.extend_output(
+            [
+                create_dup_top(),
+                create_dup_top(),
+                # frames, frames, frames
+                cg.create_load_const(-1),
+                cg.create_binary_subscr(),
+                # frames, frames, frames[-1]
+                *create_swap(2),
+                # frames, frames[-1], frames
+                cg.create_load_const(-1),
+                create_instruction("DELETE_SUBSCR"),
+                # del frames[-1]; stack: frames, frames[-1]
+                create_dup_top(),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                # frames, frames[-1], frames[-1][0]
+                *create_swap(2),
+                cg.create_load_const(1),
+                cg.create_binary_subscr(),
+            ]
+        )
+
+        # frames, frames[-1][0], frames[-1][1]
+        for name in argnames:
+            cg.extend_output(
+                [
+                    create_dup_top(),
+                    cg.create_load_const(
+                        all_stack_locals_metadata[-1].locals_names[name]
+                    ),
+                    cg.create_binary_subscr(),
+                    *create_swap(2),
+                ],
+            )
+        # frames, frames[-1][0], *(live locals), frames[-1][1]
+        cg.extend_output(
+            [
+                create_instruction("POP_TOP"),
+                create_instruction("BUILD_LIST", arg=len(argnames)),
+                create_instruction("LIST_EXTEND", arg=1),
+                # UNPACK_SEQUENCE reverses elements
+                create_instruction("UNPACK_SEQUENCE", arg=nargs),
+                *create_reverse(nargs),
+            ]
+        )
+        # frames, *(stack + live locals)
+
+        cg.extend_output(create_call_function(nargs + 1, False))
+        cg.append_output(create_instruction("RETURN_VALUE"))
+        return cg.get_instructions()
+
     def should_compile_partial_graph(self) -> bool:
-        raise AssertionError(
-            f"should_compile_partial_graph not overridden by subclass {type(self)}"
+        if sys.version_info >= (3, 11):
+            # Do not compile if current instruction's block is not the top with block
+            entry = self.current_instruction.exn_tab_entry
+            if entry and (
+                not self.block_stack or entry.target is not self.block_stack[-1].target
+            ):
+                return False
+        return (
+            all(b.can_restore() for b in self.block_stack)
+            and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
+            and not self.active_generic_context_managers
         )
 
     @break_graph_if_unsupported(push=0)
@@ -3612,125 +3875,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             return self.f_globals[source.global_name]
         raise KeyError
 
-    def run(self) -> None:
-        super().run()
-
-    def should_compile_partial_graph(self) -> bool:
-        if sys.version_info >= (3, 11):
-            # Do not compile if current instruction's block is not the top with block
-            entry = self.current_instruction.exn_tab_entry
-            if entry and (
-                not self.block_stack or entry.target is not self.block_stack[-1].target
-            ):
-                return False
-        return (
-            all(b.can_restore() for b in self.block_stack)
-            and not self.one_graph
-            and not self.error_on_graph_break
-            and not self.is_tracing_resume_prologue
-            and not self.active_generic_context_managers
-        )
-
-    def create_call_resume_at(
-        self, inst: Instruction, all_stack_locals_metadata: Any
-    ) -> list[Instruction]:
-        self.instruction_pointer = None
-
-        if inst.opname == "RETURN_VALUE":
-            return [create_instruction("RETURN_VALUE")]
-        elif inst.opname == "RETURN_CONST":
-            return [create_instruction("RETURN_CONST", argval=inst.argval)]
-
-        reads = livevars_analysis(self.instructions, inst)
-        all_argnames = tuple(
-            k
-            for k in self.symbolic_locals.keys()
-            if k in reads and k not in self.cell_and_freevars()
-        )
-        # NOTE: do not use isinstance, since it realizes lazy VT's
-        argnames_null_set = set(all_stack_locals_metadata[0].locals_null_keys)
-        argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
-        argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
-        if sys.version_info < (3, 12):
-            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
-        # compile_subgraph did not codegen any NULLs,
-        # so we should not count NullVariables
-        stack_len = len(self.stack) - len(all_stack_locals_metadata[0].stack_null_idxes)
-        nargs = stack_len + len(argnames)
-
-        cg = PyCodegen(self)
-
-        # Handle inactive context variables.
-        # The resume function assumes that context variables are the class, NOT the object.
-        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
-        # NOTE: if the unsupported instruction modifies the inactive context variable, it may
-        # result in silent incorrectness!
-        for (i, _), i_orig in zip(
-            all_stack_locals_metadata[0].stack_ctx_args,
-            all_stack_locals_metadata[0].stack_ctx_idxes_orig,
-        ):
-            # Replace the current stack var with the context class
-            ctx = cast(ContextWrappingVariable, self.stack[i_orig])
-            ctx.reconstruct_type(cg)
-            cg.extend_output(create_swap(stack_len - i + 1))
-            cg.append_output(create_instruction("POP_TOP"))
-
-        for name, _ in all_stack_locals_metadata[0].locals_ctx_args:
-            # Replace the local with the context class
-            ctx = cast(ContextWrappingVariable, self.symbolic_locals[name])
-            ctx.reconstruct_type(cg)
-            cg.append_output(create_instruction("STORE_FAST", argval=name))
-
-        name = unique_id(f"__resume_at_{inst.offset}", with_uuid=True)
-
-        new_code: types.CodeType = ContinueExecutionCache.lookup(
-            self.f_code,
-            self.lineno,
-            inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
-            stack_len,
-            argnames,
-            argnames_null,
-            tuple(b.resume_fn() for b in self.block_stack),
-            tuple(all_stack_locals_metadata[0].stack_ctx_args),
-            tuple(all_stack_locals_metadata[0].locals_ctx_args),
-            tuple(all_stack_locals_metadata[0].stack_null_idxes),
-        )
-
-        # Add original GraphModule context to the resume function to handle
-        # the case of a graph break while tracing a GraphModule
-        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", lambda: None
-        )()
-        if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
-                orig_graphmodule_maybe
-            )
-
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(name, new_code)
-            cg.make_function_with_closure(name, new_code, True, stack_len)
-            package_name = None
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                name, types.FunctionType(new_code, self.f_globals, name)
-            )
-            cg.extend_output(cg.load_function_name(name, True, stack_len))
-            package_name = name
-
-        if self.package is not None:
-            if self.output.package is not None:
-                self.package.add_resume_function(
-                    new_code, self.f_globals["__name__"], function_name=package_name
-                )
-
-        cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.extend_output(create_call_function(nargs, False))
-        cg.append_output(create_instruction("RETURN_VALUE"))
-        return cg.get_instructions()
-
     def symbolic_locals_contain_module_class(self) -> bool:
         for v in self.symbolic_locals.values():
             if isinstance(v, UserDefinedClassVariable) and issubclass(
@@ -3781,6 +3925,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             reason=GraphCompileReason(
                 "return_value", [self.frame_summary()], graph_break=False
             ),
+            # the value to be returned
+            stack_pops=1 if inst.opname == "RETURN_VALUE" else 0,
         )
         # check that our stack/locals meta are correct:
         # we should only be tracing 1 frame, and there should not be any NULLs on the stack
@@ -3791,6 +3937,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             if inst.opname == "RETURN_VALUE"
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
+        # NOTE: does the stack need to be empty after the return?
         self.output.add_output_instructions([return_inst])
         raise ReturnValueOp
 
@@ -4147,11 +4294,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         return TracingContext.current_frame(self.parent.frame_summary())
 
     def should_compile_partial_graph(self) -> bool:
+        if config.nested_graph_breaks:
+            if not self.parent.should_compile_partial_graph():
+                return False
+            return super().should_compile_partial_graph()
         return False  # inlining functions is all-or-nothing
 
     def create_call_resume_at(
-        self, inst: Instruction, all_stack_locals_metadata: Any
-    ) -> NoReturn:
+        self, inst: Instruction, push: int, all_stack_locals_metadata: Any
+    ) -> list[Instruction]:
+        if config.nested_graph_breaks:
+            return super().create_call_resume_at(inst, push, all_stack_locals_metadata)
         unimplemented_v2(
             gb_type="Graph break in inlined function",
             context="",

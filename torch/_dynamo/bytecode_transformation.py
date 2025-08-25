@@ -246,9 +246,21 @@ def create_rot_n(n: int) -> list[Instruction]:
         # e.g. rotate 3 is equivalent to swap 3, swap 2
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
-    # ensure desired rotate function exists
+    # ROT_N does not exist in Python <= 3.9, but we can simulate it
     if sys.version_info < (3, 10) and n >= 5:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.10")
+        """
+        0 1 2 3 4
+        [0 1 2 3 4]
+        4 3 2 1 0
+        4 [3 2 1 0]
+        4 0 1 2 3
+        """
+        return [
+            create_instruction("BUILD_TUPLE", arg=n),
+            create_instruction("UNPACK_SEQUENCE", arg=n),
+            create_instruction("BUILD_TUPLE", arg=n - 1),
+            create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+        ]
 
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
@@ -428,6 +440,10 @@ def create_swap(n: int) -> list[Instruction]:
     # in Python < 3.11, SWAP is a macro that expands to multiple instructions
     if n == 1:
         return []
+    elif n == 2:
+        return [create_instruction("ROT_TWO")]
+    elif n == 3:
+        return [create_instruction("ROT_THREE"), create_instruction("ROT_TWO")]
     """
     e.g. swap "a" and "b" in this stack:
     0 a 1 2 3 b
@@ -461,6 +477,38 @@ def create_swap(n: int) -> list[Instruction]:
         *create_call_method(0),
         create_instruction("POP_TOP"),
         create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+    ]
+
+
+def create_binary_slice(
+    start: Optional[int], end: Optional[int], store: bool = False
+) -> list[Instruction]:
+    """
+    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    """
+    if sys.version_info >= (3, 12):
+        inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction(inst_name),
+        ]
+    else:
+        inst_name = "STORE_SUBSCR" if store else "BINARY_SUBSCR"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction("BUILD_SLICE", arg=2),
+            create_instruction(inst_name),
+        ]
+
+
+def create_reverse(n: int) -> list[Instruction]:
+    # Reverse the top n values on the stack
+    # UNPACK_SEQUENCE reverses the sequence
+    return [
+        create_instruction("BUILD_TUPLE", arg=n),
+        create_instruction("UNPACK_SEQUENCE", arg=n),
     ]
 
 
