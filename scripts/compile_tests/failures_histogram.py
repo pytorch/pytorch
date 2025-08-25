@@ -1,7 +1,8 @@
 import argparse
 import re
 
-from common import download_reports, get_testcases, key, open_test_results, skipped_test
+from common import get_testcases, key, open_test_results, skipped_test
+from download_reports import download_reports
 from passrate import compute_pass_rate
 
 
