@@ -1578,6 +1578,10 @@ class TritonKernelOverrides(TritonOverrides):
         V.kernel.cse.put(cache_key, (mantissa, exponent))
         return (mantissa, exponent)
 
+    @staticmethod
+    def device_assert_async(cond, msg):
+        return f"tl.device_assert({cond}, {repr(msg)})"
+
 
 class HelperFunctions:
     """An ordered set of helper functions."""
