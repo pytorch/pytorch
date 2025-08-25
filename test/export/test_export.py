@@ -11381,7 +11381,6 @@ graph():
             ep.module()(4, torch.randn(4, 4))
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureRetraceabilityNonStrict  # no runtime asserts added for assert x == 3
     def test_symint_input_ranges(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -11415,8 +11414,12 @@ graph():
         )
         constraints = list(ep.range_constraints.values())
         constraint = constraints[0]
-        self.assertEqual(constraint.lower, 4)
-        self.assertEqual(constraint.upper, 5)
+        # retracebility does not remember the range asserts in the forward
+        lower, upper = (
+            (3, 10) if is_retracebility_test(self._testMethodName) else (4, 5)
+        )
+        self.assertEqual(constraint.lower, lower)
+        self.assertEqual(constraint.upper, upper)
 
         # While tracing the range was found to be bigger than the original range
         class M(torch.nn.Module):
@@ -13440,22 +13443,36 @@ def forward(self, x, y):
             "y": [Dim(f"dy{i}", min=2) for i in range(2)],
             "z": [Dim(f"dz{i}", min=4) for i in range(1)],
         }
-        ep = torch.export._trace._export(
-            FreeReshape(),
-            inputs,
-            dynamic_shapes=dynamic_shapes,
-            allow_complex_guards_as_runtime_asserts=True,
-        )
-        ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
-        out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
-        self.assertEqual(out1.shape, torch.ones(48).shape)
-        out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
-        self.assertEqual(out2.shape, torch.ones(40).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
-        ):  # fail only at runtime
-            ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
+
+        for private_api in (True, False):
+            if private_api:
+                ep = torch.export._trace._export(
+                    FreeReshape(),
+                    inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    allow_complex_guards_as_runtime_asserts=True,
+                )
+            else:
+                ep = export(FreeReshape(), inputs, dynamic_shapes=dynamic_shapes)
+            out1 = ep.module()(torch.randn(48, 1), torch.randn(4, 12), torch.randn(48))
+            self.assertEqual(out1.shape, torch.ones(48).shape)
+            out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
+            self.assertEqual(out2.shape, torch.ones(40).shape)
+            if private_api:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"Runtime assertion failed for expression Eq\((.*)\) on node '.*'",
+                ):  # fail only at runtime
+                    ep.module()(
+                        torch.randn(5, 8), torch.randn(4, 5), torch.randn(30)
+                    )  # fail
+            else:
+                # no runtime assert in exported module but it fails anyway with wrong inputs
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(40\) must match the size of tensor b \(20\) at non-singleton dimension 0",
+                ):
+                    ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))
 
         # case 3: 3d reshape (previously failing with different issue)
         class Reshape3d(torch.nn.Module):
@@ -14925,21 +14942,41 @@ def forward(self, x):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return x.view(x.shape[0] - 1, -1)
 
-        ep = export(
-            ModConstraint(),
-            (torch.randn(3, 4),),
-            dynamic_shapes={
-                "x": (dynamic, dynamic),
-            },
-        )
-        ep.module()(torch.randn(5, 8))
-        num_asserts = [
-            node.target == torch.ops.aten._assert_scalar.default
-            for node in ep.graph.nodes
-        ].count(True)
-        self.assertEqual(num_asserts, 2)
-        with self.assertRaises(RuntimeError):
-            ep.module()(torch.randn(4, 2))
+        for private_api in (True, False):
+            if private_api:
+                ep = torch.export._trace._export(
+                    ModConstraint(),
+                    (torch.randn(3, 4),),
+                    dynamic_shapes={"x": (dynamic, dynamic)},
+                    allow_complex_guards_as_runtime_asserts=True,
+                )
+            else:
+                ep = export(
+                    ModConstraint(),
+                    (torch.randn(3, 4),),
+                    dynamic_shapes={"x": (dynamic, dynamic)},
+                )
+            ep.module()(torch.randn(5, 8))
+            num_asserts = [
+                node.target == torch.ops.aten._assert_scalar.default
+                for node in ep.graph.nodes
+            ].count(True)
+            if private_api:
+                self.assertEqual(num_asserts, 7)
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
+                ):
+                    ep.module()(torch.randn(4, 2))
+            else:
+                # no runtime assert in exported module
+                self.assertEqual(num_asserts, 0)
+                # but it fails anyway with wrong inputs
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"shape '\[3, -1\]' is invalid for input of size 8",
+                ):
+                    ep.module()(torch.randn(4, 2))
 
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
