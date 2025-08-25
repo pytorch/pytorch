@@ -7244,7 +7244,7 @@ class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
 
 
-instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"))
+instantiate_device_type_tests(TestHigherOrderOpsOpInfo, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

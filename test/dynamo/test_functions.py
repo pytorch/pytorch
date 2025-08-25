@@ -1143,11 +1143,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_cuda:
             return x + 1
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @make_test
     def test_get_device_properties_tensor_device(a):
-        x = a.to(device_type)
-        prop = torch.get_device_module(device_type).get_device_properties(x.device)
+        x = a.to("cuda")
+        prop = torch.cuda.get_device_properties(x.device)
         if prop.major == 8:
             return x + prop.multi_processor_count
         return x + prop.max_threads_per_multi_processor
@@ -4731,7 +4731,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
-                (2, 3), dtype=torch.float32, device=torch.accelerator.current_device()
+                (2, 3), dtype=torch.float32, device=torch.accelerator.current_device_index()
             )
             y.copy_(x)
             return torch.sin(y + y.device.index)
