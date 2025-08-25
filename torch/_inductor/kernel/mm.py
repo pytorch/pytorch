@@ -24,8 +24,8 @@ from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.subgraph import SubgraphTemplate
-from ..ir import FlexibleLayout, is_triton
+from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
+from ..ir import Buffer, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     add_layout_constraint,
@@ -655,6 +655,44 @@ def decomposeK(a, b, k_splits):
     return reduced_buf.to(a.dtype)
 
 
+class DecomposeKSugraphTemplate(SubgraphTemplate):
+    def __init__(self):
+        super().__init__(
+            name="decompose_k",
+        )
+
+    def generate(  # type: ignore[override]
+        self,
+        input_nodes: list[Buffer],
+        layout: Layout,
+        k_split: int,
+    ) -> SubgraphChoiceCaller:
+        from torch._dispatch.python import enable_python_dispatcher
+
+        from ..decomposition import select_decomp_table
+
+        name = f"decompose_k_mm_{k_split}_split"
+        description = f"{k_split=}"
+
+        with enable_python_dispatcher():
+            decompositions = select_decomp_table()
+            fn = make_fx(
+                functools.partial(decomposeK, k_splits=k_split),
+                decompositions,
+            )
+
+            return super().generate(
+                name=name,
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=fn,
+                description=description,
+            )
+
+
+decompose_k_subgraph_template = DecomposeKSugraphTemplate()
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     """
@@ -736,10 +774,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            from torch._dispatch.python import enable_python_dispatcher
-
-            from ..decomposition import select_decomp_table
-
             k_splits = get_k_splits(m, n, k)
             for k_split in k_splits:
                 if not V.graph.sizevars.statically_known_true(
@@ -747,21 +781,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 ):
                     continue
 
-                with enable_python_dispatcher():
-                    decompositions = select_decomp_table()
-
-                    decompose_k_subgraph_template = SubgraphTemplate(
-                        name=f"decompose_k_mm_{k_split}_split",
-                        make_fx_graph=make_fx(
-                            functools.partial(decomposeK, k_splits=k_split),
-                            decompositions,
-                        ),
-                    )
-
                 decompose_k_subgraph_template.maybe_append_choice(
                     choices,
-                    input_nodes=(mat1, mat2),
+                    input_nodes=kernel_inputs.nodes(),
                     layout=layout,
+                    k_split=k_split,
                 )
 
     if (
