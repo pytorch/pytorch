@@ -934,8 +934,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
             class Foo:
-                b  = 4
-                pass
+                b = 4
 
             d = dict(Foo.__dict__)
             y = torch.sin(x) * d["b"]
