@@ -8,6 +8,9 @@ updates:
     target-branch: "main"
     allow:
       - dependency-name: "transformers"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
     commit-message:
       prefix: "[Dependabot] Update"
       include: "scope"
@@ -18,3 +21,4 @@ updates:
       - "topic: not user facing"
       - "module: ci"
       - "module: inductor"
+      - "ciflow/inductor"
