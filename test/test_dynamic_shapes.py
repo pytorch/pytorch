@@ -3095,6 +3095,20 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_matmul_transpose(self):
+        cnts = CompileCounterWithBackend("inductor")
+
+        def f(x, y):
+            return (x @ y).transpose(0, 1)
+
+        inps = (torch.randn(4, 5), torch.randn(5, 6))
+        fn = torch.compile(f, fullgraph=True, dynamic=True, backend=cnts)
+        fn(*inps)
+        fn(torch.randn(1, 1), torch.randn(1, 1))
+        # check size = 1 doesn't cause recompile
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
