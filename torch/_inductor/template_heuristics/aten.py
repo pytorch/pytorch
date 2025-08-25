@@ -54,6 +54,7 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
+        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         yield dict()
 
@@ -91,6 +92,7 @@ class ATenBiasAddMMConfigHeuristics(ATenAddMMConfigHeuristics):
         kernel_inputs: KernelInputs,
         layout: Layout,
         op_name: str,
+        max_autotune: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         if inductor_config.max_autotune or inductor_config.max_autotune_gemm:
             # NOTE: this preserves the original logic that if there is not max-autotune
