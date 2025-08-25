@@ -342,8 +342,6 @@ def export(
     else:
         import warnings
 
-        from torch.onnx.utils import export
-
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter will be the default. To switch now, set "
@@ -362,7 +360,7 @@ def export(
                 "through parameter dynamic_axes when dynamo=False."
             )
 
-        export(
+        utils.export(
             model,
             args,
             f,  # type: ignore[arg-type]
