@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     skipXLA,
 )
 from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
     all_types_and,
     all_types_and_complex_and,
     all_types_complex_float8_and,
@@ -903,9 +904,12 @@ class TestIndexing(TestCase):
         # Generate a list of lists, containing overlapping window indices
         indices = [range(i, i + W) for i in range(0, N - W)]
 
-        for i in [len(indices), 100, 32, 31]:
+        for i in [len(indices), 100, 32]:
             windowed_data = t[indices[:i]]
             self.assertEqual(windowed_data.shape, (i, W))
+
+        with self.assertRaisesRegex(IndexError, "too many indices"):
+            windowed_data = t[indices[:31]]
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
@@ -1202,13 +1206,13 @@ class TestIndexing(TestCase):
         out_cpu = func1(t, ind, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @expectedFailureMPS  # Doubles not supported
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
+        dtype = torch.float if device.startswith("mps") else torch.double
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
-            delta = torch.empty(i, dtype=torch.double, device=device).uniform_(-1, 1)
+            delta = torch.empty(i, dtype=dtype, device=device).uniform_(-1, 1)
             indices = delta.cumsum(0).long()
 
             input = torch.randn(indices.abs().max() + 1, device=device)
@@ -1866,7 +1870,7 @@ class TestIndexing(TestCase):
                     self.assertEqual(dest, expected)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160993
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
         # and the behavior is undefined
@@ -1909,8 +1913,8 @@ class TestIndexing(TestCase):
     # onlyNativeDeviceTypes due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160737
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
         scalars = (
@@ -2043,8 +2047,8 @@ class TestIndexing(TestCase):
 
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/160737
     @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 

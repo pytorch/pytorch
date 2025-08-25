@@ -2898,7 +2898,6 @@ def rms_norm(
     return torch.rms_norm(input, normalized_shape, weight, eps)
 
 
-@_wrap_torch_function_variadic
 def group_norm(
     input: Tensor,
     num_groups: int,
@@ -2910,6 +2909,20 @@ def group_norm(
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            group_norm,
+            (
+                input,
+                weight,
+                bias,
+            ),
+            input,
+            num_groups,
+            weight=weight,
+            bias=bias,
+            eps=eps,
+        )
     if input.dim() < 2:
         raise RuntimeError(
             f"Expected at least 2 dimensions for input tensor but received {input.dim()}"
@@ -3382,7 +3395,6 @@ def cross_entropy(
     )
 
 
-@_wrap_torch_function_variadic
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
@@ -3416,6 +3428,17 @@ def binary_cross_entropy(
         >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(input, target, weight):
+        return handle_torch_function(
+            binary_cross_entropy,
+            (input, target, weight),
+            input,
+            target,
+            weight=weight,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
