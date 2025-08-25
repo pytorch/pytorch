@@ -4061,53 +4061,53 @@ class GraphModule(torch.nn.Module):
         child_4: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 1, None, 2)
         child_5: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 1, None, 2)
 
-        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
+        lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
-        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
+        _vmap_increment_nesting = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting = None
 
-        _add_batch_dim: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
-        _add_batch_dim_1: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_1, 0, 1);  child_1 = None
-        _add_batch_dim_2: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
-        _add_batch_dim_3: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
-        _add_batch_dim_4: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
-        _add_batch_dim_5: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_5, 0, 1);  child_5 = None
+        _add_batch_dim: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child, 0, 1);  child = None
+        _add_batch_dim_1: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_1, 0, 1);  child_1 = None
+        _add_batch_dim_2: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_2, 0, 1);  child_2 = _add_batch_dim_2 = None
+        _add_batch_dim_3: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_3, 0, 1);  child_3 = _add_batch_dim_3 = None
+        _add_batch_dim_4: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_4, 0, 1);  child_4 = _add_batch_dim_4 = None
+        _add_batch_dim_5: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_5, 0, 1);  child_5 = None
 
         a: "f32[10, 2]" = _add_batch_dim + _add_batch_dim_5;  _add_batch_dim = None
         b: "f32[10, 2]" = _add_batch_dim_1 - _add_batch_dim_5;  _add_batch_dim_1 = _add_batch_dim_5 = None
 
         child_6: "f32[10, 2]" = a - b
 
-        child_7: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a, 1, 1, 0);  a = None
-        child_8: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b, 1, 1, 0);  b = None
-        child_9: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
+        child_7: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a, 1, 1, 0);  a = None
+        child_8: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b, 1, 1, 0);  b = None
+        child_9: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_6, 1, 1, 0);  child_6 = None
 
-        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+        _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
         child_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 2, None, 2)
         child_11: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 2, None, 2)
         child_12: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 2, None, 2)
 
-        lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
+        lazy_load_decompositions_1 = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions_1 = None
 
-        _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
+        _vmap_increment_nesting_1 = torch._functorch.predispatch._vmap_increment_nesting(1, 'error');  _vmap_increment_nesting_1 = None
 
-        _add_batch_dim_6: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_7, 0, 1)
-        _add_batch_dim_7: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_8, 0, 1)
-        _add_batch_dim_8: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
-        _add_batch_dim_9: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
-        _add_batch_dim_10: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
-        _add_batch_dim_11: "f32[10, 2]" = torch._C._functorch._add_batch_dim(child_12, 0, 1);  child_12 = None
+        _add_batch_dim_6: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_7, 0, 1)
+        _add_batch_dim_7: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_8, 0, 1)
+        _add_batch_dim_8: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_9, 0, 1);  _add_batch_dim_8 = None
+        _add_batch_dim_9: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_10, 0, 1);  child_10 = _add_batch_dim_9 = None
+        _add_batch_dim_10: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_11, 0, 1);  child_11 = _add_batch_dim_10 = None
+        _add_batch_dim_11: "f32[10, 2]" = torch._functorch.predispatch._add_batch_dim(child_12, 0, 1);  child_12 = None
 
         a_1: "f32[10, 2]" = _add_batch_dim_6 + _add_batch_dim_11;  _add_batch_dim_6 = None
         b_1: "f32[10, 2]" = _add_batch_dim_7 - _add_batch_dim_11;  _add_batch_dim_7 = _add_batch_dim_11 = None
 
         child_13: "f32[10, 2]" = a_1 - b_1
 
-        child_14: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
-        child_15: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
-        child_16: "f32[1, 10, 2]" = torch._C._functorch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
+        child_14: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(a_1, 1, 1, 0);  a_1 = None
+        child_15: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(b_1, 1, 1, 0);  b_1 = None
+        child_16: "f32[1, 10, 2]" = torch._functorch.predispatch._remove_batch_dim(child_13, 1, 1, 0);  child_13 = None
 
-        _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+        _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
 
         slice_10: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, 1);  elem_3 = None
         cat: "f32[2, 10, 2]" = torch.cat([slice_10, child_14], dim = 0);  slice_10 = child_14 = None
@@ -8974,22 +8974,6 @@ class TestHopSchema(TestCase):
         self.assertEqual(schema2.parse(str(schema2)), schema2)
         self.assertEqual(schema3.parse(str(schema3)), schema3)
 
-    def test_while_loop_schema_gen(self):
-        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
-        graph = make_fx(fn)(*inp).graph
-        while_loop_node = next(
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target is torch.ops.higher_order.while_loop
-        )
-        schema = torch._library.utils.hop_schema_from_fx_node(while_loop_node)
-        self.assertExpectedInline(
-            str(schema),
-            """while_loop(GraphModule cond_fn, GraphModule body_fn, Tensor[2] carried_inputs, Tensor[3] additional_inputs) -> Tensor[2]""",  # noqa: B950
-        )
-        self.assertEqual(schema.parse(str(schema)), schema)
-
     def test_schema_tree_spec(self):
         schema_gen = HopSchemaGenerator(torch.ops.higher_order.cond)
         args = (torch.randn(3, 4), torch.randn(2, 3))
@@ -9004,6 +8988,202 @@ class TestHopSchema(TestCase):
         flat_schema = schema_gen.gen_schema()
         self.assertExpectedInline(
             str(flat_schema), """cond(Tensor tuple_args0, Tensor tuple_args1) -> ()"""
+        )
+
+    def test_cond_gen_schema_tensor_inputs(self):
+        schema = torch.ops.higher_order.cond.gen_schema(
+            torch.tensor(True),
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_cond_gen_schema_symbool_inputs(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode, fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            sym_bool = torch.randn(3, 4).nonzero().size(0) == 0
+
+        schema = torch.ops.higher_order.cond.gen_schema(
+            sym_bool,
+            lambda x: x.sin(),
+            lambda x: x.cos(),
+            (torch.randn(3, 4),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """cond(SymBool pred, Any true_fn, Any false_fn, Tensor operand0) -> ((Tensor))""",
+        )
+
+    def test_while_loop_gen_schema_tensor_inputs(self):
+        def cond_fn(x, y):
+            return x.sum() < 10
+
+        def body_fn(x, y):
+            return x + 1, y.sin()
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1) -> (Tensor, Tensor)""",
+        )
+
+    def test_while_loop_gen_schema_with_additional_inputs(self):
+        def cond_fn(x, y, z):
+            return x.sum() < z
+
+        def body_fn(x, y, z):
+            return x + 1, y.sin()
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (torch.tensor(10),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor carried_input0, Tensor carried_input1, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(carry, x):
+            return carry + x, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0) -> (Tensor, Tensor)""",
+        )
+
+    def test_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(carry, x, scale):
+            return carry + x * scale, carry * x
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4),),
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor additional_input0) -> (Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(carry1, carry2, x1, x2):
+            return carry1 + x1, carry2 * x2, carry1 - x1, carry2 + x2
+
+        schema = torch.ops.higher_order.scan.gen_schema(
+            combine_fn,
+            (torch.randn(3, 4), torch.randn(2, 3)),
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """scan(Any combine_fn, Tensor init0, Tensor init1, Tensor xs0, Tensor xs1) -> (Tensor, Tensor, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_associative_scan_gen_schema_tensor_inputs(self):
+        def combine_fn(x, y):
+            return x + y
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_with_additional_inputs(self):
+        def combine_fn(x, y, scale):
+            return x * y * scale
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4),),
+            (torch.tensor(2.0),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor additional_input0) -> ((Tensor))""",
+        )
+
+    def test_associative_scan_gen_schema_multiple_inputs(self):
+        def combine_fn(x1, x2, y1, y2):
+            return x1 + y1, x2 * y2
+
+        schema = torch.ops.higher_order.associative_scan.gen_schema(
+            combine_fn,
+            (torch.randn(5, 3, 4), torch.randn(5, 2, 3)),
+            (),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """associative_scan(Any combine_fn, Tensor xs0, Tensor xs1) -> (Tensor, Tensor)""",
+        )
+
+    def test_while_loop_gen_schema_with_int_carries(self):
+        def cond_fn(x, y, z, c):
+            return x < y
+
+        def body_fn(x, y, z, c):
+            return x + 1, y - 1, z.sin(), c + x
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (2, 10, torch.randn(2, 3)),
+            (torch.tensor(10),),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, int carried_input0, int carried_input1, Tensor carried_input2, Tensor additional_input0) -> (int, int, Tensor, Tensor)""",  # noqa: B950
+        )
+
+    def test_while_loop_gen_schema_with_input_mutation(self):
+        def cond_fn(x, y, z, c):
+            return x < y
+
+        def body_fn(x, y, z, c):
+            x.add_(1)
+            y.sub_(1)
+            z.sin_()
+            c.add_(x)
+            return x, y, z
+
+        c = torch.randn(3, 3)
+
+        schema = torch.ops.higher_order.while_loop.gen_schema(
+            cond_fn,
+            body_fn,
+            (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
+            (c,),
+        )
+        self.assertExpectedInline(
+            str(schema),
+            """while_loop(Any cond_fn, Any body_fn, Tensor(a2!) carried_input0, Tensor(a3!) carried_input1, Tensor(a4!) carried_input2, Tensor(a5!) additional_input0) -> (Tensor, Tensor, Tensor)""",  # noqa: B950
         )
 
 
