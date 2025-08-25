@@ -45,7 +45,6 @@ from collections.abc import Generator, Sequence
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeGuard, TypeIs
-from typing_extensions import TypeGuard
 from unittest.mock import patch
 
 import torch
