@@ -178,6 +178,11 @@ struct C10_API Storage {
         isSharedStorageAlias(*this, other));
   }
 
+  void add_delete_hook(
+      std::function<void(const DataPtr&, const SymInt&)> hook) {
+    storage_impl_->add_delete_hook(std::move(hook));
+  }
+
   void UniqueStorageShareExternalPointer(
       void* src,
       size_t capacity,
