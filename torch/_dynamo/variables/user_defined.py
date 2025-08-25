@@ -40,7 +40,7 @@ import warnings
 import weakref
 from typing import TYPE_CHECKING
 from typing_extensions import is_typeddict
-
+from vllm.utils.tensor_schema import TensorSchema
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
@@ -151,6 +151,8 @@ def is_cython_function(obj):
         and type(obj).__name__ == "cython_function_or_method"
     )
 
+def is_tensorschema(value) -> bool:
+    return issubclass(value, TensorSchema)
 
 class UserDefinedVariable(VariableTracker):
     value: object
@@ -505,6 +507,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
+            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
+        elif is_tensorschema(self.value):
+            # add check for optional fields
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)

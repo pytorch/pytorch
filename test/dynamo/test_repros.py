@@ -31,6 +31,9 @@ from functools import wraps
 from typing import Any, Literal, TypedDict
 from unittest import mock
 
+import torch
+from typing import Annotated, Literal
+from vllm.utils.tensor_schema import TensorSchema, TensorShape
 import numpy as np
 
 import torch
@@ -6520,6 +6523,28 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x, y)
 
         self.assertEqual(ref, res)
+
+
+    def test_tensor_schema_llava_pixel_inputs(self):
+        class LlavaImagePixelInputs(TensorSchema):
+            type: Literal["pixel_values"] = "pixel_values"
+            pixel_values: Annotated[
+                torch.Tensor,
+                TensorShape("bn", 3, "h", "w")
+            ]
+
+        def fn(x, y):
+            obj = LlavaImagePixelInputs(pixel_values=y)
+            return x * obj["pixel_values"].sum()
+
+        x, y = torch.randn(4), torch.randn(2, 3, 8, 8)
+        ref = fn(x, y)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, y)
+
+        self.assertTrue(torch.allclose(ref, res))
+
 
     def test_typed_dict_total(self):
         class LlavaImagePixelInputs(TypedDict):
