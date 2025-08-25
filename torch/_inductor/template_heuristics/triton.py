@@ -1328,19 +1328,6 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             )
             yield template_kwargs
 
-    @staticmethod
-    def _get_input_precision(
-        m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
-    ) -> str:
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-        result = "tf32" if allow_tf32 else "ieee"
-
-        # wrap in quotes, because the string will be dropped into the templates
-        return f'"{result}"'
-
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
@@ -1360,10 +1347,16 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            FLOAT32_PRECISION=MMTemplateConfigMixin._get_input_precision(m, n, k),
+            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(layout.dtype),
             num_stages=triton_config.num_stages,
@@ -1486,6 +1479,24 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
     This inherits from MMTemplateConfigMixin and overrides config generation.
     """
 
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        """
+        override hook to enable checks for ScaledMM that are not valid for TMA version
+        """
+        assert isinstance(kernel_inputs, MMKernelInputs), (
+            "Expect MMKernelInputs for ScaledMMConfigMixin"
+        )
+        _, _, k = kernel_inputs.mnk_symbolic()
+        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
+            # Triton crashes however uncommon for real workloads
+            return False
+
+        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
+            return False
+        return True
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
@@ -1546,16 +1557,9 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             f"{self.__class__.__name__} requires MMKernelInputs"
         )
 
-        _, _, k = kernel_inputs.mnk_symbolic()
+        if not self._valid(kernel_inputs):
+            return
 
-        if V.graph.sizevars.guard_or_false(sympy.Le(k, 16)):
-            # Triton crashes however uncommon for real workloads
-            yield from []
-
-        # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
-        # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
-        if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
-            yield from []
         # Get base template configs from superclass
         for template_kwargs in super().get_template_configs(
             kernel_inputs, layout, op_name
@@ -1576,6 +1580,9 @@ class ScaledTMAConfigMixin(ScaledMMConfigMixin):
     This is for scaled MM templates that use device TMA.
     This inherits from ScaledMMConfigMixin and adds TMA-specific options.
     """
+
+    def _valid(self, kernel_inputs: KernelInputs) -> bool:
+        return True
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
