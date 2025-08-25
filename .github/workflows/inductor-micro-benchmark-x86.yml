@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
+  linux-jammy-cpu-py3_10-gcc11-inductor-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     name: linux-jammy-cpu-py3.10-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
