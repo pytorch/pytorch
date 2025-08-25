@@ -57,6 +57,10 @@ TORCH_META_FUNC(nll_loss_forward)
       target.sizes(),
       ")")
 
+  TORCH_CHECK(
+        !(self.dim() == 1 && target.dim() == 1),
+        "Expected target to be 0D when input is 1D, but got target.dim =", target.dim());
+
   const auto n_classes = self.size(-1);
 
   TORCH_CHECK(
