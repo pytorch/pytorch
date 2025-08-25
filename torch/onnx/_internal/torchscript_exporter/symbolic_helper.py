@@ -15,8 +15,8 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, errors, utils
-from torch.onnx._internal.torchscript_exporter import _type_utils, jit_utils
+from torch.onnx import _constants, errors
+from torch.onnx._internal.torchscript_exporter import _type_utils, jit_utils, utils
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
@@ -696,11 +696,15 @@ def _slice_helper(
     steps=None,
 ):
     if g.opset <= 9:
-        from torch.onnx.symbolic_opset9 import _slice as _slice9
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import (
+            _slice as _slice9,
+        )
 
         return _slice9(g, input, axes, starts, ends)
     else:
-        from torch.onnx.symbolic_opset10 import _slice as _slice10
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset10 import (
+            _slice as _slice10,
+        )
 
         return _slice10(g, input, axes, starts, ends, steps)
 
@@ -782,11 +786,11 @@ def _topk_helper(
 
 def _lt_helper(g: jit_utils.GraphContext, input, other):
     if g.opset <= 8:
-        from torch.onnx.symbolic_opset8 import lt as _lt8
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset8 import lt as _lt8
 
         return _lt8(g, input, other)
     else:
-        from torch.onnx.symbolic_opset9 import lt as _lt9
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import lt as _lt9
 
         return _lt9(g, input, other)
 
@@ -1192,20 +1196,26 @@ def __interpolate_helper(
 
 def _unbind_helper(g: jit_utils.GraphContext, self, dim, _outputs):
     if g.opset < 11:
-        from torch.onnx.symbolic_opset9 import unbind
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import unbind
     elif g.opset <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
+            unbind,  # type: ignore[no-redef]
+        )
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset13 import (
+            unbind,  # type: ignore[no-redef]
+        )
     return unbind(g, self, dim, _outputs)
 
 
 def _scatter_helper(g: jit_utils.GraphContext, self, dim, index, src):
     if g.opset <= 10:
-        from torch.onnx.symbolic_opset9 import scatter
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
+            scatter,  # type: ignore[no-redef]
+        )
     return scatter(g, self, dim, index, src)
 
 
@@ -1213,7 +1223,7 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
     if g.opset <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
-        from torch.onnx.symbolic_opset13 import split
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset13 import split
 
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
         split_out = split(g, self, repeats, dim, _outputs=reps)
@@ -1223,7 +1233,10 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
 def _repeat_interleave_single_value_repeat_helper(
     g: jit_utils.GraphContext, self, repeats, dim
 ):
-    from torch.onnx.symbolic_opset9 import flatten, unsqueeze
+    from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import (
+        flatten,
+        unsqueeze,
+    )
 
     if not _is_tensor(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
@@ -1306,15 +1319,17 @@ def _arange_cast_helper(
 
 def _arange_helper(g: jit_utils.GraphContext, *args):
     if g.opset <= 10:
-        from torch.onnx.symbolic_opset9 import arange
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import arange
     else:
-        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
+            arange,  # type: ignore[no-redef]
+        )
     return arange(g, *args)
 
 
 def _size_helper(g: jit_utils.GraphContext, self, dim):
     full_shape = g.op("Shape", self)
-    from torch.onnx.symbolic_opset9 import select
+    from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import select
 
     return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
 
@@ -1325,13 +1340,15 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
     # 3. expand value as well.
     # 4. apply onnx::scatter.
 
-    from torch.onnx.symbolic_opset9 import expand
+    from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import expand
 
     if g.opset <= 10:
-        from torch.onnx.symbolic_opset9 import scatter
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import (
+            scatter,  # type: ignore[no-redef]
+        )
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accessible")
@@ -1371,7 +1388,7 @@ def _reshape_helper(g: jit_utils.GraphContext, input, shape, allowzero=0):
 def _batchnorm_helper(
     g: jit_utils.GraphContext, input, weight, bias, running_mean, running_var
 ):
-    from torch.onnx.symbolic_opset9 import _var_mean
+    from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import _var_mean
 
     batch_size = _get_tensor_dim_size(input, 0)
     channel_size = _get_tensor_dim_size(input, 1)
@@ -1478,7 +1495,9 @@ def _flatten_helper(g: jit_utils.GraphContext, input, start_dim, end_dim, dim):
         ]
 
     final_shape = g.op("Concat", *slices, axis_i=0)
-    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    from torch.onnx._internal.torchscript_exporter.symbolic_opset9 import (
+        _reshape_from_tensor,
+    )
 
     return _reshape_from_tensor(g, input, final_shape)
 

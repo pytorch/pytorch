@@ -30,8 +30,12 @@ import functools
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx._internal.torchscript_exporter import (
+    jit_utils,
+    registration,
+    symbolic_helper,
+    symbolic_opset9 as opset9,
+)
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=15)

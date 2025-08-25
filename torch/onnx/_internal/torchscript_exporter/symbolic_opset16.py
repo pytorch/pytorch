@@ -33,11 +33,13 @@ from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
-from torch.onnx import errors, symbolic_helper, utils
+from torch.onnx import errors
 from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
     jit_utils,
     registration,
+    symbolic_helper,
+    utils,
 )
 
 

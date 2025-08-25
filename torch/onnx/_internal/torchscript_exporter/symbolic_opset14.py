@@ -21,11 +21,12 @@ from __future__ import annotations
 import functools
 
 import torch
-from torch.onnx import _constants, symbolic_helper
+from torch.onnx import _constants
 from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
     jit_utils,
     registration,
+    symbolic_helper,
 )
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 

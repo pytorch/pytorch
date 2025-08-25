@@ -7,6 +7,21 @@ converted to models which run on other deep learning frameworks.
 
 from __future__ import annotations
 
+
+__all__ = [
+    "select_model_mode_for_export",
+    "disable_apex_o2_state_dict_hook",
+    "setup_onnx_logging",
+    "exporter_context",
+    "export",
+    "model_signature",
+    "warn_on_static_input_change",
+    "unpack_quantized_tensor",
+    "unconvertible_ops",
+    "register_custom_op_symbolic",
+    "unregister_custom_op_symbolic",
+]
+
 import contextlib
 import copy
 import inspect
@@ -32,21 +47,6 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 if typing.TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
-
-
-__all__ = [
-    "select_model_mode_for_export",
-    "disable_apex_o2_state_dict_hook",
-    "setup_onnx_logging",
-    "exporter_context",
-    "export",
-    "model_signature",
-    "warn_on_static_input_change",
-    "unpack_quantized_tensor",
-    "unconvertible_ops",
-    "register_custom_op_symbolic",
-    "unregister_custom_op_symbolic",
-]
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -183,17 +183,6 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         setup_onnx_logging(verbose) as log_ctx,
     ):
         yield (mode_ctx, apex_ctx, log_ctx)
-
-
-def _get_torch_export_args(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any] | None,
-) -> tuple[tuple[Any, ...], dict[str, Any] | None]:
-    """Obtain the arguments for torch.onnx.export from the model and the input arguments."""
-    if not kwargs and args and isinstance(args[-1], dict):
-        kwargs = args[-1]
-        args = args[:-1]
-    return args, kwargs
 
 
 def export(
@@ -1360,6 +1349,27 @@ def _get_module_attributes(module):
     return attrs
 
 
+def _trigger_symbolic_function_registration():
+    """Trigger the registration of symbolic functions for all supported opsets."""
+
+    from torch.onnx._internal.torchscript_exporter import (  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401  # noqa: F401
+        symbolic_opset10,
+        symbolic_opset11,
+        symbolic_opset12,
+        symbolic_opset13,
+        symbolic_opset14,
+        symbolic_opset15,
+        symbolic_opset16,
+        symbolic_opset17,
+        symbolic_opset18,
+        symbolic_opset19,
+        symbolic_opset20,
+        symbolic_opset7,
+        symbolic_opset8,
+        symbolic_opset9,
+    )
+
+
 def _export(
     model,
     args,
@@ -1383,6 +1393,8 @@ def _export(
     autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
+
+    _trigger_symbolic_function_registration()
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(

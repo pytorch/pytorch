@@ -36,26 +36,6 @@ from ._internal.torchscript_exporter.utils import (  # Deprecated members that a
 from .errors import OnnxExporterError
 
 
-from ._internal.torchscript_exporter import (  # usort: skip. Keep the order instead of sorting lexicographically
-    symbolic_helper,
-    symbolic_opset7,
-    symbolic_opset8,
-    symbolic_opset9,
-    symbolic_opset10,
-    symbolic_opset11,
-    symbolic_opset12,
-    symbolic_opset13,
-    symbolic_opset14,
-    symbolic_opset15,
-    symbolic_opset16,
-    symbolic_opset17,
-    symbolic_opset18,
-    symbolic_opset19,
-    symbolic_opset20,
-    utils,
-)
-
-
 if TYPE_CHECKING:
     import os
     from collections.abc import Collection, Mapping, Sequence
@@ -64,6 +44,7 @@ if TYPE_CHECKING:
 ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 
+# TODO(justinchuby): Remove these two properties
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 

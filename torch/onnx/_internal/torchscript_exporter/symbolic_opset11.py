@@ -12,17 +12,15 @@ from typing import TYPE_CHECKING
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch.onnx import (
-    errors,
-    symbolic_helper,
-    symbolic_opset10 as opset10,
-    symbolic_opset9 as opset9,
-    utils,
-)
+from torch.onnx import errors
 from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
     jit_utils,
     registration,
+    symbolic_helper,
+    symbolic_opset10 as opset10,
+    symbolic_opset9 as opset9,
+    utils,
 )
 
 

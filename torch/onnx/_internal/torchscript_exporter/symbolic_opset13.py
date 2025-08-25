@@ -7,18 +7,15 @@ import functools
 
 import torch
 import torch._C._onnx as _C_onnx
-from torch.onnx import (
-    _constants,
-    errors,
-    symbolic_helper,
-    symbolic_opset11 as opset11,
-    symbolic_opset9 as opset9,
-    utils,
-)
+from torch.onnx import _constants, errors
 from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
     jit_utils,
     registration,
+    symbolic_helper,
+    symbolic_opset11 as opset11,
+    symbolic_opset9 as opset9,
+    utils,
 )
 
 

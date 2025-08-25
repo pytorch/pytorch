@@ -25,8 +25,11 @@ import functools
 
 import torch.nn.functional as F
 from torch import _C
-from torch.onnx import symbolic_helper
-from torch.onnx._internal.torchscript_exporter import jit_utils, registration
+from torch.onnx._internal.torchscript_exporter import (
+    jit_utils,
+    registration,
+    symbolic_helper,
+)
 
 
 # EDITING THIS FILE? READ THIS FIRST!

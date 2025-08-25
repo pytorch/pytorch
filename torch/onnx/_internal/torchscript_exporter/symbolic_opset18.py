@@ -25,11 +25,12 @@ from typing import Optional
 
 import torch
 from torch import _C
-from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal.torchscript_exporter import (
     _type_utils,
     jit_utils,
     registration,
+    symbolic_helper,
+    symbolic_opset9 as opset9,
 )
 
 
