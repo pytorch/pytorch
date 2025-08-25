@@ -200,7 +200,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_aten_gemm_kernels():
         choices += list(
             V.choices.get_mm_configs(
-                kernel_inputs, layout, aten_handler, name, aten_extra_kwargs
+                kernel_inputs,
+                layout,
+                [aten_handler],
+                name,
+                {aten_handler.uid: aten_extra_kwargs},
             )
         )
 
@@ -209,7 +213,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         assert out_dtype is None, "out_dtype is not supported for Triton"
 
         choices += list(
-            V.choices.get_mm_configs(kernel_inputs, layout, bmm_template, name)
+            V.choices.get_mm_configs(kernel_inputs, layout, [bmm_template], name)
         )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest_or_zero = is_batch_stride_largest_or_zero(mat1, mat2, layout)
@@ -269,7 +273,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices += list(
-            V.choices.get_mm_configs(kernel_inputs, layout, aten_baddbmm, name)
+            V.choices.get_mm_configs(kernel_inputs, layout, [aten_baddbmm], name)
         )
 
     if use_triton_template(layout):
@@ -277,7 +281,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             V.choices.get_mm_configs(
                 kernel_inputs,
                 layout,
-                bmm_template,
+                [bmm_template],
                 name,
             )
         )
