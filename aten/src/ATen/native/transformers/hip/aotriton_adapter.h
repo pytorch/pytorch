@@ -135,7 +135,7 @@ struct LazyTensorContext {
   at::Tensor like_tensor;
   std::string_view tensor_name;
   at::Tensor tensor;
-}
+};
 
 template<int kRank, bool kRequireZeros>
 struct LazyTensorFunctions : public LazyTensorContext {
@@ -144,10 +144,10 @@ struct LazyTensorFunctions : public LazyTensorContext {
     if (!ctx->tensor.defined()) {
       auto q = ctx->like_tensor;
       if constexpr (kRequireZeros) {
-        ctx->tensor = at::zeros_like(q.shape(),
-                                     q.options().dtypes(at::kFloat));
+        ctx->tensor = at::zeros(q.sizes(),
+                                q.options().dtype(at::kFloat));
       } else {
-        ctx->tensor = at::empty_like(like_tensor);
+        ctx->tensor = at::empty_like(q);
       }
     }
     return mk_aotensor<kRank>(ctx->tensor, ctx->tensor_name);
@@ -169,11 +169,20 @@ aotriton::LazyTensor<kRank> mklazy_common(LazyTensorContext* cookie)
 }
 
 template<int kRank>
-using mklazy_empty_like = mklazy_common<kRank, false>;
+auto mklazy_empty_like(LazyTensorContext* cookie)
+{
+  return mklazy_common<kRank, false>(cookie);
+}
+
 
 // Note: this will not keep the original strides
 template<int kRank>
-using mklazy_fp32zeros = mklazy_common<kRank, true>;
+auto mklazy_fp32zeros(LazyTensorContext* cookie)
+{
+  return mklazy_common<kRank, true>(cookie);
+}
+
+#endif  // >= 0.11
 
 } // namespace aotriton_adapter
 

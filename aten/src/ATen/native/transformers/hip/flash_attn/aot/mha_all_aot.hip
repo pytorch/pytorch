@@ -706,8 +706,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
     using sdp::aotriton_adapter::LazyTensorContext;
     LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
     LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
-    params.D = mklazy_empty_like<2>(lazy_delta);
-    params.DQ_ACC = mklazy_fp32zeros<4>(lazy_dq_acc);
+    params.D = mklazy_empty_like<2>(&lazy_delta);
+    params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
 #else
     at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
     params.D = mk_aotensor<2>(delta, "delta");
@@ -959,8 +959,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
       using sdp::aotriton_adapter::LazyTensorContext;
       LazyTensorContext lazy_delta { .like_tensor = softmax_lse_cont, .tensor_name = "delta" };
       LazyTensorContext lazy_dq_acc { .like_tensor = dq_padded, .tensor_name = "dq_acc" };
-      params.D = mklazy_empty_like<2>(lazy_delta);
-      params.DQ_ACC = mklazy_fp32zeros<4>(lazy_dq_acc);
+      params.D = mklazy_empty_like<2>(&lazy_delta);
+      params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
 #else
       at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
       params.D = mk_aotensor<2>(delta, "delta");
@@ -968,10 +968,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
       err = aotriton::v3::flash::attn_bwd(params,
                                           aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
-#endif
+#endif  // AOTRITON_ALWAYS_V3_API
     } else {
       using aotriton::v2::flash::attn_bwd_compact_varlen;
       using sdp::aotriton_adapter::cast_dtype;
+      at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
       aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
       err = attn_bwd_compact_varlen(mk_aotensor(q_padded, "q"),
                                     mk_aotensor(k_padded, "k"),

@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/_cudnn_attention_backward.h>
@@ -570,6 +571,7 @@ _efficient_attention_backward(
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
     if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
+#if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
       aotriton::v3::flash::attn_bwd_params params;
@@ -585,8 +587,6 @@ _efficient_attention_backward(
       params.DQ = mk_aotensor(dq_t, "dq");
       params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
       params.L = mk_aotensor<2>(softmax_lse, "L");
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
       params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
       params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
       params.dropout_p = float(dropout_p);
@@ -594,25 +594,31 @@ _efficient_attention_backward(
       params.philox_offset1 = mk_aoscalartensor(philox_offset);
       params.philox_offset2 = 0;
       params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-      params.varlen_type = cu_seqlens_q.has_value() ? VarlenType::CompactVarlen : VarlenType::None;
-      params.window_left = window_left;
-      params.window_right = window_right;
-#if AOTRITON_ALWAYS_V3_API  // if constexpr does not stop errors from undefined functions
+      params.window_left = params.Max_seqlen_q;
+      params.window_right = params.Max_seqlen_k;
+#if AOTRITON_ALWAYS_V3_API
       using sdp::aotriton_adapter::mklazy_empty_like;
       using sdp::aotriton_adapter::mklazy_fp32zeros;
       using sdp::aotriton_adapter::LazyTensorContext;
       LazyTensorContext lazy_delta { .like_tensor = softmax_lse, .tensor_name = "delta" };
       LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
-      params.D = mklazy_empty_like<2>(lazy_delta);
-      params.DQ_ACC = mklazy_fp32zeros<4>(lazy_dq_acc);
+      params.D = mklazy_empty_like<2>(&lazy_delta);
+      params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
 #else
       at::Tensor delta = at::empty_like(softmax_lse).contiguous();
       params.D = mk_aotensor<2>(delta, "delta");
 #endif
+      if (cu_seqlens_q.has_value()) {
+        params.varlen_type = VarlenType::CompactVarlen;
+        params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
+        params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
+      } else {
+        params.varlen_type = VarlenType::None;
+      }
       err = aotriton::v3::flash::attn_bwd(params,
                                           aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
-#endif
+#endif  // AOTRITON_V3_API
     } else if (cu_seqlens_q.has_value()) {
       at::Tensor delta = at::empty_like(softmax_lse).contiguous();
       // varlen aka Nested tensor
