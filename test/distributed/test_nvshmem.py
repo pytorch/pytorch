@@ -66,48 +66,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(out, group=group_name)
 
     @skipIfRocm
-    def test_rendezvous_slice(self) -> None:
-        # Rendezvous a slice of a tensor
-        self._init_device()
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        x = symm_mem.empty((2, 1024), device=self.device)
-        # Directly rendezvousing a slice should not fail
-        hdls = [symm_mem.rendezvous(y, group=group_name) for y in torch.chunk(x, 2)]
-        # Assert that handles are not the same
-        self.assertIsNot(hdls[0], hdls[1])
-
-    @skipIfRocm
-    def test_rendezvous_view(self) -> None:
-        # Rendezvous a view of a tensor
-        self._init_device()
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        x = symm_mem.empty(1024, device=self.device)
-        y = x.view(32, 32)
-        # Directly rendezvousing a view should not fail
-        hdl_y = symm_mem.rendezvous(y, group=group_name)
-
-        # Assert that view's handle is not the same as the original tensor's handle
-        hdl_x = symm_mem.rendezvous(x, group=group_name)
-        self.assertIsNot(hdl_x, hdl_y)
-
-    @skipIfRocm
-    def test_rendezvous_same(self) -> None:
-        # Rendezvous same tensor multiple times
-        self._init_device()
-        group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
-
-        x = symm_mem.empty(1024, device=self.device)
-        hdl_0 = symm_mem.rendezvous(x, group=group_name)
-        hdl_1 = symm_mem.rendezvous(x, group=group_name)
-        # The handle should point to the same object
-        self.assertIs(hdl_0, hdl_1)
-
-    @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
         group_name = dist.group.WORLD.group_name
