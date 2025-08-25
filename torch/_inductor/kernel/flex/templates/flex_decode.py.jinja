@@ -54,10 +54,10 @@
     TILE_KV = tl.cdiv(TILE_KV_OG, BLOCK_N) * BLOCK_N
     TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
 
-    off_z = tl.program_id(0) // HKV
+    off_z = tl.program_id(0).to(INDEX_DTYPE) // HKV
     off_zkv = off_z % ZKV
-    off_hkv = tl.program_id(0) % HKV
-    off_t = tl.program_id(1)
+    off_hkv = tl.program_id(0).to(INDEX_DTYPE) % HKV
+    off_t = tl.program_id(1).to(INDEX_DTYPE)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
     k_offset = off_zkv * stride_kz + off_hkv * stride_kh
