@@ -280,6 +280,10 @@ class FlatArgsAdapter(abc.ABC):
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
 
+    def get_flat_arg_paths(self) -> list[str]:
+        """Returns a list of paths that are used to access the flat args."""
+        return []
+
 
 class UnflattenedModule(torch.nn.Module):
     def __init__(
@@ -577,12 +581,25 @@ class UnflattenedModule(torch.nn.Module):
             from torch._export.utils import _check_input_constraints_for_graph
 
             if self.adapted is True:
-                # TODO(suo): The FlatArgsAdapter returns a list of flat args,
-                # which we don't have keypaths for. For now, just create a dummy
-                # keypath to associate with the arg.
+                flat_arg_paths = (
+                    self.flat_args_adapter.get_flat_arg_paths()
+                    if self.flat_args_adapter
+                    else []
+                )
+                assert not flat_arg_paths or len(flat_arg_paths) == len(flat_args)
                 new_flat_args_with_path = [  # type: ignore[var-annotated]
-                    ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
-                    for arg in flat_args
+                    (
+                        (
+                            SequenceKey(idx=idx),
+                            GetAttrKey(
+                                name=flat_arg_paths[idx]
+                                if flat_arg_paths
+                                else "<unknown location>"
+                            ),
+                        ),
+                        arg,
+                    )
+                    for idx, arg in enumerate(flat_args)
                 ]
             else:
                 new_flat_args_with_path = flat_args_with_path  # type: ignore[assignment]
