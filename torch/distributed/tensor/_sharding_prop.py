@@ -208,7 +208,7 @@ class ShardingPropagator:
     def propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
-         """
+        """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
         used if cache should be used.
