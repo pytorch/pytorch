@@ -2840,7 +2840,6 @@ def _verify_spatial_size(size: list[int]) -> None:
         )
 
 
-@_wrap_torch_function_variadic
 def instance_norm(
     input: Tensor,
     running_mean: Optional[Tensor] = None,
@@ -2856,6 +2855,19 @@ def instance_norm(
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+    if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
+        return handle_torch_function(
+            instance_norm,
+            (input, running_mean, running_var, weight, bias),
+            input,
+            running_mean=running_mean,
+            running_var=running_var,
+            weight=weight,
+            bias=bias,
+            use_input_stats=use_input_stats,
+            momentum=momentum,
+            eps=eps,
+        )
     if use_input_stats:
         _verify_spatial_size(input.size())
     return torch.instance_norm(
@@ -2871,7 +2883,16 @@ def instance_norm(
     )
 
 
-@_wrap_torch_function_variadic
+    if has_torch_function_variadic(input, weight, bias):
+        return handle_torch_function(
+            layer_norm,
+            (input, weight, bias),
+            input,
+            normalized_shape,
+            weight=weight,
+            bias=bias,
+            eps=eps,
+        )
 def layer_norm(
     input: Tensor,
     normalized_shape: list[int],
@@ -3456,7 +3477,6 @@ def binary_cross_entropy(
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
-@_wrap_torch_function_variadic
 def binary_cross_entropy_with_logits(
     input: Tensor,
     target: Tensor,
@@ -3499,6 +3519,18 @@ def binary_cross_entropy_with_logits(
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
+    if has_torch_function_variadic(input, target, weight, pos_weight):
+        return handle_torch_function(
+            binary_cross_entropy_with_logits,
+            (input, target, weight, pos_weight),
+            input,
+            target,
+            weight=weight,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+            pos_weight=pos_weight,
+        )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -5254,7 +5286,6 @@ def triplet_margin_loss(
     )
 
 
-@_wrap_torch_function_variadic
 def triplet_margin_with_distance_loss(
     anchor: Tensor,
     positive: Tensor,
@@ -5269,6 +5300,21 @@ def triplet_margin_with_distance_loss(
 
     See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
     """
+    if has_torch_function_variadic(anchor, positive, negative):
+        return handle_torch_function(
+            triplet_margin_loss,
+            (anchor, positive, negative),
+            anchor,
+            positive,
+            negative,
+            margin=margin,
+            p=p,
+            eps=eps,
+            swap=swap,
+            size_average=size_average,
+            reduce=reduce,
+            reduction=reduction,
+        )
     if torch.jit.is_scripting():
         raise NotImplementedError(
             "F.triplet_margin_with_distance_loss does not support JIT scripting: "
