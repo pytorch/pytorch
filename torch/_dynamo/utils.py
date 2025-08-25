@@ -2861,7 +2861,8 @@ def get_unique_name_wrt(
 
 def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
-        return fn()
+        with enable_python_dispatcher():
+            return fn()
     except UnsupportedFakeTensorException as e:
         from .exc import unimplemented_v2
 
