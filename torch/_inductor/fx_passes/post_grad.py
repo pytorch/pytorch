@@ -197,7 +197,77 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    # Keep these last, since they introduces mutation. Look at
+    collectives_bucketing: bool = False
+    if config.bucket_reduce_scatters_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
+
+        p = (
+            bucket_fsdp_reduce_scatter
+            if config.bucket_reduce_scatters_fx == "fsdp"
+            else bucket_reduce_scatter
+        )
+        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_reduce_scatters_fx_bucket_size_determinator,
+            )
+        )
+        collectives_bucketing = True
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_all_gather
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather  # type: ignore[assignment]
+            if config.bucket_all_gathers_fx == "fsdp"
+            else bucket_all_gather
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_all_gathers_fx_bucket_size_determinator,
+            )
+        )
+        collectives_bucketing = True
+
+    if collectives_bucketing:
+        # Fx collectives bucketing passes require topological sort for the cases:
+        # when bucketed collectives have users before the last collective in the bucket
+        # AND when inputs of bucketed collective have ancestors after the first collective in the bucket.
+        #
+        # In this case we can not manually pick the place for bucketed collective insertion.
+        # But we are guaranteed by the bucketing (independent collectives in the bucket),
+        # that it is possible to reorder nodes to satisfy all ordering requirements.
+        #
+        # --- before bucketing ---
+        # in0 = ...
+        # wait_ag0 = ag(in0)
+        # user0(wait_ag0)
+        # ...
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # wait_ag1 = ag(in1)
+        # user1(wait_ag1)
+        #
+        # --- after bucketing ---
+        #
+        # in0 = ...
+        # user(wait_ag0) <--- wait_ag0 is defined only after bucketed collective.
+        #
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # ag_bucket(in0+in1)
+        # wait_bucket
+        # wait_ag0 = wait_bucket[0]
+        # wait_ag1 = wait_bucket[1]
+        # user1(wait_ag1)
+        stable_topological_sort(gm.graph)
+
+    # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
@@ -218,42 +288,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
-
-    if config.bucket_reduce_scatters_fx != "none":
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_reduce_scatter,
-            bucket_size_determinator,
-        )
-
-        d = (
-            config.bucket_reduce_scatters_fx_bucket_size_determinator
-            or bucket_size_determinator
-        )
-        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
-            lambda graph: bucket_reduce_scatter(graph.owning_module, d)
-        )
-
-    # Fx all_gather bucketing introduces mutation op
-    # Keeping it in the end to keep invariant of functional graph for previous passes.
-    if config.bucket_all_gathers_fx != "none":
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_all_gather,
-            bucket_size_determinator,
-        )
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
-
-        p = (
-            bucket_fsdp_all_gather
-            if config.bucket_all_gathers_fx == "fsdp"
-            else bucket_all_gather
-        )
-        d = (
-            config.bucket_all_gathers_fx_bucket_size_determinator
-            or bucket_size_determinator
-        )
-        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
-            lambda graph: p(graph.owning_module, d)
-        )
 
     gm.recompile()
     gm.graph.lint()
@@ -1452,6 +1486,12 @@ def is_valid_addmm_fusion(match):
     if not matched:
         return False  # Shape mismatch
 
+    inp_dtype = inp.meta["val"].dtype
+
+    # aten cublas integration assumes equal dtypes
+    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
+        return False
+
     return not should_prefer_unfused_addmm(match)
 
 
@@ -1720,17 +1760,44 @@ class ConstructorMoverPass:
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
         target_device = next(iter(target_devices))
-        for node in movable_constructors:
-            if node in cpu_placeholders:
-                with graph.inserting_after(node):
-                    gpu_node = graph.call_function(
-                        torch.ops.prims.device_put.default, (node, target_device)
+        movable_cpu_placeholders = movable_constructors & cpu_placeholders
+        if movable_cpu_placeholders:
+            node = next(iter(reversed(movable_cpu_placeholders)))
+            last_node = node
+            unsqueezed_nodes = []
+            for elem in movable_cpu_placeholders:
+                with graph.inserting_after(last_node):
+                    unsqueezed_nodes.append(
+                        graph.call_function(torch.ops.aten.unsqueeze.default, (elem, 0))
                     )
-                node.replace_all_uses_with(
-                    gpu_node,
-                    lambda x: x != gpu_node
-                    and x.target != torch.ops.aten.copy_.default,
+                    last_node = unsqueezed_nodes[-1]
+            with graph.inserting_after(last_node):
+                cpu_concat = graph.call_function(
+                    torch.ops.aten.cat.default, (unsqueezed_nodes,)
                 )
+                last_node = cpu_concat
+            with graph.inserting_after(last_node):
+                gpu_concat = graph.call_function(
+                    torch.ops.prims.device_put.default,
+                    (cpu_concat, target_device, True),
+                )
+                last_node = gpu_concat
+            with graph.inserting_after(last_node):
+                gpu_split = graph.call_function(
+                    torch.ops.aten.unbind.int, (gpu_concat,)
+                )
+                last_node = gpu_split
+            for idx, node in enumerate(movable_cpu_placeholders):
+                with graph.inserting_after(last_node):
+                    gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
+                    node.replace_all_uses_with(
+                        gpu_node,
+                        lambda x: x
+                        not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
+                        + unsqueezed_nodes
+                        and x.target != torch.ops.aten.copy_.default,
+                    )
+                    last_node = gpu_node
 
                 # noop elimination if there are other device_put for gpu_node to
                 # target device. Alternatively, we could just move the other device_put
@@ -1744,10 +1811,12 @@ class ConstructorMoverPass:
                 for noop in noop_device_puts:
                     noop.replace_all_uses_with(gpu_node)
                     graph.erase_node(noop)
-            else:
-                kwargs = node.kwargs.copy()
-                kwargs["device"] = target_device
-                node.kwargs = kwargs
+
+        movable_constructors -= movable_cpu_placeholders
+        for node in movable_constructors:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = target_device
+            node.kwargs = kwargs
 
     def find_movable_constructors(
         self, graph: fx.Graph, constructors: list[fx.Node]

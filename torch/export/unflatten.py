@@ -280,6 +280,10 @@ class FlatArgsAdapter(abc.ABC):
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
 
+    def get_flat_arg_paths(self) -> list[str]:
+        """Returns a list of paths that are used to access the flat args."""
+        return []
+
 
 class UnflattenedModule(torch.nn.Module):
     def __init__(
@@ -308,6 +312,7 @@ class UnflattenedModule(torch.nn.Module):
         self._run_with_interpreter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_and_input_mutations(export_graph, self.graph_signature)
+        _fix_nn_module_stacks(export_graph)
 
         self.ivals = _IVals()
         # for any intermediate value of a mutation that is read, track the mutation
@@ -576,12 +581,25 @@ class UnflattenedModule(torch.nn.Module):
             from torch._export.utils import _check_input_constraints_for_graph
 
             if self.adapted is True:
-                # TODO(suo): The FlatArgsAdapter returns a list of flat args,
-                # which we don't have keypaths for. For now, just create a dummy
-                # keypath to associate with the arg.
+                flat_arg_paths = (
+                    self.flat_args_adapter.get_flat_arg_paths()
+                    if self.flat_args_adapter
+                    else []
+                )
+                assert not flat_arg_paths or len(flat_arg_paths) == len(flat_args)
                 new_flat_args_with_path = [  # type: ignore[var-annotated]
-                    ((SequenceKey(idx=0), GetAttrKey(name="<unknown location>")), arg)
-                    for arg in flat_args
+                    (
+                        (
+                            SequenceKey(idx=idx),
+                            GetAttrKey(
+                                name=flat_arg_paths[idx]
+                                if flat_arg_paths
+                                else "<unknown location>"
+                            ),
+                        ),
+                        arg,
+                    )
+                    for idx, arg in enumerate(flat_args)
                 ]
             else:
                 new_flat_args_with_path = flat_args_with_path  # type: ignore[assignment]
@@ -791,6 +809,45 @@ def _inplace_buffer_and_input_mutations(
     # need to thread it through anymore.
     user_outputs = tuple(return_args[num_mutations:])
     output_node.args = ((user_outputs),)
+
+
+def _fix_nn_module_stacks(graph):
+    # For each nn module stack in the graph, check if the fqns in it represent a stack:
+    # 1. Each fqn must be a prefix of the next fqn.
+    # 2. If not, remove the entries starting from the next fqn, emitting a warning.
+    for node in graph.nodes:
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        nn_module_stack = node.meta["nn_module_stack"]
+        fqns = [
+            fqn.split("@")[0] if "@" in fqn else fqn
+            for fqn, _t in nn_module_stack.values()
+        ]
+
+        # Check if each FQN is a prefix of the next one
+        prev_fqn, *next_fqns = fqns
+        num_valid_indices = 1  # root FQN
+        for curr_fqn in next_fqns:
+            # Check if the previous FQN is a prefix of the current one
+            if _is_prefix(prev_fqn, curr_fqn):
+                num_valid_indices += 1
+                prev_fqn = curr_fqn
+            else:
+                # Found a non-prefix FQN, stop here
+                break
+
+        # If we need to remove entries, create a new stack with only valid entries
+        if num_valid_indices < len(nn_module_stack):
+            log.warning(
+                "nn_module_stack fqns %s at node %s do not form a stack! dropping last %d entries",
+                fqns,
+                node,
+                len(nn_module_stack) - num_valid_indices,
+            )
+            node.meta["nn_module_stack"] = dict(
+                list(nn_module_stack.items())[:num_valid_indices]
+            )
 
 
 def _is_prefix(candidate, target):

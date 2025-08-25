@@ -143,11 +143,44 @@ def maybe_to_fake_obj(
 
     _check_valid_flat_script_obj(flat_x)
 
-    fake_flattened = pytree.tree_map_only(
-        torch.Tensor,
-        lambda t: fake_mode.from_tensor(t),
-        flat_x,
-    )
+    with fake_mode:
+        from torch._higher_order_ops.utils import _tensor_storage
+
+        storage_map = {
+            _tensor_storage(inp): i
+            for i, inp in enumerate(flat_x)
+            if isinstance(inp, torch.Tensor)
+        }
+        alias_map = {
+            i: storage_map[_tensor_storage(inp)]
+            for i, inp in enumerate(flat_x)
+            if isinstance(inp, torch.Tensor) and storage_map[_tensor_storage(inp)] != i
+        }
+        if len(alias_map) > 0:
+            log.warning(
+                "Detected script object %s has aliasing relationship among its tensors. "
+                "Flattened obj: %s. Aliasing tensor indices: %s. "
+                "This is not supported and may cause unexpected behavior.",
+                x,
+                flat_x,
+                alias_map,
+            )
+
+        # This breaks the aliasing relationship among the tensors inside the torchbind object
+        # This is bad but since we don't need to preserve the aliasing relationship anyway and
+        # we state clearly that aliasing relationship is not preserved in the doc so this might be OK.
+        fake_flattened = pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: torch.empty_strided(
+                t.size(),
+                t.stride(),
+                device=t.device,
+                dtype=t.dtype,
+                requires_grad=t.requires_grad,
+                layout=t.layout,
+            ),
+            flat_x,
+        )
 
     fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 

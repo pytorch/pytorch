@@ -24,12 +24,14 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
     )
 
@@ -73,6 +75,17 @@ def radians(x):
     import math
 
     return math.pi / 180.0 * x
+
+
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
 def accumulate_grad(x, new_grad):
@@ -231,6 +244,10 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
 def assert_multi_line_equal(self_, first, second, msg=None):
     return self_.assertTrue(first == second, msg)
 
@@ -238,12 +255,6 @@ def assert_multi_line_equal(self_, first, second, msg=None):
 # The original impl. uses difflib
 def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
-
-
-def generator___contains__(gen, item):
-    # "any" lazily consumes the generator, which is important to prevent
-    # unintended side effects.
-    return any(e == item for e in gen)
 
 
 def getattr_and_trace(*args, **kwargs):

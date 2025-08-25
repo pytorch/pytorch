@@ -468,13 +468,26 @@ def compiled_module_main(
             "If None, NCU will use '--set full'."
         ),
     )
+    parser.add_argument(
+        "--times",
+        type=int,
+        default=10,
+        help="Number of times to run each benchmark iteration",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=10,
+        help="Number of repetitions of each benchmark run",
+    )
+
     args = parser.parse_args()
 
     if args.benchmark_kernels:
         benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
     else:
-        times = 10
-        repeat = 10
+        times = args.times
+        repeat = args.repeat
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()

@@ -309,6 +309,7 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -321,6 +322,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -935,6 +937,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -956,6 +959,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 

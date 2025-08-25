@@ -50,21 +50,18 @@ jobs:
         runner: [linux.12xlarge]
         docker-image-name: [
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
-          pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-jammy-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
-          pytorch-linux-jammy-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9,
           pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
           pytorch-linux-jammy-py3.9-clang12,
-          pytorch-linux-jammy-py3.11-clang12,
-          pytorch-linux-jammy-py3.12-clang12,
           pytorch-linux-jammy-py3.13-clang12,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
           pytorch-linux-noble-rocm-alpha-py3,
+          pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12,
           pytorch-linux-jammy-py3.9-gcc11,
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
@@ -75,8 +72,10 @@ jobs:
           pytorch-linux-jammy-py3-clang12-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter,
-          pytorch-linux-jammy-py3-clang12-executorch,
-          pytorch-linux-jammy-py3.12-triton-cpu
+          # Executorch pin needs update
+          # pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11

@@ -124,9 +124,9 @@ class BasicEvaluation:
             for child_event in curr_event.children:
                 self_time -= child_event.duration_time_ns
                 stack.append(child_event)
-            assert (
-                EventKey(curr_event) not in self.metrics
-            ), f"Duplicate id: {curr_event.id}, {curr_event.name}"
+            assert EventKey(curr_event) not in self.metrics, (
+                f"Duplicate id: {curr_event.id}, {curr_event.name}"
+            )
             self.metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
             self.metrics[
                 EventKey(curr_event)
@@ -154,8 +154,17 @@ class BasicEvaluation:
             return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
-            # TODO: find a better way to identify CUDA Kernel
-            return e.device_type() == DeviceType.CUDA and "mem" not in e.name.lower()
+            """Check if the event is a CUDA runtime kernel."""
+            # Check if the kernel is CUDA
+            if e.device_type() != DeviceType.CUDA:
+                return False
+
+            name = str(getattr(e, "name", e)).lower()
+
+            # Exclude memory operations
+            exclude_patterns = {"mem", "cpy", "alloc", "free"}
+
+            return not any(pattern in name for pattern in exclude_patterns)
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -218,8 +227,7 @@ class BasicEvaluation:
 
             while (
                 current_kernel_index < len(cuda_kernel_events)
-                and (cuda_kernel_events[current_kernel_index].start_ns())
-                <= start_time  # type: ignore[possibly-undefined]
+                and (cuda_kernel_events[current_kernel_index].start_ns()) <= start_time  # type: ignore[possibly-undefined]
             ):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
@@ -343,11 +351,11 @@ class BasicEvaluation:
 
         output += "\n".join(
             [
-                f"""{'-' * 80}
+                f"""{"-" * 80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-' * 80}"""
+{"-" * 80}"""
                 for event in event_list
             ]
         )

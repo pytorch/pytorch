@@ -27,7 +27,7 @@ import torch.fx
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented_v2
-from ..source import AttrSource
+from ..source import AttrSource, NamedTupleFieldsSource
 from ..utils import (
     cmp_name_to_op_mapping,
     cmp_name_to_op_str_mapping,
@@ -639,10 +639,12 @@ class ListVariable(CommonListMethodsVariable):
                 else:
                     key = key.as_python_constant()
 
-                if key >= len(self.items) or key < -len(self.items):
-                    msg = ConstantVariable.create("list index out of range")
-                    raise_observed_exception(IndexError, tx, args=[msg])
-                self.items[key] = value
+                try:
+                    self.items[key] = value
+                except (IndexError, TypeError) as e:
+                    raise_observed_exception(
+                        type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                    )
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
@@ -1148,6 +1150,10 @@ class NamedTupleVariable(TupleVariable):
             else:
                 return None
 
+        if name == "_fields":
+            source = NamedTupleFieldsSource(self.source) if self.source else None
+            return VariableTracker.build(tx, self.fields(), source=source)
+
         if name in self.dynamic_attributes:
             return self.dynamic_attributes[name]
 
@@ -1257,19 +1263,8 @@ class ListIteratorVariable(IteratorVariable):
         self.index += 1
         return self.items[old_index]
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ):
-        if name == "__contains__":
-            assert len(args) == 1
-            assert not kwargs
-            return iter_contains(self.items[self.index :], args[0], tx)
-
-        return super().call_method(tx, name, args, kwargs)
+    def call_obj_hasattr(self, tx, name):
+        return variables.ConstantVariable.create(hasattr(iter([]), name))
 
     def python_type(self):
         return type(iter([]))
@@ -1279,8 +1274,13 @@ class ListIteratorVariable(IteratorVariable):
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
+    def has_unpack_var_sequence(self, tx):
+        return True
+
     def unpack_var_sequence(self, tx):
-        return list(self.items[self.index :])
+        r = list(self.items[self.index :])
+        self.index = len(self.items)
+        return r
 
     def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         return self.unpack_var_sequence(tx)
