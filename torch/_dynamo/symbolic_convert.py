@@ -72,10 +72,13 @@ from .bytecode_analysis import (
 )
 from .bytecode_transformation import (
     cleaned_instructions,
+    create_binary_slice,
     create_call_function,
+    create_copy,
     create_dup_top,
     create_instruction,
     create_jump_absolute,
+    create_rot_n,
     create_swap,
     get_code_keys,
     Instruction,
@@ -671,14 +674,12 @@ def generic_jump(
         self.pop()
 
         if_next = self.create_call_resume_at(
-            self.next_instruction, 0, all_stack_locals_metadata
+            self.next_instruction, all_stack_locals_metadata
         )
         if push:
             self.push(value)
         assert inst.target is not None
-        if_jump = self.create_call_resume_at(
-            inst.target, int(push), all_stack_locals_metadata
-        )
+        if_jump = self.create_call_resume_at(inst.target, all_stack_locals_metadata)
 
         if sys.version_info >= (3, 13):
             # 3.13 requires stack[-1] to be bool type
@@ -1011,7 +1012,7 @@ def break_graph_if_unsupported(
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
-                    self.next_instruction, push, all_stack_locals_metadata
+                    self.next_instruction, all_stack_locals_metadata
                 )
             )
 
@@ -1426,16 +1427,15 @@ class InstructionTranslatorBase(
         # load locals from frame values
         # current frame state
         # [
-        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        #   frame N locals,
+        #   frame N-1 stack + locals,
         #   ...,
-        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        #   frame 1 stack + locals,
         # ],
         cg = PyCodegen(self)
         self.output.add_output_instructions(
             [
                 cg.create_load_const(-1),
-                cg.create_binary_subscr(),
-                cg.create_load_const(1),
                 cg.create_binary_subscr(),
             ]
         )
@@ -2467,9 +2467,7 @@ class InstructionTranslatorBase(
         self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
-            self.create_call_resume_at(
-                self.next_instruction, 0, all_stack_locals_metadata
-            )
+            self.create_call_resume_at(self.next_instruction, all_stack_locals_metadata)
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
@@ -2481,7 +2479,7 @@ class InstructionTranslatorBase(
         )
 
     def create_call_resume_at(
-        self, inst: Instruction, push: int, all_stack_locals_metadata: Any
+        self, inst: Instruction, all_stack_locals_metadata: Any
     ) -> list[Instruction]:
         self.instruction_pointer = None
 
@@ -2494,38 +2492,35 @@ class InstructionTranslatorBase(
 
         # current frame state
         # [
-        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        #   frame N locals,
+        #   frame N-1 stack + locals,
         #   ...,
-        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
-        # ], `push` values from running the unsupported instruction
+        #   frame 1 stack + locals
+        # ], frame N stack (post-instruction)
 
-        # move the `push` stack values to the frame N stack
+        # move frame N stack to the frame values list
+        current_num_stack = len(self.stack) - len(
+            all_stack_locals_metadata[0].stack_null_idxes
+        )
+        all_stack_locals_metadata[0].num_stack = current_num_stack
         cg.extend_output(
             [
-                create_instruction("BUILD_LIST", arg=push),
-                # frames_list, push_values_list
-                *create_swap(2),
-                create_dup_top(),
+                create_instruction("BUILD_LIST", arg=current_num_stack),
+                *create_copy(2),
+                # frame_values, frame N stack, frame_values
                 cg.create_load_const(0),
                 cg.create_binary_subscr(),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                # push_values_list, frames_list, frames_list[0][0]
-                *create_swap(3),
-                # frames_list[0][0] += push_values_list
-                create_instruction("LIST_EXTEND", arg=2),
-                *create_swap(2),
-                # frames_list, frames_list[0][0]
-                create_instruction("POP_TOP"),
+                *create_binary_slice(0, 0, True),
+                # frame_values[0][0:0] = frame N stack
+                # frame_values left on top of stack
             ]
         )
 
         # current frame state
         # [
-        #   (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #   [frame N stack (fixed) + locals]
         #   ...,
-        #   (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
-        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        #   [frame 1 stack + locals]
         # ],
 
         #
@@ -2541,20 +2536,17 @@ class InstructionTranslatorBase(
         # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
         # NOTE: if the unsupported instruction modifies the inactive context variable, it may
         # result in silent incorrectness!
-        argnames: tuple[str, ...] = ()
         for i, meta in enumerate(all_stack_locals_metadata):
             for (j, _), j_orig in zip(meta.stack_ctx_args, meta.stack_ctx_idxes_orig):
                 # Replace the stack var with the context class
                 ctx = cast(ContextWrappingVariable, txes[i].stack[j_orig])
-                # frames[i][0][j] = reconstructed_ctx
+                # frames[i][j] = reconstructed_ctx
                 cg.append_output(create_dup_top())
                 ctx.reconstruct_type(cg)
                 cg.extend_output(
                     [
                         *create_swap(2),
                         cg.create_load_const(i),
-                        cg.create_binary_subscr(),
-                        cg.create_load_const(0),
                         cg.create_binary_subscr(),
                         cg.create_load_const(j),
                         create_instruction("STORE_SUBSCR"),
@@ -2564,7 +2556,7 @@ class InstructionTranslatorBase(
             for name, _ in meta.locals_ctx_args:
                 # Replace the local with the context class
                 ctx = cast(ContextWrappingVariable, txes[i].symbolic_locals[name])
-                # frames[i][1][meta.locals_names[name]] = reconstructed_ctx
+                # frames[i][meta.num_stack +meta.locals_names[name]] = reconstructed_ctx
                 cg.append_output(create_dup_top())
                 ctx.reconstruct_type(cg)
                 cg.extend_output(
@@ -2572,9 +2564,7 @@ class InstructionTranslatorBase(
                         *create_swap(2),
                         cg.create_load_const(i),
                         cg.create_binary_subscr(),
-                        cg.create_load_const(1),
-                        cg.create_binary_subscr(),
-                        cg.create_load_const(meta.locals_names[name]),
+                        cg.create_load_const(meta.num_stack + meta.locals_names[name]),
                         create_instruction("STORE_SUBSCR"),
                     ]
                 )
@@ -2595,21 +2585,65 @@ class InstructionTranslatorBase(
                 if is_jump_absolute(resume_inst):
                     assert resume_inst.target
                     resume_inst = resume_inst.target
-            name = unique_id(f"__resume_at_{resume_inst.offset}")
-            resume_names.append(name)
+            resume_name = unique_id(f"__resume_at_{resume_inst.offset}")
+            resume_names.append(resume_name)
 
-            # more locals may have been pruned after the unsupported instruction (e.g. branch)
-            reads = livevars_analysis(cur_tx.instructions, resume_inst)
-            all_argnames = tuple(
-                k
-                for k in cur_tx.symbolic_locals.keys()
-                if k in reads and k not in cur_tx.cell_and_freevars()
-            )
-            argnames_null_set = set(meta.locals_null_keys)
-            argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
-            argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
+            # More locals may have been pruned in the current frame
+            # after the unsupported instruction (e.g. branch).
+            # There should not be any pruning in the other frames since
+            # the current instruction is a CALL.
+            if cur_tx is self:
+                reads = livevars_analysis(cur_tx.instructions, resume_inst)
+                all_argnames = tuple(
+                    k
+                    for k in cur_tx.symbolic_locals.keys()
+                    if k in reads and k not in cur_tx.cell_and_freevars()
+                )
+                argnames_null_set = set(meta.locals_null_keys)
+                argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
+                argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
+
+                # codegen filter for current frame's locals
+                # current stack state: frames
+                cg.extend_output(
+                    [
+                        create_dup_top(),
+                        cg.create_load_const(i),
+                        cg.create_binary_subscr(),
+                        create_dup_top(),
+                    ]
+                )
+                for arg in argnames:
+                    # current stack state: frames, frames[i], *(prev locals), frames[i]
+                    cg.extend_output(
+                        [
+                            create_dup_top(),
+                            cg.create_load_const(
+                                meta.num_stack + meta.locals_names[arg]
+                            ),
+                            cg.create_binary_subscr(),
+                            *create_swap(2),
+                        ],
+                    )
+                # current stack state: frames, frames[i], *(frame i live locals), frames[i]
+                cg.extend_output(
+                    [
+                        create_instruction("POP_TOP"),
+                        create_instruction("BUILD_LIST", arg=len(argnames)),
+                        *create_swap(2),
+                        # frames, frames i live locals, frames[i]
+                        *create_binary_slice(meta.num_stack, None, True),
+                        # frames[i][num_stack:] = frame i live locals
+                    ]
+                )
+                # current stack state: frames
+            else:
+                argnames = tuple(meta.locals_names.keys())
+                argnames_null = tuple(meta.locals_null_keys)
+
             if sys.version_info < (3, 12):
                 assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
+
             # compile_subgraph did not codegen any NULLs,
             # so we should not count NullVariables
             stack_len = len(cur_tx.stack) - len(meta.stack_null_idxes)
@@ -2643,14 +2677,15 @@ class InstructionTranslatorBase(
             # add resume function to the global scope
             if new_code.co_freevars:
                 # expose code object for debugging purposes
-                cur_tx.output.install_global_unsafe(name, new_code)
+                cur_tx.output.install_global_unsafe(resume_name, new_code)
                 package_name = None
             else:
                 # This is safe: we pre-generate a unique name
                 cur_tx.output.install_global_unsafe(
-                    name, types.FunctionType(new_code, cur_tx.f_globals, name)
+                    resume_name,
+                    types.FunctionType(new_code, cur_tx.f_globals, resume_name),
                 )
-                package_name = name
+                package_name = resume_name
 
             if cur_tx.package is not None:
                 cur_tx.package.add_resume_function(
@@ -2687,10 +2722,10 @@ class InstructionTranslatorBase(
         # [
         #     [resume N, ..., resume 2],
         #     [
-        #         (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #         frame N stack + locals,
         #         ...,
-        #         (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
-        #     ], *(frame 1 stack + frame 1 non-cell locals)
+        #         frame 2 stack + locals,
+        #     ], *(frame 1 stack + locals)
         # ]
         cg.extend_output(
             [
@@ -2704,48 +2739,21 @@ class InstructionTranslatorBase(
                 # frames, frames[-1], frames
                 cg.create_load_const(-1),
                 create_instruction("DELETE_SUBSCR"),
-                # del frames[-1]; stack: frames, frames[-1]
-                create_dup_top(),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                # frames, frames[-1], frames[-1][0]
-                *create_swap(2),
-                cg.create_load_const(1),
-                cg.create_binary_subscr(),
             ]
         )
 
-        # resumes, frames, frames[-1][0], frames[-1][1]
-        for name in argnames:
-            cg.extend_output(
-                [
-                    create_dup_top(),
-                    cg.create_load_const(
-                        all_stack_locals_metadata[-1].locals_names[name]
-                    ),
-                    cg.create_binary_subscr(),
-                    *create_swap(2),
-                ],
-            )
-        # resumes, frames, frames[-1][0], *(live locals), frames[-1][1]
+        # TOS: resumes, frames (popped), frame 1 stack + locals
         cg.extend_output(
             [
-                create_instruction("POP_TOP"),
-                create_instruction("BUILD_LIST", arg=len(argnames)),
-                *create_swap(4),
-                # live_locals, frames, frames[-1][0], resumes
-                create_instruction("BUILD_LIST", arg=1),
-                *create_swap(3),
-                # live_locals, [resumes], frames[-1][0], frames
-                create_instruction("LIST_APPEND", arg=2),
-                create_instruction("LIST_EXTEND", arg=1),
-                # live_locals, [resumes, frames, *stack]
+                *create_rot_n(3),
+                create_instruction("BUILD_LIST", arg=2),
                 *create_swap(2),
+                # [resumes, frames (popped)], frame 1 stack + locals
                 create_instruction("LIST_EXTEND", arg=1),
             ]
         )
-        # [resumes, frames, *(stack + live locals)]
 
+        # TOS: [resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(
             [
                 create_instruction("CALL_FUNCTION_EX", arg=0),
@@ -4391,10 +4399,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         return False  # inlining functions is all-or-nothing
 
     def create_call_resume_at(
-        self, inst: Instruction, push: int, all_stack_locals_metadata: Any
+        self, inst: Instruction, all_stack_locals_metadata: Any
     ) -> list[Instruction]:
         if config.nested_graph_breaks:
-            return super().create_call_resume_at(inst, push, all_stack_locals_metadata)
+            return super().create_call_resume_at(inst, all_stack_locals_metadata)
         unimplemented_v2(
             gb_type="Graph break in inlined function",
             context="",

@@ -25,7 +25,6 @@ from .bytecode_transformation import (
     add_push_null,
     bytecode_from_template,
     create_call_function,
-    create_dup_top,
     create_instruction,
     create_jump_absolute,
     create_load_const,
@@ -495,15 +494,8 @@ class ContinueExecutionCache:
                         # create [
                         #     __nested_resume_fns,
                         #     __nested_frame_values,
-                        #     *__nested_frame_values[-1][0],
-                        #     *__nested_frame_values[-1][1]],
+                        #     *__nested_frame_values[-1],
                         # ]
-                        create_dup_top(),
-                        create_instruction("LOAD_CONST", argval=0),
-                        create_instruction("BINARY_SUBSCR"),
-                        create_instruction("LIST_EXTEND", arg=2),
-                        create_instruction("LOAD_CONST", argval=1),
-                        create_instruction("BINARY_SUBSCR"),
                         create_instruction("LIST_EXTEND", arg=1),
                         # del __nested_frame_values[-1]
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
