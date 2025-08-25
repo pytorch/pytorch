@@ -669,7 +669,7 @@ void svd_cusolver(const Tensor& A,
 #ifdef USE_ROCM
   const auto driver_v = std::string_view("gesvdj");
 #else
-  const auto driver_v = driver.value_or("gesvdj");
+  const auto driver_v = driver.value_or("gesvd");
 #endif
 
   if (driver_v == "gesvd") {
