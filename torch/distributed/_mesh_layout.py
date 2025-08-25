@@ -31,51 +31,54 @@
 #################################################################################################
 
 import math
+from collections.abc import Iterator
+from dataclasses import dataclass
 from itertools import product
 
 
+IntTupe = tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class _Layout:
     """
-    Utility class for representing an integer layout by leveraging CuTe Layout Algebra.
+    Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
     See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
 
-    Each layout is represented as a list of (size, stride) pairs. We use it as a way for mechanical bookkeeping
+    Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
 
     Lots of methods of layout like coalesce, composition, complement, etc. are borrowed from pycute.
     https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137,L257
+
+    Note this is a CuTe-inspired layout, because CuTe uses co-lexicographic way in linearization while PyTorch
+    is using lexicographic. So even though the CuTe documentation can still be referenced, the implementation will be
+    different from that of PyCute's.
     """
 
-    def __init__(self, sizes_and_strides: tuple[tuple[int, int], ...]):
-        self.sizes_and_strides = sizes_and_strides
+    _sizes: IntTupe
+    _strides: IntTupe
 
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}(sizes_and_strides={self.sizes_and_strides!r})"
-        )
-
-    def __str__(self) -> str:
-        return f"Sizes/Strides: {self.sizes_and_strides}"
+    def __post_init__(self) -> None:
+        if len(self._sizes) != len(self._strides):
+            raise ValueError(
+                f"sizes {len(self._sizes)} and strides {len(self._strides)} must have the same length"
+            )
 
     @property
-    def sizes(self) -> list[int]:
-        return [s for s, _ in self.sizes_and_strides]
+    def sizes(self) -> IntTupe:
+        return self._sizes
 
     @property
-    def strides(self) -> list[int]:
-        return [s for _, s in self.sizes_and_strides]
+    def strides(self) -> IntTupe:
+        return self._strides
+
+    @property
+    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
+        return zip(self._sizes, self._strides)
 
     def numel(self) -> int:
         return math.prod(self.sizes)
-
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, _Layout)
-            and self.sizes_and_strides == other.sizes_and_strides
-        )
-
-    def __hash__(self) -> int:
-        return hash(self.sizes_and_strides)
 
     @staticmethod
     def ceil_div(n: int, m: int) -> int:
@@ -98,18 +101,20 @@ class _Layout:
         - outer dimension: stride=4, mismatch (≠ 2)
         → cannot merge; result stays (3,2):(4,1)
         """
-        res_sizes_and_strides: list[tuple[int, int]] = []
+        sizes: list[int] = []
+        strides: list[int] = []
         for size, stride in self.sizes_and_strides:
             if size == 1:
                 pass
-            elif (
-                res_sizes_and_strides and res_sizes_and_strides[-1][1] == size * stride
-            ):
-                prev_size, _ = res_sizes_and_strides.pop()
-                res_sizes_and_strides.append((size * prev_size, stride))
+            elif strides and strides[-1] == size * stride:
+                strides.pop()
+                prev_size = sizes.pop()
+                sizes.append(size * prev_size)
+                strides.append(stride)
             else:
-                res_sizes_and_strides.append((size, stride))
-        return _Layout(tuple(res_sizes_and_strides))
+                sizes.append(size)
+                strides.append(stride)
+        return _Layout(tuple(sizes), tuple(strides))
 
     def composition(self, layout: "_Layout") -> list["_Layout"]:
         """
@@ -131,17 +136,15 @@ class _Layout:
         Returns:
           A list of composed layouts.
         """
-        assert len(self.sizes_and_strides) >= 1, (
-            "Layout for composition cannot be empty"
-        )
+        assert len(self.sizes) >= 1, "Layout for composition cannot be empty"
         # A layout can be expressed as the concatenation of its sublayouts.
         # When layout is injective (aka one-to-one), composition is left-distributive with concatenation.
         # We return a flattened list of list of self compose with each sublayout.
-        if len(layout.sizes_and_strides) > 1:
+        if len(layout.sizes) > 1:
             return [
                 l
                 for ss in layout.sizes_and_strides
-                for l in self.composition(_Layout((ss,)))
+                for l in self.composition(_Layout((ss[0],), (ss[1],)))
             ]
 
         res: list[_Layout] = []
@@ -150,7 +153,7 @@ class _Layout:
         for sub_size in layout.sizes:
             sub_stride = numel_so_far
             numel_so_far *= sub_size
-            sub_res_sizes_and_strides = []
+            sub_res_sizes, sub_res_strides = [], []
 
             # when self is multi-dimensional sublayout, aka, self = (a,b,...,c):(x,y,...,z), layout = s:d,
             # for integral s and d means that we want:
@@ -159,15 +162,14 @@ class _Layout:
             # For example, if self = (6,2):(2,1), layout = (3:2)
             # Step 1: remove the first 2 elements from self with strid increase, i.e., (6,2):(2,1) -> (3,2):(4,1)
             # Step 2: keep the first 3 of those strided elements, i.e., (3,2):(4,1) -> (3,1):(4,1)
-            for curr_size, curr_stride in self.sizes_and_strides[:-1]:
+            for curr_size, curr_stride in zip(self.sizes[:-1], self.strides[:-1]):
                 assert curr_size % sub_stride == 0 or sub_stride % curr_size == 0, (
                     "Layouts do not meet stride divisibility condition"
                 )
                 new_size = min(max(1, curr_size // sub_stride), sub_size)
                 if new_size != 1:
-                    sub_res_sizes_and_strides.append(
-                        (new_size, sub_stride * curr_stride)
-                    )
+                    sub_res_sizes.append(new_size)
+                    sub_res_strides.append(sub_stride * curr_stride)
                 assert sub_size % new_size == 0, (
                     "Layouts do not meet shape divisibility condition"
                 )
@@ -177,20 +179,19 @@ class _Layout:
             # When self is integral and has single-size sublayout, aka, self = a:b, layout = s:d,
             # the result is rather trivial: self o layout = a:b o s:d = s:(b*d).
             # For example, if self = (6:2), layout = (3:2), the result is (3:(2*2)) = (3:4).
-            if sub_size != 1 or len(sub_res_sizes_and_strides) == 0:
-                sub_res_sizes_and_strides.append(
-                    (sub_size, sub_stride * self.strides[-1])
-                )
+            if sub_size != 1 or len(sub_res_sizes) == 0:
+                sub_res_sizes.append(sub_size)
+                sub_res_strides.append(sub_stride * self.strides[-1])
 
-            sub_res = _Layout(tuple(sub_res_sizes_and_strides))
+            sub_res = _Layout(tuple(sub_res_sizes), tuple(sub_res_strides))
             res.append(sub_res)
         return res
 
     def complement(self, world_size: int) -> "_Layout":
         """
         Compute the "complement layout" relative to a given world_size.
-        A complement layout fills in the "missing" factor so that: self ⊗ complement(self, world_size)
-        has a total cosize (product of sizes) = world_size.
+        A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
+        will get a total cosize (product of sizes) = world_size. We use ⊗ to denote the repeat operation.
 
         Example:
           self = (4:1)   # size=4, stride=1
@@ -207,7 +208,8 @@ class _Layout:
         In distributed terms, complement() is often used to derive the "other"
         rank grouping when splitting processes into 2D meshes.
         """
-        res_sizes_and_strides = []
+        res_sizes: list[int] = []
+        res_strides: list[int] = []
         current_idx = 1
         for size, stride in sorted(self.sizes_and_strides, key=lambda x: x[1]):
             if stride == 0 or size == 1:
@@ -216,21 +218,22 @@ class _Layout:
                 f"current_idx {current_idx} larger than numel so far {size * stride}."
             )
 
-            res_sizes_and_strides.append((stride // current_idx, current_idx))
+            res_sizes.append(stride // current_idx)
+            res_strides.append(current_idx)
             current_idx = size * stride
 
-        res_sizes_and_strides.append(
-            (self.ceil_div(world_size, current_idx), current_idx)
-        )
+        res_sizes.append(self.ceil_div(world_size, current_idx))
+        res_strides.append(current_idx)
         # This is different from original pycute implementation, because in pytorch we usually
         # have the right-most dimension as the innermost dimension (smallest stride).
-        res_sizes_and_strides.reverse()
+        res_sizes.reverse()
+        res_strides.reverse()
 
-        return _Layout(tuple(res_sizes_and_strides)).coalesce()
+        return _Layout(tuple(res_sizes), tuple(res_strides)).coalesce()
 
-    def layout_to_group_ranks(self) -> list[int]:
+    def local_ranks(self) -> list[int]:
         """
-        This function computes the local group rank specified by the layout.
+        This function computes the local rank specified by the layout.
 
         How it works:
         1. we enumerates every possible coordinate (like a nested for-loop).
@@ -238,7 +241,7 @@ class _Layout:
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            group_rank = sum(coord[i] * strides[i] for i in range(ndim))
+            local_ranks = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes   = (2, 3)        # 2 rows, 3 cols
@@ -267,7 +270,7 @@ class _Layout:
             for coord in product(*(range(s) for s in self.sizes))
         ]
 
-    def layout_to_global_ranks(self, world_size: int) -> list[list[int]]:
+    def global_ranks(self, world_size: int) -> list[list[int]]:
         """
         Build global ranks specified by the layout via two-level ranks composition.
 
@@ -287,32 +290,44 @@ class _Layout:
                         ]
         """
         return [
-            [group_offset + group_rank for group_rank in self.layout_to_group_ranks()]
-            for group_offset in self.complement(world_size).layout_to_group_ranks()
+            [group_offset + group_rank for group_rank in self.local_ranks()]
+            for group_offset in self.complement(world_size).local_ranks()
         ]
 
 
-def init_layouts_from_mesh(
-    mesh_size: tuple[int, ...], mesh_stride: tuple[int, ...]
-) -> tuple["_Layout", ...]:
-    """
-    Convert a PyTorch mesh tensor's metadata (size, stride) into a list of CuTe-style layouts.
+MeshLayoutType = tuple["_Layout", ...]
 
-    For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
-    and then wrap that (size, stride) pair into a 1D CuTe layout.
 
-    The result is a list of independent layout, one per dimension.
-    Each layout describes how indices in that dimension map to backend ranks.
+@dataclass(frozen=True)
+class _MeshLayout:
+    _layouts: MeshLayoutType
 
-    Example:
-        Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
-        Then:
-        layouts[0] = (3:4)   # first dimension: size=3, stride=4
-        layouts[1] = (4:1)   # second dimension: size=4, stride=1
-    """
-    assert len(mesh_size) == len(mesh_stride), (
-        "mesh_size and mesh_stride must have the same length"
-    )
-    return tuple(
-        _Layout(((size, stride),)) for size, stride in zip(mesh_size, mesh_stride)
-    )
+    @staticmethod
+    def to_single_depth_layouts(
+        mesh_size: IntTupe, mesh_stride: IntTupe
+    ) -> "_MeshLayout":
+        """
+        Convert a contiguous PyTorch mesh tensor's metadata (size, stride) into a list of layouts.
+        If there are no transformation is being made to a device mesh, each dim of mesh is represented
+        by a layout but this is not the case once the mesh has been transformed, unflatten for example.
+
+        For each dimension of the input tensor, we extract its size (mesh.size(i)) and stride (mesh.stride(i)),
+        and then wrap that (size, stride) pair into a 1D layout.
+
+        The result is a list of independent layout, one per dimension.
+        Each layout describes how indices in that dimension map to backend ranks.
+
+        Example:
+            Suppose mesh.shape = (3, 4), mesh.stride = (4, 1).
+            Then:
+            layouts[0] = (3:4)   # first dimension: size=3, stride=4
+            layouts[1] = (4:1)   # second dimension: size=4, stride=1
+        """
+        if len(mesh_size) != len(mesh_stride):
+            raise ValueError("mesh_size and mesh_stride must have the same length")
+        return _MeshLayout(
+            tuple(
+                _Layout((size,), (stride,))
+                for size, stride in zip(mesh_size, mesh_stride)
+            )
+        )
