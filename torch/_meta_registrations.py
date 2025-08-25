@@ -2374,13 +2374,6 @@ def calc_conv_nd_return_shape(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
 
-    torch._check(
-        any(x > 0 for x in ret_shape[2:]),
-        lambda: f"Given input size per channel: {list(dims)}. "
-        f"Calculated output size per channel: {ret_shape[2:]}. "
-        f"Output size is too small",
-    )
-
     return ret_shape
 
 
@@ -2438,7 +2431,13 @@ def meta_conv(
     output_padding: list[int],
     groups: int,
 ):
-    def pick_memory_format():
+    def pick_memory_format(dims):
+        # conv1d use nchw when device is cuda else nhwc
+        if dims == 3:
+            if device_hint(input_tensor) == "cuda":
+                return torch.contiguous_format
+            elif device_hint(input_tensor) == "cpu":
+                return torch.channels_last
         if device_hint(input_tensor) == "cuda":
             if is_channels_last(input_tensor) or is_channels_last(weight):
                 return torch.channels_last
@@ -2449,6 +2448,31 @@ def meta_conv(
             return torch.contiguous_format
         elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
+
+    def shape_check(ret_shape, dims):
+        torch._check(
+            any(x > 0 for x in ret_shape),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape}. "
+            f"Output size is too small",
+        )
+
+    # Expand 1d -> 2d.
+    # This is only done for backends that don't natively support 1d spatial input.
+    k = input_tensor.dim()
+    if (
+        k == 3
+        and not device_hint(input_tensor) == "xpu"
+        and not device_hint(input_tensor) == "mkldnn"
+    ):
+        input_tensor = input_tensor.to(memory_format=torch.contiguous_format)
+        input_tensor.unsqueeze_(2)
+        weight.unsqueeze_(2)
+        if len(stride) == 1:
+            stride.insert(0, 1)
+            padding.insert(0, 0)
+            dilation.insert(0, 1)
+            output_padding.insert(0, 0)
 
     shape_out = calc_conv_nd_return_shape(
         input_tensor,
@@ -2467,7 +2491,19 @@ def meta_conv(
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
+    out = out.to(memory_format=pick_memory_format(k))  # type: ignore[call-overload]
+    # revert 2d -> 1d back
+    if (
+        k == 3
+        and not device_hint(input_tensor) == "xpu"
+        and not device_hint(input_tensor) == "mkldnn"
+    ):
+        out.squeeze_(2)
+        # if we don't squeeze input_tensor/weight here, we'll get a assert failure in ir.ExternKernel.require_exact_strides
+        input_tensor.squeeze_(2)
+        weight.squeeze_(2)
+
+    shape_check(out.shape[2:], input_tensor.shape[2:])
     return out
 
 
