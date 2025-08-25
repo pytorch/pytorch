@@ -891,7 +891,7 @@ struct CachingDeviceAllocatorImpl {
     context_recorder_.store(nullptr);
   }
 
- private:
+ protected:
   /* Internal methods for processing runtime */
 
   // Deallocate a device memory pointer associated with the given block.
