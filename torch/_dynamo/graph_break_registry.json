@@ -2690,5 +2690,16 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
+  ],
+  "GB0269": [
+    {
+      "Gb_type": "while_loop doesn't support int carry training",
+      "Context": "context",
+      "Explanation": "while_loop doesn't support int carry training.",
+      "Hints": [
+        "Consider change the int carry to a scalar int tensor",
+        "Please open an issue."
+      ]
+    }
   ]
 }
