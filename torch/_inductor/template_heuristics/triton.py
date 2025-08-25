@@ -17,6 +17,7 @@ from .. import config, config as inductor_config
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import get_backend_num_stages, get_num_sms, TMA_DESCRIPTOR_SIZE
 from ..virtualized import V
+from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
 
 
@@ -1237,24 +1238,6 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
-
-
-class TemplateConfigHeuristics:
-    def get_template_configs(
-        self,
-        kernel_inputs: KernelInputs,
-        layout: Any,
-        op_name: str,
-    ) -> Generator[dict[str, Any], None, None]:
-        """
-        Get template configs for the given inputs.
-        This is the main entry point for template-specific logic.
-        """
-        # NOTE: not an abstract class, because that clashed below for the mixin
-        # functionality. Can be adjusted, but not a high priority
-        yield from {}
-
-
 class MMTemplateConfigMixin(TemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
