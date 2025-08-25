@@ -110,8 +110,9 @@ void quantized_matmul(
   // [Note] Quantized Matrix Multiplication at XPU
   // The following code integrates oneDNN quantized gemm. The quantization
   // config we support:
-  // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
-  // weight: s8; per_tensor/per_channel calibrated; symmetric
+  // activation: s8, u8, fp16, bf16, fp32; per tensor calibrated;
+  // symmetric&asymmetric weight: s8; per_tensor/per_channel calibrated;
+  // symmetric
   auto attr = Attr(static_cast<float>(1.0 / output_scale), output_zero_point);
   construct_attr_by_post_op(
       binary_post_op,
