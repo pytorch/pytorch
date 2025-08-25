@@ -223,6 +223,47 @@ class LoopBody:
         )
         return new_body2
 
+    def replace_boundary_with_mask(self, dimension: int, new_range: int) -> LoopBody:
+        old_body = self
+        old_sizes = self.sizes
+
+        iter_size, reduce_size = old_sizes
+        original_range = iter_size[dimension]
+        new_iter_size = list(iter_size)
+        new_iter_size[dimension] = new_range
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
+        )
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = [*itertools.chain.from_iterable(indices)]
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+            # index_dtype = iter_idx[dimension].get_dtype()
+            mask = ops.lt(
+                ops.index_expr(iter_idx[dimension], torch.int64),
+                ops.index_expr(original_range, torch.int64),
+            )
+            return ops.masked(mask, lambda: old_body(iter_idx, reduce_idx), 0)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
+
     def reorder_iter_loops(self, new_order) -> LoopBody:
         """
         Reorder iteration loops and return a new LoopBody.

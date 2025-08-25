@@ -1100,6 +1100,16 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
+    def replace_boundary_with_mask(self, dimension: int, new_range: int) -> None:
+        self._body = self._body.replace_boundary_with_mask(dimension, new_range)
+        self._sizes = self._body.sizes
+
+        device = self.node.get_device_or_error()
+        group_fn = self.scheduler.get_backend(device).group_fn
+        self.group = (device, group_fn(self._sizes))
+
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+
     def merge_loops(self) -> None:
         self._body = self._body.merge_loops()
         self._sizes = self._body.sizes
@@ -3992,6 +4002,11 @@ class Scheduler:
             and config.loop_ordering_after_fusion
         ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
+
+        if (shared_data_score < config.score_fusion_memory_threshold and isinstance(node1, SchedulerNode)):
+            breakpoint()
+            node1.replace_boundary_with_mask(0, 4) # hack to mask node1 from [2,3] to [4,3]. TODO: generalize
+            shared_data_score = self.score_fusion_memory(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
             loop_ordering_log.debug(
