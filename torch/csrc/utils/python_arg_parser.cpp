@@ -880,6 +880,10 @@ static bool is_int_or_symint(PyObject* obj) {
     return true;
   }
 
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
   // FakeTensor(..., size=()) is qualified for SymInt param,
   // but we can't go via __index__ (below) as we would normally
   // do for regular tensors, because __index__ first forces a
@@ -893,10 +897,6 @@ static bool is_int_or_symint(PyObject* obj) {
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       return true;
     }
-  }
-
-  if (THPUtils_checkIndex(obj)) {
-    return true;
   }
 
   return false;
