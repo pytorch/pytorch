@@ -103,10 +103,6 @@ def main():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
-            # Python 2.6 requires -fno-strict-aliasing, see
-            # http://legacy.python.org/dev/peps/pep-3123/
-            # We also depend on it in our code (even Python 3).
-            "-fno-strict-aliasing",
         ]
 
     ext_modules = [
