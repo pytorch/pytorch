@@ -6,14 +6,13 @@ import random
 from collections import namedtuple
 from typing import Optional
 
-import sympy
-
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
+from torch._inductor.codegen.triton_utils import is_static_int
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
@@ -48,10 +47,6 @@ padding_lookup = {
         "GemmSpecialization::MNKPadding": True,
     },
 }
-
-
-def is_static_int(number):
-    return isinstance(number, (int, sympy.Integer))
 
 
 def torch_layout_to_ck_layout(torch_layout):
@@ -390,7 +385,7 @@ class CKGemmTemplate(CKTemplate):
         )
         return res
 
-    def _has_padding(self, dimension, gemm_specialization):
+    def _has_padding(self, dimension, gemm_specialization) -> bool:
         # Get the relevant padding map for the given dimension
         dimension_padding = padding_lookup.get(dimension, {})
 
@@ -857,7 +852,7 @@ class CKGemmTemplate(CKTemplate):
 
         return res
 
-    def _is_rcr_f16(self):
+    def _is_rcr_f16(self) -> bool:
         X_meta, W_meta, Y_meta = (
             T.get_layout() for T in [*self.input_nodes, self.output_node]
         )

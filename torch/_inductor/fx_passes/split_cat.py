@@ -331,7 +331,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
 
     ndim = cat_node.meta["example_value"].dim()
 
-    def is_empty_tensor(x):
+    def is_empty_tensor(x) -> bool:
         # special case where torch.cat supports cat'ing with an empty tensor
         x_shape = x.meta["example_value"].shape
         return len(x_shape) == 1 and guard_or_false(x_shape[0] == 0)
@@ -1443,7 +1443,7 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
 #     |    \                              |     \
 
 
-def has_same_parent_node(node: torch.fx.Node):
+def has_same_parent_node(node: torch.fx.Node) -> bool:
     # the input nodes of the node should come from the same parent
     prev_node = None
     for getitem in node.args[0]:  # type: ignore[union-attr]

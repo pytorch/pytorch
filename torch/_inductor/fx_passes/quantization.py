@@ -5,7 +5,7 @@ import functools
 import itertools
 import math
 import operator
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -360,8 +360,8 @@ def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_val
         return actual_value == expected_value
 
 
-def _is_valid_quantized_conv_optimization_pattern():
-    def fn(match):
+def _is_valid_quantized_conv_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         output_dtype = _get_pattern_output_dtype(match)
         if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
@@ -376,7 +376,9 @@ def _is_valid_quantized_conv_optimization_pattern():
     return fn
 
 
-def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False):
+def _is_valid_qconv_post_op_fusion_pattern(
+    has_binary_post_op=False,
+) -> Callable[[Match], bool]:
     return (
         _is_valid_qconv_binary_optimization_pattern()
         if has_binary_post_op
@@ -384,8 +386,8 @@ def _is_valid_qconv_post_op_fusion_pattern(has_binary_post_op=False):
     )
 
 
-def _is_valid_qconv_lowering_pattern():
-    def fn(match):
+def _is_valid_qconv_lowering_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if len(match.nodes) != 1:
             return False
         return match.nodes[0].target in (
@@ -466,8 +468,8 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
-def _is_valid_quantized_linear_optimization_pattern():
-    def fn(match):
+def _is_valid_quantized_linear_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         output_dtype = _get_pattern_output_dtype(match)
         if output_dtype in [torch.float32, torch.bfloat16]:
             # Only keep matched pattern with same output_dtype
@@ -482,7 +484,9 @@ def _is_valid_quantized_linear_optimization_pattern():
     return fn
 
 
-def _is_valid_qlinear_post_op_fusion_pattern(has_binary_post_op=False):
+def _is_valid_qlinear_post_op_fusion_pattern(
+    has_binary_post_op=False,
+) -> Callable[[Match], bool]:
     return (
         _is_valid_qlinear_binary_optimization_pattern()
         if has_binary_post_op
@@ -490,8 +494,8 @@ def _is_valid_qlinear_post_op_fusion_pattern(has_binary_post_op=False):
     )
 
 
-def _is_valid_qlinear_lowering_pattern():
-    def fn(match):
+def _is_valid_qlinear_lowering_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if len(match.nodes) != 1:
             return False
         return match.nodes[0].target in (
@@ -643,13 +647,13 @@ def _register_quantized_linear_binary_lowering(
     return qlinear_binary
 
 
-def _is_valid_qconv_binary_optimization_pattern():
+def _is_valid_qconv_binary_optimization_pattern() -> Callable[[Match], bool]:
     return _is_valid_quantized_op_binary_optimization_pattern(
         torch.ops.onednn.qconv_pointwise
     )
 
 
-def _is_valid_qlinear_binary_optimization_pattern():
+def _is_valid_qlinear_binary_optimization_pattern() -> Callable[[Match], bool]:
     return _is_valid_quantized_op_binary_optimization_pattern(
         torch.ops.onednn.qlinear_pointwise,
         # we don't insert q-dq for extra input due to accuracy issues
@@ -863,12 +867,14 @@ def _register_quantization_binary_lowering():
         )
 
 
-def _is_valid_quantized_maxpool2d_optimization_pattern():
-    def fn(match):
+def _is_valid_quantized_maxpool2d_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         # Only match the pattern which max_pool2d_with_indices returns value
         # instead of indices.
         get_item_node = filter_nodes(match.nodes, operator.getitem)[0]
-        return get_item_node.args[1] == 0
+        arg = get_item_node.args[1]
+        assert not isinstance(arg, torch.Tensor)
+        return arg == 0
 
     return fn
 
@@ -983,8 +989,8 @@ def _register_quantization_maxpool2d():
         )
 
 
-def _is_input_output_same_scale_zp(check_node):
-    def fn(match):
+def _is_input_output_same_scale_zp(check_node) -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         # Ensure all the inputs and output has same scale and zero point
         # Step 1: Check inputs/output zero point
         # Get dequant nodes at input
@@ -1083,8 +1089,8 @@ def _register_quantization_reshape():
     )
 
 
-def _is_valid_concat_linear_int8_woq_optimization_pattern():
-    def fn(match):
+def _is_valid_concat_linear_int8_woq_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         if not config.cpp.enable_concat_linear:
             return False
         assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
@@ -1130,8 +1136,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
     return fn
 
 
-def _is_valid_woq_optimization_pattern():
-    def fn(match):
+def _is_valid_woq_optimization_pattern() -> Callable[[Match], bool]:
+    def fn(match: Match) -> bool:
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         if not all(
             hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
@@ -1384,8 +1390,8 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern4()
 
 
-def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
-    def _inner(match):
+def _is_valid_dequant_promotion_pattern(dtype=torch.float32) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
         if dequant_pattern_end_node.target not in [
@@ -1402,7 +1408,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
                     0
                 ]  # pattern: linear <- reshape <- dequant
                 if dtype == torch.float32
-                else dequant_pattern_end_node.args[0].args[
+                else dequant_pattern_end_node.args[0].args[  # type: ignore[union-attr]
                     0
                 ]  # pattern: linear <- reshape <- to_bf16 <- dequant
             )
@@ -1416,7 +1422,7 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
             )
 
         if (
-            dequant_node.target
+            dequant_node.target  # type: ignore[operator, union-attr]
             in [
                 quantized_decomposed.dequantize_per_tensor.default,
                 quantized_decomposed.dequantize_per_tensor.tensor,
@@ -1530,8 +1536,8 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
-def _is_valid_dequant_conv_pattern(dtype):
-    def _inner(match):
+def _is_valid_dequant_conv_pattern(dtype) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         # Here we do some further check to ensure:
         # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
         # 2. The dequant pattern has only 1 user of conv2d node.
@@ -1539,8 +1545,8 @@ def _is_valid_dequant_conv_pattern(dtype):
         # insert weight prepack node into the matched pattern.
         conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
-        input_meta_value = conv_node.args[0].meta.get("val")
-        weight_meta_value = conv_node.args[1].meta.get("val")
+        input_meta_value = conv_node.args[0].meta.get("val")  # type: ignore[union-attr]
+        weight_meta_value = conv_node.args[1].meta.get("val")  # type: ignore[union-attr]
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
@@ -1556,9 +1562,9 @@ def _is_valid_dequant_conv_pattern(dtype):
             dequant_node = conv_node.args[0]
         else:
             convert_to_bf16 = conv_node.args[0]
-            dequant_node = convert_to_bf16.args[0]
+            dequant_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
 
-        if len(list(dequant_node.users)) != 1:
+        if len(list(dequant_node.users)) != 1:  # type: ignore[union-attr]
             # Ensure the dequant pattern only has 1 user
             # since we will delete the dequant pattern here
             return False
@@ -1814,8 +1820,10 @@ def _get_linear_dq_node(
     return dequant_node, act_reshape_node, activation_to_bf16_node, act_expand_node
 
 
-def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contiguous):
-    def _inner(match):
+def _is_valid_dequant_linear_pattern(
+    dtype, input_dim_exceeds_two, input_contiguous
+) -> Callable[[Match], bool]:
+    def _inner(match: Match) -> bool:
         # Check dequant pattern has only 1 user.
         (
             linear_node,
@@ -3657,7 +3665,7 @@ def _register_quantization_weight_pack_pass():
         _register_qlinear_binary_fusion()
 
 
-def _is_valid_concat_linear_woq_int4_fusion(computation_nodes):
+def _is_valid_concat_linear_woq_int4_fusion(computation_nodes) -> bool:
     computation_op = torch.ops.aten._weight_int4pack_mm_for_cpu.default
     act = computation_nodes[0].args[0]
     wgt = computation_nodes[0].args[1]
@@ -3841,7 +3849,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
     It produces a DQ->LINEAR->Q pattern which can be fused by backend.
     """
 
-    def is_view_op(node):
+    def is_view_op(node) -> bool:
         return node.op == "call_function" and node.target in _VIEW_OPS
 
     for node in graph_module.graph.nodes:

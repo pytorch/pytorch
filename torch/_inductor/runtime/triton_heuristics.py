@@ -365,7 +365,7 @@ class CachingAutotuner(KernelInterface):
         self.compile_id: Optional[CompileId] = None
         self.is_backward = False
 
-    def is_statically_launchable(self):
+    def is_statically_launchable(self) -> bool:
         """
         Checks if every compiled kernel is statically launchable, which
         allows us to efficiently cache it in FXGraphCache

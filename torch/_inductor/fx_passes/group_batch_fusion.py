@@ -577,7 +577,7 @@ class BatchLinearLHSFusion(BatchFusion):
 
 # Poor person's check for if a node in the graph mutates its input.
 # (the graph is torch IR, so we will see torch fns and python operators)
-def _is_mutable_node(tgt):
+def _is_mutable_node(tgt) -> bool:
     if str(tgt).endswith("_"):
         # e.g. torch.mul_, torch.Tensor.mul_
         return True
@@ -591,7 +591,7 @@ def _is_mutable_node(tgt):
     return False
 
 
-def is_linear_node_can_be_fused(node: torch.fx.Node):
+def is_linear_node_can_be_fused(node: torch.fx.Node) -> bool:
     input = get_arg_value(node, 0, "input")
     weight = get_arg_value(node, 1, "weight")
     return (

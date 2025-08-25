@@ -587,7 +587,7 @@ aten__fp8_mm = ExternKernelChoice(
 )
 
 
-def _is_int8_mat(mat):
+def _is_int8_mat(mat) -> bool:
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
 

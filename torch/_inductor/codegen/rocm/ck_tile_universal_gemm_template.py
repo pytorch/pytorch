@@ -14,15 +14,10 @@ from torch._inductor.ir import Buffer, Layout
 from torch.utils._ordered_set import OrderedSet
 
 from ...utils import IndentedBuffer
+from ..triton_utils import is_static_int
 
 
 log = logging.getLogger(__name__)
-
-
-def is_static_int(number):
-    import sympy
-
-    return isinstance(number, (int, sympy.Integer))
 
 
 def torch_layout_to_ck_layout(torch_layout):

@@ -157,7 +157,7 @@ class CoordescTuner:
         return out
 
     @staticmethod
-    def has_improvement(baseline, test):
+    def has_improvement(baseline, test) -> bool:
         threshold = 0.001  # 0.1%
         return test is not None and test < baseline * (1 - threshold)
 
