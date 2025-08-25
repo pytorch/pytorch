@@ -618,7 +618,7 @@ class XPUAllocator : public DeviceAllocator {
     return &local_raw_delete;
   }
 
-  void* raw_alloc(size_t size) {
+  void* raw_alloc(size_t size) override {
     if (size == 0) {
       return nullptr;
     }
@@ -638,7 +638,7 @@ class XPUAllocator : public DeviceAllocator {
     return r;
   }
 
-  void raw_delete(void* ptr) {
+  void raw_delete(void* ptr) override {
     this->free(ptr);
   }
 
