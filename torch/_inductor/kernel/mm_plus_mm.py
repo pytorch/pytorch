@@ -130,7 +130,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
-    name = "mm_plus_mm"
+
     # Optimization is optional, because we can always just not do the fusion
     if (
         m1 * n1 == 0
@@ -157,7 +157,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, aten_mm_plus_mm.uid, name
+            kernel_inputs, layout1, aten_mm_plus_mm, "mm_plus_mm"
         ):
             aten_mm_plus_mm.maybe_append_choice(
                 choices,
@@ -168,7 +168,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     if use_triton_template(layout1):
         # Get template params using the new unified function
         for kwargs, extra_kwargs in V.choices.get_mm_configs(
-            kernel_inputs, layout1, mm_plus_mm_template.uid, name
+            kernel_inputs, layout1, mm_plus_mm_template, "mm_plus_mm"
         ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
@@ -180,4 +180,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                     **extra_kwargs,
                 )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout1)
+    return autotune_select_algorithm(
+        "mm_plus_mm", choices, kernel_inputs.nodes(), layout1
+    )
