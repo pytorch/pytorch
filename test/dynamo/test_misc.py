@@ -13147,7 +13147,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         self.assertEqual(out, opt_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
-    def test_cuda_set_device(self, device):
+    def test_gpu_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
             torch.get_device_module(device).set_device(1)
