@@ -14,7 +14,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from .template_heuristics import TemplateConfigHeuristics
+    from .triton import TemplateConfigHeuristics
 
 # Module-wide registry for template heuristics
 _TEMPLATE_HEURISTIC_REGISTRY: dict[tuple[str, ...], type[TemplateConfigHeuristics]] = {}
