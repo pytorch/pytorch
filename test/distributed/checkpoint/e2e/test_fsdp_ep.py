@@ -73,7 +73,19 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
             self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
         )
         # TODO: we are using an internal API atm. Change to a public API once it is ready.
-        mesh_fsdp_ep = _mesh_resources.create_sub_mesh(mesh_fsdp_tp, ("dp",), [(0,)])
+        mesh_fsdp_ep = mesh_fsdp_tp["dp"]
+        root_mesh = _mesh_resources.get_root_mesh(mesh_fsdp_ep)
+        layouts_to_groups_map = _mesh_resources.layouts_to_groups.setdefault(
+            mesh_fsdp_ep, {}
+        )
+        names_to_layouts_map = _mesh_resources.names_to_layouts.setdefault(
+            mesh_fsdp_ep, {}
+        )
+        for layout in mesh_fsdp_ep._layouts:
+            layouts_to_groups_map[layout] = _mesh_resources.layouts_to_groups[
+                root_mesh
+            ][layout]
+        names_to_layouts_map["dp"] = _mesh_resources.names_to_layouts[root_mesh]["dp"]
         del _mesh_resources.child_to_root_mapping[mesh_fsdp_ep]
 
         mesh_fsdp = init_device_mesh(self.device_type, (8,))
