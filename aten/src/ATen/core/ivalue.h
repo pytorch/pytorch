@@ -1169,7 +1169,7 @@ struct TORCH_API IValue final {
   using HashIdentityIValueMap =
       std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
 
-  // Chechs if this and rhs has a subvalues in common.
+  // Checks if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
 

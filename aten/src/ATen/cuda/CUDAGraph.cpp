@@ -304,7 +304,7 @@ CUDAGraph::~CUDAGraph() {
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
 // They wait for next sync point in order to free the memory, this is to ensure that all
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
-// We need to ensure all async opreations finish before deleting the object.
+// We need to ensure all async operations finish before deleting the object.
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
