@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -583,6 +584,7 @@ class TestFlexDecoding(InductorTestCase):
         v: Tensor,
         dtype: torch.dtype = torch.float16,
         block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
         device="cuda",
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
@@ -613,6 +615,7 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
+                kernel_options=kernel_options,
             )
         else:
             compiled_lse = None
@@ -624,6 +627,7 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
+                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -640,6 +644,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_S: int = S,
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
+        kernel_options: Optional[dict] = None,
         device="cuda",
     ):
         assert Q_H % KV_H == 0
@@ -674,7 +679,8 @@ class TestFlexDecoding(InductorTestCase):
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
         compiled_out, compiled_lse = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask, device
+            score_mod, q, k, v, dtype, block_mask,
+            device=device, kernel_options=kernel_options
         )
 
         self._check_out(
@@ -1699,6 +1705,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
             ).mean()
             out_mixed.backward()
+
+    @supported_platform
+    @skipCUDAIf(True, "Not supported on CUDA")
+    @common_utils.parametrize("partition_size", [128, 256, 1024])
+    def test_flash_decoding_partition_size(self, device, partition_size):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test_with_paged_attention(
+            score_mod,
+            device=device,
+            kernel_options={"PARTITION_SIZE": partition_size})
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)

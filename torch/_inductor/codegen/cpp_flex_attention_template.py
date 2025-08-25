@@ -783,7 +783,7 @@ extern "C"
   const scalar_t* v_data = value;
   scalar_t* out_data = output;
 
-  // TODO: Support score / mask mod dependant on batch_size / num_head
+  // TODO: Support score / mask mod dependent on batch_size / num_head
   int64_t num_kvblocks_per_seq = kv_num_blocks[0] + full_kv_num_blocks[0];
   int64_t num_kvblocks_per_partition = PARTITION_SIZE / kvBlockSize;
   int64_t num_partitions = (num_kvblocks_per_seq + num_kvblocks_per_partition - 1) / num_kvblocks_per_partition;
