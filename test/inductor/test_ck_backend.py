@@ -22,11 +22,11 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
 )
 
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 log = logging.getLogger(__name__)
@@ -464,5 +464,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu():
+    if HAS_CUDA_AND_TRITON and HAS_CPU and is_big_gpu():
         run_tests()

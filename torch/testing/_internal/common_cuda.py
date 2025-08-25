@@ -66,6 +66,12 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
+def evaluate_platform_supports_ck_sdpa():
+    if TEST_WITH_ROCM:
+        return torch.backends.cuda.is_ck_sdpa_available()
+    else:
+        return False
+
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
@@ -90,6 +96,8 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
+
+PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
@@ -120,11 +128,19 @@ def evaluate_platform_supports_fp8_grouped_gemm():
             return SM90OrLater and not SM100OrLater
     return False
 
+def evaluate_platform_supports_mx_gemm():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
+            if ROCM_VERSION >= (7, 0):
+                return 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return SM100OrLater
+    return False
+
+PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
-
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 
 if TEST_NUMBA:
     try:
@@ -291,7 +307,7 @@ def _get_torch_rocm_version():
     if not TEST_WITH_ROCM or torch.version.hip is None:
         return (0, 0)
     rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
 def _check_cusparse_generic_available():
@@ -304,7 +320,7 @@ def _check_hipsparse_generic_available():
         return False
 
     rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
     return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
 
