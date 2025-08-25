@@ -524,9 +524,7 @@ Attempted to call function marked as skipped
         # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
         # that issue is fixed.
         first_graph_break = re.sub(
-            r"pybind11_builtins\.pybind11_detail_function_record_v[^ .]+",
-            "PyCapsule",
-            first_graph_break,
+            r"pybind11_detail_function_record_v[^ .]+", "PyCapsule", first_graph_break
         )
 
         self.assertExpectedInline(
