@@ -1546,14 +1546,20 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if int_array == "{}":
             #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                if config.cpp.use_constexpr_for_int_array:
+                    writeline(f"static constexpr {ctype} *{var}=nullptr;")
+                else:
+                    writeline(f"static const {ctype} *{var}=nullptr;")
             else:
                 writeline(f"const {ctype} *{var}=nullptr;")
         else:
             if var not in self.declared_int_array_vars:
                 self.declared_int_array_vars.add(var)
                 if known_statically:
-                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    if config.cpp.use_constexpr_for_int_array:
+                        writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                    else:
+                        writeline(f"static const {ctype} {var}[] = {int_array};")
                 else:
                     writeline(f"const {ctype} {var}[] = {int_array};")
         return var
@@ -2604,7 +2610,7 @@ if (!custom_op_wrapper) {
             "AtenTensorHandle", tensor_call_args, force_mutable=True
         )
 
-        extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
+        extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
         self.writeline(
             f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
