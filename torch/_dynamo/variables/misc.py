@@ -1185,8 +1185,10 @@ class GetAttrVariable(VariableTracker):
     def get_forwarded_dict(self, tx):
         assert (
             self.name == "__dict__"
+            and isinstance(self.obj, variables.UserDefinedClassVariable)
             and not tx.output.side_effects.has_pending_mutation(self.obj)
         )
+        self.obj.ban_mutation = True
         return VariableTracker.build(tx, self.obj.value.__dict__, self.source)
 
 

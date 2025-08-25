@@ -1900,6 +1900,7 @@ class BuiltinVariable(VariableTracker):
         if (
             len(args) == 1
             and isinstance(args[0], variables.GetAttrVariable)
+            and isinstance(args[0].obj, variables.UserDefinedClassVariable)
             and not tx.output.side_effects.has_pending_mutation(args[0].obj)
         ):
             # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
