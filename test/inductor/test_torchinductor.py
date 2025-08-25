@@ -8486,14 +8486,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.slice_scatter(y, x, 0)
 
         for dtype in [
-            torch.int8,
-            torch.int16,
-            torch.int32,
             torch.int64,
-            torch.uint8,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
             torch.float64,
             torch.complex128,
         ]:
