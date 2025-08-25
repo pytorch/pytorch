@@ -311,6 +311,9 @@ class Vectorized<float> {
   Vectorized<float> lgamma() const {
     return {Sleef_lgammaf4_u10(_vec0), Sleef_lgammaf4_u10(_vec1)};
   }
+  Vectorized<float> C10_ALWAYS_INLINE erf_u20() const {
+    return erf();
+  }
   Vectorized<float> erf() const {
     return {Sleef_erff4_u10(_vec0), Sleef_erff4_u10(_vec1)};
   }

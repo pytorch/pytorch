@@ -178,6 +178,10 @@ struct Vectorized16 {
     return static_cast<const Derived*>(this)->map2_with_vec_float_method(
         sign, &Vectorized<float>::copysign);
   }
+  Derived erf_u20() const {
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::erf_u20);
+  }
   Derived erf() const {
     return static_cast<const Derived*>(this)->map_with_vec_float_method(
         &Vectorized<float>::erf);
