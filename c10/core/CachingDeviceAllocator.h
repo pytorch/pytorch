@@ -250,6 +250,34 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
+// Struct containing info of an allocation block (i.e. a fractional part of a
+// cudaMalloc)..
+struct BlockInfo {
+  size_t size = 0;
+  size_t requested_size = 0;
+  int32_t gc_counter = 0;
+  bool allocated = false;
+  bool active = false;
+  std::shared_ptr<GatheredContext>
+      context_when_allocated; // per-watcher context
+};
+
+// Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
+struct GenericSegmentInfo {
+  c10::DeviceIndex device = 0;
+  size_t address = 0;
+  size_t total_size = 0;
+  size_t requested_size = 0; // unrounded, actually requested size
+  size_t allocated_size = 0;
+  size_t active_size = 0;
+  c10::Stream stream;
+  bool is_large = false;
+  bool is_expandable = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
+  std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
 /**
  * Thread-safe circular buffer for storing a fixed number of entries.
  * Maintains the most recent N entries, automatically overwriting older entries
@@ -1113,11 +1141,192 @@ struct CachingDeviceAllocatorImpl {
         params, orig_size, std::move(context), split_remainder);
   }
 
+  virtual void free(BlockT* block) {
+    std::shared_ptr<GatheredContext> context =
+        maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    block->allocated = false;
+
+    // following logic might modifying underlying Block, causing the size
+    // changed. We store ahead for reporting
+    auto orig_block_ptr = block->ptr;
+    auto orig_block_size = block->size;
+
+    StatTypes stat_types = block->pool->get_stat_types();
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].decrease(1);
+      stats.allocated_bytes[stat_type].decrease(block->size);
+    });
+    auto allocated_bytes_gauge =
+        STATIC_GAUGE(pytorch.CachingAllocator.allocated_bytes);
+    allocated_bytes_gauge.record(
+        stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
+            .current);
+
+    record_trace(
+        TraceEntryT::FREE_REQUESTED,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_allocated);
+
+    if (block->size >= AcceleratorAllocatorConfig::max_split_size())
+      stats.oversize_allocations.decrease(1);
+
+    if (!block->stream_uses.empty()) {
+      if (C10_UNLIKELY(!captures_underway.empty())) {
+        // It's forbidden to cudaEventQuery an event recorded during CUDA graph
+        // capture. We conservatively defer recording end-of-life events until
+        // the next call to process_events() (which won't happen until no
+        // captures are underway)
+        needs_events_deferred_until_no_capture.push_back(block);
+      } else {
+        insert_events(block);
+      }
+    } else {
+      free_block(block, context);
+    }
+
+    c10::reportMemoryUsageToProfiler(
+        orig_block_ptr,
+        -static_cast<int64_t>(orig_block_size),
+        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+        c10::Device(device_type_, block->device));
+  }
+
+  virtual void recordStream(BlockT* block, StreamT stream) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (stream.stream() == block->stream) {
+      // ignore uses on the allocation stream, since those don't require any
+      // special synchronization
+      return;
+    }
+    block->stream_uses.insert(stream);
+    if (C10_UNLIKELY(!captures_underway.empty())) {
+      block_to_graph_stream_uses[block].insert(stream);
+    }
+  }
+
+  /** returns cached blocks to the system allocator **/
+  virtual void emptyCache(MempoolId_t mempool_id) {
+    auto context = maybeGatherContext(RecordContext::ALL);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    release_cached_blocks(context, mempool_id);
+  }
+
+  /** Returns a copy of the memory allocator stats **/
+  DeviceStats getStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return stats;
+  }
+
+  /** Resets the historical accumulation stats for the device **/
+  virtual void resetAccumulatedStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_accumulated();
+      stats.segment[statType].reset_accumulated();
+      stats.active[statType].reset_accumulated();
+      stats.inactive_split[statType].reset_accumulated();
+      stats.allocated_bytes[statType].reset_accumulated();
+      stats.reserved_bytes[statType].reset_accumulated();
+      stats.active_bytes[statType].reset_accumulated();
+      stats.inactive_split_bytes[statType].reset_accumulated();
+      stats.requested_bytes[statType].reset_accumulated();
+    }
+
+    stats.num_alloc_retries = 0;
+    stats.num_ooms = 0;
+    stats.num_sync_all_streams = 0;
+    stats.num_device_alloc = 0;
+    stats.num_device_free = 0;
+    stats.oversize_allocations.reset_accumulated();
+    stats.oversize_segments.reset_accumulated();
+  }
+
+  /** Resets the historical peak stats for the device **/
+  virtual void resetPeakStats() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    for (const auto statType :
+         c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_peak();
+      stats.segment[statType].reset_peak();
+      stats.active[statType].reset_peak();
+      stats.inactive_split[statType].reset_peak();
+      stats.allocated_bytes[statType].reset_peak();
+      stats.reserved_bytes[statType].reset_peak();
+      stats.active_bytes[statType].reset_peak();
+      stats.inactive_split_bytes[statType].reset_peak();
+      stats.requested_bytes[statType].reset_peak();
+    }
+    stats.oversize_allocations.reset_peak();
+    stats.oversize_segments.reset_peak();
+  }
+
   // Returns the size of free and total memory in bytes on the device.
   virtual void getMemoryInfo(
       c10::DeviceIndex device,
       size_t& free_bytes,
       size_t& total_bytes) = 0;
+
+  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
+    oom_observers_.emplace_back(std::move(observer));
+  }
+
+  void attachAllocatorTraceTracker(
+      std::function<void(const TraceEntryT&)> tracker) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    trace_trackers_.emplace_back(std::move(tracker));
+  }
+
+  // Get memory fraction limiting maximum allocated memory
+  virtual double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    getMemoryInfo(device_index_, device_free, device_total);
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_total);
+  }
+
+  // Set memory fraction to limit maximum allocated memory
+  virtual void setMemoryFraction(double fraction) {
+    size_t device_free = 0;
+    size_t device_total = 0;
+    getMemoryInfo(device_index_, device_free, device_total);
+    allowed_memory_maximum =
+        static_cast<size_t>(fraction * static_cast<double>(device_total));
+    set_fraction = true;
+  }
+
+  void setUseOnOOM(MempoolId_t mempool_id) {
+    // Choose if this pool should be used as a last resort before ooming
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    use_on_oom_pools.insert(mempool_id);
+  }
+
+  void createOrIncrefPool(MempoolId_t mempool_id, DeviceAllocator* allocator) {
+    // Create a PrivatePool object if it does not exist yet
+    // and increment its use_count
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    create_or_incref_pool(mempool_id, allocator);
+  }
+
+  int getPoolUseCount(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto pp = get_private_pool(mempool_id);
+    return pp->use_count;
+  }
 
   // See Note [Interaction with CUDA graph capture]
 
@@ -1171,6 +1380,25 @@ struct CachingDeviceAllocatorImpl {
       // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+    }
+  }
+
+  std::vector<c10::DeviceIndex> peers() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return devices_with_peer_access_;
+  }
+
+  void addPeerAccess(c10::DeviceIndex dev_to_access) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (std::find(
+            devices_with_peer_access_.begin(),
+            devices_with_peer_access_.end(),
+            dev_to_access) != devices_with_peer_access_.end()) {
+      return;
+    }
+    devices_with_peer_access_.push_back(dev_to_access);
+    for (auto& es : expandable_segments_) {
+      es->addPeer(dev_to_access);
     }
   }
 
@@ -1946,6 +2174,26 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
+  std::vector<BlockT*> get_all_blocks() const {
+    std::vector<BlockT*> blocks;
+    blocks.insert(
+        blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    for (const auto& gp : graph_pools) {
+      blocks.insert(
+          blocks.end(),
+          gp.second->small_blocks.blocks.begin(),
+          gp.second->small_blocks.blocks.end());
+      blocks.insert(
+          blocks.end(),
+          gp.second->large_blocks.blocks.begin(),
+          gp.second->large_blocks.blocks.end());
+    }
+    blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
+    return blocks;
+  }
+
   bool should_split(const BlockT* block, size_t size) {
     size_t remaining = block->size - size;
     if (block->pool->is_small ||
@@ -2243,6 +2491,29 @@ struct CachingDeviceAllocatorImpl {
     return it->second.get();
   }
 
+  std::vector<BlockT*> get_private_pool_head_blocks(PrivatePoolT* pool) const {
+    std::vector<BlockT*> blocks;
+    for (BlockT* b : active_blocks) {
+      if ((b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) &&
+          b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    for (BlockT* b : pool->small_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+    for (BlockT* b : pool->large_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    return blocks;
+  }
+
   /* Internal methods for utils: tracing, stats, gc... */
 
   // Must be called outside of `mutex` or deadlocks are possible with Python
@@ -2285,6 +2556,16 @@ struct CachingDeviceAllocatorImpl {
 
     if (record_history) {
       alloc_buffer.insertEntries(te);
+    }
+  }
+
+  void pushCompileContext(std::string& md) {
+    compile_context.push(md);
+  }
+
+  void popCompileContext() {
+    if (!compile_context.empty()) {
+      compile_context.pop();
     }
   }
 
