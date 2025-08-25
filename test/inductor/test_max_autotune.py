@@ -28,8 +28,9 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, InputBuffer
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplate,
@@ -73,7 +74,10 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+# torch.set_float32_matmul_precision("high")
+# torch.backends.cuda.matmul.fp32_precision = 'ieee'
+torch.backends.cuda.matmul.allow_tf32 = False
+
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -1278,6 +1282,143 @@ class TestMaxAutotune(TestCase):
                 code[0]
             )
 
+    @parametrize("dynamic", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
+    @config.patch(
+        max_autotune=True,
+    )
+    def test_max_autotune_contiguous_transform(self, sizes, dtype, dynamic):
+        """
+        Test the contiguous subgraph transform with A * transpose(B) pattern.
+        This transform makes the second matrix contiguous before the matmul.
+        """
+        M, N, K = sizes
+
+        def mm_transpose(a, b):
+            return a @ b.transpose(0, 1)
+
+        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+
+        # Force only contiguous choice to test the transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose, dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness
+            expected = mm_transpose(a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
+        self, dynamic
+    ):
+        """
+        Test that contiguous transform is only applied when the second matrix is non-contiguous.
+        """
+        M, N, K = 64, 128, 64
+
+        def mm_contiguous(a, b):
+            return a @ b
+
+        def mm_non_contiguous(a, b):
+            return a @ b.transpose(0, 1)
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b_contiguous = torch.randn(K, N, dtype=torch.float32, device=GPU_TYPE)
+        b_non_contiguous = torch.randn(N, K, dtype=torch.float32, device=GPU_TYPE)
+
+        # Compute fp64 baselines without max_autotune (since fp64 doesn't work with max_autotune=True)
+        a_fp64 = a.to(torch.float64)
+        b_contiguous_fp64 = b_contiguous.to(torch.float64)
+        b_non_contiguous_fp64 = b_non_contiguous.to(torch.float64)
+
+        expected1_fp64 = mm_contiguous(a_fp64, b_contiguous_fp64)
+        expected2_fp64 = mm_non_contiguous(a_fp64, b_non_contiguous_fp64)
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+        ):
+            # Test with contiguous second matrix - should not use contiguous transform
+            compiled_func_contiguous = torch.compile(mm_contiguous, dynamic=dynamic)
+            out1, code1 = run_and_get_code(compiled_func_contiguous, a, b_contiguous)
+
+            # Should not contain contiguous transform
+            try:
+                FileCheck().check("contiguous_mm").run(code1[0])
+                self.fail(
+                    "Contiguous transform should not be used for contiguous matrices"
+                )
+            except RuntimeError:
+                pass  # Expected - contiguous transform should not be used
+
+            # Test with non-contiguous second matrix - should use contiguous transform
+            with (
+                mock.patch(
+                    "torch._inductor.kernel.mm.use_contiguous"
+                ) as contiguous_mock,
+            ):
+                contiguous_mock.return_value = True
+
+                compiled_func_non_contiguous = torch.compile(
+                    mm_non_contiguous, dynamic=dynamic
+                )
+                out2, code2 = run_and_get_code(
+                    compiled_func_non_contiguous, a, b_non_contiguous
+                )
+
+                # Should contain contiguous transform
+                FileCheck().check("contiguous_mm").run(code2[0])
+
+        # Verify correctness against fp64 baselines
+        torch.testing.assert_close(
+            out1, expected1_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
+        )
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_max_autotune_contiguous_transform_with_epilogue(self):
+        """
+        Test contiguous transform with epilogue operations like relu.
+        """
+        M, N, K = 128, 256, 512
+
+        def mm_transpose_relu(a, b):
+            return (a @ b.transpose(0, 1)).relu()
+
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(N, K, dtype=torch.float32, device=GPU_TYPE)
+
+        # Force contiguous transform
+        with (
+            mock.patch("torch._inductor.kernel.mm.use_contiguous") as contiguous_mock,
+        ):
+            contiguous_mock.return_value = True
+
+            compiled_func = torch.compile(mm_transpose_relu)
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            # Verify correctness
+            expected = mm_transpose_relu(a, b)
+            torch.testing.assert_close(out, expected, atol=1e-2, rtol=1e-2)
+
+            # Check that contiguous transform was used
+            FileCheck().check("contiguous_mm").run(code[0])
+
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
             inspect.signature(
@@ -1681,6 +1822,39 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
+    def test_get_mm_configs_float32_precision_ieee(self):
+        """Test that configs returned from choices.get_mm_configs use float32_precision == ieee."""
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.ir import FlexibleLayout
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Create a simple graph to get proper context
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        with V.set_graph_handler(graph):
+            device = torch.device(f"{GPU_TYPE}:0")
+            mat1 = InputBuffer(
+                name="mat1",
+                layout=FixedLayout(device, torch.float32, [64, 128], [128, 1]),
+            )
+            mat2 = InputBuffer(
+                name="mat2",
+                layout=FixedLayout(device, torch.float32, [128, 64], [64, 1]),
+            )
+            kernel_inputs = MMKernelInputs([mat1, mat2])
+            output_layout = FlexibleLayout(device, torch.float32, [64, 64])
+
+            choices = InductorChoices()
+            configs = list(
+                choices.get_mm_configs(kernel_inputs, output_layout, "mm", "mm")
+            )
+
+            for config in configs:
+                self.assertIn("FLOAT32_PRECISION", config)
+                self.assertEqual(config["FLOAT32_PRECISION"], '"ieee"')
 
 
 class TestMaxAutotunePrecompile(TestCase):

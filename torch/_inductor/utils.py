@@ -1798,6 +1798,25 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
         and not V.graph.cpp_wrapper
     )
 
+@functools.cache
+def use_contiguous(layout: Layout) -> bool:
+    """
+    Check if we should use the contiguous subgraph transform.
+    This transform makes the second matrix contiguous before the matmul.
+    """
+    # Only enable for non-contiguous second matrix
+    if layout.is_contiguous():
+        return False
+    
+    # Similar conditions to decompose_k but for contiguous transform
+    from torch._inductor.virtualized import V
+    
+    return (
+        torch.version.hip  # Only relevant on AMD
+        and not V.graph.aot_mode  # TODO: Support AOTI for contiguous transform
+        and not V.graph.cpp_wrapper
+    )
+
 
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
