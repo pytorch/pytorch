@@ -296,7 +296,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 3)
 
-    @unittest.expectedFailure
     def test_cells(self):
         def f1(x1):
             cell1 = x1 + 1
@@ -329,7 +328,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-    @unittest.expectedFailure
     def test_side_effects_cells(self):
         cell1, cell2, cell3, cell4 = (torch.zeros(3),) * 4
 
