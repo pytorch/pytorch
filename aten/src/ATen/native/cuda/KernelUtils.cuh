@@ -223,6 +223,8 @@ __device__ __forceinline__ void fastAtomicAdd(
   }
 }
 
+
+#ifdef USE_ROCM
 // This function implements a commited store. 
 // Upon returning, the store is commited to to global memory. 
 // This is usefull in avoiding the need for fences.
@@ -254,6 +256,7 @@ __device__ inline void cmtdStore(void* address, T value) {
       asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 }
+#endif
 
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
 // This function implements warp-level opportunistic fastatomics
