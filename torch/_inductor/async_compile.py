@@ -447,6 +447,7 @@ class AsyncCompile:
                 load_kernel,
                 extra_env,
                 extra_config,
+                name=kernel_name,
             )
 
             def get_result() -> CachingAutotuner:

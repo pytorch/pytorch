@@ -39,6 +39,19 @@ class TestCompileWorker(TestCase):
             pool.shutdown()
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_exception(self):
+        pool = SubprocPool(2)
+        try:
+            a = pool.submit(raise_testexc, name="testname")
+            with self.assertRaisesRegex(
+                SubprocException,
+                "testname",
+            ):
+                a.result()
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_crash(self):
         pool = SubprocPool(2)
         try:
@@ -79,7 +92,6 @@ class TestCompileWorker(TestCase):
                 self.assertEqual(os.path.exists(temp_log.name), True)
             finally:
                 pool.shutdown()
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

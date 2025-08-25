@@ -90,8 +90,8 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str) -> None:
-        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+    def __init__(self, details: str, name:str) -> None:
+        super().__init__(f"An exception occurred in a subprocess:\n\nName={name}\n{details}")
 
 
 class SubprocPickler:
@@ -127,6 +127,7 @@ class SubprocPool:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
         self.kind = kind
+        self.names = {}
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
@@ -188,7 +189,9 @@ class SubprocPool:
         self.read_thread.start()
 
     def submit(
-        self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+        self, job_fn: Callable[_P, _T], *args: _P.args,
+        name: str = "",
+        **kwargs: _P.kwargs
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
@@ -198,14 +201,15 @@ class SubprocPool:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
         future.set_running_or_notify_cancel()
-        self._send(MsgHeader.JOB, job_id, job_data)
+        self.names[job_id] = name
+        self._send(MsgHeader.JOB, job_id, job_data, job_id)
         return future
 
     def _send(self, msg_header: MsgHeader, job_id: int = -1, data: bytes = b"") -> None:
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("Attempting to use a closed pool")
-            _send_msg(self.write_pipe, msg_header, job_id, data)
+            _send_msg(self.write_pipe, msg_header, data, job_id)
 
     def _read_thread(self) -> None:
         while True:
@@ -243,7 +247,7 @@ class SubprocPool:
                 if isinstance(result, _SubprocExceptionInfo):
                     # An exception occurred in the submitted job
                     self.pending_futures[job_id].set_exception(
-                        SubprocException(result.details)
+                        SubprocException(result.details, self.names[job_id])
                     )
                 elif isinstance(result, Exception):
                     # An exception occurred in some of our subprocess machinery.
@@ -251,6 +255,7 @@ class SubprocPool:
                 else:
                     self.pending_futures[job_id].set_result(result)
                 del self.pending_futures[job_id]
+                del self.names[job_id]
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
