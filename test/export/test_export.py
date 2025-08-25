@@ -16163,6 +16163,29 @@ def forward(self, x):
         wrapper = Wrapper(pyt_model, example_inputs)
         wrapper.forward()
 
+    def test_strict_export_with_shared_parameters(self):
+        """Test that parameter names are preserved when there are shared parameters with the same name."""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = torch.nn.Parameter(torch.ones(3))
+                self.n2 = self.n1
+
+            def forward(self, x):
+                res1 = x * self.n1
+                res2 = x * self.n2
+                return res1 + res2
+
+        m = M()
+        ep = torch.export.export(m, (torch.ones(3),), strict=True)
+        gm = ep.module()
+
+        # Check that named_parameters are preserved
+        original_param_names = [name for name, _ in m.named_parameters()]
+        exported_param_names = [name for name, _ in gm.named_parameters()]
+        self.assertEqual(original_param_names, exported_param_names)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
