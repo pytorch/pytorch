@@ -233,7 +233,15 @@ class graph:
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
         torch.cuda.synchronize()
-        gc.collect()
+
+        if torch.compiler.config.force_cudagraph_gc:
+            # Originally we unconditionally garbage collected here. On one hand
+            # that's nice because we have a chance to collect more memory, but
+            # on the other hand it is REALLY expensive, especially for doing
+            # multiple cudagraph captures in a row. In theory it will only help
+            # when a dead python cycle is holding onto CUDA memory.
+            gc.collect()
+
         torch.cuda.empty_cache()
 
         # Stackoverflow seems comfortable with this pattern

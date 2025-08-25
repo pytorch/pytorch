@@ -15,6 +15,7 @@ __all__ = [
     "preferred_linalg_library",
     "preferred_blas_library",
     "preferred_rocm_fa_library",
+    "is_ck_sdpa_available",
     "cufft_plan_cache",
     "matmul",
     "SDPAParams",
@@ -294,7 +295,7 @@ def preferred_rocm_fa_library(
     [ROCm-only]
     Override the backend PyTorch uses in ROCm environments for Flash Attention. Choose between AOTriton and CK
 
-    .. warning:: This flag is experimeental and subject to change.
+    .. warning:: This flag is experimental and subject to change.
 
     When Flash Attention is enabled and desired, PyTorch defaults to using AOTriton as the backend.
     This flag (a :class:`str`) allows users to override this backend to use composable_kernel
@@ -330,6 +331,16 @@ def preferred_rocm_fa_library(
 # Set the __module__ attribute
 SDPAParams.__module__ = "torch.backends.cuda"
 SDPAParams.__name__ = "SDPAParams"
+
+
+def is_ck_sdpa_available() -> bool:
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether composable_kernel may be used as the backend for
+    scaled-dot-product-attention.
+    """
+    return torch._C._is_ck_sdpa_available()
 
 
 def flash_sdp_enabled():

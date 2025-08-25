@@ -2842,6 +2842,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
+    @expectedFailureMPS  # No double support
     def test_conv_backend(
         self,
         device,
@@ -4055,13 +4056,24 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
-    @largeTensorTest("80GB", "cpu")
+    @largeTensorTest("64GB", "cpu")
     def test_depthwise_conv_64bit_indexing(self, device):
-        x = torch.randn(1, 2, 32800, 32800)
-        c = nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, groups=2)
+        x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
+        c = nn.Conv2d(
+            2, 2, kernel_size=3, stride=1, padding=1, groups=2, dtype=torch.half
+        ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y)
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        del y, yref
+
+        # try a batch-splittable case
+        x = x.reshape(100, 2, 3280, 3280).contiguous(memory_format=torch.channels_last)
+        yref = c(x)
+        y = c.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

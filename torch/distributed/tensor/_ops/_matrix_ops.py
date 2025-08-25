@@ -312,6 +312,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # Shard on the batch dimension
+    debug_attn_mask_sharding = Shard(0) if return_debug_mask else Replicate()
     single_mesh_dim_strategies.append(
         [
             Shard(0),  # output
@@ -322,7 +323,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
             None,  # max_k
             Replicate(),  # rng_state
             None,  # unused
-            Shard(0),  # debugattn
+            debug_attn_mask_sharding,  # debugattn
             Shard(0),  # q
             Shard(0),  # k
             Shard(0),  # v
@@ -330,6 +331,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
     )
 
     # Context Parallelism: shards on the sequence dim
+    debug_attn_mask_sharding = Shard(2) if return_debug_mask else Replicate()
     single_mesh_dim_strategies.append(
         [
             Shard(2),  # output
@@ -340,7 +342,7 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
             None,  # max_k
             Replicate(),  # rng_state
             None,  # unused
-            Shard(2),  # debugattn
+            debug_attn_mask_sharding,  # debugattn
             Shard(2),  # q
             Shard(2),  # k
             Shard(2),  # v
@@ -704,7 +706,7 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
         None,  # max_k
         None,  # philox_seed
         None,  # philox_offset
-        # NOTE: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # NOTE: debug_attn_mask is not supported by pytorch and is always an empty tensor
         # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
         debug_attn_mask_sharding,  # debug_attn_mask
         Replicate(),  # q

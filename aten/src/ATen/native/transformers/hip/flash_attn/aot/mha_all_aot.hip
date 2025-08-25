@@ -243,12 +243,6 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   } else {
     softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
   }
-
-  at::Tensor atomic_counter;
-  if (is_causal) {
-    atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
-  }
-
   auto [needs_swa, window_left, window_right] = calculate_swa(window_size_left,
                                                               window_size_right,
                                                               seqlen_q,
@@ -261,6 +255,14 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   // optimized out (hopefully).
   constexpr bool uses_swa = false;
 #endif
+
+  // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+  is_causal = is_causal || uses_swa;
+
+  at::Tensor atomic_counter;
+  if (is_causal) {
+    atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
+  }
 
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
@@ -401,7 +403,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
   CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
 
   // AOTriton's varlen API needs input shapes be
-  // (1, num_heads, total sequence lenght, head dimension)
+  // (1, num_heads, total sequence length, head dimension)
   at::Tensor q_padded, k_padded, v_padded;
   at::Tensor out, out_padded;
   q_padded = q.unsqueeze(0).transpose(1, 2);
@@ -454,6 +456,9 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
   // optimized out (hopefully).
   constexpr bool uses_swa = false;
 #endif
+
+  // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+  is_causal = is_causal || needs_swa;
 
   auto [seed_t, offset_t, philox_state, use_philox_state] =
     prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);

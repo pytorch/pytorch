@@ -62,13 +62,11 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
-  }
-  if (value > std::numeric_limits<int32_t>::max() ||
-      value < std::numeric_limits<int32_t>::min()) {
-    throw std::runtime_error("Overflow when unpacking long");
-  }
+  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
+  TORCH_CHECK_VALUE(
+      value <= std::numeric_limits<int32_t>::max() &&
+          value >= std::numeric_limits<int32_t>::min(),
+      "Overflow when unpacking long");
   return (int32_t)value;
 }
 
@@ -78,9 +76,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long long");
-  }
+  TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
   return (int64_t)value;
 }
 
@@ -89,9 +85,9 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  if (value > std::numeric_limits<uint32_t>::max()) {
-    throw std::runtime_error("Overflow when unpacking unsigned long");
-  }
+  TORCH_CHECK_VALUE(
+      value <= std::numeric_limits<uint32_t>::max(),
+      "Overflow when unpacking long long");
   return (uint32_t)value;
 }
 
@@ -211,4 +207,23 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking DeviceIndex");
   }
   return (c10::DeviceIndex)value;
+}
+
+template <typename T>
+inline T THPUtils_unpackInteger(PyObject* obj) {
+  int overflow = -1;
+  const auto value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (!overflow) {
+    return static_cast<int64_t>(value);
+  }
+  // try unsigned
+  const auto uvalue = PyLong_AsUnsignedLongLong(obj);
+  if (uvalue == static_cast<std::decay_t<decltype(uvalue)>>(-1) &&
+      PyErr_Occurred()) {
+    throw python_error();
+  }
+  return static_cast<uint64_t>(uvalue);
 }

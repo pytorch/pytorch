@@ -47,18 +47,6 @@ WORKDIR /opt/pytorch
 COPY . .
 RUN git submodule update --init --recursive
 
-FROM conda as build
-ARG CMAKE_VARS
-WORKDIR /opt/pytorch
-COPY --from=conda /opt/conda /opt/conda
-COPY --from=submodule-update /opt/pytorch /opt/pytorch
-RUN make triton
-RUN --mount=type=cache,target=/opt/ccache \
-    export eval ${CMAKE_VARS} && \
-    TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
-    python -m pip install --no-build-isolation -v .
-
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
 ARG CUDA_PATH=cu121
@@ -109,4 +97,5 @@ WORKDIR /workspace
 
 FROM official as dev
 # Should override the already installed version from the official-image stage
-COPY --from=build /opt/conda /opt/conda
+COPY --from=conda /opt/conda /opt/conda
+COPY --from=submodule-update /opt/pytorch /opt/pytorch

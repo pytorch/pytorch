@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -74,8 +74,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
+            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            for o in operands
+        ), (
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+        )
 
         return super().__call__(subgraph, identifier, *operands)
 
@@ -134,7 +137,9 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                    backend: Union[str, Callable[..., Any]] = (
+                        make_eager_backend_with_torch_function_mode(metadata_mode)
+                    )
                 else:
                     backend = "eager"
 
@@ -465,6 +470,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
         fake_mode = detect_fake_mode(primals + filtered_grad_outs)
+        assert fake_mode is not None, "fake_mode should be enabled for HOPs"
         state = _CacheKeyState(fake_mode.shape_env)
 
         tangent_metadata: list[object] = []
@@ -607,6 +613,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
+        assert fake_mode is not None and fake_mode.shape_env is not None
         insert_deferred_runtime_asserts(
             graph,
             fake_mode.shape_env,

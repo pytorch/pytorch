@@ -98,14 +98,14 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   std::optional<at::Tensor> dk{std::nullopt};
   std::optional<at::Tensor> dv{std::nullopt};
 
-  //  The kernel computes irregardless we will drop for this functions return
+  //  The kernel computes regardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
   std::optional<at::Tensor> alibi_slopes{std::nullopt};
   const float softcap = 0.0;
 
-  bool determinisitic{false};
+  bool deterministic{false};
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
     if (ctx.deterministicAlgorithmsWarnOnly()) {
@@ -113,7 +113,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           "Flash Attention defaults to a non-deterministic algorithm. ",
           "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
     } else {
-      determinisitic = true;
+      deterministic = true;
     }
   }
 
@@ -148,7 +148,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -176,7 +176,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_right,
 #endif
         softcap,
-        determinisitic,
+        deterministic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -260,7 +260,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
                           attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
                           out /*const Tensor& o*/,
                           grad_out/*const Tensor& dO*/,
-                          logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
+                          logsumexp/*const Tensor& softmaxstats*/,
                           dq/*Tensor& dQ*/,
                           dk/*Tensor& dK*/,
                           dv/*Tensor& dV*/,
@@ -493,7 +493,7 @@ _efficient_attention_backward(
   // ROCM Implementation
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
-#if defined(USE_CK_FLASH_ATTENTION)
+#if defined(USE_ROCM_CK_SDPA)
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;

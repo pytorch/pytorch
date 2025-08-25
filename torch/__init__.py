@@ -34,6 +34,14 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
+
+# As a bunch of torch.packages internally still have this check
+# we need to keep this. @todo: Remove tests that rely on this check as
+# they are likely stale.
+def _running_with_deploy() -> builtins.bool:
+    return False
+
+
 from torch._utils import (
     _functionalize_sync as _sync,
     _import_dotted_name,

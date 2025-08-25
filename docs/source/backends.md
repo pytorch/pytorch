@@ -169,6 +169,10 @@ These backends include:
 .. autofunction:: torch.backends.cuda.sdp_kernel
 ```
 
+```{eval-rst}
+.. autofunction:: torch.backends.cuda.is_ck_sdpa_available
+```
+
 ## torch.backends.cudnn
 
 ```{eval-rst}
@@ -251,6 +255,19 @@ These backends include:
 ```{eval-rst}
 .. autofunction::  torch.backends.mha.set_fastpath_enabled
 
+```
+
+## torch.backends.miopen
+
+```{eval-rst}
+.. automodule:: torch.backends.miopen
+```
+
+```{eval-rst}
+.. attribute::  immediate
+
+    A :class:`bool` that, if True, causes MIOpen to use Immediate Mode
+    (https://rocm.docs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html).
 ```
 
 ## torch.backends.mps
