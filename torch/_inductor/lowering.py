@@ -1160,7 +1160,13 @@ def repeat(x, repeats):
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
 def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
-    return TensorBox(View.create(x.data, sizes))
+    view_out = TensorBox(View.create(x.data, sizes))
+    device = x.get_device()
+    if device == torch.device("cpu") and (
+        len(x.get_size()) == 0 or (len(x.get_size()) == 1 and x.get_size()[0] == 1)
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(view_out, device, False)))
+    return view_out
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)

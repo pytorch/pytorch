@@ -13833,6 +13833,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inp = torch.randn(100, 100, device=self.device)
         self.assertTrue(CommonTemplate._is_triggering_buffer_reuse(fn, m, inp))
 
+    @requires_cuda_and_triton
+    def test_cpu_scalar_with_cuda_tensor(self):
+        def fn(a, b):
+            return a + b[0]
+
+        a = torch.rand(20, device=GPU_TYPE)
+        b = torch.rand(4, device="cpu")
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, backend="inductor")(a, b)
+        self.assertEqual(eager, compiled)
+
     # end of class CommonTemplate - add new tests here
 
 
