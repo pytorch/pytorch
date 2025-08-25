@@ -1402,7 +1402,7 @@ struct CachingDeviceAllocatorImpl {
     }
   }
 
- private:
+ protected:
   /* Internal methods for processing runtime */
 
   // Deallocate a device memory pointer associated with the given block.
