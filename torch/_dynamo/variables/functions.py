@@ -1801,7 +1801,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             p2p_ops = kwargs["p2p_op_list"]
 
             if not isinstance(p2p_ops, variables.ListVariable):
-                raise Exception
+                raise torch._dynamo.exc.InternalTorchDynamoError("`P2POp` used incorrectly")
+
             for op in p2p_ops.items: # list of P2POpVariable
                 ops.append(op.op)
                 tensors.append(op.tensor)

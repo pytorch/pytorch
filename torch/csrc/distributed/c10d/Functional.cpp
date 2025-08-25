@@ -324,6 +324,8 @@ std::vector<at::Tensor> batch_p2p_ops(
 
   std::vector<c10::intrusive_ptr<c10d::Work>> works;
   std::vector<at::Tensor> result_tensors;
+  works.reserve(N);
+  result_tensors.reserve(N);
   for (uint32_t i = 0; i < N; ++i) {
     c10::intrusive_ptr<c10d::Work> work;
     at::Tensor t = tensors[i];
@@ -345,10 +347,10 @@ std::vector<at::Tensor> batch_p2p_ops(
 
     if (work) {
       c10d::register_work(t, work);
-      works.push_back(work);
+      works.push_back(std::move(work));
     }
 
-    result_tensors.push_back(t);
+    result_tensors.push_back(std::move(t));
   }
 
   if (should_coalesce) {
