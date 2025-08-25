@@ -1396,23 +1396,23 @@ class CppFlexAttentionTemplate(CppTemplate):
         query: ir.Buffer,
         num_threads,
     ):
-      # choose from FLEX_ATTENTION or FLEX_DECODING
-      FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
-      q_batch_size = query.data.data.layout.size[0]  # type: ignore[attr-defined]
-      q_num_heads = query.data.data.layout.size[1]  # type: ignore[attr-defined]
-      q_seq_len = query.data.data.layout.size[2]  # type: ignore[attr-defined]
-      if all(
-          sympy.sympify(val).is_number
-          for val in [q_batch_size, q_num_heads, q_seq_len, num_threads]
-      ):
-          # if static shape
-          if (
-              self.partition_size % self.kv_block_size == 0
-              and q_seq_len == 1
-              and num_threads > q_batch_size * q_num_heads
-          ):
-              FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
-      return FLEX_TEMPLATE
+        # choose from FLEX_ATTENTION or FLEX_DECODING
+        FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
+        q_batch_size = query.data.data.layout.size[0]  # type: ignore[attr-defined]
+        q_num_heads = query.data.data.layout.size[1]  # type: ignore[attr-defined]
+        q_seq_len = query.data.data.layout.size[2]  # type: ignore[attr-defined]
+        if all(
+            sympy.sympify(val).is_number
+            for val in [q_batch_size, q_num_heads, q_seq_len, num_threads]
+        ):
+            # if static shape
+            if (
+                self.partition_size % self.kv_block_size == 0
+                and q_seq_len == 1
+                and num_threads > q_batch_size * q_num_heads
+            ):
+                FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
+        return FLEX_TEMPLATE
 
     def render(  # type: ignore[override,return]
         self,

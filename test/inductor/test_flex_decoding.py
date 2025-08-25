@@ -26,7 +26,8 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
-    instantiate_device_type_tests, skipCUDAIf
+    instantiate_device_type_tests,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 
@@ -650,8 +651,14 @@ class TestFlexDecoding(InductorTestCase):
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
         compiled_out, compiled_lse = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask,
-            device=device, kernel_options=kernel_options
+            score_mod,
+            q,
+            k,
+            v,
+            dtype,
+            block_mask,
+            device=device,
+            kernel_options=kernel_options,
         )
 
         self._check_out(
@@ -1531,9 +1538,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score * 2
 
         self.run_test_with_paged_attention(
-            score_mod,
-            device=device,
-            kernel_options={"PARTITION_SIZE": partition_size})
+            score_mod,device=device,kernel_options={"PARTITION_SIZE": partition_size}
+        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
