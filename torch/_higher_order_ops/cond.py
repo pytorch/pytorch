@@ -246,9 +246,10 @@ def cond(
                 )
             else:
                 backend = "eager"
-            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+            with torch.fx.experimental._config.patch(backed_size_oblivious=False):  # type: ignore[attr-defined]
+                return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+                    pred, true_fn, false_fn, operands
+                )
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
