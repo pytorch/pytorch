@@ -13,6 +13,7 @@ from torch._C import (
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
 from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -687,7 +688,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             flex_attention = torch.compile(flex_attention_eager, dynamic=False)
 
             with self.assertRaisesRegex(
@@ -711,7 +712,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device("cuda"):
+        with torch.device(GPU_TYPE):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "raised exception HopDetectionError([ConstantVariable(str: 'test')])",

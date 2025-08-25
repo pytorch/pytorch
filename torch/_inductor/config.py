@@ -81,6 +81,11 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Configurable compile worker logging path for subproc_pool
+worker_log_path = (
+    "/logs/dedicated_log_torch_compile_worker_rank" if is_fbcode() else None
+)
+
 # precompilation timeout
 precompilation_timeout_seconds: int = 60 * 60
 
@@ -90,6 +95,8 @@ fx_graph_cache: bool = Config(
     env_name_force="TORCHINDUCTOR_FX_GRAPH_CACHE",
     default=True,
 )
+
+remote_gemm_autotune_cache: bool = False
 
 # use remote fx aot graph codegen cache
 # False: Disables the cache
@@ -179,6 +186,8 @@ cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 cpp_wrapper_build_separate: bool = (
     os.environ.get("TORCHINDUCTOR_CPP_WRAPPER_BUILD_SEPARATE", "0") == "1"
 )
+
+fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 
 # Controls automatic precompiling of common include files for codecache.CppCodeCache
 # (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
@@ -380,6 +389,16 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+reorder_iterative_debug_memory_recompute: bool = False
+reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+    None
+    if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
+    else int(env_str)
+)
+sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
+)
+
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
@@ -430,7 +449,11 @@ max_autotune_report_choices_stats = (
 )
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
-graph_partition = False
+graph_partition: bool = (
+    os.environ.get("TORCHINDUCTOR_GRAPH_PARTITION", "1" if not is_fbcode() else "0")
+    == "1"
+)
+
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -1009,6 +1032,24 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 
+def get_worker_log_path() -> Optional[str]:
+    log_loc = None
+    if is_fbcode():
+        mast_job_name = os.environ.get("MAST_HPC_JOB_NAME", None)
+        global_rank = os.environ.get("ROLE_RANK", "0")
+
+        if mast_job_name is not None:
+            log_loc = f"/logs/dedicated_log_torch_compile_worker_rank{global_rank}"
+
+    return log_loc
+
+
+torchinductor_worker_logpath: str = Config(
+    env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
+    default="",
+)
+
+
 # config specific to codegen/cpp.py
 class cpp:
     """
@@ -1133,6 +1174,11 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Use static constexpr or static const for int array
+    use_constexpr_for_int_array = (
+        os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
 
 
@@ -1803,10 +1849,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
-    # Save mapping info from inductor generated triton kernel to post_grad fx nodes to pre_grad fx nodes
-    provenance_tracking = (
-        os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-        or os.environ.get("INDUCTOR_PROVENANCE", "0") == "1"
+    # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
+    # Levels:
+    #   0 - disabled (default)
+    #   1 - normal
+    #   2 - basic
+    # Backward compatibility:
+    #   If TORCH_COMPILE_DEBUG=1, level is set to at least 1.
+    #   If INDUCTOR_PROVENANCE is set, use its integer value.
+    provenance_tracking_level: int = int(
+        os.environ.get(
+            "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
+        )
     )
 
 
