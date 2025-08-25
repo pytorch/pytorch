@@ -1173,12 +1173,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
-    @skipGPUIf(not torch.cuda.is_available() and "HalfTensor" in dir(torch.get_device_module(device_type)),
-                        "requires cuda or support HalfTensor" )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @make_test
     def test_tensor_type5(a, b):
-        m = a.type(torch.get_device_module(device_type).HalfTensor)
+        m = a.type(torch.cuda.HalfTensor)
         return b.type(m.type())
 
     @make_test
@@ -4741,11 +4739,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(backend=counter, fullgraph=True)(fn)
 
-        with torch.accelerator.device(0):
+        with torch.accelerator.device_index(0):
             x = torch.randn(2, 3)
             self.assertEqual(opt_fn(x), fn(x))
             self.assertEqual(counter.frame_count, 1)
-            with torch.accelerator.device(1):
+            with torch.accelerator.device_index(1):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 
