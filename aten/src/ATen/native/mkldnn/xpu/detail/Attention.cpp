@@ -114,16 +114,15 @@ struct SDPALogicalParams {
       }
     }
 
-    query = {
-        static_cast<size_t>(TensorID::query),
-        dtype,
-        reshaped_query.sizes().vec(),
-        reshaped_query.strides().vec()};
-    key = {
-        static_cast<size_t>(TensorID::key),
-        dtype,
-        reshaped_key.sizes().vec(),
-        reshaped_key.strides().vec()};
+#define LOGIC_TENSOR_DESC(name, dtype)     \
+  name = {                                 \
+      static_cast<size_t>(TensorID::name), \
+      dtype,                               \
+      reshaped_##name.sizes().vec(),       \
+      reshaped_##name.strides().vec()}
+
+    LOGIC_TENSOR_DESC(query, dtype);
+    LOGIC_TENSOR_DESC(key, dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
         to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
@@ -144,34 +143,19 @@ struct SDPALogicalParams {
       TORCH_INTERNAL_ASSERT(
           (mask_dtype != data_type::undef),
           "Only FP16/BF16/FP32 datatypes are currently supported for attn_mask");
-      attn_mask = {
-          static_cast<size_t>(TensorID::attn_mask),
-          mask_dtype,
-          reshaped_attn_mask.sizes().vec(),
-          reshaped_attn_mask.strides().vec()};
+      LOGIC_TENSOR_DESC(attn_mask, mask_dtype);
     }
-    value = {
-        static_cast<size_t>(TensorID::value),
-        dtype,
-        reshaped_value.sizes().vec(),
-        reshaped_value.strides().vec()};
-    attention = {
-        static_cast<size_t>(TensorID::attention),
-        dtype,
-        reshaped_attention.sizes().vec(),
-        reshaped_attention.strides().vec()};
+    LOGIC_TENSOR_DESC(value, dtype);
+    LOGIC_TENSOR_DESC(attention, dtype);
     if (compute_logsumexp) {
       TORCH_INTERNAL_ASSERT(
           logsumexp_.scalar_type() == at::kFloat,
           "scaled_dot_product_attention: Expected logsumexp data type in FP32, but got ",
           logsumexp_.scalar_type(),
           " instead.");
-      logsumexp = {
-          static_cast<size_t>(TensorID::logsumexp),
-          sdpa_intermediate_dtype,
-          reshaped_logsumexp.sizes().vec(),
-          reshaped_logsumexp.strides().vec()};
+      LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
     }
+#undef LOGIC_TENSOR_DESC
   }
   std::vector<logical_tensor> get_input() const {
     std::vector<logical_tensor> input = {query, key, scale};
@@ -345,13 +329,13 @@ partition& find_or_create_graph_partition(
   // patternID is determined on the basis of the arguments provided
   std::bitset<32> patternID;
   if (dtype == data_type::f32) {
-    patternID.set(PartitionCache::kBitFloat32, 1);
+    patternID.set(static_cast<uint8_t>(PartitionCache::BitType::Float32), 1);
   }
   if (dtype == data_type::bf16) {
-    patternID.set(PartitionCache::kBitBfloat16, 1);
+    patternID.set(static_cast<uint8_t>(PartitionCache::BitType::Bfloat16), 1);
   }
   // sdp pattern
-  patternID.set(PartitionCache::kBitSdpaPattern, 1);
+  patternID.set(static_cast<uint8_t>(PartitionCache::BitType::SdpaPattern), 1);
 
   // Refer to comments in Utils.h. The first 8 bits are reserved
   int pos = 8;
@@ -456,6 +440,9 @@ struct SDPABackwardLogicalParams {
     at::Tensor reshaped_out = out_;
     at::Tensor reshaped_logsumexp = logsumexp_.unsqueeze(-1);
     at::Tensor reshaped_attn_mask = attn_mask_.value_or(at::Tensor());
+    at::Tensor reshaped_grad_query = grad_query_;
+    at::Tensor reshaped_grad_key = grad_key_;
+    at::Tensor reshaped_grad_value = grad_value_;
 
     // handle broadcasted input tensors for OneDNN
     if (at::native::onednn::is_broadcast(reshaped_grad_out)) {
@@ -477,36 +464,19 @@ struct SDPABackwardLogicalParams {
 
     // TODO: Support GQA in backward pass once OneDNN supports it.
 
-    grad_out = {
-        static_cast<size_t>(TensorID::grad_out),
-        dtype,
-        reshaped_grad_out.sizes().vec(),
-        reshaped_grad_out.strides().vec()};
-    query = {
-        static_cast<size_t>(TensorID::query),
-        dtype,
-        reshaped_query.sizes().vec(),
-        reshaped_query.strides().vec()};
-    key = {
-        static_cast<size_t>(TensorID::key),
-        dtype,
-        reshaped_key.sizes().vec(),
-        reshaped_key.strides().vec()};
-    value = {
-        static_cast<size_t>(TensorID::value),
-        dtype,
-        reshaped_value.sizes().vec(),
-        reshaped_value.strides().vec()};
-    out = {
-        static_cast<size_t>(TensorID::out),
-        dtype,
-        reshaped_out.sizes().vec(),
-        reshaped_out.strides().vec()};
-    logsumexp = {
-        static_cast<size_t>(TensorID::logsumexp),
-        sdpa_intermediate_dtype,
-        reshaped_logsumexp.sizes().vec(),
-        reshaped_logsumexp.strides().vec()};
+#define LOGIC_TENSOR_DESC(name, dtype)     \
+  name = {                                 \
+      static_cast<size_t>(TensorID::name), \
+      dtype,                               \
+      reshaped_##name.sizes().vec(),       \
+      reshaped_##name.strides().vec()}
+
+    LOGIC_TENSOR_DESC(grad_out, dtype);
+    LOGIC_TENSOR_DESC(query, dtype);
+    LOGIC_TENSOR_DESC(key, dtype);
+    LOGIC_TENSOR_DESC(value, dtype);
+    LOGIC_TENSOR_DESC(out, dtype);
+    LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
         to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
@@ -527,27 +497,12 @@ struct SDPABackwardLogicalParams {
       TORCH_INTERNAL_ASSERT(
           (mask_dtype != data_type::undef),
           "Only FP16/BF16/FP32 datatypes are currently supported for attn_mask");
-      attn_mask = {
-          static_cast<size_t>(TensorID::attn_mask),
-          mask_dtype,
-          reshaped_attn_mask.sizes().vec(),
-          reshaped_attn_mask.strides().vec()};
+      LOGIC_TENSOR_DESC(attn_mask, mask_dtype);
     }
-    grad_query = {
-        static_cast<size_t>(TensorID::grad_query),
-        dtype,
-        reshaped_query.sizes().vec(),
-        reshaped_query.strides().vec()};
-    grad_key = {
-        static_cast<size_t>(TensorID::grad_key),
-        dtype,
-        reshaped_key.sizes().vec(),
-        reshaped_key.strides().vec()};
-    grad_value = {
-        static_cast<size_t>(TensorID::grad_value),
-        dtype,
-        reshaped_value.sizes().vec(),
-        reshaped_value.strides().vec()};
+    LOGIC_TENSOR_DESC(grad_query, dtype);
+    LOGIC_TENSOR_DESC(grad_key, dtype);
+    LOGIC_TENSOR_DESC(grad_value, dtype);
+#undef LOGIC_TENSOR_DESC
   }
   std::vector<logical_tensor> get_input() const {
     std::vector<logical_tensor> input = {
@@ -797,13 +752,14 @@ partition& find_or_create_backward_graph_partition(
   // patternID is determined on the basis of the arguments provided
   std::bitset<32> patternID;
   if (dtype == data_type::f32) {
-    patternID.set(PartitionCache::kBitFloat32, 1);
+    patternID.set(static_cast<uint8_t>(PartitionCache::BitType::Float32), 1);
   }
   if (dtype == data_type::bf16) {
-    patternID.set(PartitionCache::kBitBfloat16, 1);
+    patternID.set(static_cast<uint8_t>(PartitionCache::BitType::Bfloat16), 1);
   }
   // sdpa backward pattern
-  patternID.set(PartitionCache::kBitSdpaBwdPattern, 1);
+  patternID.set(
+      static_cast<uint8_t>(PartitionCache::BitType::SdpaBwdPattern), 1);
 
   // Refer to comments in Utils.h. The first 8 bits are reserved
   int pos = 8;
@@ -868,34 +824,27 @@ void sdpa(
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
-  auto get_compiled_partition = [&]() {
-    const sdpa_forward::SDPALogicalParams logical_params(
-        query,
-        key,
-        value,
-        attn_mask,
-        attention,
-        logsumexp,
-        batch_size,
-        seq_len_q,
-        seq_len_kv,
-        num_head_q,
-        num_head_kv,
-        head_dim_qk,
-        head_dim_v,
-        is_causal,
-        compute_logsumexp);
-    auto& partition_ = sdpa_forward::find_or_create_graph_partition(
-        is_causal, compute_logsumexp, logical_params);
-    auto i = logical_params.get_input();
-    auto o = logical_params.get_output();
-    auto compiled_partition_ = partition_.compile(i, o, eng);
-    l_inputs = std::move(i);
-    l_outputs = std::move(o);
-    return compiled_partition_;
-  };
-
-  compiled_partition = get_compiled_partition();
+  const sdpa_forward::SDPALogicalParams logical_params(
+      query,
+      key,
+      value,
+      attn_mask,
+      attention,
+      logsumexp,
+      batch_size,
+      seq_len_q,
+      seq_len_kv,
+      num_head_q,
+      num_head_kv,
+      head_dim_qk,
+      head_dim_v,
+      is_causal,
+      compute_logsumexp);
+  auto& partition = sdpa_forward::find_or_create_graph_partition(
+      is_causal, compute_logsumexp, logical_params);
+  l_inputs = std::move(logical_params.get_input());
+  l_outputs = std::move(logical_params.get_output());
+  compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   Tensor softmax_scale1 = at::full(
       {},
@@ -922,6 +871,7 @@ void sdpa(
 
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+
   ADD_INPUT(query);
   ADD_INPUT(key);
   ADD_INPUT(softmax_scale1);
@@ -933,6 +883,7 @@ void sdpa(
   }
   ADD_INPUT(value);
 #undef ADD_INPUT
+
   compiled_partition->execute(strm, inputs, outputs);
 }
 
@@ -981,37 +932,30 @@ void sdpa_backward(
   std::vector<dnnl::graph::logical_tensor> l_inputs, l_outputs;
   std::optional<dnnl::graph::compiled_partition> compiled_partition;
 
-  auto get_compiled_partition = [&]() {
-    const sdpa_backward::SDPABackwardLogicalParams logical_params(
-        grad_out,
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        attn_mask,
-        grad_query,
-        grad_key,
-        grad_value,
-        batch_size,
-        num_head_q,
-        num_head_kv,
-        seq_len_q,
-        seq_len_kv,
-        head_dim_qk,
-        head_dim_v,
-        is_causal);
-    auto& partition_ = sdpa_backward::find_or_create_backward_graph_partition(
-        is_causal, logical_params);
-    auto i = logical_params.get_input();
-    auto o = logical_params.get_output();
-    auto compiled_partition_ = partition_.compile(i, o, eng);
-    l_inputs = std::move(i);
-    l_outputs = std::move(o);
-    return compiled_partition_;
-  };
-
-  compiled_partition = get_compiled_partition();
+  const sdpa_backward::SDPABackwardLogicalParams logical_params(
+      grad_out,
+      query,
+      key,
+      value,
+      out,
+      logsumexp,
+      attn_mask,
+      grad_query,
+      grad_key,
+      grad_value,
+      batch_size,
+      num_head_q,
+      num_head_kv,
+      seq_len_q,
+      seq_len_kv,
+      head_dim_qk,
+      head_dim_v,
+      is_causal);
+  auto& partition = sdpa_backward::find_or_create_backward_graph_partition(
+      is_causal, logical_params);
+  l_inputs = std::move(logical_params.get_input());
+  l_outputs = std::move(logical_params.get_output());
+  compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
   Tensor softmax_scale = at::full(
       {}, scale, query.options().dtype(at::toOpMathType(query.scalar_type())));
@@ -1032,8 +976,10 @@ void sdpa_backward(
   size_t i = 0;
   std::vector<dnnl::graph::tensor> inputs;
   inputs.reserve(l_inputs.size());
+
 #define ADD_INPUT(variable) \
   inputs.emplace_back(l_inputs[i++], eng, variable.data_ptr())
+
   ADD_INPUT(grad_out);
   ADD_INPUT(query);
   ADD_INPUT(key);
@@ -1048,6 +994,7 @@ void sdpa_backward(
     ADD_INPUT((*attn_mask));
   }
 #undef ADD_INPUT
+
   compiled_partition->execute(strm, inputs, outputs);
 }
 } // namespace at::native::onednn

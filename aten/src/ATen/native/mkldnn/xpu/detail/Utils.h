@@ -116,12 +116,14 @@ struct PartitionCache {
   // The rest of the bits depend upon the arguments provided
   // However, down the line, we might have different bitsets for different
   // patterns
-  static constexpr uint8_t kBitInt8 = 0;
-  static constexpr uint8_t kBitUint8 = 1;
-  static constexpr uint8_t kBitBfloat16 = 2;
-  static constexpr uint8_t kBitFloat32 = 3;
-  static constexpr uint8_t kBitSdpaPattern = 4;
-  static constexpr uint8_t kBitSdpaBwdPattern = 5;
+  enum class BitType : uint8_t {
+    Int8 = 0,
+    Uint8 = 1,
+    Bfloat16 = 2,
+    Float32 = 3,
+    SdpaPattern = 4,
+    SdpaBwdPattern = 5
+  };
 
   dnnl::graph::partition& insert_partition_cache(
       std::bitset<32>& patternID,
