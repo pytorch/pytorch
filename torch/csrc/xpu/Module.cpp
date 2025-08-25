@@ -295,7 +295,22 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
+  // Wrapper class for XPU UUID
+  struct XPUuuid {
+    XPUuuid(std::array<unsigned char*, 16>& uuid) : bytes(uuid) {}
+    std::array<unsigned char*, 16>& bytes;
+  };
   auto m = py::handle(module).cast<py::module>();
+
+  py::class_<XPUuuid>(m, "_XPUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const XPUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
+          })
+      .def("__str__", [](const XPUuuid& uuid) {
+        return uuid_to_string(uuid.bytes);
+      });
 
 #define DEFINE_READONLY_MEMBER(member) \
   def_readonly(#member, &DeviceProp::member)
@@ -328,6 +343,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
+      .def_property_readonly(
+          "uuid", [](const DeviceProp& prop) { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
@@ -336,6 +353,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
                    << std::uppercase << prop.device_id << std::dec
+                   << ", uuid=" << uuid_to_string(prop.uuid)
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
