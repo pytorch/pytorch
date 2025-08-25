@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf3
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -92,6 +93,12 @@ else:
         else [torch.float32]
     )
     test_dtypes_fast = [torch.float32]
+
+
+def skip_on_xpu(test_func):
+    """Decorator to skip tests that are not supported on Intel GPU."""
+    decorated_func = skipXPUIf(True, "Not supported on Intel GPU")(test_func)
+    return decorated_func
 
 
 def create_attention(score_mod, block_mask, enable_gqa=False):
@@ -1797,6 +1804,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @skip_on_xpu  # TODO: SYCL acc issue
     def test_non_sparse_mulitple_block_size(self, device):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):
