@@ -49,14 +49,14 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
-  linux-jammy-py3_9-gcc11-build:
-    name: linux-jammy-py3.9-gcc11
+  linux-jammy-py3_10-gcc11-build:
+    name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -73,49 +73,49 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-test:
-    name: linux-jammy-py3.9-gcc11
+  linux-jammy-py3_10-gcc11-test:
+    name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_9-gcc11-build
+      - linux-jammy-py3_10-gcc11-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.9-gcc11
-      docker-image: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
-    needs: linux-jammy-py3_9-gcc11-build
+    needs: linux-jammy-py3_10-gcc11-build
     with:
-      build-environment: linux-jammy-py3.9-gcc11
-      docker-image: ${{ needs.linux-jammy-py3_9-gcc11-build.outputs.docker-image }}
+      build-environment: linux-jammy-py3.10-gcc11
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-no-ops:
-    name: linux-jammy-py3.9-gcc11-no-ops
+  linux-jammy-py3_10-gcc11-no-ops:
+    name: linux-jammy-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11-no-ops
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-pch:
-    name: linux-jammy-py3.9-gcc11-pch
+  linux-jammy-py3_10-gcc11-pch:
+    name: linux-jammy-py3.10-gcc11-pch
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11-pch
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11-pch
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -183,14 +183,14 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-py3_9-clang12-build:
-    name: linux-jammy-py3.9-clang12
+  linux-jammy-py3_10-clang12-build:
+    name: linux-jammy-py3.10-clang12
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-clang12
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-clang12
+      build-environment: linux-jammy-py3.10-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang12
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -207,16 +207,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-clang12-test:
-    name: linux-jammy-py3.9-clang12
+  linux-jammy-py3_10-clang12-test:
+    name: linux-jammy-py3.10-clang12
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_9-clang12-build
+      - linux-jammy-py3_10-clang12-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.9-clang12
-      docker-image: ${{ needs.linux-jammy-py3_9-clang12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_9-clang12-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.10-clang12
+      docker-image: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3_13-clang12-build:
@@ -253,14 +253,14 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda12_8-cudnn9-py3_9-clang12-build:
-    name: linux-jammy-cuda12.8-cudnn9-py3.9-clang12
+  linux-jammy-cuda12_8-cudnn9-py3_10-clang12-build:
+    name: linux-jammy-cuda12.8-cudnn9-py3.10-clang12
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-cudnn9-py3.9-clang12
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-clang12
+      build-environment: linux-jammy-cuda12.8-cudnn9-py3.10-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -282,14 +282,14 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_9-gcc11-mobile-lightweight-dispatch-build:
-    name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
+  linux-jammy-py3_10-gcc11-mobile-lightweight-dispatch-build:
+    name: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
       build-generates-artifacts: false
       test-matrix: |
         { include: [
