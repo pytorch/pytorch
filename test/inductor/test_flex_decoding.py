@@ -753,7 +753,7 @@ class TestFlexDecoding(InductorTestCase):
             block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
         compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask, device
+            score_mod, q, k, v, dtype, block_mask, device=device
         )
 
         self._check_out(
