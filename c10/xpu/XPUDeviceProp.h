@@ -129,8 +129,8 @@ namespace c10::xpu {
   /* the device identifier of the Intel GPU, also known as the product ID. */ \
   _(device_id, device_id, 0)                                                  \
                                                                               \
-  /* the device descriptor for device Universal Unique ID*/                   \
-  _(uuid, device_info_uuid, 0)
+  /* the device descriptor for device Universal Unique ID, 16 bytes*/         \
+  _(uuid, device_info_uuid, (std::array<unsigned char, 16>{}))
 
 #define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
   /* sycl::half is supported on device. */              \
