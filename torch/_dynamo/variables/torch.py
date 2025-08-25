@@ -61,6 +61,7 @@ from ..source import (
     TorchSource,
 )
 from ..utils import (
+    amp_autocast_modules,
     check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
@@ -352,11 +353,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ):
+        elif self.value in amp_autocast_modules:
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             # NOTE any class added here must align with the semantic
