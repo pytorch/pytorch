@@ -2760,9 +2760,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
-                    counters["inductor"][
-                        "select_algorithm_num_precompilation_exceptions"
-                    ] += 1
                     exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
