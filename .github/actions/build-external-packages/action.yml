@@ -48,6 +48,7 @@ runs:
         BASE_IMAGE: ${{ inputs.docker-image }}
         BUILD_TARGETS: ${{ inputs.build-targets }}
         PARENT_OUTPUT_DIR: ${{ inputs.output-dir}}
+
       shell: bash
       run: |
         set -euo pipefail
@@ -60,6 +61,8 @@ runs:
         )
         MAX_JOBS="$(nproc --ignore=6)"
         export MAX_JOBS
+
+        echo "$GITHUB_STEP_SUMMARY"
 
         # Split the comma-separated list and build each target
         IFS=',' read -ra TARGETS <<< "$BUILD_TARGETS"

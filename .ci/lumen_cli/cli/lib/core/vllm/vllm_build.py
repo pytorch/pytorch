@@ -4,7 +4,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
+from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.cli_helper import BaseRunner
 from cli.lib.common.docker_helper import local_image_exists
 from cli.lib.common.envs_helper import (
@@ -153,18 +153,25 @@ class VllmBuildRunner(BaseRunner):
         """
         inputs = VllmBuildParameters()
         logger.info("Running vllm build with inputs: %s", inputs)
-        clone_vllm()
+        vllm_commit = clone_vllm()
 
         self.cp_dockerfile_if_exist(inputs)
 
         # cp torch wheels from root direct to vllm workspace if exist
         self.cp_torch_whls_if_exist(inputs)
 
+        # make sure the output dir to store the build artifacts exist
         ensure_dir_exists(inputs.output_dir)
 
         cmd = self._generate_docker_build_cmd(inputs)
         logger.info("Running docker build: \n %s", cmd)
         run_command(cmd, cwd="vllm", env=os.environ.copy())
+
+    def write_step_summary(self, vllm_commit: str):
+       vllm_sha_url =f"${vllm_commit}](https://github.com/vllm-project/vllm/commit/${vllm_commit})"
+       md = []
+
+       write_gh_step_summary()
 
     def cp_torch_whls_if_exist(self, inputs: VllmBuildParameters) -> str:
         if not inputs.use_torch_whl:
