@@ -1,11 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/zendnn/Linear_utils.hpp>
-#include <ATen/record_function.h>
 #include <string_view>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <c10/core/ivalue.h>
 #else
 #include <ATen/ops/zendnn_linear_native.h>
 #endif
