@@ -402,14 +402,11 @@ sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
 
 # Comparing estimations vs real benchmarks showed big divergence.
 # Exposing extensive config for easier experimentation.
-# TODO:(ivankobzarev) Remove once runtime estimations are reliable.
-reorder_iterative_limit_by_runtime_estimations: bool = True
-sink_waits_iterative_limit_by_runtime_estimations: bool = True
-# Debug configurations for experimentations
-reorder_sink_runtime_estimations_mm_mult: float = 1.0
 reorder_sink_runtime_estimations_comm_mult: float = 1.0
+reorder_sink_runtime_estimations_non_comm_mult: float = 1.0
 # Ratio of comm_time to cover deviations of comm_time from estimations
-reorder_sink_extra_comm_comp_overlap: float = 0.1
+reorder_iterative_extra_comm_comp_overlap: float = 0.1
+sink_iterative_extra_comm_comp_overlap: float = 0.2
 
 # Experimental unsafe configuration that allows changing relative collectives order,
 # No guarantees for now that all the rank will do the same order of collectives,

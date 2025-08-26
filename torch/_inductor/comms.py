@@ -147,31 +147,6 @@ class ReorderInfo:
         return self.initial_exposed - self.final_exposed
 
 
-def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
-    if node is None:
-        return False
-
-    if is_fallback_op(
-        node,  # type: ignore[arg-type]
-        torch.ops.aten._scaled_dot_product_flash_attention.default,
-    ):
-        return True
-
-    if python_kernel_name := getattr(node, "python_kernel_name", None):
-        if "extern_kernels" in python_kernel_name and "mm" in python_kernel_name:
-            return True
-    return False
-
-
-def contains_gemm_like(snode: BaseSchedulerNode) -> bool:
-    from torch._inductor.scheduler import GroupedSchedulerNode
-
-    if isinstance(snode, GroupedSchedulerNode):
-        return any(contains_gemm_like(x) for x in snode.snodes)
-    else:
-        return is_gemm_like(snode.node)
-
-
 def _temp_group_visit_leaves(snode, fn):
     from torch._inductor.scheduler import GroupedSchedulerNode
 
@@ -297,14 +272,29 @@ def is_corresponding_collective_wait(collective_snode, wait_snode):
     return unmet_deps & collective_outs
 
 
+def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
+    if node is None:
+        return False
+
+    if is_fallback_op(
+        node,  # type: ignore[arg-type]
+        torch.ops.aten._scaled_dot_product_flash_attention.default,
+    ):
+        return True
+
+    if python_kernel_name := getattr(node, "python_kernel_name", None):
+        if "extern_kernels" in python_kernel_name and "mm" in python_kernel_name:
+            return True
+    return False
+
+
 def _op_runtime_estimate_mult(snode):
     # Apply multipliers for faster experimentation.
     # TODO(ivankobzarev): Remove after confirmation that runtime estimations are correct.
     if contains_collective(snode):
         return config.reorder_sink_runtime_estimations_comm_mult
-    elif is_gemm_like(snode):
-        return config.reorder_sink_runtime_estimations_mm_mult
-    return 1.0
+
+    return config.reorder_sink_runtime_estimations_non_comm_mult
 
 
 def is_async_collective(snode):
@@ -532,9 +522,8 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             while candidate is not None:
                 if (
-                    config.reorder_iterative_limit_by_runtime_estimations
-                    and info.final_exposed
-                    < -config.reorder_sink_extra_comm_comp_overlap * info.comm_time
+                    info.final_exposed
+                    < -config.reorder_iterative_extra_comm_comp_overlap * info.comm_time
                 ):
                     info.limiting_factor = "unexposed by runtime estimations"
                     break
@@ -611,13 +600,19 @@ def _reorder_communication_preserving_peak_memory_internal(
                     c_runtime = runtimes[candidate]
 
                     if c_runtime > 0 and len(group_waits) > 0:
-                        exposed_delta = max(0, info.comm_time - info.comp_time) - max(
+                        exposed_before = max(0, info.comm_time - info.comp_time)
+                        exposed_after = max(
                             0, info.comm_time - info.comp_time - c_runtime
                         )
-                        for gw, (gw_comm_time, gw_comp_time) in group_waits.items():
-                            exposed_delta += max(0, gw_comm_time - gw_comp_time) - max(
+                        exposed_delta = exposed_after - exposed_before
+                        for gw_comm_time, gw_comp_time in group_waits.values():
+                            gw_exposed_before = max(0, gw_comm_time - gw_comp_time)
+                            gw_exposed_after = max(
                                 0, gw_comm_time - gw_comp_time + c_runtime
                             )
+
+                            exposed_delta += gw_exposed_after - gw_exposed_before
+
                         if exposed_delta > 0:
                             info.limiting_factor = (
                                 f"candidate has compute {c_runtime},"
@@ -634,17 +629,19 @@ def _reorder_communication_preserving_peak_memory_internal(
                 else:
                     # Unsafe collectives reordering
                     # Cj -> [...group_runtime..., Ci] -> Wj
+                    # Checking that we are not increasing exposed time of Cj
                     if group_runtime > 0:
                         comm_time, comp_time = coll_exposed_communication_time(
                             candidate, _group_nodes(candidate, None), runtimes
                         )
-                        exposed_delta = max(0, comm_time - comp_time) - max(
-                            0, comm_time - comp_time + group_runtime
-                        )
+                        exposed_before = max(0, comm_time - comp_time)
+                        exposed_after = max(0, comm_time - comp_time + group_runtime)
+                        exposed_delta = exposed_after - exposed_before
                         if exposed_delta > 0:
                             info.limiting_factor = (
                                 f"candidate is collective,"
-                                f" group_runtime:{group_runtime}, exposed_delta:{exposed_delta}"
+                                f" group_runtime:{group_runtime},"
+                                f" exposed_delta:{exposed_delta} c_comm_time:{comm_time} c_comp_time:{comp_time}"
                             )
                             break
 
@@ -696,9 +693,12 @@ def _reorder_communication_preserving_peak_memory_internal(
 
                 _perform_double_linked_list_swap(candidate, group_head, group_tail)
 
-                info.final_exposed = coll_exposed_communication_time(
+                comm_time, comp_time = coll_exposed_communication_time(
                     curr, _group_nodes(_next[curr], None), runtimes
-                )[1]
+                )
+                info.comm_time = comm_time
+                info.comp_time = comp_time
+                info.final_exposed = comm_time - comp_time
 
                 _update_memory_tracking_after_swap(
                     candidate,
@@ -743,6 +743,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     headers = [
         "Collective node",
         "comm_time",
+        "comp_time",
         "initial exposed",
         "final exposed",
         "improvement",
@@ -755,6 +756,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         [
             node_summary(snode),
             node_info.comm_time,
+            node_info.comp_time,
             node_info.initial_exposed,
             node_info.final_exposed,
             node_info.improvement,
@@ -1171,9 +1173,8 @@ def _sink_waits_iterative_internal(
 
             while candidate is not None:
                 if (
-                    config.sink_waits_iterative_limit_by_runtime_estimations
-                    and info.final_exposed
-                    < -config.reorder_sink_extra_comm_comp_overlap * info.comm_time
+                    info.final_exposed
+                    < -config.sink_iterative_extra_comm_comp_overlap * info.comm_time
                 ):
                     info.limiting_factor = "unexposed by runtime estimations"
                     break
@@ -1394,6 +1395,7 @@ def _sink_waits_iterative_internal(
     headers = [
         "Wait node",
         "comm_time",
+        "comp_time",
         "initial exposed",
         "final exposed",
         "improvement",
@@ -1406,7 +1408,7 @@ def _sink_waits_iterative_internal(
     rows = [
         [
             node_summary(snode),
-            info.comm_time,
+            info.comp_time,
             info.initial_exposed,
             info.final_exposed,
             info.improvement,
