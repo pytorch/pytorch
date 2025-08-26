@@ -174,7 +174,7 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    * 0 11111111 00000000000000000000000 - fp32
    */
   constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
-  
+
   /*
    * Representation of 480.0f in fp32 format, which represents
    * +NaN in fp8e4m3fn format:
