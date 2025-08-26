@@ -103,15 +103,13 @@ inline bool _check_tensors_share_device_and_dtype(
         tensor.is_non_overlapping_and_dense();
   };
 
-  for (const auto& tensorList : tensorLists) {
-    for (const auto& tensor : tensorList) {
-      if (!is_tensor_okay(tensor)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return std::all_of(
+      tensorLists.cbegin(),
+      tensorLists.cend(),
+      [&](const TensorList& tensorList) {
+        return std::all_of(
+            tensorList.cbegin(), tensorList.cend(), is_tensor_okay);
+      });
 }
 
 // Helper function called in check_fast_path_restrictions to check if
