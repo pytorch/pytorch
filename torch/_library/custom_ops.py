@@ -210,6 +210,7 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
+        self._used_triton_kernels: list[Any] = list()
         OPDEFS[self._qualname] = self
 
     @property
