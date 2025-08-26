@@ -164,7 +164,7 @@ def _local_map_wrapped(
     in_placements: InputPlacements,
     in_grad_placements: InputPlacements,
     device_mesh: Optional[DeviceMesh],
-    redistribute_inputs: bool = False,
+    redistribute_inputs: bool,
     *args,
     **kwargs,
 ):
