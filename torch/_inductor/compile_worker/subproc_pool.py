@@ -90,10 +90,13 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str, name: str) -> None:
+    def __init__(self, details: str, name: str = "<unknown>") -> None:
         super().__init__(
             f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
         )
+
+    def with_name(self, name: str):
+        return SubprocException(self.details, name)
 
 
 class SubprocPickler:
@@ -129,7 +132,6 @@ class SubprocPool:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
         self.kind = kind
-        self.names: dict[int, str] = {}
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
@@ -191,11 +193,7 @@ class SubprocPool:
         self.read_thread.start()
 
     def submit(
-        self,
-        job_fn: Callable[_P, _T],
-        *args: _P.args,
-        name: str = "",
-        **kwargs: _P.kwargs,
+        self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
@@ -205,7 +203,6 @@ class SubprocPool:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
         future.set_running_or_notify_cancel()
-        self.names[job_id] = name
         self._send(MsgHeader.JOB, job_id, job_data)
         return future
 
@@ -251,7 +248,7 @@ class SubprocPool:
                 if isinstance(result, _SubprocExceptionInfo):
                     # An exception occurred in the submitted job
                     self.pending_futures[job_id].set_exception(
-                        SubprocException(result.details, self.names[job_id])
+                        SubprocException(result.details)
                     )
                 elif isinstance(result, Exception):
                     # An exception occurred in some of our subprocess machinery.
@@ -259,7 +256,6 @@ class SubprocPool:
                 else:
                     self.pending_futures[job_id].set_result(result)
                 del self.pending_futures[job_id]
-                del self.names[job_id]
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
