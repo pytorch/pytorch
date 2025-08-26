@@ -23,6 +23,7 @@ __all__ = [
     "check_backward_validity",
     "detach_variable",
     "get_device_states",
+    "is_checkpoint_enabled",
     "set_device_states",
     "noop_context_fn",
     "set_checkpoint_early_stop",
@@ -328,18 +329,23 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
-# Note: [torch.compile and checkpoint]
-# TorchDynamo does not step inside utils.checkpoint function.  The flow
-# looks likes this
-#  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
-#     speculatively checking if the forward function is safe to trace.
-#  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
-#     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
-#  3) If not, then TorchDynamo falls back to eager by performing a graph
-#     break. And here, the following disable wrapper ensures that
-#     TorchDynamo does not trigger again on the frames created by
-#     utils.checkpoint innards.
-@torch._disable_dynamo
+
+_is_checkpoint_enabled = False
+
+
+def is_checkpoint_enabled():
+    """Returns whether we are currently in a checkpoint region"""
+    return _is_checkpoint_enabled
+
+
+def _set_checkpoint_enabled():
+    _is_checkpoint_enabled = True
+
+
+def _unset_checkpoint_enabled():
+    _is_checkpoint_enabled = False
+
+
 def checkpoint(
     function,
     *args,
@@ -347,6 +353,7 @@ def checkpoint(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -425,6 +432,9 @@ def checkpoint(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        args: tuple containing inputs to the :attr:`function`
+
+    Keyword args:
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
@@ -455,11 +465,61 @@ def checkpoint(
             a trace of the operators ran during the original forward computation
             as well as the recomputation. This argument is only supported if
             ``use_reentrant=False``.
-        args: tuple containing inputs to the :attr:`function`
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. This
+            argument is ignored if ``use_reentrant=True``. Can be overridden
+            globally using :func:`set_checkpoint_early_stop` context manager.
+            Default: ``True``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    from torch._dynamo.utils import (
+        _disable_side_effect_safety_checks_for_current_subtracer,
+    )
+    try:
+        global _is_checkpoint_enabled
+        _disable_side_effect_safety_checks_for_current_subtracer(
+            _set_checkpoint_enabled
+        )
+        kwargs["use_reentrant"] = use_reentrant
+        if context_fn is not noop_context_fn:
+            kwargs["context_fn"] = context_fn
+        kwargs["determinism_check"] = determinism_check
+        kwargs["debug"] = debug
+        kwargs["early_stop"] = early_stop
+        return _checkpoint_inner(
+            function,
+            *args,
+            **kwargs
+        )
+    finally:
+        _disable_side_effect_safety_checks_for_current_subtracer(
+            _set_checkpoint_enabled
+        )
+
+# Note: [torch.compile and checkpoint]
+# TorchDynamo does not step inside utils.checkpoint function.  The flow
+# looks likes this
+#  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+#     speculatively checking if the forward function is safe to trace.
+#  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+#     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+#  3) If not, then TorchDynamo falls back to eager by performing a graph
+#     break. And here, the following disable wrapper ensures that
+#     TorchDynamo does not trigger again on the frames created by
+#     utils.checkpoint innards.
+@torch._disable_dynamo
+def _checkpoint_inner(
+    function,
+    *args,
+    use_reentrant: Optional[bool] = None,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    **kwargs
+):
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
@@ -488,7 +548,7 @@ def checkpoint(
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, *args, **kwargs
+            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
         )
         # Runs pre-forward logic
         next(gen)
@@ -731,7 +791,7 @@ def _internal_assert(cond):
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop = True
+_enable_checkpoint_early_stop: Optional[bool] = None
 
 
 @contextlib.contextmanager
@@ -1448,6 +1508,7 @@ def _checkpoint_without_reentrant_generator(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     *args,
     **kwargs
 ):
@@ -1475,6 +1536,10 @@ def _checkpoint_without_reentrant_generator(
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
             as well as the recomputation.
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. Can be
+            overridden globally using :func:`set_checkpoint_early_stop` context
+            manager. Default: ``True``.
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
@@ -1543,7 +1608,7 @@ def _checkpoint_without_reentrant_generator(
 
     new_frame = _CheckpointFrame(
         recompute_fn,
-        _enable_checkpoint_early_stop,
+        _enable_checkpoint_early_stop if _enable_checkpoint_early_stop is not None else early_stop,
         unpack_error_cb,
         metadata_fn
     )

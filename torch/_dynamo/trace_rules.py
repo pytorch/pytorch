@@ -366,6 +366,10 @@ manual_torch_name_rule_map: dict[
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
+    "torch.utils.checkpoint.checkpoint": UserFunctionVariable,
+    "torch.utils.checkpoint.is_checkpoint_enabled": UserFunctionVariable,
+    "torch.utils.checkpoint._set_checkpoint_enabled": UserFunctionVariable,
+    "torch.utils.checkpoint._unset_checkpoint_enabled": UserFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
