@@ -103,7 +103,6 @@ def main():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
-            "-fno-strict-aliasing",
         ]
 
     ext_modules = [
