@@ -2690,15 +2690,5 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
-  ],
-  "GB0269": [
-    {
-      "Gb_type": "Forced graph break on leaf function",
-      "Context": "",
-      "Explanation": "Forced graph break for nested graph break testing purposes",
-      "Hints": [
-        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
-      ]
-    }
   ]
 }
