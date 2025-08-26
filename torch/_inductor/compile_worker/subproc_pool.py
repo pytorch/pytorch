@@ -206,14 +206,14 @@ class SubprocPool:
             self.pending_futures[job_id] = future = Future()
         future.set_running_or_notify_cancel()
         self.names[job_id] = name
-        self._send(MsgHeader.JOB, job_id, job_data, job_id)
+        self._send(MsgHeader.JOB, job_id, job_data)
         return future
 
     def _send(self, msg_header: MsgHeader, job_id: int = -1, data: bytes = b"") -> None:
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("Attempting to use a closed pool")
-            _send_msg(self.write_pipe, msg_header, data, job_id)
+            _send_msg(self.write_pipe, msg_header, job_id, data)
 
     def _read_thread(self) -> None:
         while True:
