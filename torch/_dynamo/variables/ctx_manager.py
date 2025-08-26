@@ -44,7 +44,6 @@ from ..utils import (
     amp_autocast_modules,
     custom_backend_name,
     is_custom_backend_available,
-    torch_custom_backend,
 )
 from .base import VariableTracker
 from .functions import (

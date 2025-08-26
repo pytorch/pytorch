@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Callable
+from typing import Callable, cast, Optional
 
 import torch
 import torch.utils._pytree as pytree
