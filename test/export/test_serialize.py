@@ -636,6 +636,79 @@ def forward(self, x):
             if "aten.sum.dim_IntList" in node.target:
                 self.assertEqual(node.inputs[1].arg.type, "as_ints")
 
+    def test_preserve_aliasing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(8, 8)
+                self.linear2 = self.linear1  # alias of linear1
+                self.register_buffer("buffer1", torch.randn(8, 8))
+                self.register_buffer("buffer2", torch.randn(8, 8), persistent=False)
+                self.const1 = torch.ones(8, 8)
+                self.const2 = self.const1.diagonal()  # a partial view of const1
+
+            def forward(self, x):
+                return (
+                    self.linear1(x)
+                    + self.linear2(x)
+                    + self.buffer1
+                    + self.buffer2
+                    + self.const1
+                    + self.const2
+                )
+
+        m = M()
+        sample_inputs = (torch.randn(1, 8),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        eager_out = m(*sample_inputs)
+        epm = loaded_ep.module()
+        ep_out = epm(*sample_inputs)
+        self.assertTrue(torch.allclose(eager_out, ep_out))
+
+        # loaded_ep should preserve the aliasing info
+        self.assertEqual(
+            loaded_ep.state_dict["linear1.weight"].untyped_storage(),
+            loaded_ep.state_dict["linear2.weight"].untyped_storage(),
+        )
+        self.assertEqual(
+            loaded_ep.state_dict["linear1.bias"].untyped_storage(),
+            loaded_ep.state_dict["linear2.bias"].untyped_storage(),
+        )
+        self.assertEqual(
+            loaded_ep.constants["const1"].untyped_storage(),
+            loaded_ep.constants["const2"].untyped_storage(),
+        )
+        # verify const1 and const2 share the same storage
+        loaded_ep.constants["const1"][0][0] = 123
+        self.assertEqual(loaded_ep.constants["const2"][0], 123)
+        loaded_ep.constants["const2"][-1] = 321
+        self.assertEqual(loaded_ep.constants["const1"][-1][-1], 321)
+
+        # unlifted module should also preserve the aliasing info
+        epm = loaded_ep.module()
+        epm_state_dict = epm.state_dict()
+        self.assertEqual(
+            epm_state_dict["linear1.weight"].untyped_storage(),
+            epm_state_dict["linear2.weight"].untyped_storage(),
+        )
+        self.assertEqual(
+            epm_state_dict["linear1.bias"].untyped_storage(),
+            epm_state_dict["linear2.bias"].untyped_storage(),
+        )
+        self.assertEqual(
+            epm.const1.untyped_storage(),
+            epm.const2.untyped_storage(),
+        )
+        # verify const1 and const2 share the same storage
+        epm.const1[0][0] = 123
+        self.assertEqual(epm.const2[0], 123)
+        epm.const2[-1] = 321
+        self.assertEqual(epm.const1[-1][-1], 321)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -1607,12 +1680,21 @@ class TestSaveLoad(TestCase):
                 f.seek(0)
                 file_prefix = f.name.split("/")[2].split(".")[0]
 
-                # Modify the version
-                with zipfile.ZipFile(f, "a") as zipf:
-                    zipf.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
+                # Create a new file and copy things over, but modify the
+                # archive version
+                with tempfile.NamedTemporaryFile(suffix=".pt2") as fnew:
+                    with zipfile.ZipFile(f, "r") as zin:
+                        with zipfile.ZipFile(fnew, "w") as zout:
+                            for item in zin.infolist():
+                                if (
+                                    item.filename
+                                    != f"{file_prefix}/{ARCHIVE_VERSION_PATH}"
+                                ):
+                                    zout.writestr(item, zin.read(item.filename))
+                            zout.writestr(f"{file_prefix}/{ARCHIVE_VERSION_PATH}", "-1")
 
-                f.seek(0)
-                load(f.name)
+                    f.seek(0)
+                    load(fnew.name)
 
     def test_save_constants(self):
         class Foo(torch.nn.Module):
