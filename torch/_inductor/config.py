@@ -408,8 +408,8 @@ sink_waits_iterative_limit_by_runtime_estimations: bool = True
 # Debug configurations for experimentations
 reorder_sink_runtime_estimations_mm_mult: float = 1.0
 reorder_sink_runtime_estimations_comm_mult: float = 1.0
-reorder_iterative_group_with_gemm: bool = True
-sink_iterative_group_with_gemm: bool = True
+# Ratio of comm_time to cover deviations of comm_time from estimations
+reorder_sink_extra_comm_comp_overlap: float = 0.1
 
 # Experimental unsafe configuration that allows changing relative collectives order,
 # No guarantees for now that all the rank will do the same order of collectives,
