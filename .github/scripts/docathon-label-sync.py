@@ -39,7 +39,9 @@ def main() -> None:
     pull_request_label_names = [label.name for label in pull_request_labels]
     issue_label_names = [label.name for label in issue_labels]
     labels_to_add = [
-        label for label in issue_label_names if label not in pull_request_label_names
+        label
+        for label in issue_label_names
+        if label not in pull_request_label_names and label != "actionable"
     ]
     if not labels_to_add:
         print("The pull request already has the same labels.")
