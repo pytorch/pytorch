@@ -1101,6 +1101,8 @@ class SchedulerNode(BaseSchedulerNode):
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
     def replace_boundary_with_mask(self, dimension: int, new_range: int) -> None:
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+
         self._body = self._body.replace_boundary_with_mask(dimension, new_range)
         self._sizes = self._body.sizes
 
@@ -3880,6 +3882,62 @@ class Scheduler:
 
         return True
 
+    def get_expand_dim_for_pointwise_nodes(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> Optional[tuple[int, SchedulerNode, sympy.Expr]]:
+        """
+
+        """
+        # only support scheduler node
+        if not isinstance(node1, SchedulerNode) or not isinstance(node2, SchedulerNode):
+            return None
+
+        # only support pointwise nodes with the same size
+        n1_sizes, n2_sizes = node1._sizes, node2._sizes
+        n1_iter_sizes, n1_reduce_sizes = n1_sizes
+        n2_iter_sizes, n2_reduce_sizes = n2_sizes
+        if (
+            node1.is_reduction()
+            or node2.is_reduction()
+            or n1_reduce_sizes != n2_reduce_sizes
+            or len(n1_iter_sizes) != len(n2_iter_sizes)
+        ):
+            return None
+
+        # only support nodes with 1 write for simplification
+        if len(node1.read_writes.writes) > 1 or len(node2.read_writes.writes) > 1:
+            return None
+
+        # When memory access is small, reducing gpu kernel overhead is profitable over
+        # slightly larger memory access.
+        node1_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
+        node2_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
+        if (
+            max(node1_write_memory, node2_write_memory) > 16777216
+        ):  # todo: replace with a config
+            return None
+
+        # only support nodes
+        mismatch_dimensions = []
+        for idx, (n1_size, n2_size) in enumerate(zip(n1_iter_sizes, n2_iter_sizes)):
+            if n1_size != n2_size:
+                mismatch_dimensions.append(idx)
+
+        if len(mismatch_dimensions) != 1:
+            return None
+
+        mismatch_dim = mismatch_dimensions[0]
+        mismatch_size1, mismatch_size2 = (
+            n1_iter_sizes[mismatch_dim],
+            n2_iter_sizes[mismatch_dim],
+        )
+        if V.graph.sizevars.statically_known_lt(mismatch_size1, mismatch_size2):
+            return mismatch_dim, node1, mismatch_size2
+        elif V.graph.sizevars.statically_known_lt(mismatch_size2, mismatch_size1):
+            return mismatch_dim, node2, mismatch_size1
+        else:
+            return None
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -4004,8 +4062,11 @@ class Scheduler:
         ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
-        if (shared_data_score < config.score_fusion_memory_threshold and isinstance(node1, SchedulerNode)):
-            node1.replace_boundary_with_mask(0, 4) # hack to mask node1 from [2,3] to [4,3]. TODO: generalize
+        if shared_data_score < config.score_fusion_memory_threshold and (
+            expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
+        ):
+            (expand_dim, smaller_node, expand_size) = expand_analysis
+            smaller_node.replace_boundary_with_mask(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
