@@ -1,13 +1,12 @@
 #include "Common.h"
 
-namespace at::native::openreg {
-
-at::Tensor quantize_per_tensor(
+namespace at::native {
+at::Tensor quantize_per_tensor_openreg(
     const at::Tensor& self,
     double scale,
     int64_t zero_point,
     at::ScalarType dtype);
-int64_t _fused_sdp_choice(
+int64_t _fused_sdp_choice_openreg(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
@@ -16,11 +15,6 @@ int64_t _fused_sdp_choice(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa);
-void quantize_tensor_per_tensor_affine_stub(
-    const at::Tensor& rtensor,
-    at::Tensor& qtensor,
-    double scale,
-    int64_t zero_point);
 std::tuple<
     at::Tensor,
     at::Tensor,
@@ -31,7 +25,7 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor>
-_scaled_dot_product_fused_attention_overrideable(
+_scaled_dot_product_fused_attention_overrideable_openreg(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
@@ -41,7 +35,7 @@ _scaled_dot_product_fused_attention_overrideable(
     bool return_debug_mask,
     std::optional<double> scale);
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-_scaled_dot_product_fused_attention_overrideable_backward(
+_scaled_dot_product_fused_attention_overrideable_backward_openreg(
     const at::Tensor& grad_out,
     const at::Tensor& query,
     const at::Tensor& key,
@@ -59,11 +53,18 @@ _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     std::optional<double> scale);
+} // namespace at::native
 
+namespace at::native {
+void abs_kernel_openreg(at::TensorIteratorBase& iter);
+void quantize_tensor_per_tensor_affine_stub_openreg(
+    const at::Tensor& rtensor,
+    at::Tensor& qtensor,
+    double scale,
+    int64_t zero_point);
+} // namespace at::native
+
+namespace at::native {
 at::Tensor custom_autograd_fn_returns_self(at::Tensor x);
 at::Tensor custom_autograd_fn_aliasing(at::Tensor x);
-at::Tensor& abs_out(const at::Tensor& self, at::Tensor& out);
-void abs_kernel(at::TensorIteratorBase& iter);
-at::Tensor custom_abs(at::Tensor x);
-
-} // namespace at::native::openreg
+} // namespace at::native
