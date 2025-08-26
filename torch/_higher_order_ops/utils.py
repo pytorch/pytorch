@@ -1143,6 +1143,7 @@ def materialize_as_graph(
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
                 unfunc_t = [_from_fun(arg) for arg in args]
+
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch.utils._python_dispatch._disable_current_modes()
