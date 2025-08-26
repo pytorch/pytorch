@@ -2475,10 +2475,7 @@ if torch._C.has_zendnn:  # type: ignore[attr-defined]
 
     @register_meta(aten.zendnn_linear.default)
     def meta_zendnn_linear(
-        input,
-        weight,
-        bias=None,
-        is_weight_prepacked=False,
+        input, weight, bias=None, is_weight_prepacked=False, post_op="none"
     ):
         out_dim = list(input.size())
         out_dim[-1] = weight.size(0)
