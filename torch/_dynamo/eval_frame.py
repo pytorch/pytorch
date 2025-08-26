@@ -758,13 +758,13 @@ class _TorchDynamoContext:
             callback = self.callback  # type: ignore[assignment]
 
         is_jit_tracing = torch._C._is_tracing
-        is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
+        is_fx_symbolic_tracing = torch.fx._symbolic_trace.is_fx_symbolic_tracing
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
-                if is_fx_tracing():
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
