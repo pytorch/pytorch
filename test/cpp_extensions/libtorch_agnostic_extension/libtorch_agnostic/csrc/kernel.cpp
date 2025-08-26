@@ -4,6 +4,7 @@
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 #ifdef LAE_USE_CUDA
 #include <cuda_runtime.h>
@@ -340,12 +341,24 @@ void boxed_my_narrow(
   stack[0] = from(res);
 }
 
+Tensor my_new_empty_dtype_variant(Tensor t) {
+  std::vector<int64_t> sizes = {2, 5};
+  auto dtype = std::make_optional(at::ScalarType::BFloat16);
+  return new_empty(t, sizes, dtype);
+}
+
+void boxed_my_new_empty_dtype_variant(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  auto res = my_new_empty_dtype_variant(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_pad(Tensor t) -> Tensor");
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
+  m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
@@ -353,6 +366,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_empty_like", &boxed_empty_like);
   m.impl("fill_infinity", &boxed_fill_infinity);
   m.impl("my_is_cpu", &boxed_my_is_cpu);
+  m.impl("my_new_empty_dtype_variant", &boxed_my_new_empty_dtype_variant);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeImplicitAutograd, m) {

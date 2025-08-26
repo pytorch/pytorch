@@ -200,7 +200,7 @@ def debug_insert_nops(
             return ConvertFrameReturn()
 
         debug_checks(frame.f_code)
-        code = transform_code_object(frame.f_code, insert_nops)
+        code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
             code_options={},
             compiler_fn=None,

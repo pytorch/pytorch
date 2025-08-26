@@ -414,9 +414,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1425,6 +1425,7 @@ def context_parallel(
     buffers: Optional[list[torch.Tensor]] = None,
     buffer_seq_dims: Optional[list[int]] = None,
     no_restore_buffers: Optional[set[torch.Tensor]] = None,
+    load_balance_indices: Optional[torch.Tensor] = None,
 ) -> Generator[None, None, None]:
     """
 
@@ -1450,6 +1451,7 @@ def context_parallel(
             won't be restored after the context exits. This set must be a subset
             of ``buffers``. If the buffers won't be used after the context exits,
             these buffers can be put in this list to avoid extra restore time.
+        @TODO: add load_balance_indices
 
     .. warning::
         `torch.distributed.tensor.experimental.context_parallel` is a
@@ -1474,14 +1476,14 @@ def context_parallel(
     device = buffers[0].device
     seq_length = buffers[0].shape[buffer_seq_dims[0]]
     cp_world_size = mesh.size()
-    if _cp_options.enable_load_balance:
+    # TODO: add explicit load_balance_indices for user to specify
+    if not load_balance_indices and _cp_options.enable_load_balance:
         load_balance_indices = _generate_round_robin_indices(
             seq_length=seq_length,
             cp_world_size=cp_world_size,
             device=device,
         )
-    else:
-        load_balance_indices = None
+
     shards = _context_parallel_buffers(
         mesh, buffers, buffer_seq_dims, load_balance_indices
     )
@@ -1504,6 +1506,8 @@ def context_parallel_unshard(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     seq_dims: list[int],
+    *,
+    restore_indices: Optional[torch.Tensor] = None,
 ) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
@@ -1513,11 +1517,12 @@ def context_parallel_unshard(
         buffers (List[torch.Tensor]): the buffers to be unsharded.
         seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
             must have the same length as ``buffers``.
+        @TODO: add restore_indices
 
     Returns:
         List[torch.Tensor]: the unsharded buffers.
     """
-    if _cp_options.enable_load_balance:
+    if not restore_indices and _cp_options.enable_load_balance:
         device = buffers[0].device
         cp_world_size = mesh.size()
         seq_length = buffers[0].shape[seq_dims[0]] * cp_world_size
@@ -1527,8 +1532,7 @@ def context_parallel_unshard(
             device=device,
             restore=True,
         )
-    else:
-        restore_indices = None
+
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
         b = b.contiguous()
