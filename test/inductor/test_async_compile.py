@@ -50,12 +50,20 @@ class TestAsyncCompile(TestCase):
         with config.patch(worker_start_method="subprocess", compile_threads=8):
             async_compile = AsyncCompile()
             AsyncCompile.wait_pool_ready()
-            # Working around bug in wait_pool_ready()
-            async_compile._ready_future.result(timeout=120)
             with self.assertRaises(SubprocException):
                 async_compile.triton(
                     "fake_kernel_name", source_code="This definitely doesn't exist"
                 ).result()
+
+    @requires_gpu()
+    @requires_triton()
+    def test_wait_pool_ready(self):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=8):
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile._ready_future.done())
+            self.assertTrue(AsyncCompile.use_process_pool())
 
     @requires_gpu()
     @requires_triton()
