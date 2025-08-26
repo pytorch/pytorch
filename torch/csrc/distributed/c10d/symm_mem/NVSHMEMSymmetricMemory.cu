@@ -216,16 +216,15 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
       c10::ScalarType dtype,
       int64_t storage_offset) override {
     // storage_offset is in element, convert to byte
-    const auto element_size = c10::elementSize(dtype);
-    const auto offset_bytes = storage_offset * element_size;
-    return _get_buffer_at_offset(rank, sizes, dtype, offset_bytes);
+    const auto offset_bytes = storage_offset * c10::elementSize(dtype);
+    return _get_buffer_at_byte_offset(rank, sizes, dtype, offset_bytes);
   }
 
   at::Tensor get_remote_tensor(
       int peer,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype) override {
-    return _get_buffer_at_offset(peer, sizes, dtype, offset_);
+    return _get_buffer_at_byte_offset(peer, sizes, dtype, offset_);
   }
 
   at::Tensor get_signal_pad(
@@ -297,7 +296,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   };
 
  private:
-  at::Tensor _get_buffer_at_offset(
+  at::Tensor _get_buffer_at_byte_offset(
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
