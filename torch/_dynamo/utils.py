@@ -1292,6 +1292,7 @@ class CompilationMetrics:
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
     stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
     graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
@@ -4724,6 +4725,11 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+class CompileCounterInt(int):
+    def __add__(self, other: Any) -> CompileCounterInt:
+        return CompileCounterInt(super().__add__(other))
 
 
 def set_feature_use(feature: str, usage: bool) -> None:
