@@ -540,34 +540,43 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return scaled_configs
 
+    def _exceed_available_shared_memeory(
+        self, gemm_config: BaseConfig, dtype_size: int
+    ) -> bool:
+        try:
+            if dtype_size <= 0:
+                return False
+
+            device = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(device)
+            if not hasattr(props, "shared_memory_per_block_optin"):
+                return False
+            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
+            shared_mem_accum = dtype_size * (
+                gemm_config.block_m * gemm_config.block_k
+                + gemm_config.block_n * gemm_config.block_k
+            )
+            return shared_mem_accum * gemm_config.num_stages > sm_available
+        except Exception:
+            return False
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        import torch
-
         pruned_configs = []
         for gemm_config in configs:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
-            NUM_REG = 255
+            # Will use more shared memory than available
+            if self._exceed_available_shared_memeory(gemm_config, dtype_size):
+                continue
 
+            NUM_REG = 255
             acc_regs = math.ceil(
                 gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
             )
-
-            shared_mem_accum = dtype_size * (
-                gemm_config.block_m * gemm_config.block_k
-                + gemm_config.block_n * gemm_config.block_k
-            )
-
-            # Will use more shared memory than available
-            if shared_mem_accum * gemm_config.num_stages > sm_available:
-                continue
             # Lower bound for register spillage, if exceeds the kernel will certainly spill
-            elif acc_regs > NUM_REG:
+            if acc_regs > NUM_REG:
                 continue
 
             pruned_configs.append(gemm_config)
@@ -599,6 +608,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
+
+        # Filter out configs that require more shared memory than is available.
+        if dtype_size > 0 and config.max_autotune_prune_choices_based_on_shared_mem:
+            scaled_configs = [
+                c
+                for c in scaled_configs
+                if not self._exceed_available_shared_memeory(c, dtype_size)
+            ]
+
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
             scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
@@ -1487,6 +1505,11 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
 
             return False
 
+        def is_scalar_like(sz: Any) -> bool:
+            return (len(sz) == 0) or all(
+                V.graph.sizevars.statically_known_equals(d, 1) for d in sz
+            )
+
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
         assert are_compatible_scales(size_a, size_b), (
             "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
@@ -1500,8 +1523,9 @@ class ScaledMMConfigMixin(MMTemplateConfigMixin):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
             template_kwargs["ACC_TYPE"] = "tl.float32"
-            # Add SCALING_ROWWISE attribute based on scale_a tensor shape
-            template_kwargs["SCALING_ROWWISE"] = len(size_a) == 2
+            # Add SCALING_ROWWISE attribute based on scale tensor shapes
+            both_scalar_like = is_scalar_like(size_a) and is_scalar_like(size_b)
+            template_kwargs["SCALING_ROWWISE"] = not both_scalar_like
 
             yield template_kwargs
 
