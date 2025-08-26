@@ -1114,7 +1114,7 @@ class SchedulerNode(BaseSchedulerNode):
         group_fn = self.scheduler.get_backend(device).group_fn
         self.group = (device, group_fn(self._sizes))
 
-        # TODO: double think normalize name
+        # Need normalize the prefix name to facilitate finding common dependencies
         self.refresh_dependencies(normalize=True, need_clear_tiling_cache=True)
 
     def merge_loops(self) -> None:
