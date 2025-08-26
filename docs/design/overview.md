@@ -1,217 +1,140 @@
 # Auto-Running Code Examples in PyTorch Documentation - Design Overview
 
-**Related to Issue:** [#6662](https://github.com/pytorch/pytorch/issues/6662)  
-**Branch:** `docs/gen-example-autotest`  
-**Author:** DHANUSHRAJA22  
-**Date:** August 27, 2025
+## Background & Motivation
 
-## Executive Summary
+Automatically generated and validated code outputs in ML documentation provide significant benefits:
 
-This document outlines a prototype design for automatically running and including code example outputs in PyTorch documentation. The goal is to enhance documentation quality by ensuring code examples are always up-to-date with executable outputs, improving user experience and reducing maintenance overhead.
+- **Accuracy**: Ensures documentation examples produce expected outputs, eliminating discrepancies between code and results
+- **Freshness**: Automatically updates outputs when API changes, keeping documentation current
+- **Trust**: Users gain confidence in examples that demonstrably work
+- **Maintenance**: Reduces manual effort in keeping examples synchronized with codebase changes
+- **Quality**: Catches breaking changes early in the development cycle
 
-## Background and Motivation
+## Current PyTorch Documentation Infrastructure
 
-PyTorch documentation contains numerous code examples across tutorials, API references, and guides. Currently, many code examples show static outputs that may become outdated as the library evolves. This leads to:
+### Sphinx Autodoc
+PyTorch uses Sphinx autodoc to automatically extract docstrings from Python modules. Key features:
+- Automatic API documentation generation from docstrings
+- Cross-referencing capabilities between modules
+- Support for various docstring formats (Google, NumPy, Sphinx)
+- Integration with type hints and signatures
 
-- Inconsistent documentation with potentially incorrect output examples
-- Manual maintenance burden for documentation contributors
-- User confusion when actual outputs differ from documented examples
-- Reduced trust in documentation accuracy
+### Doctest Integration
+Sphinx doctest extension provides:
+- Execution of code examples in docstrings
+- Output verification against expected results
+- Integration with pytest for testing workflows
+- Support for setup/teardown code blocks
 
-## Current State Analysis
+### nbsphinx for Jupyter Integration
+nbsphinx enables:
+- Direct inclusion of Jupyter notebooks in documentation
+- Automatic execution of notebooks during build
+- Cell output preservation and display
+- Cross-referencing between notebooks and standard docs
 
-### Existing Capabilities in Sphinx/nbsphinx
+## Gaps and Technical Challenges
 
-**Sphinx Documentation System:**
-- Supports `doctest` extension for testing code snippets
-- Provides `sphinx-gallery` for tutorial generation from Python scripts
-- Includes `autodoc` for automatic API documentation generation
-- Supports custom directives and extensions
+### Current Limitations
+1. **Inconsistent Coverage**: Not all code examples are automatically validated
+2. **Manual Maintenance**: Many examples require manual output updates
+3. **Environment Dependencies**: Complex setup requirements for GPU/distributed examples
+4. **Build Performance**: Execution overhead can significantly slow documentation builds
+5. **Flaky Examples**: Non-deterministic outputs or timing-dependent code
 
-**nbsphinx Integration:**
-- Converts Jupyter notebooks to Sphinx documentation
-- Automatically includes cell outputs from executed notebooks
-- Supports both static and dynamic notebook rendering
-- Handles rich media outputs (images, plots, HTML)
+### Technical Challenges
+1. **Resource Management**: GPU memory, computation time, and parallel execution
+2. **Version Compatibility**: Ensuring examples work across supported PyTorch versions
+3. **Error Handling**: Graceful handling of failed examples without breaking builds
+4. **Output Formatting**: Consistent presentation of execution results
+5. **Caching Strategy**: Avoiding redundant execution while ensuring freshness
 
-**Current PyTorch Documentation Workflow:**
-- Uses Sphinx with custom extensions
-- Relies on manual code example verification
-- Limited automated testing of documentation examples
-- Inconsistent output formatting across different documentation sections
-
-### Identified Gaps
-
-1. **No Automated Code Execution**: Documentation examples are not automatically executed during build
-2. **Output Synchronization**: No mechanism to ensure documented outputs match actual execution results
-3. **Environment Consistency**: No standardized environment for running documentation examples
-4. **Error Handling**: No robust system for handling failing code examples during documentation builds
-5. **Performance Overhead**: No optimization for build time when executing numerous code examples
-6. **Version Compatibility**: No system to test examples across different PyTorch versions
-
-## Proposed Solution: Minimal Prototype Design
-
-### Architecture Overview
-
-```
-Documentation Build Pipeline
-├── Source Files (.rst, .py, .ipynb)
-├── Code Example Extractor
-├── Execution Environment Manager  
-├── Code Runner & Output Capturer
-├── Output Integration & Formatting
-└── Final Documentation Generation
-```
+## Proposed Minimal Prototype
 
 ### Core Components
 
-#### 1. Code Example Extractor
-- **Purpose**: Identify and extract executable code blocks from documentation sources
-- **Input**: RST files, Python scripts, Jupyter notebooks
-- **Output**: Structured list of code examples with metadata
-- **Key Features**:
-  - Support for different code block formats (```python, .. code-block::, etc.)
-  - Metadata extraction (expected output, execution context)
-  - Dependency identification
-
-#### 2. Execution Environment Manager
-- **Purpose**: Provide consistent, isolated environments for code execution
-- **Features**:
-  - Docker-based isolation
-  - PyTorch version matrix support
-  - Dependency management
-  - Resource limitation (memory, CPU, execution time)
-
-#### 3. Code Runner & Output Capturer
-- **Purpose**: Execute code examples and capture comprehensive outputs
-- **Capabilities**:
-  - Standard output/error capture
-  - Rich media output handling (plots, tensors, models)
-  - Execution timing and performance metrics
-  - Error handling and graceful degradation
-
-#### 4. Output Integration System
-- **Purpose**: Integrate captured outputs back into documentation
-- **Features**:
-  - Format-aware output rendering
-  - Diff detection for output changes
-  - Manual override mechanisms
-  - Version control integration
-
-### Minimal Script/Test Setup
-
-#### Phase 1: Proof of Concept Script
-
-**File Structure:**
-```
-docs/tools/auto-example/
-├── extract_examples.py     # Extract code blocks from docs
-├── execute_examples.py     # Run extracted examples  
-├── integrate_outputs.py    # Update documentation with outputs
-├── config.yaml            # Configuration settings
-├── requirements.txt       # Dependencies
-└── test_examples/         # Sample test cases
-    ├── basic_tensor.py
-    ├── neural_network.py
-    └── expected_outputs/
-```
-
-**Core Script: `execute_examples.py`**
+#### 1. Code Block Extractor
 ```python
-#!/usr/bin/env python3
-"""
-Minimal auto-execution prototype for PyTorch documentation examples.
-"""
-
+# extract_examples.py
 import ast
-import subprocess
-import sys
-import tempfile
+import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Dict, Tuple
 
-class DocumentationExampleRunner:
-    def __init__(self, timeout: int = 30):
-        self.timeout = timeout
-        self.results = []
-    
-    def extract_code_blocks(self, rst_file: Path) -> List[str]:
-        """Extract Python code blocks from RST files."""
-        # Implementation to parse RST and extract code blocks
+class DocumentationExtractor:
+    def extract_code_blocks(self, file_path: str) -> List[Dict]:
+        """Extract executable code blocks from documentation files"""
         pass
     
-    def execute_code(self, code: str) -> Tuple[str, str, int]:
-        """Execute Python code and capture output."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(code)
-            temp_file = f.name
-        
-        try:
-            result = subprocess.run(
-                [sys.executable, temp_file],
-                capture_output=True,
-                text=True,
-                timeout=self.timeout
-            )
-            return result.stdout, result.stderr, result.returncode
-        finally:
-            Path(temp_file).unlink()
-    
-    def process_documentation(self, docs_path: Path) -> Dict:
-        """Process all documentation files and execute examples."""
-        results = {'passed': 0, 'failed': 0, 'examples': []}
-        
-        for rst_file in docs_path.rglob('*.rst'):
-            code_blocks = self.extract_code_blocks(rst_file)
-            
-            for code in code_blocks:
-                stdout, stderr, returncode = self.execute_code(code)
-                
-                example_result = {
-                    'file': str(rst_file),
-                    'code': code,
-                    'stdout': stdout,
-                    'stderr': stderr,
-                    'success': returncode == 0
-                }
-                
-                results['examples'].append(example_result)
-                if returncode == 0:
-                    results['passed'] += 1
-                else:
-                    results['failed'] += 1
-        
-        return results
-
-if __name__ == '__main__':
-    runner = DocumentationExampleRunner()
-    results = runner.process_documentation(Path('docs/source'))
-    print(f"Executed {len(results['examples'])} examples")
-    print(f"Passed: {results['passed']}, Failed: {results['failed']}")
+    def extract_docstring_examples(self, module_path: str) -> List[Dict]:
+        """Extract examples from Python docstrings"""
+        pass
 ```
 
-#### Phase 2: Integration Testing
+#### 2. Example Runner
+```python
+# run_examples.py
+import subprocess
+import tempfile
+from contextlib import contextmanager
+from typing import Optional, Dict, Any
 
-**Test Cases:**
-1. Basic tensor operations
-2. Neural network forward pass
-3. Data loading examples
-4. Model training snippets
-5. Visualization code (matplotlib integration)
+class ExampleRunner:
+    def __init__(self, timeout: int = 30, max_memory: str = "1GB"):
+        self.timeout = timeout
+        self.max_memory = max_memory
+    
+    def execute_code(self, code: str, context: Dict[str, Any]) -> Dict:
+        """Execute code block and capture output"""
+        pass
+    
+    @contextmanager
+    def isolated_environment(self):
+        """Create isolated execution environment"""
+        pass
+```
 
-**Continuous Integration Integration:**
+#### 3. Output Verifier
+```python
+# verify_outputs.py
+import difflib
+from typing import List, Optional
+
+class OutputVerifier:
+    def compare_outputs(self, expected: str, actual: str) -> bool:
+        """Compare expected vs actual outputs with tolerance"""
+        pass
+    
+    def generate_diff_report(self, differences: List[Dict]) -> str:
+        """Generate human-readable diff report"""
+        pass
+```
+
+### Integration Options
+
+#### Option A: Sphinx Extension
+```python
+# sphinx_autorun.py
+from sphinx.ext import doctest
+from sphinx.util.docutils import docutils_namespace
+
+class AutoRunExamplesExtension:
+    def setup(app):
+        app.add_config_value('autorun_examples', True, 'html')
+        app.connect('doctree-resolved', process_code_blocks)
+        return {'version': '1.0', 'parallel_read_safe': True}
+```
+
+#### Option B: CI Job Integration
 ```yaml
-# .github/workflows/doc-examples-test.yml
-name: Documentation Examples Test
-
+# .github/workflows/docs-examples.yml
+name: Validate Documentation Examples
 on:
   pull_request:
-    paths:
-      - 'docs/**'
-      - 'torch/**'
+    paths: ['docs/**', '**/*.py']
 
 jobs:
-  test-doc-examples:
+  validate-examples:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -220,37 +143,54 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: |
-          pip install torch torchvision
-          pip install -r docs/requirements.txt
-      - name: Run documentation example tests
-        run: |
-          cd docs/tools/auto-example
-          python execute_examples.py
+        run: pip install -r docs/requirements.txt
+      - name: Extract and run examples
+        run: python scripts/validate_doc_examples.py
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: example-validation-results
+          path: validation_results.json
 ```
 
-## Implementation Roadmap
+#### Option C: Custom nbval-style Runner
+```python
+# custom_runner.py
+import nbformat
+from nbconvert.preprocessors import ExecutePreprocessor
 
-### Phase 1: Prototype Development (2-3 weeks)
-- [ ] Implement basic code extraction from RST files
-- [ ] Create minimal code execution framework
-- [ ] Develop output capture and formatting
-- [ ] Test with 10-20 documentation examples
-- [ ] Create initial CI integration
+class DocumentationRunner:
+    def __init__(self):
+        self.executor = ExecutePreprocessor(timeout=600, kernel_name='python3')
+    
+    def run_markdown_examples(self, file_path: str) -> Dict:
+        """Convert markdown examples to notebook and execute"""
+        pass
+    
+    def validate_docstring_examples(self, module_path: str) -> Dict:
+        """Run doctest-style validation on docstrings"""
+        pass
+```
 
-### Phase 2: Enhanced Features (3-4 weeks)
-- [ ] Add support for Jupyter notebook integration
-- [ ] Implement rich media output handling
-- [ ] Create execution environment isolation
-- [ ] Add performance optimizations
-- [ ] Expand test coverage to 100+ examples
+### Implementation Plan
 
-### Phase 3: Production Integration (4-6 weeks)
-- [ ] Full documentation build pipeline integration
-- [ ] Error handling and graceful degradation
-- [ ] Manual override systems
-- [ ] Performance benchmarking and optimization
-- [ ] Documentation and contributor guidelines
+#### Phase 1: Prototype (2 weeks)
+1. Create basic extractor for common code block patterns
+2. Implement simple runner with timeout and error handling
+3. Test on 10-15 representative examples from PyTorch docs
+4. Measure performance impact and resource usage
+
+#### Phase 2: Integration (4 weeks)
+1. Choose optimal integration approach based on prototype results
+2. Add caching and incremental execution capabilities
+3. Implement comprehensive error handling and reporting
+4. Create configuration system for example metadata
+
+#### Phase 3: Deployment (2 weeks)
+1. Integrate with existing CI/CD pipeline
+2. Add monitoring and alerting for failed examples
+3. Create contributor documentation and guidelines
+4. Gradual rollout with feedback collection
 
 ## Risk Assessment & Mitigation
 
@@ -278,6 +218,28 @@ jobs:
 - **User Experience**: Reduced bug reports related to documentation examples
 - **Maintainer Efficiency**: Reduced time spent on manual example verification
 
+## Community Review and Feedback Request
+
+We seek community input on this design proposal:
+
+### Technical Feedback Needed
+- Architecture and implementation approach preferences
+- Integration points with existing PyTorch documentation infrastructure
+- Performance requirements and resource constraints
+- Error handling and fallback strategies
+
+### Process Feedback Needed
+- Contributor workflow implications
+- Testing and validation strategies
+- Rollout and adoption timeline
+- Maintenance and support model
+
+### How to Provide Feedback
+1. **GitHub Issues**: Comment on [Issue #6662](https://github.com/pytorch/pytorch/issues/6662)
+2. **Pull Request Reviews**: Review implementation PRs when available
+3. **Community Forums**: Discuss on PyTorch developer forums
+4. **Direct Contact**: Reach out to the documentation team
+
 ## Next Steps & Commitment
 
 ### Immediate Actions (Next 2 weeks)
@@ -293,21 +255,13 @@ jobs:
 4. **Integration Plan**: Detailed steps for full PyTorch docs integration
 5. **Code Review Package**: Clean, documented codebase ready for review
 
-### Feedback Request
-We seek core reviewer feedback on:
-- Architecture and design approach alignment with PyTorch standards
-- Integration points with existing documentation infrastructure
-- Technical implementation preferences and constraints
-- Timeline and resource allocation recommendations
-- Testing and validation strategies
-
----
-
 **Commitment**: All development work will remain exclusively on the `docs/gen-example-autotest` branch until core reviewer approval and integration planning is complete. Regular progress updates will be provided through GitHub issues and this documentation will be maintained as the single source of truth for the project status.
 
 ## References
 
 - [Issue #6662](https://github.com/pytorch/pytorch/issues/6662): Original feature request
 - [Sphinx Documentation](https://www.sphinx-doc.org/): Primary documentation framework
+- [Sphinx Doctest Extension](https://www.sphinx-doc.org/en/master/usage/extensions/doctest.html): Code testing capabilities
 - [nbsphinx Documentation](https://nbsphinx.readthedocs.io/): Jupyter integration
+- [nbval](https://github.com/computationalmodelling/nbval): Notebook validation tool
 - [PyTorch Documentation Guidelines](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md): Contributing standards
