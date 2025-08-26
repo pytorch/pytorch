@@ -148,6 +148,7 @@ def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
     for pool in _pool_set:
         pool.shutdown()
+    AsyncCompile._ready_future = None
     after_fork()
 
 
@@ -308,8 +309,8 @@ class AsyncCompile:
 
     @classmethod
     def wait_pool_ready(cls, timeout=120) -> None:
-        if cls.use_process_pool():
-            assert cls._ready_future is not None
+        cls.use_process_pool()
+        if cls._ready_future is not None:
             cls._ready_future.result(timeout=timeout)
 
     @classmethod
