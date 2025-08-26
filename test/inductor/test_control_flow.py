@@ -778,8 +778,12 @@ class WhileLoopModels:
         class InnerModel(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
-                self.layer1 = torch.nn.Linear(20, 30, device=device)
-                self.layer2 = torch.nn.Linear(30, 20, device=device)
+                self.layer1 = torch.nn.Linear(
+                    20, 30, device=device, dtype=torch.float64
+                )
+                self.layer2 = torch.nn.Linear(
+                    30, 20, device=device, dtype=torch.float64
+                )
 
             def forward(self, c, x):
                 return c - 1, self.layer2(self.layer1(x - 2)) * 3.14
@@ -1091,6 +1095,10 @@ class WhileLoopTests(TestCase):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         import copy
 
+        if not autograd:
+            for p in model.parameters():
+                p.requires_grad_(False)
+
         compiled_model = copy.deepcopy(model)
         compiled_fn = torch.compile(backend=cnt, fullgraph=True)(compiled_model)
 
@@ -1252,7 +1260,7 @@ class WhileLoopTests(TestCase):
         # while_loop control flow with parameters
         self._run_test(
             model=WhileLoopModels.Parameters(device),
-            inputs=(torch.randn(10, 20),),
+            inputs=(torch.randn(10, 20, dtype=torch.float64),),
             device=device,
             dynamic=dynamic,
             autograd=autograd,

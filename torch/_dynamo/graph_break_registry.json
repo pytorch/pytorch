@@ -2693,8 +2693,18 @@
   ],
   "GB0269": [
     {
+      "Gb_type": "Forced graph break on leaf function",
+      "Context": "",
+      "Explanation": "Forced graph break for nested graph break testing purposes",
+      "Hints": [
+        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
+      ]
+    }
+  ],
+  "GB0270" : [
+    {
       "Gb_type": "while_loop doesn't support int carry training",
-      "Context": "context",
+      "Context": "",
       "Explanation": "while_loop doesn't support int carry training.",
       "Hints": [
         "Consider change the int carry to a scalar int tensor",

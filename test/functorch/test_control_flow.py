@@ -7840,9 +7840,8 @@ class GraphModule(torch.nn.Module):
 
     class while_loop_cond_graph_0(torch.nn.Module):
         def forward(self, it_1: "Sym(u0)", x_1: "f32[s77, 3]"):
-            sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
-
-            lt: "Sym(u0 < s77)" = it_1 < sym_size_int_1;  it_1 = sym_size_int_1 = None
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+            lt: "Sym(u0 < s77)" = it_1 < sym_size_int;  it_1 = sym_size_int = None
             return lt
 
     class while_loop_body_graph_0(torch.nn.Module):
@@ -8313,13 +8312,13 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", primals_3: "f32[3]"):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
-        while_loop_with_checkpoint = torch.ops.higher_order.while_loop_with_checkpoint(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = primals_1 = None
-        getitem: "f32[3, 3]" = while_loop_with_checkpoint[0]
-        getitem_1: "f32[u0, 3, 3]" = while_loop_with_checkpoint[1];  while_loop_with_checkpoint = None
-        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_1, 0)
-        ge_1: "Sym(u0 >= 0)" = sym_size_int >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-        return (getitem, primals_2, primals_3, getitem_1, sym_size_int)
+        while_loop_with_checkpoint = torch.ops.higher_order.while_loop_with_checkpoint(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
+        getitem: "f32[u2, 3, 3]" = while_loop_with_checkpoint[0];  while_loop_with_checkpoint = None
+        select: "f32[3, 3]" = torch.ops.aten.select.int(getitem, 0, -1)
+        unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_1, 0);  primals_1 = None
+        slice_1: "f32[u2 - 1, 3, 3]" = torch.ops.aten.slice.Tensor(getitem, 0, 0, -1);  getitem = None
+        cat: "f32[u2, 3, 3]" = torch.ops.aten.cat.default([unsqueeze, slice_1]);  unsqueeze = slice_1 = None
+        return (select, primals_2, primals_3, cat)
 
     class while_loop_cond_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3, 3]"):
@@ -8342,28 +8341,28 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, sym_size_int: "Sym(u0)", primals_2: "f32[3, 3]", primals_3: "f32[3]", getitem_1: "f32[u0, 3, 3]", tangents_1: "f32[3, 3]"):
+    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
+        zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
         zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
         zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
-        zeros_1: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
         while_loop_cond_graph_1 = self.while_loop_cond_graph_1
         while_loop_body_graph_1 = self.while_loop_body_graph_1
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros_1, tangents_1, zeros_like, zeros_like_1), (getitem_1, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros_1 = tangents_1 = zeros_like = zeros_like_1 = getitem_1 = primals_3 = primals_2 = None
-        getitem_3: "f32[3, 3]" = while_loop[1]
-        getitem_4: "f32[3]" = while_loop[2]
-        getitem_5: "f32[3, 3]" = while_loop[3];  while_loop = None
-        return (getitem_3, getitem_5, getitem_4)
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, tangents_1, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = tangents_1 = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
+        getitem_2: "f32[3, 3]" = while_loop[1]
+        getitem_3: "f32[3]" = while_loop[2]
+        getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
+        return (getitem_2, getitem_4, getitem_3)
 
     class while_loop_cond_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u0, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0);  arg4_1 = None
 
             lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, sym_size_int_1);  arg0_1 = sym_size_int_1 = None
             return lt
 
     class while_loop_body_graph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u0, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
-            sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(arg4_1, 0)
+        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
+            sym_size_int_1: "Sym(u2)" = torch.ops.aten.sym_size.int(arg4_1, 0)
 
             rsub: "i64[]" = torch.ops.aten.rsub.Scalar(arg0_1, sym_size_int_1);  sym_size_int_1 = None
             sub_1: "i64[]" = torch.ops.aten.sub.Tensor(rsub, 1);  rsub = None

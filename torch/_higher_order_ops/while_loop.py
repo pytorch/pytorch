@@ -806,7 +806,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             ) = pytree.tree_unflatten(flat_args, spec)
             assert isinstance(fw_carries[0], torch.Tensor), fw_carries[0]
             # excluding the last iteration's output
-            return idx < fw_carries[0].size(0) - 1
+            return idx < fw_carries[0].size(0)
 
         def body_fn(*flat_args):
             (
