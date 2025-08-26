@@ -123,6 +123,8 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def dot(a: sympy.Expr, b: sympy.Expr) -> BlockShapeType:
+        from torch._inductor.codegen.triton import TritonKernel
+        assert isinstance(V.kernel, TritonKernel), "dot supports Triton only"
         return tuple(['YBLOCK', 'XBLOCK'])
 
     @staticmethod
