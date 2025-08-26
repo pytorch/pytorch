@@ -3099,7 +3099,14 @@ def same(
                     and math.isnan(res_error)
                     # Some unit test for the accuracy minifier relies on
                     # returning false in this case.
-                    and not torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY
+                    and not any(
+                        (
+                            torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.cpp.inject_log1p_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_log1p_bug_TESTING_ONLY,
+                        )
+                    )
                 ):
                     passes_test = True
                 if not passes_test:
@@ -4725,11 +4732,6 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
-
-
-class CompileCounterInt(int):
-    def __add__(self, other: Any) -> CompileCounterInt:
-        return CompileCounterInt(super().__add__(other))
 
 
 def set_feature_use(feature: str, usage: bool) -> None:
