@@ -830,9 +830,7 @@ class BaseSchedulerNode:
             try:
                 if config.runtime_estimations_use_nccl_lib_estimations:
                     est = estimate_nccl_collective_runtime_nccl_estimator(self)
-                    # -1000 constant is NCCL return in case of error during estimations.
-                    # Observed it for all_to_all estimations.
-                    if est == -1000.0:
+                    if est is None:
                         # NCCL estimations fail: fallback to in-tree algorithmic estimation.
                         est = estimate_nccl_collective_runtime(self.node)
 
