@@ -1100,10 +1100,14 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-    def replace_boundary_with_mask(self, dimension: int, new_range: int) -> None:
+    def expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int
+    ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
 
-        self._body = self._body.replace_boundary_with_mask(dimension, new_range)
+        self._body = self._body.expand_dimension_for_pointwise_node(
+            dimension, new_range
+        )
         self._sizes = self._body.sizes
 
         device = self.node.get_device_or_error()
@@ -3885,7 +3889,13 @@ class Scheduler:
     def get_expand_dim_for_pointwise_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Optional[tuple[int, SchedulerNode, sympy.Expr]]:
-        """TODO: Doc"""
+        """
+        Fusing two small pointwise nodes significantly reduces kernel overhead
+        and launch overhead. However, slightly different sizes would prevent fusion.
+        Here, we decide if expanding sizes of one node is profitible by allowing
+        fusion, and returns the dimension to expand, node with smaller sizes,
+        and new size after expand.
+        """
         # only support scheduler node
         if not isinstance(node1, SchedulerNode) or not isinstance(node2, SchedulerNode):
             return None
@@ -3902,7 +3912,7 @@ class Scheduler:
         if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
             return None
 
-        # only support pointwise nodes with the same size
+        # only support pointwise nodes with the same reduction size
         n1_sizes, n2_sizes = node1._sizes, node2._sizes
         n1_iter_sizes, n1_reduce_sizes = n1_sizes
         n2_iter_sizes, n2_reduce_sizes = n2_sizes
@@ -3923,8 +3933,9 @@ class Scheduler:
         node1_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
         node2_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
         if (
-            max(node1_write_memory, node2_write_memory) > 16777216
-        ):  # todo: replace with a config
+            max(node1_write_memory, node2_write_memory)
+            > config.small_memory_access_threshold
+        ):
             return None
 
         # only support nodes
@@ -4076,7 +4087,7 @@ class Scheduler:
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
             (expand_dim, smaller_node, expand_size) = expand_analysis
-            smaller_node.replace_boundary_with_mask(expand_dim, expand_size)
+            smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):

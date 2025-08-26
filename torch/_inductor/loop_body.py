@@ -223,7 +223,14 @@ class LoopBody:
         )
         return new_body2
 
-    def replace_boundary_with_mask(self, dimension: int, new_range: int) -> LoopBody:
+    def expand_dimension_for_pointwise_node(
+        self, dimension: int, new_range: int
+    ) -> LoopBody:
+        """
+        Expand node on `dimension` to `new_range` and rely on index modular to avoid
+        out-of-boundary access.
+        """
+
         old_body = self
         old_sizes = self.sizes
 

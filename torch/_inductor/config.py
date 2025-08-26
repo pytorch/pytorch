@@ -757,6 +757,10 @@ def decide_worker_start_method() -> str:
 
 worker_start_method: str = decide_worker_start_method()
 
+# Threshold to decide if a kernel has small memory access in bytes
+# Default value is 16 MB which is arbitrarily selected.
+small_memory_access_threshold: int = 16777216
+
 # Whether to log from subprocess workers that are launched.
 worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
