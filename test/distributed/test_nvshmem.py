@@ -77,18 +77,12 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(tensor, group=group_name)
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_put(tensor, 1)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_put_with_signal(tensor, 1)
         elif self.rank == 1:
-            # handle.wait_signal(src_rank=0)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_wait_for_signal(tensor, 0)
             torch.testing.assert_close(
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
-        else:
-            dist.barrier()
 
     @skipIfRocm
     def test_nvshmem_get(self) -> None:
