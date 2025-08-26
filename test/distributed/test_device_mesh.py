@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -61,13 +60,6 @@ class DeviceMeshTestGlooBackend(DTensorTestBase):
             self.assertEqual(get_world_size(mesh_group), get_world_size(default_group))
         else:
             self.assertEqual(mesh_group, default_group)
-
-
-def get_mesh_pg_names(mesh: DeviceMesh, idx: Optional[int] = None) -> list[str]:
-    idx = idx or len(mesh._layouts)
-    root_mesh = _mesh_resources.get_root_mesh(mesh)
-    layouts_to_groups_map = _mesh_resources.layouts_to_groups.get(root_mesh, {})
-    return [layouts_to_groups_map[l] for l in mesh._layouts[:idx]]
 
 
 class DeviceMeshSetDeviceTest(DTensorTestBase):
@@ -285,7 +277,7 @@ class DeviceMeshTest(DTensorTestBase):
         global_mesh = DeviceMesh.from_group(mesh_pg, self.device_type)
         self.assertEqual(ref_global_mesh, global_mesh)
         self.assertEqual(
-            get_mesh_pg_names(ref_global_mesh), get_mesh_pg_names(global_mesh)
+            ref_global_mesh._layouts_to_groups, global_mesh._layouts_to_groups
         )
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
@@ -296,7 +288,7 @@ class DeviceMeshTest(DTensorTestBase):
         )
         self.assertEqual(ref_global_mesh, global_mesh)
         self.assertEqual(
-            get_mesh_pg_names(ref_global_mesh), get_mesh_pg_names(global_mesh)
+            ref_global_mesh._layouts_to_groups, global_mesh._layouts_to_groups
         )
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
@@ -476,19 +468,24 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
-        ref_mesh_dp_dim_group_names = get_mesh_pg_names(ref_mesh, 2)
-        self.assertEqual(ref_mesh_dp_dim_group_names, get_mesh_pg_names(dp_mesh, 2))
+        ref_mesh_dp_dim_group_names = [
+            ref_mesh._layouts_to_groups[l] for l in ref_mesh._layouts[:2]
+        ]
+        self.assertEqual(
+            ref_mesh_dp_dim_group_names,
+            [dp_mesh._layouts_to_groups[l] for l in dp_mesh._layouts[:2]],
+        )
         # Cannot check directly for mesh equality since parent meshes are not
         # the same since the ref's parent mesh is 3D
         self.assertEqual(dp_mesh["dp_replicate"].mesh, ref_mesh["dp_replicate"].mesh)
         self.assertEqual(
-            get_mesh_pg_names(dp_mesh["dp_replicate"]),
-            get_mesh_pg_names(ref_mesh["dp_replicate"]),
+            dp_mesh["dp_replicate"]._layouts_to_groups,
+            ref_mesh["dp_replicate"]._layouts_to_groups,
         )
         self.assertEqual(dp_mesh["dp_shard"].mesh, ref_mesh["dp_shard"].mesh)
         self.assertEqual(
-            get_mesh_pg_names(dp_mesh["dp_shard"]),
-            get_mesh_pg_names(ref_mesh["dp_shard"]),
+            dp_mesh["dp_shard"]._layouts_to_groups,
+            ref_mesh["dp_shard"]._layouts_to_groups,
         )
 
     @with_comms()
@@ -854,7 +851,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
         self.assertEqual(
-            flattened_dp_cp_mesh._layouts[0].layout_to_global_ranks(8),
+            flattened_dp_cp_mesh._layouts[0].global_ranks(8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
 
@@ -872,7 +869,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
         self.assertEqual(
-            flattened_dp_tp_mesh._layouts[0].layout_to_global_ranks(8),
+            flattened_dp_tp_mesh._layouts[0].global_ranks(8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
 
