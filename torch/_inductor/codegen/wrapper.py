@@ -2312,9 +2312,9 @@ class PythonWrapperCodegen(CodeGen):
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
-            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
+            compile_wrapper.writeline(f"async_compile.triton({name!r}, r'''")
         else:
-            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
+            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, r'''")
 
         inductor_meta["kernel_name"] = name
         inductor_meta.update(TritonKernel.inductor_meta_common())

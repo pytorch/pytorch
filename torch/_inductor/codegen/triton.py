@@ -4689,7 +4689,7 @@ class TritonScheduling(SIMDScheduling):
                 # so that the second time we call async_compile.triton, we do no work.
                 async_compile.triton(subs_name, src_code)
 
-            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, r'''")
 
             compile_wrapper.splice(src_code, strip=True)
             current_device = V.graph.get_current_device_or_throw()
