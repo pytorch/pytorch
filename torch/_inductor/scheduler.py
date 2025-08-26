@@ -3885,7 +3885,7 @@ class Scheduler:
     def get_expand_dim_for_pointwise_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Optional[tuple[int, SchedulerNode, sympy.Expr]]:
-        """TODO: Doc """
+        """TODO: Doc"""
         # only support scheduler node
         if not isinstance(node1, SchedulerNode) or not isinstance(node2, SchedulerNode):
             return None
@@ -3895,6 +3895,11 @@ class Scheduler:
             isinstance(node1.node, ir.ComputedBuffer)
             and isinstance(node2.node, ir.ComputedBuffer)
         ):
+            return None
+
+        # does not support mutation yet since relying on index mod to handle
+        # out-of-boundary access.
+        if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
             return None
 
         # only support pointwise nodes with the same size
