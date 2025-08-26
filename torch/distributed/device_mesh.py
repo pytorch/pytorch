@@ -384,9 +384,11 @@ else:
                 )
             else:
                 # Generate the pg_ranks_by_dim for pg_creation from the layout.
+                # When Mesh ranks are not representible by CuTe layout, we want to directly
+                # use the mesh ranks to create PGs.
                 pg_ranks_by_dim = (
                     array_mesh
-                    if array_mesh is not None
+                    if array_mesh is not None and isinstance(array_mesh, torch.Tensor)
                     else layout.global_ranks(get_world_size())
                 )
                 backend, pg_options = backend_override
