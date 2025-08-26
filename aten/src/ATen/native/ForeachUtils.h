@@ -22,7 +22,7 @@ namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
 inline bool has_integral_tensor(TensorList tensors, const bool includeBool) {
   return std::any_of(
-      tensors.begin(), tensors.end(), [&includeBool](const auto& t) {
+      tensors.begin(), tensors.end(), [includeBool](const auto& t) {
         return at::isIntegralType(t.scalar_type(), includeBool);
       });
 }
@@ -53,8 +53,8 @@ inline void check_foreach_api_restrictions(
 inline void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2) {
-  TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
+  check_foreach_api_restrictions(tensors1);
+  check_foreach_api_restrictions(tensors2);
   TORCH_CHECK(
       tensors1.size() == tensors2.size(),
       "Tensor lists must have the same number of tensors, got ",
@@ -67,21 +67,8 @@ inline void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
     TensorList tensors3) {
-  TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(!tensors3.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(
-      tensors1.size() == tensors2.size(),
-      "Tensor lists must have the same number of tensors, got ",
-      tensors1.size(),
-      " and ",
-      tensors2.size());
-  TORCH_CHECK(
-      tensors1.size() == tensors3.size(),
-      "Tensor lists must have the same number of tensors, got ",
-      tensors1.size(),
-      " and ",
-      tensors3.size());
+  check_foreach_api_restrictions(tensors1, tensors2);
+  check_foreach_api_restrictions(tensors1, tensors3);
 }
 
 inline void check_foreach_api_restrictions(
@@ -90,12 +77,7 @@ inline void check_foreach_api_restrictions(
     TensorList tensors3,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  TORCH_CHECK(
-      tensors1.size() == scalars.size(),
-      "Tensor list must have same number of elements as scalar list, got ",
-      tensors1.size(),
-      " and ",
-      scalars.size());
+  check_foreach_api_restrictions(tensors1, scalars);
 }
 
 inline void check_foreach_api_restrictions(
@@ -103,12 +85,7 @@ inline void check_foreach_api_restrictions(
     TensorList tensors2,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2);
-  TORCH_CHECK(
-      tensors1.size() == scalars.size(),
-      "Tensor list must have same number of elements as scalar list, got ",
-      tensors1.size(),
-      " and ",
-      scalars.size());
+  check_foreach_api_restrictions(tensors1, scalars);
 }
 
 // Helper function called in check_fast_path_restrictions to check whether all
@@ -361,36 +338,34 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
               }
             }),
         "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
-    if (!grouped_tensors_with_indices.count(key)) {
-      grouped_tensors_with_indices.insert(
-          {key,
-           TensorsAndIndicesT{
-               [&]() -> nested_optional_tensorvec_t {
-                 nested_optional_tensorvec_t nested_tensorvec;
-                 nested_tensorvec.reserve(num_lists);
-                 for (const auto& i : c10::irange(num_lists)) {
-                   std::vector<std::optional<at::Tensor>> tensors;
-                   if (!nested_tensorlist[i].empty()) {
-                     // NB: num_tensors is the max possible length for any of
-                     // the inner lists of tensor references. Reserving the max
-                     // trades memory for perf. This should not have significant
-                     // impact.
-                     tensors.reserve(num_tensors);
-                   }
-                   nested_tensorvec.emplace_back(tensors);
-                 }
-                 return nested_tensorvec;
-               }(),
-               [&]() -> IndicesT {
-                 if (!with_indices) {
-                   return {};
-                 } else {
-                   IndicesT indices;
-                   indices.reserve(num_tensors);
-                   return indices;
-                 }
-               }()}});
-    }
+    grouped_tensors_with_indices.try_emplace(
+        key,
+        TensorsAndIndicesT{
+            [&]() -> nested_optional_tensorvec_t {
+              nested_optional_tensorvec_t nested_tensorvec;
+              nested_tensorvec.reserve(num_lists);
+              for (const auto& i : c10::irange(num_lists)) {
+                std::vector<std::optional<at::Tensor>> tensors;
+                if (!nested_tensorlist[i].empty()) {
+                  // NB: num_tensors is the max possible length for any of
+                  // the inner lists of tensor references. Reserving the max
+                  // trades memory for perf. This should not have significant
+                  // impact.
+                  tensors.reserve(num_tensors);
+                }
+                nested_tensorvec.emplace_back(std::move(tensors));
+              }
+              return nested_tensorvec;
+            }(),
+            [&]() -> IndicesT {
+              if (!with_indices) {
+                return {};
+              } else {
+                IndicesT indices;
+                indices.reserve(num_tensors);
+                return indices;
+              }
+            }()});
     for (const auto& list_index : c10::irange(num_lists)) {
       if (!nested_tensorlist[list_index].empty()) {
         grouped_tensors_with_indices[key].first[list_index].emplace_back(
