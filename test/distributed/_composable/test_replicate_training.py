@@ -249,7 +249,7 @@ class TestReplicateCastAfterInit(FSDPTestMultiThread):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
 
-class TestFullyShard1DTrainingCore(FSDPTest):
+class TestReplicate1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.get_device_module(device_type).device_count())
@@ -329,7 +329,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
     @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
-        Tests train parity against DDP when using multiple parameter groups for
+        Tests train parity when using multiple parameter groups for
         communication and CPU offloading.
         """
         self.run_subtests(
@@ -449,6 +449,103 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_non_root_forward_backward(self):
+        """
+        Tests running forward/backward through the root and then through a
+        non-root. The non-root needs to synchronize streams/queue the callback.
+        """
+        torch.manual_seed(42)
+        lin_dim = 32
+        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            replicate(mlp)
+        replicate(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((8, lin_dim), device=device_type)
+
+        ref_root_loss = ref_model(inp).sum()
+        ref_root_loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad)
+            param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+        ref_optim.zero_grad()
+        ref_nonroot_loss = ref_model[0](inp).sum()
+        ref_nonroot_loss.backward()
+        for param in ref_model.parameters():
+            if param.grad is not None:
+                dist.all_reduce(param.grad)
+                param.grad.detach().div_(self.world_size)
+        ref_optim.step()
+
+        root_loss = model(inp).sum()
+        root_loss.backward()
+        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms()))
+        optim.step()
+        optim.zero_grad()
+        nonroot_loss = model[0](inp).sum()
+        nonroot_loss.backward()
+        optim.step()
+
+        self.assertEqual(ref_root_loss, root_loss)
+        self.assertEqual(ref_nonroot_loss, nonroot_loss)
+        self.assertEqual(ref_model(inp).sum(), model(inp).sum())
+
+    @skip_if_lt_x_gpu(2)
+    def test_multi_forward_module(self):
+        """
+        Tests parity when running a module that participates multiple
+        times in forward.
+        """
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_multi_forward_module,
+        )
+
+    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+        class MultiForwardModule(nn.Module):
+            def __init__(self, device: torch.device):
+                super().__init__()
+                self.inner = nn.Linear(4, 4, device=device)
+                self.outer = nn.Linear(4, 5, device=device)
+
+            def forward(self, x):
+                i = self.inner(x)
+                j = self.inner(x)
+                return self.outer(i + j)
+
+        torch.manual_seed(42)
+        model = MultiForwardModule(device=device_type.type)
+        ref_model = copy.deepcopy(model).to(device_type)
+
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        replicate(model.inner)
+        replicate(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((32, 4), device=device_type.type)
+        for iter_idx in range(10):
+            losses: list[torch.Tensor] = []
+            for _model in (ref_model, model):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad)
+                    param.grad.div_(self.world_size)
+
+            for _optim in (ref_optim, optim):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                _optim.step()
+
+            self.assertEqual(losses[0], losses[1])
 
 
 if __name__ == "__main__":
