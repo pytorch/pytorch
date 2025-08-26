@@ -20,6 +20,14 @@ void SymInt::promote_to_negative() {
   s.data_ = 0;
 }
 
+std::optional<int64_t> SymInt::maybe_as_int_slow_path() const {
+  auto* node = toSymNodeImplUnowned();
+  if (auto c = node->constant_int()) {
+    return c;
+  }
+  return node->maybe_as_int();
+}
+
 SymNode SymInt::toSymNode() const {
   TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
       is_heap_allocated(), "SymInt::toSymNode is_heap_allocated");
