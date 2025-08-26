@@ -113,9 +113,9 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
 
   // Step 1: Handle case of NaN
   // (f_bits > fp32_inf): set result = 0x7F
-  __mmask16 overflow_mask = _mm512_cmpgt_epu32_mask(f_bits, fp32_inf);
-  if (overflow_mask) {
-    result = _mm512_mask_set1_epi32(result, overflow_mask, 0x7F);
+  __mmask16 nan_mask = _mm512_cmpgt_epu32_mask(f_bits, fp32_inf);
+  if (nan_mask) {
+    result = _mm512_mask_set1_epi32(result, nan_mask, 0x7F);
   }
 
   // Step 2: Handle clamping
@@ -139,7 +139,7 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   }
 
   // Step 4: Handle normal numbers
-  __mmask16 normal_mask = ~(overflow_mask | denorm_thresh_mask);
+  __mmask16 normal_mask = ~(nan_mask | overflow_mask | denorm_thresh_mask);
 
   if (normal_mask) {
     // mant_odd = (f_bits >> 20) & 1
