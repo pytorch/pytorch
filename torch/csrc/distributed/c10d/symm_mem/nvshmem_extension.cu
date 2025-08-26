@@ -12,11 +12,10 @@
 // NVSHMEM minimum SM arch
 #define _NVSHMEM_MIN_SM_ARCH 700
 
-// If CUDA_ARCH is too old, or on sm_110, skip NVSHMEM device APIs
+// If CUDA_ARCH is less than sm_70, or on sm_110, skip NVSHMEM device APIs
 #define _NVSHMEM_DEVICELIB_SUPPORTED 1
 #if defined(__CUDA_ARCH__)
-#  if (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || \
-      ((defined(CUDA_VERSION) && (CUDA_VERSION >= 13000)) && (__CUDA_ARCH__ == 1100))
+#  if (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || (__CUDA_ARCH__ == 1100)
 #    undef _NVSHMEM_DEVICELIB_SUPPORTED
 #  endif
 #endif
