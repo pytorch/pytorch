@@ -3371,6 +3371,10 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
+- func: zendnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  dispatch:
+    CPU: zendnn_linear
+
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
