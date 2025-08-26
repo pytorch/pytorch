@@ -91,6 +91,7 @@ class SubprocException(Exception):
     """
 
     def __init__(self, details: str, name: str = "<unknown>") -> None:
+        self.details = details
         super().__init__(
             f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
         )

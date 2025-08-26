@@ -457,7 +457,7 @@ class AsyncCompile:
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
-                    raise e.with_kernel_name(kernel_name) from e
+                    raise e.with_name(kernel_name) from e
 
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
