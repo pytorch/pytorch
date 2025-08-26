@@ -150,7 +150,13 @@ def aot_compile_fullgraph(
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
 
     if not isinstance(compiled_fn, SerializableCallable):
-        raise RuntimeError(f"Backend {backend} did not return a SerializableCallable.")
+        if hasattr(backend, "compiler_fn"):
+            compiler_fn = backend.compiler_fn
+        else:
+            compiler_fn = backend
+        raise RuntimeError(
+            f"Compilation result {compiled_fn} produced from backend {compiler_fn} does not implement SerializableCallable."
+        )
     compile_artifacts = CompileArtifacts(
         signature=signature,
         bytecode=dynamo_output.bytecode,
