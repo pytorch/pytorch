@@ -4,7 +4,7 @@
 @triton.jit
 def forward_block_mn(
     {{gen_argdefs()}},
-    q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+    q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
@@ -13,8 +13,6 @@ def forward_block_mn(
     kv_start,
     kv_offset,
     MATMUL_PRECISION, RCP_LN2,
-    # Strides for K and V
-    stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
 ):
@@ -23,21 +21,17 @@ def forward_block_mn(
 
     # -- load k --
     # NB reversed order to since K is transposed
-    kv_base_offset = kv_start + kv_offset
     {%- if USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
-        [kv_base_offset, 0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
-
-    # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
-    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
-    k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
+    k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
     {%- endif %}
 
-    k = tl.trans(k)
+    if USE_TMA:
+        k = tl.trans(k)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -104,12 +98,10 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_base_offset, 0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
-    # Calculate offsets for V loading - reuse kv_base_offset from K loading
-    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
-    v = load_checked_2d(V, offs_n_load, offs_v, stride_vn, stride_vk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
+    v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
     {%- endif %}
     acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
@@ -121,7 +113,7 @@ def forward_block_mn(
 @triton.jit
 def forward_inner(
     {{gen_argdefs()}},
-    q, K, V,
+    q, K_block_ptr, V_block_ptr,
     desc_k, desc_v, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
@@ -135,8 +127,6 @@ def forward_inner(
     # start kv and end kv block
     block_n_start, block_n_end,
     MATMUL_PRECISION,
-    # Strides for K and V
-    stride_kk, stride_kn, stride_vn, stride_vk,
     IS_FULL_BLOCKS,
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
@@ -156,7 +146,7 @@ def forward_inner(
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
@@ -165,8 +155,6 @@ def forward_inner(
                 kv_start,
                 kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
-                # Strides for K and V
-                stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS,
             )
         else:
@@ -176,7 +164,7 @@ def forward_inner(
             # to the last block because it's faster a lot.
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
@@ -185,8 +173,6 @@ def forward_inner(
                 kv_start,
                 kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
-                # Strides for K and V
-                stride_kk, stride_kn, stride_vn, stride_vk,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
 
@@ -199,6 +185,9 @@ def forward_inner(
 
         offs_n = offs_n + offset
         kv_offset += offset
+        if not USE_TMA:
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
 
 
     return acc, l_i, m_i
