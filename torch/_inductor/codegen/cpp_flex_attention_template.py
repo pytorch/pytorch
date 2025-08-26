@@ -1410,6 +1410,7 @@ class CppFlexAttentionTemplate(CppTemplate):
     def choose_flex_template(
         self,
         query: ir.Buffer,
+        key: ir.Buffer,
         num_threads,
     ):
         # choose from FLEX_ATTENTION or FLEX_DECODING
@@ -1417,15 +1418,17 @@ class CppFlexAttentionTemplate(CppTemplate):
         q_batch_size = query.data.data.layout.size[0]  # type: ignore[attr-defined]
         q_num_heads = query.data.data.layout.size[1]  # type: ignore[attr-defined]
         q_seq_len = query.data.data.layout.size[2]  # type: ignore[attr-defined]
+        k_seq_len = key.data.data.layout.size[2]  # type: ignore[attr-defined]
         if all(
             sympy.sympify(val).is_number
-            for val in [q_batch_size, q_num_heads, q_seq_len, num_threads]
+            for val in [q_batch_size, q_num_heads, q_seq_len, k_seq_len, num_threads]
         ):
             # if static shape
             if (
                 self.partition_size % self.kv_block_size == 0
                 and q_seq_len == 1
                 and num_threads > q_batch_size * q_num_heads
+                and k_seq_len / q_batch_size >= max(self.partition_size * 2, 512)
             ):
                 FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
         return FLEX_TEMPLATE
@@ -1494,7 +1497,7 @@ class CppFlexAttentionTemplate(CppTemplate):
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            FLEX_TEMPLATE = self.choose_flex_template(query, num_threads)
+            FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
             return self._template_from_string(FLEX_TEMPLATE).render(**options)
 
     def codegen_softmax_fusion(self, kernel_name: str):
