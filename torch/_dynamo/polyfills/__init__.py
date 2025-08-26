@@ -257,6 +257,16 @@ def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
+def generator___contains__(gen, item):
+    # "any" lazily consumes the generator, which is important to prevent
+    # unintended side effects.
+    return any(e == item for e in gen)
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
