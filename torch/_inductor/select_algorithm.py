@@ -1514,17 +1514,21 @@ class TritonTemplate(KernelTemplate):
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
-        defines = defines.getvalue()
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            raise NotImplementedError(
-                "64-bit indexing is not yet implemented for triton templates"
-            )
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int32"
+        else:
+            index_dtype = "tl.int64"
+
+        # Add index dtype to defines so it's available in the template
+        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
+        defines = defines.getvalue()
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -1699,7 +1703,7 @@ class TritonTemplate(KernelTemplate):
         # patch around it here.  See https://github.com/triton-lang/triton/issues/3011
         # for one example issue with this problem.
         if torch.cuda.is_available() and not torch.cuda.is_tf32_supported():
-            kwargs["FLOAT32_PRECISION"] = '"ieee"'
+            kwargs["ALLOW_TF32"] = "False"
 
         if call_sizes is None:
             call_sizes = layout.size
@@ -1832,7 +1836,7 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "float32_precision": str(kwargs.get("FLOAT32_PRECISION", None)),
+                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
@@ -2464,12 +2468,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 important_keys = [
                     "ACC_TYPE",
+                    "ALLOW_TF32",
                     "BLOCK_K",
                     "BLOCK_M",
                     "BLOCK_N",
                     "EVEN_K",
                     "GROUP_M",
-                    "FLOAT32_PRECISION",
                     "USE_FAST_ACCUM",
                     "num_stages",
                     "num_warps",
@@ -2756,6 +2760,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             ):
                 if e := future.exception():
+                    counters["inductor"][
+                        "select_algorithm_num_precompilation_exceptions"
+                    ] += 1
                     exceptions.append((futures[future], e))
                     from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,

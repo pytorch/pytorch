@@ -540,34 +540,43 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return scaled_configs
 
+    def _exceed_available_shared_memeory(
+        self, gemm_config: BaseConfig, dtype_size: int
+    ) -> bool:
+        try:
+            if dtype_size <= 0:
+                return False
+
+            device = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(device)
+            if not hasattr(props, "shared_memory_per_block_optin"):
+                return False
+            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
+            shared_mem_accum = dtype_size * (
+                gemm_config.block_m * gemm_config.block_k
+                + gemm_config.block_n * gemm_config.block_k
+            )
+            return shared_mem_accum * gemm_config.num_stages > sm_available
+        except Exception:
+            return False
+
     def _prune_exhaustive_configs(
         self,
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        import torch
-
         pruned_configs = []
         for gemm_config in configs:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
-            NUM_REG = 255
+            # Will use more shared memory than available
+            if self._exceed_available_shared_memeory(gemm_config, dtype_size):
+                continue
 
+            NUM_REG = 255
             acc_regs = math.ceil(
                 gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
             )
-
-            shared_mem_accum = dtype_size * (
-                gemm_config.block_m * gemm_config.block_k
-                + gemm_config.block_n * gemm_config.block_k
-            )
-
-            # Will use more shared memory than available
-            if shared_mem_accum * gemm_config.num_stages > sm_available:
-                continue
             # Lower bound for register spillage, if exceeds the kernel will certainly spill
-            elif acc_regs > NUM_REG:
+            if acc_regs > NUM_REG:
                 continue
 
             pruned_configs.append(gemm_config)
@@ -599,6 +608,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
+
+        # Filter out configs that require more shared memory than is available.
+        if dtype_size > 0 and config.max_autotune_prune_choices_based_on_shared_mem:
+            scaled_configs = [
+                c
+                for c in scaled_configs
+                if not self._exceed_available_shared_memeory(c, dtype_size)
+            ]
+
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
             scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
@@ -1316,19 +1334,6 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             )
             yield template_kwargs
 
-    @staticmethod
-    def _get_input_precision(
-        m: sympy.Integer, n: sympy.Integer, k: sympy.Integer
-    ) -> str:
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
-            not inductor_config.force_same_precision
-            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
-        )
-        result = "tf32" if allow_tf32 else "ieee"
-
-        # wrap in quotes, because the string will be dropped into the templates
-        return f'"{result}"'
-
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
@@ -1348,10 +1353,16 @@ class MMTemplateConfigMixin(TemplateConfigHeuristics):
             == triton_config.kwargs["BLOCK_K"]
         )
 
+        # Calculate allow_tf32
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+            not inductor_config.force_same_precision
+            or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
+        )
+
         # Build options dict
         options_dict = dict(
             EVEN_K=even_k_symbolic,
-            FLOAT32_PRECISION=MMTemplateConfigMixin._get_input_precision(m, n, k),
+            ALLOW_TF32=allow_tf32,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
             ACC_TYPE=self._get_acc_type(layout.dtype),
             num_stages=triton_config.num_stages,
