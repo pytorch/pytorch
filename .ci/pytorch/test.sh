@@ -91,6 +91,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export VALGRIND=OFF
 fi
 
+detect_cuda_arch
 
 if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
   # There are additional warnings on s390x, maybe due to newer gcc.
@@ -1630,11 +1631,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
-      export TORCH_CUDA_ARCH_LIST
-    fi
-    echo "VLLM CI TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
+    echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
