@@ -96,7 +96,7 @@ class SubprocException(Exception):
             f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
         )
 
-    def with_name(self, name: str):
+    def with_name(self, name: str) -> "SubprocException":
         return SubprocException(self.details, name)
 
 
