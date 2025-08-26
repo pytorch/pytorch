@@ -4,8 +4,8 @@ import pytorch_test_common
 from pytorch_test_common import skipIfNoCuda
 
 import torch
-from torch.onnx import verification
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.torchscript_exporter import verification
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
