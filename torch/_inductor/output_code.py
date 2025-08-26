@@ -582,11 +582,15 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
 
-        if torch._inductor.debug.RECORD_GRAPH_EXECUTION:
+        if (
+            torch._inductor.debug.RECORD_GRAPH_EXECUTION
+            and torch._inductor.debug.GRAPH_EXECUTION_ORDER is not None
+        ):
             graph_id = self.fx_kwargs.get("graph_id")
             compile_id = (
                 torch._inductor.debug.GRAPH_COMPILE_IDS.get(graph_id)
                 if graph_id is not None
+                and torch._inductor.debug.GRAPH_COMPILE_IDS is not None
                 else None
             )
             torch._inductor.debug.GRAPH_EXECUTION_ORDER.append(

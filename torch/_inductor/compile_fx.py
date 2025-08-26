@@ -1606,7 +1606,10 @@ class _InProcessFxCompile(FxCompile):
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
-                    if torch._inductor.debug.RECORD_GRAPH_EXECUTION:
+                    if (
+                        torch._inductor.debug.RECORD_GRAPH_EXECUTION
+                        and torch._inductor.debug.GRAPH_COMPILE_IDS is not None
+                    ):
                         compile_id = str(
                             torch._guards.CompileContext.current_compile_id()
                         )

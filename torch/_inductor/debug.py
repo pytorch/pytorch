@@ -48,9 +48,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # Graph execution tracking for debugging
-GRAPH_EXECUTION_ORDER: list[dict[str, object]] = []
+GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
 RECORD_GRAPH_EXECUTION: bool = False
-GRAPH_COMPILE_IDS: dict[int, Optional[str]] = {}
+GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -827,15 +827,17 @@ def log_graph_execution() -> None:
 @contextlib.contextmanager
 def record_and_log_graph_execution_order() -> Iterator[None]:
     """Record graph execution order and log it once on exit."""
-    global RECORD_GRAPH_EXECUTION
-    GRAPH_EXECUTION_ORDER.clear()
+    global RECORD_GRAPH_EXECUTION, GRAPH_EXECUTION_ORDER, GRAPH_COMPILE_IDS
+    GRAPH_EXECUTION_ORDER = []
+    GRAPH_COMPILE_IDS = {}
     RECORD_GRAPH_EXECUTION = True
     try:
         yield
     finally:
         log_graph_execution()
         RECORD_GRAPH_EXECUTION = False
-        GRAPH_EXECUTION_ORDER.clear()
+        GRAPH_EXECUTION_ORDER = None
+        GRAPH_COMPILE_IDS = None
 
 
 @dataclasses.dataclass
