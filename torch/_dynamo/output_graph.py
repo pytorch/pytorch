@@ -356,6 +356,7 @@ class StackLocalsMetadata:
     locals_names: dict[str, int] = dc_field(
         default_factory=dict
     )  # order of locals codegen'd to the stack
+    cell_and_freevars: dict[str, int] = dc_field(default_factory=dict)
     stack_null_idxes: list[int] = dc_field(default_factory=list)
     locals_null_keys: list[str] = dc_field(default_factory=list)
     stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
@@ -1236,7 +1237,10 @@ class OutputGraph(OutputGraphGuardsState):
 
         meta.num_stack = len(stack_values)
 
-        cell_and_freevars = set(tx.cellvars() + tx.freevars())
+        cell_and_freevars = dict.fromkeys(tx.cellvars() + tx.freevars())
+        meta.cell_and_freevars = {
+            name: i for i, name in enumerate(cell_and_freevars.keys())
+        }
 
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
@@ -1252,8 +1256,7 @@ class OutputGraph(OutputGraphGuardsState):
             # This will in turn result in spurious variables showing up in the graph.
             # This was very tricky to debug. For an example, dump the graph at call_user_compiler
             # while running test_subgraphs.py
-            # Do not include top-frame unmodified locals here - otherwise, the compiled graph may
-            # erroneously include them as part of the return. We manually codegen them afterward.
+            # Do not load unmodified locals (load them at a later time) from the top frame
             if (
                 isinstance(v.source, LocalSource)
                 and v.source.local_name == k
@@ -1261,7 +1264,7 @@ class OutputGraph(OutputGraphGuardsState):
             ):
                 continue
             # Do not load cell/free vars
-            if k in cell_and_freevars:
+            if k in meta.cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
@@ -1327,20 +1330,19 @@ class OutputGraph(OutputGraphGuardsState):
                 if inst.opname == "COPY_FREE_VARS":
                     prefix_insts.append(
                         create_instruction(
-                            "COPY_FREE_VARS",
-                            arg=len(self.root_tx.code_options["co_freevars"]),
+                            "COPY_FREE_VARS", arg=len(tx.code_options["co_freevars"])
                         )
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
 
         # stack values and restore vars for each frame are pushed in reverse order
-        # i.e. last element corresponds to root frame (1),
-        # first element corresponds to current frame (N)
+        # i.e. last element corresponds to root frame, first element corresponds to current frame
         all_stack_values = []
         all_stack_locals_metas = []
         cur_tx: Optional[InstructionTranslatorBase] = tx
-        while cur_tx is not None:
+        while True:
+            assert cur_tx is not None
             # this should have been checked by the caller
             assert all(block.can_restore() for block in cur_tx.block_stack)
 
@@ -1349,15 +1351,9 @@ class OutputGraph(OutputGraphGuardsState):
             )
             all_stack_values.append(stack_values)
             all_stack_locals_metas.append(meta)
-
-            # Exit from all context manager variables to make sure global state is restored
-            for block in reversed(cur_tx.block_stack):
-                block.exit(cur_tx, is_graph_break=reason.graph_break)
-
+            if cur_tx is self.root_tx:
+                break
             cur_tx = cur_tx.parent
-
-        # "Garbage collect the heap".
-        self.side_effects.prune_dead_object_new(tx)
 
         self.add_output_instructions(prefix_insts)
 
@@ -1370,6 +1366,10 @@ class OutputGraph(OutputGraphGuardsState):
             self.root_tx
         )
         self.add_output_instructions(alias_insts)
+
+        # Exit from all context manager variables to make sure global state is restored
+        for block in reversed(self.root_tx.block_stack):
+            block.exit(self.root_tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
 
@@ -1407,27 +1407,41 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.add_output_instructions(random_calls_instructions)
 
-        # Codegen stack convention before the unsupported instruction
-        # NOTE: in these comment blocks, "locals" EXCLUDE free and cell vars.
-        # NOTE: stack and locals must be codegen'd BEFORE the unsupported instruction, since the latter
-        # can arbitrarily mutate the former.
+        # FIXME: right now not dealing with cells because they're difficult to deal with
+        # codegen stack convention before the unsupported instruction
+        # NOTE: in this comment block, "cell" refers to a Python cell object - i.e. free and cell vars
         # [
-        #   frame N locals,
-        #   frame N-1 stack + locals,
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
         #   ...,
-        #   frame 1 stack + locals,
-        # ], frame N stack
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ], top stack_pops values of frame N
 
-        # see symbolic_convert.py for
         # codegen stack convention after the unsupported instruction
-        # NOTE: cells are loaded into continuation functions directly
+        # before calling resume function
+        # NOTE: need to push result of unsupported instruction to frame N stack
+        # [
+        #   (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
+        # ], frame 1 stack + frame 1 non-cell locals
 
-        # this determines the order that values are codegen'd to the stack
-        stack_values_flat = [val for vals in all_stack_values for val in vals]
+        # (frame 1 cells should be loaded into the continuation function directly
+        # as part of the closure)
+
+        # NOTE: move the top stack_pops values from frame N to the beginning of the flat list.
+        # This is to prevent packing NULLs into a list.
+
+        cur_num_stack = all_stack_locals_metas[0].num_stack
+        stack_values_flat = (
+            all_stack_values[0][cur_num_stack - stack_pops : cur_num_stack]
+            + all_stack_values[0][: cur_num_stack - stack_pops]
+            + all_stack_values[0][cur_num_stack:]
+            + [val for vals in all_stack_values[1:] for val in vals]
+        )
         stored_graph_output_var = False
         graph_output_var = None
 
-        # call compiled fx graph and codegen all values - stack and locals
+        # call compiled fx graph and codegen everything - stack, locals, cells
         if (
             self.root_tx is tx  # single frame
             and stack_values_flat
@@ -1509,87 +1523,94 @@ class OutputGraph(OutputGraphGuardsState):
                 self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # store all stack and locals for each frame
+        # store all stack, locals, cells for each frame
         # current state of the stack:
-        # *(frame N stack), *(frame N locals),
-        # ...,
-        # *(frame 1 stack), *(frame 1 locals)
+        #   *(top stack_pops values), *(remaining stack_values_flat)
 
         self.add_output_instructions(
             [
                 create_instruction(
-                    "BUILD_LIST",
-                    arg=len(stack_values_flat) - all_stack_locals_metas[0].num_stack,
+                    "BUILD_LIST", arg=len(stack_values_flat) - stack_pops
                 ),
             ]
         )
 
-        # current state of the stack:
-        # *(frame N stack), [
-        #     *(frame N locals),
-        #     *(frame N-1 stack), *(frame N-1 locals),
-        #     ...
-        #     *(frame 1 stack), *(frame 1 locals),
-        # ]
-        # iterate current frame (N) to root frame (1)
-        # sliding window over frame stack/locals
+        # iterate current frame to root frame
+        # sliding window over frame stack/locals/cells
         start_idx = 0
         end_idx = 0
         for i, meta in enumerate(all_stack_locals_metas):
-            # do not pack frame N's stack into the value list
-            n_vals = len(meta.locals_names)
-            if i != 0:
-                n_vals += meta.num_stack
-            if n_vals == 0:
-                self.add_output_instructions(
-                    [
-                        create_instruction("BUILD_LIST", arg=0),
-                        *create_swap(2),
-                    ]
-                )
-                # [], stack_values_flat
-            else:
-                end_idx += n_vals
-                self.add_output_instructions(
-                    [
-                        create_dup_top(),
-                        *create_binary_slice(start_idx, end_idx),
-                        *create_swap(2),
-                    ]
-                )
-                start_idx += n_vals
-                # stack_values_flat[x:y], stack_values_flat
+            # stack, locals, cells
+            # account for removed stack_pops values in current frame
+            num_stack = meta.num_stack - stack_pops if i == 0 else meta.num_stack
+            counts = (
+                num_stack,
+                len(meta.locals_names),
+                # len(meta.cell_and_freevars),
+            )
+            self.add_output_instructions([create_dup_top()])
+            # values, values
+            for j, cnt in enumerate(counts):
+                end_idx += cnt
+                if start_idx == end_idx:
+                    self.add_output_instructions(
+                        [
+                            create_instruction("BUILD_LIST", arg=0),
+                            *create_swap(2),
+                        ]
+                    )
+                    # [], values
+                else:
+                    self.add_output_instructions(
+                        [
+                            create_dup_top(),
+                            *create_binary_slice(start_idx, end_idx),
+                            *create_swap(2),
+                        ]
+                    )
+                    # values[x:y], values
+                # add root frame's unmodified locals here
+                if i == len(all_stack_locals_metas) - 1 and j == 1:
+                    root_cg = PyCodegen(self.root_tx)
+                    unmodified_locals_names: dict[str, int] = {}
+                    for k, v in self.root_tx.symbolic_locals.items():
+                        if (
+                            isinstance(v.source, LocalSource)
+                            and v.source.local_name == k
+                        ):
+                            root_cg.append_output(root_cg.create_load(k))
+                            unmodified_locals_names[k] = len(meta.locals_names) + len(
+                                unmodified_locals_names
+                            )
+                    self.add_output_instructions(
+                        root_cg.get_instructions()
+                        + [
+                            create_instruction(
+                                "BUILD_LIST", arg=len(unmodified_locals_names)
+                            ),
+                            # arg=2 because we already swapped the locals list back
+                            create_instruction("LIST_EXTEND", arg=2),
+                        ]
+                    )
+                    meta.locals_names.update(unmodified_locals_names)
+                start_idx += cnt
 
-            # add root frame's unmodified locals here
-            if i == len(all_stack_locals_metas) - 1:
-                root_cg = PyCodegen(self.root_tx)
-                unmodified_locals_names: dict[str, int] = {}
-                for k, v in self.root_tx.symbolic_locals.items():
-                    if isinstance(v.source, LocalSource) and v.source.local_name == k:
-                        root_cg.append_output(root_cg.create_load(k))
-                        unmodified_locals_names[k] = len(meta.locals_names) + len(
-                            unmodified_locals_names
-                        )
-                self.add_output_instructions(
-                    root_cg.get_instructions()
-                    + [
-                        create_instruction(
-                            "BUILD_LIST", arg=len(unmodified_locals_names)
-                        ),
-                        # arg=2 because we already swapped the locals list back
-                        create_instruction("LIST_EXTEND", arg=2),
-                    ]
-                )
-                meta.locals_names.update(unmodified_locals_names)
-
-            # *(frame N stack), metas[0] stack + locals, ..., metas[i] stack + locals, stack_values_flat
+            # pack stack, locals, cells together
+            # values, stack, locals, cells, values
+            self.add_output_instructions(
+                [
+                    create_instruction("POP_TOP"),
+                    create_instruction("BUILD_TUPLE", arg=2),
+                    *create_swap(2),
+                ]
+            )
+            # (stack, locals, cells), values
 
         # current state of the stack:
-        # *(frame N stack)
-        # frame N locals,
-        # frame N-1 stack, frame N-1 locals,
-        # ...
-        # frame 1 stack, frame 1 locals,
+        # *(top stack_pops values),
+        # (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        # ...,
+        # (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
         # stack_values_flat
         #
 
@@ -1597,17 +1618,16 @@ class OutputGraph(OutputGraphGuardsState):
             [
                 create_instruction("POP_TOP"),
                 create_instruction("BUILD_LIST", arg=len(all_stack_locals_metas)),
-                *create_rot_n(all_stack_locals_metas[0].num_stack + 1),
+                *create_rot_n(stack_pops + 1),
             ]
         )
 
         # final state of the stack before running the unsupported bytecode:
         # [
-        #   [frame N locals],
-        #   [frame N-1 stack + locals],
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
         #   ...,
-        #   [frame 1 stack + locals],
-        # ], *(frame N stack)
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ], *(top stack_pops values of frame N)
 
         if graph_output_var and stored_graph_output_var:
             self.add_output_instructions(
@@ -2596,7 +2616,9 @@ class SubgraphTracer(fx.Tracer):
         # map basic symbols (unbacked and unbacked) to their bound proxies.
         # There are only two cases where bound_symbols will be recorded:
         # 1. when we create_graph_input for a backed SymInt that's basic symbol
-        # 2. when we track_unbacked_symbols for intermediate results that contain unbacked symints.
+        # 2. when we track_produced_symints for intermediate results
+        # bound_symbols always map the symbol to the proxy whose
+        # tracer is the current tracer that's readily accessible in current tracer's graph.
         self.bound_symbols: dict[sympy.Symbol, Union[torch.fx.Proxy, LazyProxy]] = {}
 
         self.prev_inst = None
@@ -2972,27 +2994,34 @@ class SubgraphTracer(fx.Tracer):
             self._used_names.add(name)
 
             # NOTE: [Auto lift basic free symbols when create_graph_input]
-            # Whenever we call create_graph_input, we try to also lift the basic symbols in example values
-            # as graph input.
-            # This applies to both top-level graph and subgraphs in higher order ops.
-            # It has several cases:
+            # There are two sources of basic symbols:
+            #
+            # - They can come from inputs, e.g. when an input tensor is specified as dynamic. We handle
+            # this case by intercepting at create_graph_input. Whenever we call create_graph_input, we
+            # try to also lift the basic symbols in example values as graph input.
+            #
             #  1. When create_graph_input for a tensor that has symbolic shapes,
             #     we look for basic symbols in its size and stride, we check if the symbol is bound
             #     in current graph (i.e. bound_symbols), it it's not bound, we'll create a placeholder
-            #     for it then recursively check its parent, creates ph if not bound.
-            #     Every tracer maintains a mapping (i.e. lifted_freevars)
-            #     that maps from parent proxy to proxy in current tracer for the symbol.
-            #  2. When create_graph_input for a tensor with unbacked symbolic shapes,
-            #     Backed symbols all come from inputs's symbolic shape. But unbacked symbols
-            #     can be created while tracing. So we use track_unbacked_symbols will intercept
-            #     at wrap_fx_proxy, and try to bind the unbacked symbols immediately after they're
-            #     created.
-            #  3. subgraph will also lifted basic symbols in compound exprs of tensor shape.
-            #     For example, if an input to subgraph takes size [s1+s2//8], we'll look for the
-            #     the free symbols in the sizes and lift as inputs similar to 1 in _lift_symbols_in_symint)
-            #  4. When create_graph_input for a SymInt, if the symint is a basic symbol, we'll track it
-            #     in bound_symbols so that we don't lift the same basic symbol twice. When the symint is a
-            #     compound expr, we'll just create the proxy for the compouned expr but not lift its basic symbols.
+            #     for it then recursively check its parent, creates ph if not bound at parent until.
+            #     reachting the top-level, where we require a source is attached to the proxy.
+            #
+            #  2. When create_graph_input for a tensor that contains compound exprs,
+            #     for example, if an input to subgraph takes size [s1+s2//8], we'll look for the
+            #     the free basic symbols in the sizes and lift all of them following 1.
+            #
+            #  3. When create_graph_input for a symint. The following invariants hold:
+            #     a. if symint's expr is a basic symbol, we only lift it once.
+            #     b. if symint's expr is compuned, we lift the expr as a single input. We won't lift The basic symbols
+            #       in the compuned expr are NOT lifted. Because if the basic symbols are used inside the subgraph
+            #       they will be lifted according to 3.a
+            #
+            # - They can come from intermediate results:
+            # For example, data-dependent operators such as t.item(), t.nonzero(), where basic symbols
+            # might be created. For this purpose, we track the basic symbols of intermediate results
+            # immediately after they're created at wrap_fx_proxy with track_produced_symints. Notice
+            # that for basic symbols that're already tracked by create_graph_input, we won't track it again.
+            #
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
@@ -3088,12 +3117,13 @@ class SubgraphTracer(fx.Tracer):
 
     # See NOTE: [Auto lift basic free symbols when create_graph_input] for overall design
     # You MUST call this API every time when creating a proxy in wrap_fx_proxy for a call
-    # that produced unbacked symints or tensors with unbacked symint shapes.
-    # This function is used to track the unbacked symints with its proxies created during
+    # that produced symints or tensors with unbacked symint shapes.
+    # This function is used to track the symints with its proxies created during
     # dynamo tracing so that subgraph knows how to bind a symbol input with parent's proxy.
     # LazyProxy are created for tensor shapes that're unbacked so that we don't create proxies
-    # for symbols that're not going to be used.
-    def track_unbacked_symbols(
+    # for symbols that're not going to be used, the LazyProxy will be turned into a proxy
+    # when it's lifted as input to subgraph.
+    def track_produced_symints(
         self, example_value: Any, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ) -> None:
         # When binding the symbols in an exmaple_value, we bind the symbols
@@ -3118,22 +3148,26 @@ class SubgraphTracer(fx.Tracer):
             return (
                 is_symbolic(s)
                 and isinstance(s.node.expr, sympy.Symbol)
-                and s.node.shape_env.is_unbacked_symint(s.node.expr)
                 and s.node.expr not in self.bound_symbols
             )
 
         def _proxy_with_example_value(
             example_value: Any, *args: Any, **kwargs: Any
         ) -> fx.Proxy:
-            proxy = tracer.create_proxy(*args, **kwargs)
-            set_example_value(proxy.node, example_value)
-            return proxy
+            # We need to insert proxy for creating sym_size/sym_stride/sym_storage right after e_proxy
+            nonlocal e_proxy
+            e_proxy = e_proxy() if isinstance(e_proxy, LazyProxy) else e_proxy
+            assert isinstance(e_proxy, torch.fx.Proxy)
+            with tracer.graph.inserting_after(e_proxy.node):
+                proxy = tracer.create_proxy(*args, **kwargs)
+                set_example_value(proxy.node, example_value)
+                return proxy
 
         if isinstance(example_value, torch.Tensor):
             for i, s in enumerate(example_value.size()):
                 if need_bind(s):
                     log.debug(
-                        "_track_unbacked_symbols %s for %s.size()[%s] at debug_level %s",
+                        "track_produced_symints %s for %s.size()[%s] at debug_level %s",
                         s,
                         e_proxy,
                         i,
@@ -3149,13 +3183,33 @@ class SubgraphTracer(fx.Tracer):
                         {},
                         type_expr=type(s),
                     )
-                    self.track_unbacked_symbols(s, lazy_proxy)
+                    self.track_produced_symints(s, lazy_proxy)
+
+            storage_offset = example_value.storage_offset()
+            if need_bind(storage_offset):
+                log.debug(
+                    "track_produced_symints %s for %s.storage_offset() at debug_level %s",
+                    storage_offset,
+                    e_proxy,
+                    tracer.debug_level,
+                )
+                lazy_proxy = LazyProxy(
+                    tracer,
+                    _proxy_with_example_value,
+                    storage_offset,
+                    "call_function",
+                    torch.ops.aten.sym_storage_offset,
+                    (e_proxy,),
+                    {},
+                    type_expr=type(storage_offset),
+                )
+                self.track_produced_symints(storage_offset, lazy_proxy)
 
             if example_value.layout is torch.strided:
                 for i, s in enumerate(example_value.stride()):
                     if need_bind(s):
                         log.debug(
-                            "_track_unbacked_symbols %s for %s.stride()[%s] at debug_level %s",
+                            "track_produced_symints %s for %s.stride()[%s] at debug_level %s",
                             s,
                             e_proxy,
                             i,
@@ -3171,24 +3225,23 @@ class SubgraphTracer(fx.Tracer):
                             {},
                             type_expr=type(s),
                         )
-                        self.track_unbacked_symbols(s, lazy_proxy)
+                        self.track_produced_symints(s, lazy_proxy)
 
             elif example_value.layout is torch.sparse_coo:
-                self.track_unbacked_symbols(example_value._indices(), e_proxy)
-                self.track_unbacked_symbols(example_value._values(), e_proxy)
+                self.track_produced_symints(example_value._indices(), e_proxy)
+                self.track_produced_symints(example_value._values(), e_proxy)
             elif example_value.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                self.track_unbacked_symbols(example_value.crow_indices(), e_proxy)
-                self.track_unbacked_symbols(example_value.col_indices(), e_proxy)
+                self.track_produced_symints(example_value.crow_indices(), e_proxy)
+                self.track_produced_symints(example_value.col_indices(), e_proxy)
             elif example_value.layout in {torch.sparse_csc, torch.sparse_bsc}:
-                self.track_unbacked_symbols(example_value.ccol_indices(), e_proxy)
-                self.track_unbacked_symbols(example_value.row_indices(), e_proxy)
+                self.track_produced_symints(example_value.ccol_indices(), e_proxy)
+                self.track_produced_symints(example_value.row_indices(), e_proxy)
             if is_traceable_wrapper_subclass(example_value):
                 attrs, ctx = example_value.__tensor_flatten__()
                 for attr in attrs:
                     inner_t = getattr(example_value, attr)
-                    self.track_unbacked_symbols(inner_t, getattr(e_proxy, attr))
+                    self.track_produced_symints(inner_t, getattr(e_proxy, attr))
         elif isinstance(example_value, torch.SymInt):
-            # Only bind unbacked symbols. backed symbols are lifted as inputs.
             if need_bind(example_value):
                 expr = example_value.node.expr
                 tracer.bound_symbols[expr] = e_proxy
