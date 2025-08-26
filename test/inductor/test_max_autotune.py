@@ -14,7 +14,6 @@ from typing import Callable, Optional
 from unittest import mock
 from unittest.mock import MagicMock
 
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, InputBuffer
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
@@ -28,10 +27,10 @@ from torch._inductor.autotune_process import (
     TuningProcess,
     TuningProcessPool,
 )
-from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, InputBuffer
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplate,
@@ -75,7 +74,7 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-torch.set_float32_matmul_precision("high")
+torch.backends.cuda.fp32_precision = "ieee"
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
@@ -2107,7 +2106,6 @@ class TestMaxAutotuneRemoteCache(TestCase):
             for config in configs:
                 self.assertIn("ALLOW_TF32", config)
                 self.assertEqual(config["ALLOW_TF32"], False)
-
 
 
 class _TestTritonTemplateCaller(TritonTemplateCaller):
