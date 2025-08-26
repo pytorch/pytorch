@@ -470,7 +470,7 @@ Tensor _weight_int4pack_mm_xpu(
   return C;
 }
 
-Tensor& _weight_fp8_mm_out_xpu(
+Tensor& _weight_fp8pack_mm_out_xpu(
     const Tensor& A, //[B, M, K] or [M, K]
     const Tensor& B, // [K, N]
     const std::optional<Tensor>& scales_,
@@ -554,7 +554,7 @@ Tensor& _weight_fp8_mm_out_xpu(
   }
   at::native::resize_output(out, output_flattened_size);
 
-  at::native::onednn::woq_matmul_w8a16(out, flattened_A, B, scales);
+  at::native::onednn::matmul_w8(out, flattened_A, B, scales);
 
   // [B, M, K] -> [B, M, N] for output
   std::vector<int64_t> output_size (A.sizes().begin(), A.sizes().end()-1);
@@ -567,7 +567,7 @@ Tensor& _weight_fp8_mm_out_xpu(
   return out;
 }
 
-Tensor _weight_fp8_mm_xpu(
+Tensor _weight_fp8pack_mm_xpu(
     const Tensor& A, // [B, M, K] or [M, K]
     const Tensor& B, // [K, N]
     const std::optional<Tensor>& scales_) {
@@ -577,7 +577,7 @@ Tensor _weight_fp8_mm_xpu(
   // Initialize the empty out tensor and do actual allocation once all check
   // passed.
   auto out = at::empty({0}, A.options());
-  return _weight_fp8_mm_out_xpu(A, B, scales, out);
+  return _weight_fp8pack_mm_out_xpu(A, B, scales, out);
 }
 
 Tensor& _int_mm_out_xpu(

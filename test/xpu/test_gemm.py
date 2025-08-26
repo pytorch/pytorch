@@ -1511,7 +1511,7 @@ def weight_float8_mm(
     b_scale: torch.Tensor,
 ) -> torch.Tensor:
     b_inverse_scale = b_scale.reciprocal()
-    return torch._weight_fp8_mm(a, b, b_inverse_scale)
+    return torch._weight_fp8pack_mm(a, b, b_inverse_scale)
 
 
 def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -1547,7 +1547,7 @@ class TestFP8MatMul(TestCase):
     @parametrize("a_dtype", [torch.float16, torch.bfloat16])
     @parametrize("w_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     @parametrize("scales", [torch.tensor(1.0)])
-    def test__weight_fp8_mm_basics(
+    def test__weight_fp8pack_mm_basics(
         self, m, k, n, a_dtype, w_dtype, scales, device="xpu"
     ):
         torch.manual_seed(1)
@@ -1557,14 +1557,14 @@ class TestFP8MatMul(TestCase):
 
         ref = torch.mm(a, w_ref)
         scales = scales.to(device)
-        res = torch._weight_fp8_mm(a, w, scales)
+        res = torch._weight_fp8pack_mm(a, w, scales)
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err.cpu() < 0.05)
 
     @parametrize("a_dtype", [torch.float16, torch.bfloat16])
     @parametrize("w_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
-    def test__weight_fp8_mm_vs_emulated(self, a_dtype, w_dtype, device="xpu"):
+    def test__weight_fp8pack_mm_vs_emulated(self, a_dtype, w_dtype, device="xpu"):
         torch.manual_seed(42)
         a = torch.rand((16, 16), dtype=a_dtype, device=device)
         w = torch.rand((16, 32), dtype=a_dtype, device=device)
@@ -1585,7 +1585,7 @@ class TestFP8MatMul(TestCase):
     @parametrize("n", [512, 1024])
     @parametrize("a_dtype", [torch.float16, torch.bfloat16])
     @parametrize("w_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
-    def test__weight_fp8_mm_channelwise_scaling(self, m, k, n, a_dtype, w_dtype, device="xpu"):
+    def test__weight_fp8pack_mm_channelwise_scaling(self, m, k, n, a_dtype, w_dtype, device="xpu"):
         torch.manual_seed(42)
         a = torch.rand((m, k), dtype=a_dtype, device=device)
         w = torch.rand((k, n), dtype=a_dtype, device=device)

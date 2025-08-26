@@ -98,7 +98,7 @@ TORCH_API void woq_matmul_int4(
     int64_t group_size,
     bool pri_cache = true);
 
-TORCH_API sycl::event woq_matmul_w8a16(
+TORCH_API sycl::event matmul_w8(
     Tensor& result, // [M, N], dtype: fp16,bf16. Depending on mat1.
     const Tensor& mat1, // [M, K], Activation. dtype: fp16,bf16
     const Tensor& mat2, // [K, N], Weight. dtype: fp8_e4m3, fp8_e5m2
