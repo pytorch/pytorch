@@ -140,7 +140,7 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
-    assertDictEqual = unittest.TestCase.assertDictEqual
+    assertDictEqual = polyfills.assert_dict_equal
     assertRaises = unittest.TestCase.assertRaises
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns

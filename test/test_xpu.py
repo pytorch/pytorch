@@ -607,6 +607,17 @@ if __name__ == "__main__":
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
 
+    def test_background_thread_for_pin_memory(self):
+        # Just ensure no crash
+        torch._C._accelerator_setAllocatorSettings("pinned_use_background_threads:True")
+        cpu_tensor = torch.randn(100)
+        pin_tensor = cpu_tensor.pin_memory()
+        xpu_tensor = pin_tensor.to(device="xpu", non_blocking=True)
+        torch.xpu.synchronize()
+        del pin_tensor
+        gc.collect()
+        self.assertEqual(xpu_tensor.cpu(), cpu_tensor)
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
