@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -23,13 +23,12 @@ from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTem
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from ..ir import Buffer, ChoiceCaller, is_triton, Layout
+from ..ir import Buffer, ChoiceCaller, FlexibleLayout, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    KernelTemplate,
     realize_inputs,
     TritonTemplate,
 )
@@ -696,25 +695,30 @@ def tuned_mm(mat1, mat2, *, layout=None):
         layout,
     )
 
+    aten_layout = layout
+    if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
+        aten_layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
     choices: list[ChoiceCaller] = []
+    if use_aten_gemm_kernels():
+        choices += V.choices.get_mm_configs(kernel_inputs, aten_layout, [aten_mm], "mm")
     static_shape, is_nonzero = _is_static_problem(layout)
 
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
-    if use_aten_gemm_kernels():
-        templates_to_use.append(aten_mm)
-
     if is_nonzero and use_triton_template(layout):
-        templates_to_use.append(mm_template)
+        # Get template choices using the new unified function
+        choices += V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], "mm")
 
         if use_triton_tma_template(mat1, mat2):
-            templates_to_use.append(persistent_tma_mm_template)
+            # Get TMA template choices using the new unified function
+            choices += V.choices.get_mm_configs(
+                kernel_inputs, layout, [persistent_tma_mm_template], "mm"
+            )
 
         if use_decompose_k_choice(m, n, k):
-            templates_to_use.append(decompose_k_subgraph_template)
-
-    # Single unified call for all non-autoheuristic templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, "mm")
+            choices += V.choices.get_mm_configs(
+                kernel_inputs, layout, [decompose_k_subgraph_template], "mm"
+            )
 
     if (
         is_nonzero
@@ -830,22 +834,21 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     # Create MMKernelInputs for Int MM
     kernel_inputs = MMKernelInputs([mat1, mat2])
-
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__int_mm)
-
-    if is_nonzero and use_triton_template(layout, enable_int32=True):
-        templates_to_use.append(mm_template)
-
-    # Single unified call for all templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [aten__int_mm],
+            name,
+        )
 
     if use_cutlass and _use_cutlass_for_op(name):
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes(), fuseable=True, non_fuseable=True
         )
+
+    if is_nonzero and use_triton_template(layout, enable_int32=True):
+        choices += V.choices.get_mm_configs(kernel_inputs, layout, [mm_template], name)
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
@@ -896,19 +899,38 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
         return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        templates_to_use.extend([aten_bias_addmm, aten_addmm])
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            [aten_bias_addmm],
+            name,
+        )
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            aten_layout,
+            [aten_addmm],
+            name,
+        )
 
     if is_nonzero and use_triton_template(layout):
-        templates_to_use.append(mm_template)
+        # all the triton templates use the extra_kwargs
+        # Get template choices using the new unified function
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [mm_template],
+            name,
+        )
 
         if use_triton_tma_template(mat1, mat2):
-            templates_to_use.append(persistent_tma_mm_template)
-
-    # Single unified call for all templates
-    choices += V.choices.get_mm_configs(kernel_inputs, layout, templates_to_use, name)
+            # Get TMA template choices using the new unified function
+            choices += V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [persistent_tma_mm_template],
+                name,
+            )
 
     if (
         is_nonzero
@@ -1061,48 +1083,49 @@ def tuned_scaled_mm(
     kernel_inputs = MMKernelInputs(input_nodes, mat1_idx=0, mat2_idx=1)
 
     choices: list[ChoiceCaller] = []
-
-    # Collect all templates for unified call
-    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
-    kwarg_overrides = {}
-
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
+        choices += list(
+            V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [aten__fp8_mm],
+                name,
+                kwarg_overrides={
+                    aten__fp8_mm.uid: dict(
+                        out_dtype=out_dtype, use_fast_accum=use_fast_accum
+                    )
+                },
+            )
         )
+
+    # We dont have triton lowerings for the MX variants yet
+    if scale_a.dtype != torch.float32:
+        return autotune_select_algorithm(name, choices, input_nodes, layout)
 
     _, is_nonzero = _is_static_problem(layout)
 
-    # We dont have triton lowerings for the MX variants yet
-    if (
-        scale_a.dtype == torch.float32
-        and is_nonzero
-        and use_triton_template(layout, enable_float8=True)
-    ):
+    if is_nonzero and use_triton_template(layout, enable_float8=True):
         scaled_mm_kwargs = {"USE_FAST_ACCUM": use_fast_accum}
-
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exists
         if use_triton_tma_template(mat_a, mat_b) and not bias:
-            templates_to_use.append(scaled_mm_device_tma_template)
-            kwarg_overrides[scaled_mm_device_tma_template.uid] = scaled_mm_kwargs
+            # Get TMA template choices using the new unified function
+            choices += V.choices.get_mm_configs(
+                kernel_inputs,
+                layout,
+                [scaled_mm_device_tma_template],
+                name,
+                kwarg_overrides={scaled_mm_device_tma_template.uid: scaled_mm_kwargs},
+            )
 
-        templates_to_use.append(mm_template)
-        kwarg_overrides[mm_template.uid] = scaled_mm_kwargs
-
-    # Single unified call for all templates
-    choices += V.choices.get_mm_configs(
-        kernel_inputs,
-        layout,
-        templates_to_use,
-        name,
-        kwarg_overrides=kwarg_overrides,
-    )
-
-    # Early return for MX variants
-    if scale_a.dtype != torch.float32:
-        return autotune_select_algorithm(name, choices, input_nodes, layout)
+        # Get template choices using the new unified function
+        choices += V.choices.get_mm_configs(
+            kernel_inputs,
+            layout,
+            [mm_template],
+            name,
+            kwarg_overrides={mm_template.uid: scaled_mm_kwargs},
+        )
 
     if (
         is_nonzero
