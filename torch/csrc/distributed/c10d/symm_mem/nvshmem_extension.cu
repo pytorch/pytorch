@@ -119,12 +119,10 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
-  void* signal_ptr = hdl->get_signal_pad_ptrs()[peer];
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
-  nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(signal_ptr), NVSHMEM_SIGNAL_SET, 1, peer, stream);
 }
 
 void nvshmem_wait_for_signal(at::Tensor& tensor, int64_t peer) {
@@ -142,11 +140,10 @@ void nvshmem_put_with_signal(at::Tensor& tensor, int64_t peer) {
   auto rank = hdl->get_rank();
   void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
   auto buffer_size = tensor.numel() * tensor.element_size();
-  void* signal_ptr = hdl->get_signal_pad_ptrs()[peer];
+  void* signal_ptr = hdl->get_signal_pad_ptrs()[rank];
 
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-
   nvshmemx_putmem_signal_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, static_cast<uint64_t*>(signal_ptr), NVSHMEM_SIGNAL_SET, 1, peer, stream);
 }
 

@@ -2,7 +2,6 @@
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/Functions.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <cstddef>
@@ -251,6 +250,13 @@ cudaGraph_t CUDAGraph::raw_cuda_graph() {
   TORCH_CHECK(keep_graph_, "You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true");
   TORCH_CHECK(has_graph_, "You cannot access the raw cudaGraph_t instance until capture_end() has been called");
   return graph_;
+}
+
+cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
+  TORCH_CHECK(
+      has_graph_exec_,
+      "You cannot access the raw cudaGraphExec_t instance until instantiate() has been called");
+  return graph_exec_;
 }
 
 void CUDAGraph::reset() {
