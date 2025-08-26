@@ -826,6 +826,13 @@ struct ExpandableSegment {
         ptr() + segment_size_ * begin, segment_size_ * (end - begin));
   }
 
+  // Remove trailing unused handles from the end of handles_.
+  void trimHandles() {
+    while (!handles_.empty() && !handles_.back()) {
+      handles_.pop_back();
+    }
+  }
+
   // Iterates over all contiguous ranges of allocated segments in `handles_`,
   // and invokes the provided function `fn(start, end)` for each range.
   // Each range is defined as a half-open interval [start, end).
