@@ -1514,21 +1514,17 @@ class TritonTemplate(KernelTemplate):
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
+        defines = defines.getvalue()
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-
-        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            index_dtype = "tl.int32"
-        else:
-            index_dtype = "tl.int64"
-
-        # Add index dtype to defines so it's available in the template
-        defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
-        defines = defines.getvalue()
+        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            raise NotImplementedError(
+                "64-bit indexing is not yet implemented for triton templates"
+            )
 
         kernel_options = {
             "input_nodes": input_nodes,
