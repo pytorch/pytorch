@@ -28,6 +28,8 @@ from . import errors, ops
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
     symbolic_helper,
+    symbolic_opset10,
+    symbolic_opset9,
     utils,
 )
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
