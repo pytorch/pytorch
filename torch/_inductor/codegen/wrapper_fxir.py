@@ -766,14 +766,11 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unrecognized output layout: {kernel.layout}")
 
-        # Look up the kernel function from its name.
-        kernel_name = kernel.get_kernel_name()
-        module_name, kernel_name = kernel_name.split(".", 1)
-        op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
-        for subname in kernel_name.split("."):
-            op = getattr(op, subname)  # E.g. extern_kernels.addmm
-
-        fx_node = self.gm.graph.call_function(op, args=args, kwargs=kwargs)
+        fx_node = self.gm.graph.call_function(
+            kernel.op_overload,  # type: ignore[arg-type]
+            args=args,
+            kwargs=kwargs,
+        )
 
         # Assign the result to the given name.
         if result_buffer:
