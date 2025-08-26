@@ -14,6 +14,7 @@ flaky_models = {
     "detectron2_maskrcnn_r_101_c4",
     "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+    "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
 }
 
 

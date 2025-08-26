@@ -294,20 +294,19 @@ class TestCutlassBackend(TestCase):
             Y = torch.mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
-    @unittest.skipIf(
-        True, "FIXME: Disabled temporarily since IMA or crashing in subprocess"
-    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_cutlass_backend_subproc_addmm(self, shape_combo):
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_cutlass_backend_subproc_addmm(self, dtype):
         """
         Test autotune_in_subproc works for addmm.
         """
 
         M, N, K = 4096, 2048, 25728
+        dtype = torch.float16
 
-        a = torch.randn(M, K).cuda().half()
-        b = torch.randn(N, K).cuda().half().t()
+        a = torch.randn(M, K, dtype=dtype).cuda()
+        b = torch.randn(N, K, dtype=dtype).cuda().t()
 
         x_shapes = [
             (M, N),
@@ -329,7 +328,10 @@ class TestCutlassBackend(TestCase):
             }
         ):
             for x_shape in x_shapes:
-                x = torch.randn(x_shape).cuda().half()
+                torch._dynamo.reset()
+                clear_caches()
+
+                x = torch.randn(x_shape).cuda().to(dtype)
                 Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
                 torch.testing.assert_close(Y_compiled, Y)
@@ -695,6 +697,7 @@ class TestCutlassBackend(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @parametrize("use_expand", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_bmm(
         self,
@@ -702,6 +705,7 @@ class TestCutlassBackend(TestCase):
         use_aoti: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
         dtype: torch.dtype = torch.float16,
+        use_expand: bool = False,
     ):
         """
         Main test for bmm.
@@ -719,13 +723,17 @@ class TestCutlassBackend(TestCase):
         ]
         shapes = shapes[0:1] if not dynamic else shapes
 
-        inputs = [
-            (
-                torch.randn(B, M, K).cuda().to(dtype),
-                torch.randn(B, N, K).cuda().to(dtype).permute(0, 2, 1),
-            )
-            for B, M, N, K in shapes
-        ]
+        inputs = []
+        for B, M, N, K in shapes:
+            if use_expand:
+                # Create A using unsqueeze and expand
+                A = torch.randn(M, K).cuda().to(dtype).unsqueeze(0).expand(B, -1, -1)
+            else:
+                # Original method
+                A = torch.randn(B, M, K).cuda().to(dtype)
+
+            B_tensor = torch.randn(B, N, K).cuda().to(dtype).permute(0, 2, 1)
+            inputs.append((A, B_tensor))
         dynamic_shapes = (
             {
                 "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC, 2: Dim.DYNAMIC},
