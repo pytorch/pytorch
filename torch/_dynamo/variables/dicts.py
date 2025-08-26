@@ -626,33 +626,48 @@ class ConstDictVariable(VariableTracker):
             )
         elif name == "__or__":
             assert len(args) == 1
-            # Dicts can only be unioned with other dicts or subclasses of dicts.
-            # Sets can be unioned with other sets, frozensets or subclasses of sets.
-            _raise = not (
-                (
-                    istype(self, ConstDictVariable)
-                    and istype(
-                        args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
-                    )
-                )
-                or (
-                    isinstance(self, SetVariable)
-                    and isinstance(
-                        args[0], (SetVariable, variables.UserDefinedSetVariable)
-                    )
-                )
-            )
+            other = args[0]
 
-            if _raise:
+            # Method resolution for binops works as follow (using __or__ as example):
+            # (1) dict.__or__(dict) => dict
+            # (2) dict.__or__(subclass): return NotImplemented
+            # (3) Check if subclass implements __ror__ => forward the call
+            # to subclass.__ror__(dict)
+
+            # Let's not forward the call to __ror__ yet because __ror__ can be
+            # implemented in C (i.e. OrderedDict subclass) which Dynamo cannot
+            # trace
+            # if istype(other, variables.UserDefinedDictVariable):
+            #     if other.call_obj_hasattr(tx, "__ror__").value:
+            #         return other.call_method(tx, "__ror__", [self], kwargs)
+
+            # The three dict types Dynamo can handle are dict, OrderedDict and
+            # defaultdict.
+
+            # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
+            if not istype(
+                other, (ConstDictVariable, variables.UserDefinedDictVariable)
+            ):
                 msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                    f"and '{args[0].python_type().__name__}'"
+                    f"and '{other.python_type().__name__}'"
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
+            # OrderedDict overloads __ror__
+            ts = {self.user_cls, other.user_cls}
+            user_cls = (
+                collections.OrderedDict
+                if any(issubclass(t, collections.OrderedDict) for t in ts)
+                else dict
+            )
+
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                items=self.items.copy(),
+                mutation_type=ValueMutationNew(),
+                source=None,
+                user_cls=user_cls,
             )
 
             # NB - Guard on all the keys of the other dict to ensure
