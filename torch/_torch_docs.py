@@ -7573,12 +7573,12 @@ The behavior depends on the dimensionality of the tensors as follows:
   1 is appended to its dimension for the purpose of the batched matrix multiply and removed after.
 
   The first N-2 dimensions of each argument, the batch dimensions, are
-  :ref:`broadcasted <broadcasting-semantics>` (and thus must be broadcastable).
+  :ref:`broadcast <broadcasting-semantics>` (and thus must be broadcastable).
   The last 2, the matrix dimensions, are handled as in the matrix-matrix product.
 
   For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
-  tensor, the batch dimensions are :math:`(j \times 1 \times)` and :math:`(k)`,
+  tensor, the batch dimensions are :math:`(j \times 1)` and :math:`(k)`,
   and the matrix dimensions are :math:`(n \times m)` and :math:`(m \times p)`.
   :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
