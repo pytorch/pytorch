@@ -1272,6 +1272,7 @@ def _compile(
         start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
+        exception_stack_trace: Optional[list[str]] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
@@ -1300,6 +1301,7 @@ def _compile(
             # info here and add it to the metrics context below.
             fail_type = type(e).__qualname__
             fail_reason = str(e)
+            exception_stack_trace = [traceback.format_exc()]
             exception_handler(e, code, frame, export=export)
             # NB: this is the post-mutation exception
             torch._logging.trace_structured(
@@ -1314,15 +1316,7 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if tracer_output and tracer_output.is_tracing_resume_prologue:
-                # Do not allow any errors to be suppressed if tracer is currently tracing
-                # through resume function.
-                raise ResumePrologueTracingError(
-                    "Error while tracing through a Dynamo-generated resume function prologue. "
-                    "Errors are not allowed when tracing resume function prologues.\n"
-                    f"{type(e).__qualname__}: {str(e)}"
-                ).with_traceback(e.__traceback__) from None
-            elif isinstance(
+            if isinstance(
                 e,
                 (
                     Unsupported,
@@ -1336,6 +1330,7 @@ def _compile(
                     BisectValidationException,
                     ShortenTraceback,
                     PackageError,
+                    ResumePrologueTracingError,
                 ),
             ):
                 raise
@@ -1420,6 +1415,7 @@ def _compile(
                 ),
                 "stack_trace": stack_trace,
                 "graph_node_shapes": str(graph_node_shapes),
+                "exception_stack_trace": exception_stack_trace,
             }
             # TODO: replace with CompileEventLogger.compilation_metrics
             # There are some columns here not in PT2 Compile Events

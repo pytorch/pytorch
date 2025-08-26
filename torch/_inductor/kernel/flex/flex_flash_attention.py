@@ -35,7 +35,6 @@ flash_attention_cutedsl_template = CuteDSLTemplate(
 
 def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
     """Check if the flex graphs are trivial"""
-    return True
     graph = graph_module.graph
     nodes = list(graph.nodes)
     # Check if it's just placeholder -> output
@@ -44,7 +43,8 @@ def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
     assert len(output) == 1, "Got graph w/ multiple outputs"
     output_val = output[0].args[0]
     if is_score_graph:
-        return len(placeholders) == 5 and output_val == placeholders[0]
+        # Make sure we dont have any captures
+        return len(placeholders) == 5
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
 
@@ -57,8 +57,8 @@ def _use_flex_flash_attention(
         return False
     if kernel_options.get("disable_flash", False):
         return False
-    if is_trivial_graph(subgraph.graph_module, True) and is_trivial_graph(
-        mask_graph.graph_module, False
+    if is_trivial_graph(subgraph.graph_module, is_score_graph=True) and is_trivial_graph(
+        mask_graph.graph_module, is_score_graph=False
     ):
         return True
 
