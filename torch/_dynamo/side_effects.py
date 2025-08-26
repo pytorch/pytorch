@@ -617,21 +617,16 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        init_live_vars = []
-        # gather stack/symbolic_locals for all tx's up the chain
-        cur_tx: Optional[InstructionTranslatorBase] = tx
-        while cur_tx is not None:
-            init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
-            cur_tx = cur_tx.parent
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
-            init_live_vars
-            + [
+            (
+                tx.stack,
+                tx.symbolic_locals,
                 pre_existing_vars,
                 tx.output.backward_state,
                 self.tensor_hooks,
-            ],
+            ),
         )
         # Manually release the self-referential function, which indirectly
         # captures certain `VariableTracker` and affects parts of PT test/logic
