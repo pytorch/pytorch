@@ -1456,7 +1456,15 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if isinstance(
+            if tracer_output and tracer_output.is_tracing_resume_prologue:
+                # Do not allow any errors to be suppressed if tracer is currently tracing
+                # through resume function.
+                raise ResumePrologueTracingError(
+                    "Error while tracing through a Dynamo-generated resume function prologue. "
+                    "Errors are not allowed when tracing resume function prologues.\n"
+                    f"{type(e).__qualname__}: {str(e)}"
+                ).with_traceback(e.__traceback__) from None
+            elif isinstance(
                 e,
                 (
                     Unsupported,
@@ -1470,7 +1478,6 @@ def _compile(
                     BisectValidationException,
                     ShortenTraceback,
                     PackageError,
-                    ResumePrologueTracingError,
                 ),
             ):
                 raise
