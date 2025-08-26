@@ -269,10 +269,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            # Use issubclass to work with *dict subclasses
+            issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
             and name == "fromkeys"
         ):
-            return super().var_getattr(tx, name)
+            m = inspect.getattr_static(self.value, name)
+            if m in dict_methods:
+                return super().var_getattr(tx, name)
+            else:
+                # dict subclass overloads "fromkeys"
+                return variables.UserDefinedDictVariable(self.value()).var_getattr(
+                    tx, name
+                )
 
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -412,9 +422,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+            issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
+        ) and name == "fromkeys":
             from .builtin import BuiltinVariable
 
             return BuiltinVariable.call_custom_dict_fromkeys(
@@ -806,7 +817,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
-        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
+        elif SideEffects.cls_supports_mutation_side_effects(self.value):
             with do_not_convert_to_tracable_parameter():
                 return tx.inline_user_function_return(
                     VariableTracker.build(
