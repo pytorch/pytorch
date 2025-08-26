@@ -14,7 +14,7 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -256,6 +256,31 @@ def deserialize_device(d: Device) -> torch.device:
     return torch.device(type=d.type, index=d.index)
 
 
+def deserialize_size(sizes: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_size in sizes:
+        assert sym_int_size.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_size.type}"
+        )
+    return tuple(sym_int_size.as_int for sym_int_size in sizes)
+
+
+def deserialize_stride(strides: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_stride in strides:
+        assert sym_int_stride.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_stride.type}"
+        )
+    return tuple(sym_int_stride.as_int for sym_int_stride in strides)
+
+
+def deserialize_scalar_type(st: ScalarType) -> torch.dtype:
+    return _SERIALIZE_TO_TORCH_DTYPE[st]
+
+
+def deserialize_storage_offset(offset: SymInt) -> int:
+    assert offset.type == "as_int", f"Only as_int is supported, got {offset.type}"
+    return offset.as_int
+
+
 def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
     if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
         s = s.node.expr
@@ -326,7 +351,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
         requires_grad=t.requires_grad,
         device=Device(type=t.device.type, index=t.device.index),
         strides=[serialize_sym_int(s) for s in t.stride()],
-        storage_offset=serialize_sym_int(0),  # TODO needs to be fixed.
+        storage_offset=serialize_sym_int(t.storage_offset()),
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
@@ -3019,6 +3044,13 @@ def _dict_to_dataclass(cls, data):
     return data
 
 
+def _bytes_to_dataclass(cls: Any, artifact_bytes: bytes) -> Any:
+    artifact_str = artifact_bytes.decode("utf-8")
+    artifact_dict = json.loads(artifact_str)
+    artifact_dataclass = _dict_to_dataclass(cls, artifact_dict)
+    return artifact_dataclass
+
+
 def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: Optional[dict[str, int]] = None,
@@ -3026,10 +3058,8 @@ def deserialize(
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
     assert isinstance(artifact.exported_program, bytes)
-    exported_program_str = artifact.exported_program.decode("utf-8")
-    exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
+    serialized_exported_program = _bytes_to_dataclass(
+        ExportedProgram, artifact.exported_program
     )
     return ExportedProgramDeserializer(expected_opset_version).deserialize(
         serialized_exported_program,
