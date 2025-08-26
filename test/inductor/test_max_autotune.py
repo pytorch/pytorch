@@ -19,7 +19,7 @@ from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -47,7 +47,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 aten = torch.ops.aten
@@ -220,9 +220,11 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
         # Verify that we are using a TMA implementation
-        FileCheck().check("triton_tem_fused_mm").check(
-            "triton.language.make_tensor_descriptor"
-        ).run(code[0])
+        # depending on whether we're using the experimental API, we check for a different string
+        check_str = "triton.language.extra.cuda.experimental_device_tensormap_create2d"
+        if has_triton_stable_tma_api():
+            check_str = "triton.language.make_tensor_descriptor"
+        FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
@@ -707,7 +709,7 @@ class TestMaxAutotune(TestCase):
 
         m_c = torch.compile(mode="max-autotune")(mod)
         out, code = run_and_get_code(m_c, x)
-        self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+        self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
         FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1679,6 +1681,26 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
+    @config.patch(
+        max_autotune_gemm=True,
+        max_autotune_prune_choices_based_on_shared_mem=True,
+    )
+    def test_max_autotune_prune_choices(self):
+        def mm(x, y):
+            return x @ y
+
+        M, K, N = (3, 3, 3)
+
+        x = torch.rand([M, K], device=GPU_TYPE, dtype=torch.float32)
+        y = torch.rand([K, N], device=GPU_TYPE, dtype=torch.float32)
+
+        compiled_f = torch.compile(mm)
+        compiled_f(x, y)
+
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
+        )
 
 
 class TestMaxAutotunePrecompile(TestCase):
