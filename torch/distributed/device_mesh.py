@@ -1148,6 +1148,102 @@ else:
 
             return res_mesh
 
+        def _unflatten(
+            self,
+            dim: Union[int, str],
+            mesh_sizes: tuple[int, ...],
+            mesh_dim_names: tuple[str, ...],
+        ) -> "DeviceMesh":
+            """
+            Returns a DeviceMesh by unflatten the current DeviceMesh.
+
+            This api can be used to unflatten a N-D DeviceMesh into N-1+len(mesh_sizes)-D meshes or submeshes.
+            The dim is the dimension to be unflattened which can be either a string or an integer.
+
+            The mesh_sizes is a tuple which specifies the shape of the mesh unflatten into for the given dim.
+            The mesh_dim_names is a list of strings which specifies the names of the dimensions of the mesh unflatten into.
+            Its length must match the length of mesh_sizes.
+
+            For example, if we have a 1D mesh DeviceMesh([0, 1, 2, 3, 4, 5, 6, 7], mesh_dim_names=("world")),
+            calling mesh_1d._unflatten(0, (2, 2, 4), ["dp", "pp", "tp"]) will create a 3D mesh
+            DeviceMesh([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], mesh_dim_names=("dp", "cp", "tp")).
+
+            Note that after calling the unflatten, there is no access to the unflattened dimension in mesh_1d, one can only
+            use the newly unflattened mesh to slice out the unflattened mesh dims.
+            """
+            if isinstance(dim, int) and dim >= self.ndim:
+                raise ValueError(
+                    f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
+                )
+            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+                raise ValueError(
+                    f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
+                )
+
+            if len(mesh_sizes) != len(mesh_dim_names):
+                raise RuntimeError(
+                    "mesh_dim_names must have same length as mesh_sizes in _unflatten!"
+                )
+
+            if not self._init_backend:
+                raise NotImplementedError(
+                    "flatten a device mesh without backend initialized is not supported!"
+                )
+
+            strides = [1]
+            for i in range(len(mesh_sizes) - 1):
+                strides.append(strides[-1] * mesh_sizes[i])
+            strides.reverse()
+
+            if isinstance(dim, str):
+                dim = not_none(self.mesh_dim_names).index(dim)
+
+            unflatten_layout = _Layout(tuple(mesh_sizes), tuple(strides))
+            unflattened_layout: list[_Layout] = []
+            unflattened_dim_names: list[str] = []
+            idxs = [i + dim for i in range(len(mesh_sizes))]
+            for i in range(self.ndim):
+                if i == dim:
+                    unflattened_layout.extend(
+                        self._layouts[i].composition(unflatten_layout)
+                    )
+                    unflattened_dim_names.extend(mesh_dim_names)
+                else:
+                    unflattened_layout.append(self._layouts[i])
+                    unflattened_dim_names.append(not_none(self.mesh_dim_names)[i])
+
+            global_override = _mesh_resources.mesh_dim_group_options.get(
+                dim, (None, None)
+            )
+            res_mesh = DeviceMesh._from_layouts(
+                self.device_type,
+                tuple(unflattened_layout),
+                self.get_rank(),
+                dim_names=tuple(unflattened_dim_names),
+            )
+            _mesh_resources.child_to_root_mapping[res_mesh] = (
+                _mesh_resources.get_root_mesh(self)
+            )
+            for dim in range(0, self.ndim + len(idxs) - 1):
+                if dim in idxs:
+                    res_mesh._get_or_create_backend(
+                        unflattened_layout[dim],
+                        dim,
+                        unflattened_dim_names[dim],
+                        backend_override=global_override,
+                    )
+                else:
+                    idx = dim - len(idxs) + 1 if dim > idxs[-1] else dim
+                    res_mesh._layouts_to_groups[unflattened_layout[dim]] = (
+                        self._layouts_to_groups[self._layouts[idx]]
+                    )
+                    res_mesh._names_to_layouts[unflattened_dim_names[dim]] = (
+                        self._names_to_layouts[not_none(self.mesh_dim_names)[idx]]
+                    )
+            res_mesh._init_backend = True
+
+            return res_mesh
+
     def _normalize_backend_override(
         backend_override: dict[
             Union[int, str],
