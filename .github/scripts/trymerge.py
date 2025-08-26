@@ -2416,6 +2416,11 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
     try:
+        # Ensure comment id is set, else fail
+        if not args.comment_id:
+            raise ValueError(
+                "Comment ID is required for merging PRs, please provide it using --comment-id")
+
         merge(
             pr,
             repo,
