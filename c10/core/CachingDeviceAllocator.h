@@ -1452,6 +1452,11 @@ struct CachingDeviceAllocatorImpl {
   // Synchronizes the given event, blocking until it completes.
   virtual void synchronize_event(const EventT& event) = 0;
 
+  // Synchronizes the device to ensure all operations are complete before
+  // releasing a memory block. see Note [Safe to Release Blocks on BlockPool]
+  virtual void synchronize_device_before_release_block(
+      c10::DeviceIndex device) = 0;
+
   // Records events for all streams that have used the given memory block.
   // This function transfers the ownership of the block’s `stream_uses` set.
   void insert_events(BlockT* block) {
@@ -1874,6 +1879,20 @@ struct CachingDeviceAllocatorImpl {
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_segment_allocated);
 
+    /*
+     * Note [Safe to Release Blocks on BlockPool]
+     *
+     * If the runtime does not guarantee that a device pointer can be safely
+     * released before all kernel accesses to it have completed, then a
+     * device-level synchronization must be performed before releasing the
+     * associated blocks.
+     *
+     * For example, CUDA guarantees that calling `cudaFree` is safe even if
+     * kernels are still accessing the device pointer. Therefore, no explicit
+     * device-level synchronization is required before releasing blocks. In
+     * other runtimes without this guarantee, explicit synchronization is
+     * mandatory.
+     */
     auto* pool = block->pool;
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
       // If there is an active mempool with a given allocator,
@@ -1939,6 +1958,9 @@ struct CachingDeviceAllocatorImpl {
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
+    // See Note [Safe to Release Blocks on BlockPool]
+    synchronize_device_before_release_block(device_index_);
+
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
         captures_underway.empty()) {
       // If there is no active mempool, we work on releasing *all* blocks.
@@ -1997,6 +2019,9 @@ struct CachingDeviceAllocatorImpl {
     BlockT key(p.device(), p.stream(), p.size());
     if (key.size < AcceleratorAllocatorConfig::max_split_size())
       key.size = AcceleratorAllocatorConfig::max_split_size();
+
+    // See Note [Safe to Release Blocks on BlockPool]
+    synchronize_device_before_release_block(device_index_);
 
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream() ||
@@ -2154,6 +2179,9 @@ struct CachingDeviceAllocatorImpl {
     if (freeable_block_count == 0) {
       return;
     }
+
+    // See Note [Safe to Release Blocks on BlockPool]
+    synchronize_device_before_release_block(device_index_);
 
     // Repeat GC until we reach reclaim > target size.
     bool block_freed = true;
