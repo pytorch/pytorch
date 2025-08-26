@@ -3426,7 +3426,7 @@ class InstructionTranslatorBase(
         self.push(exit)
 
         if target:
-            if isinstance(self, InstructionTranslator) or config.nested_graph_breaks:
+            if isinstance(self, InstructionTranslator):
                 self.block_stack.append(
                     BlockStackEntry(inst, target, len(self.stack), ctx)
                 )
