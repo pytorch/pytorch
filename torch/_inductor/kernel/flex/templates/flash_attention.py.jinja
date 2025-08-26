@@ -21,7 +21,12 @@
         ) | indent_except_first(2) }}
         return tSrS_ssa
 
-    output, lse_out = _flash_attn_fwd(
+    # (B,M,H,D) -> (B,H,M,D)
+    output = {{get_output()}}
+    output_transposed = output.transpose(1, 2)
+
+    # Out and LSE filled inplace
+    _flash_attn_fwd(
         q_transposed,
         k_transposed,
         v_transposed,
@@ -29,11 +34,6 @@
         causal={{CAUSAL}},
         return_lse=True,
         score_mod=score_mod,
+        out=output_transposed,
+        lse=LOGSUMEXP
     )
-
-    # Transpose output back (B,M,H,D) -> (B,H,M,D)
-    output_final = output.transpose(1, 2)
-
-    # Copy results to output tensors
-    {{get_output()}}[:] = output_final
-    LOGSUMEXP[:] = lse_out
