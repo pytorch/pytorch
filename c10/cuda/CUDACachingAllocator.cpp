@@ -488,7 +488,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
   }
 
   void mapHandles(size_t begin, size_t end) override {
-    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_.get());
     for (auto i : c10::irange(begin, end)) {
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
           devPtr + i * segment_size_,
@@ -514,7 +514,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
       cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
-    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_.get());
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& h = handles_.at(i).value();
@@ -535,7 +535,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     desc.location.id = static_cast<int>(device);
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
+    CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_.get());
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         devPtr + begin * segment_size_,
         (end - begin) * segment_size_,
@@ -738,10 +738,10 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
     context_recorder_.store(record_history ? context_recorder : nullptr);
-    cuda_alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
+    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
     if (!enabled || clearHistory) {
-      cuda_alloc_buffer.clear();
+      alloc_buffer.clear();
     }
   }
 
@@ -754,7 +754,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
   }
 
-  void allocate_device_ptr(void** ptr, AllocParamsT& p) {
+  void allocate_device_ptr(void** ptr, AllocParamsT& p) override {
     cudaError_t error = C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, p.alloc_size));
     if (error == cudaErrorMemoryAllocation) {
       p.status = AllocParamsT::OOM;
@@ -907,7 +907,7 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
       const std::unordered_set<void*>& expected_live_allocations) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    PrivatePool* pool = nullptr;
+    PrivatePoolT* pool = nullptr;
     auto pool_it = graph_pools.find(mempool_id);
     TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
     pool = pool_it->second.get();
