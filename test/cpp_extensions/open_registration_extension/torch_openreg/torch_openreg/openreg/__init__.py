@@ -2,8 +2,6 @@ import torch
 
 import torch_openreg._C  # type: ignore[misc]
 
-from . import meta  # noqa: F401
-
 
 _initialized = False
 
@@ -44,10 +42,6 @@ def set_device(device) -> None:
     return torch_openreg._C._set_device(device)
 
 
-def init():
-    _lazy_init()
-
-
 def is_initialized():
     return _initialized
 
@@ -70,7 +64,6 @@ __all__ = [
     "set_device",
     "initial_seed",
     "is_available",
-    "init",
     "is_initialized",
     "random",
     "manual_seed",
