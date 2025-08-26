@@ -29,7 +29,6 @@ __all__ = [
     "ProcessException",
     "ProcessExitedException",
     "ProcessRaisedException",
-    "should_use_parallel_start",
     "spawn",
     "SpawnContext",
     "start_processes",
@@ -265,9 +264,6 @@ def start_processes(
     else:
         # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
         start_parallel = False
-
-    if numa_options is not None and start_parallel:
-        raise ValueError("NUMA binding is not compatible with parallel start")
 
     mp = multiprocessing.get_context(start_method)
     error_files = [None] * nprocs
