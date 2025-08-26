@@ -1549,6 +1549,18 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             self.assertNotEqual(self.thetype, other)
             self.assertTrue(self.thetype is not other, f"{self.thetype=}, {other=}")
 
+    def test_bool(self):
+        p = self.thetype()
+        q = self.thetype({"a": 1, "b": 2})
+        if p:
+            self.fail("empty mapping must compare to False")
+        if not q:
+            self.fail("full mapping must compare to True")
+        if bool(p):
+            self.fail("empty mapping must compare to False")
+        if not bool(q):
+            self.fail("full mapping must compare to True")
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
