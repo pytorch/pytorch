@@ -675,11 +675,20 @@ class TestDecomp(TestCase):
             )
             m = module_cls(*args, **kwargs)
             m.to(device).to(dtype)
-
+            print(m)
             args, kwargs = (
                 module_input.forward_input.args,
                 module_input.forward_input.kwargs,
             )
+            for arg in args:
+                if type(arg) is tuple:
+                    for idx, subarg in enumerate(arg):
+                        print(f"subarg {idx} is {subarg} with shape {subarg.shape}")
+                else:
+                    print(f"arg is: {arg} and shape: {arg.shape}")
+            print(kwargs)
+            non_decomp_out = m(*args, **kwargs)
+            print(non_decomp_out)
             with (
                 self.DecompCrossRefMode(
                     self, self.precision, self.rel_tol, dtype, run_all=True
@@ -688,10 +697,10 @@ class TestDecomp(TestCase):
             ):
                 decomp_out = m(*args, **kwargs)
 
-            non_decomp_out = m(*args, **kwargs)
             # without this check, incorrect decomps at the python dispatcher level can still pass because
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
+            print("Passed this first one!")
 
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
@@ -778,6 +787,7 @@ def forward(self, scores_1, mask_1, value_1):
 
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
+            self.supports_higher_order_operators = True
             self.test_case = test_case
             self.saved_precision = saved_precision
             self.saved_rel_tol = saved_rel_tol
@@ -972,7 +982,11 @@ def forward(self, scores_1, mask_1, value_1):
                 # for each region
                 with (
                     self.DecompCrossRefMode(
-                        self, self.precision, self.rel_tol, dtype, run_all
+                        self,
+                        self.precision,
+                        self.rel_tol,
+                        dtype,
+                        run_all,
                     ) as mode,
                     enable_python_dispatcher(),
                 ):
