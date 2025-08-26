@@ -221,7 +221,7 @@ def preprocess_test_in(
     target_path = Path(target_file)
     lines = target_path.read_text().splitlines()
 
-    pkgs_to_add = ["pybind11==3.0.1"]
+    pkgs_to_add = []
 
     # Remove lines starting with the package names (==, @, >=) — case-insensitive
     pattern = re.compile(rf"^({'|'.join(pkgs_to_remove)})\s*(==|@|>=)", re.IGNORECASE)
