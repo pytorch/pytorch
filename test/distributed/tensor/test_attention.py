@@ -22,6 +22,7 @@ from torch.distributed.tensor.experimental._attention import (
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
+    PerDocumentHeadTailLoadBalancer,
     set_rotate_method,
 )
 from torch.distributed.tensor.parallel import parallelize_module
@@ -38,7 +39,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     ModelArgs,
@@ -80,6 +81,7 @@ class LoadBalanceTest(TestCase):
         batch_size = 2
         doc_count = 4
         max_seq_len = 28
+
         # initialize document mask
         lengths = [
             generate_random_lengths_in_chunks(
@@ -87,8 +89,15 @@ class LoadBalanceTest(TestCase):
             )
             for _ in range(batch_size)
         ]
-        offsets = length_to_offsets(lengths, self.device_type)
-        document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+        print(f"lengths={lengths}")
+
+        # instantiate the load balancer object
+        lb = PerDocumentHeadTailLoadBalancer(
+            lengths, self.world_size, torch.device(self.device_type)
+        )
+        indices_per_batch = lb.generate_indices(restore=False)
+
+        print(indices_per_batch)
 
 
 class RingAttentionTest(DTensorTestBase):
@@ -783,6 +792,7 @@ class RingFlexAttentionTest(DTensorTestBase):
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
             _cp_options.enable_load_balance = enable_load_balance
+            # generate
 
             # construct testing function
             test_func = functools.partial(
