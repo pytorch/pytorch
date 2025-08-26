@@ -28,7 +28,6 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
-    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -175,6 +174,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
+    "inductor/test_flex_attention",
 ]
 
 S390X_BLOCKLIST = [
@@ -909,10 +909,6 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
-    # TODO(FFFrog): Will remove this later when windows/macos are supported.
-    if not IS_LINUX:
-        return 0
-
     openreg_dir = os.path.join(
         test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
