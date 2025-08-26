@@ -196,7 +196,7 @@ class PagedAttention:
         self,
         block_mask: BlockMask,
         batch_idx: Optional[torch.Tensor] = None,
-        kv_len: Optional[Union[int, torch.Tensor]] = None,
+        kv_len: Optional[torch.Tensor] = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -209,6 +209,8 @@ class PagedAttention:
                 batch dimension. This provides flexibility to convert a
                 block mask with smaller batch size than the page table;
                 shape :math:`(B)`.
+            kv_len (Optional[Tensor]): actual KV sequence length for upper bound check;
+                shape :math:`(B,)` to handle multiple batches.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 
@@ -276,7 +278,7 @@ class PagedAttention:
     def get_mask_mod(
         self,
         mask_mod: Optional[_mask_mod_signature],
-        kv_len: Optional[Union[int, torch.Tensor]] = None,
+        kv_len: Optional[torch.Tensor] = None,
     ) -> _mask_mod_signature:
         """
         Converts a mask_mod based on mapping from the physical block index to the logical
@@ -299,9 +301,10 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
-
             live_block = logical_block_idx >= 0
-            within_upper_bound = logical_kv_idx < kv_len if kv_len is not None else True
+            within_upper_bound = (
+                logical_kv_idx < kv_len[b] if kv_len is not None else True
+            )
             within_lower_bound = logical_kv_idx >= 0
             is_valid = live_block & within_upper_bound & within_lower_bound
 

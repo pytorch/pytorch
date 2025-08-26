@@ -540,8 +540,9 @@ class TestFlexDecoding(InductorTestCase):
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
+        kv_len_tensor = torch.full((KV_B,), KV_S, device=device, dtype=torch.int64)
         converted_block_mask = paged_attention.convert_logical_block_mask(
-            block_mask, kv_len=KV_S
+            block_mask, kv_len=kv_len_tensor
         )
         converted_score_mod = paged_attention.get_score_mod(score_mod)
 
@@ -1544,7 +1545,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
-    def test_max_autotune_with_captured(self, device):
+    def test_ma_autotune_with_captured(self, device):
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
         tok_scale = torch.randn(S, device=device)
@@ -2008,8 +2009,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         input_pos = torch.tensor(prefill_length, device=device, dtype=torch.int32).view(
             max_batch_size, 1
         )
+        kv_len_tensor = torch.full(
+            (max_batch_size,), max_seq_len, device=device, dtype=torch.int64
+        )
         new_block_mask = paged_cache.convert_logical_block_mask(
-            block_mask, kv_len=max_seq_len
+            block_mask, kv_len=kv_len_tensor
         )
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(
