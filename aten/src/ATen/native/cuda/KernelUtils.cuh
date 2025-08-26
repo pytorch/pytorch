@@ -225,9 +225,9 @@ __device__ __forceinline__ void fastAtomicAdd(
 
 
 #ifdef USE_ROCM
-// This function implements a commited store.
-// Upon returning, the store is commited to to global memory.
-// This is usefull in avoiding the need for fences.
+// This function implements a committed store.
+// Upon returning, the store is committed to global memory.
+// This is useful in avoiding the need for fences.
 template <typename T>
 __device__ inline void cmtdStore(void* address, T value) {
       int constexpr num_long_per_val = sizeof(value)/sizeof(long);
