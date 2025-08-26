@@ -824,9 +824,13 @@ def get_pt_operator_registry_dict(
         apple_sdks = kwargs.get("apple_sdks"),
     )
 
+    # Extract existing linker_flags from kwargs and combine with default flags
+    existing_linker_flags = kwargs.pop("linker_flags", [])
+    combined_linker_flags = get_no_as_needed_linker_flag() + existing_linker_flags
+
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = get_no_as_needed_linker_flag(),
+        linker_flags = combined_linker_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
@@ -1143,6 +1147,9 @@ def define_buck_targets(
             "AT_BLAS_USE_CBLAS_DOT_FBXPLAT",
             "--replace",
             "@AT_KLEIDIAI_ENABLED@",
+            "0",
+            "--replace",
+            "@AT_USE_EIGEN_SPARSE@",
             "0",
         ]),
         outs = {
