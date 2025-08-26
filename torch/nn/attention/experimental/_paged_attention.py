@@ -116,7 +116,6 @@ class PagedAttention:
         Args:
             batch_idx (Tensor): batch index to be removed; shape :math:`(1)`.
         """
-
         # find allocated pages
         allocated_page_idx = self.page_table[batch_idx] != -1
         allocated_pages = self.page_table[batch_idx][allocated_page_idx]
@@ -138,7 +137,7 @@ class PagedAttention:
     ) -> None:
         """
         Assigns new contents `val` to the storage `cache` at the location
-        `batch_idx` and `input_pos`.
+        `batch_idx` and `input_pos`.`
 
         Args:
             batch_idx (Tensor): batch index; shape :math:`(B)`.
@@ -150,6 +149,7 @@ class PagedAttention:
             raise RuntimeError("val must not require gradient")
 
         B, H, S, K_D = k_val.shape
+        self.seq_len = S
         V_D = v_val.shape[3]
         if B != batch_idx.shape[0]:
             raise RuntimeError(
@@ -182,12 +182,13 @@ class PagedAttention:
         logical_block_offset = input_pos % self.page_size  # [B, S]
         physical_block_idx = torch.gather(
             self.page_table[batch_idx], 1, logical_block_idx.to(torch.int64)
-        ).to(torch.int32)  # [B, S]
+        ).to(
+            torch.int32
+        )  # [B, S]
 
         addr = (physical_block_idx * self.page_size + logical_block_offset).view(
             -1
         )  # [B*S]
-
         k_val = k_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, K_D)
         v_val = v_val.permute(1, 0, 2, 3).contiguous().view(1, H, B * S, V_D)
 
@@ -297,9 +298,13 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
-            return torch.where(
-                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
-            )
+
+            live_block = logical_block_idx >= 0
+            within_upper_bound = logical_kv_idx < self.seq_len
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
+            return torch.where(is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False)
 
         return new_mask_mod
 
