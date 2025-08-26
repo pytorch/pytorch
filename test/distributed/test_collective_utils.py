@@ -12,6 +12,7 @@ from torch.distributed.collective_utils import (
     broadcast,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -163,15 +164,10 @@ class TestCollectiveUtils(MultiProcessTestCase):
         for actual, expected in zip(value_ranks.values(), [{0}, {1}, {2, 3}]):
             self.assertEqual(actual, expected, actual)
 
-        # Prints something like this, I was too lazy to figure out how to check the log but at least make sure the
-        # function does not crash
-        # [rank0]:E0808 ] Generator desync detected:
-        # [rank0]:E0808 ] Ranks    (Seed, Offset) values
-        # [rank0]:E0808 ] -------  -----------------------
-        # [rank0]:E0808 ] 0        (456, 0)
-        # [rank0]:E0808 ] 1        (123, 4)
-        # [rank0]:E0808 ] 2-3      (123, 0)
-        _check_rng_sync(generator, group)
+        log_str = _check_rng_sync(generator, group)
+        FileCheck().check("Generator desync detected").check("Ranks").check("0").check(
+            "1"
+        ).check("2-3").run(log_str)
 
 
 class TestUtils(TestCase):
@@ -200,17 +196,13 @@ class TestUtils(TestCase):
         summaries = {
             name: _summarize_ranks(ranks_lists[name]) for name in mesh_dim_names
         }
-        self.assertEqual(
-            summaries["pp"], "(0, 512, ..., 4096)"
-        )  # TODO the last rank is 3584, is this too unintuitive?
-        self.assertEqual(
-            summaries["dp"], "(0, 8, ..., 512)"
-        )  # similarly, last rank is 504
+        self.assertEqual(summaries["pp"], "0:4096:512")
+        self.assertEqual(summaries["dp"], "0:512:8")
         self.assertEqual(summaries["tp"], "0:8")
 
         self.assertEqual(
             _summarize_ranks([1, 2, 3, 6, 7, 8, 10, 12, 14, 16]),
-            "1:4,6:9,(10, 12, ..., 18)",
+            "1:4,6:9,10:18:2",
         )
 
 

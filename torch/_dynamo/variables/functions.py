@@ -62,12 +62,14 @@ from ..source import (
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    SkipGuardSource,
 )
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
     counters,
+    create_nested_fn_cache,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -275,6 +277,11 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
+    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
+    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
+    if create_nested_fn_cache.get(cache_key):
+        return create_nested_fn_cache.get(cache_key)
+
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -286,7 +293,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-
+    create_nested_fn_cache.set(cache_key, func)
     return func
 
 
@@ -303,6 +310,13 @@ fn_known_dunder_attrs = {
 
 def fn_var_getattr(tx, fn, source, name):
     source = source and AttrSource(source, name)
+
+    if source and name == "__annotations__":
+        # We get a large number of silly guards from annotations from inspect
+        # module. Changing annotations is rare, and it impacting the extracted
+        # graph is even rarer. So skip guards.
+        source = SkipGuardSource(source)
+
     try:
         subobj = inspect.getattr_static(fn, name)
     except AttributeError:
@@ -416,6 +430,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
+    def get_source(self):
+        source = self.source
+
+        if source and isinstance(self, variables.UserMethodVariable):
+            source = self.source_fn
+        return source
+
     def bind_args(self, parent, args, kwargs) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
@@ -428,7 +449,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if not isinstance(fn, FunctionType):
             raise TypeError("Only supports regular Python functions.")
         root_tx = parent.output.root_tx
-        result = bind_args_cached(fn, root_tx, self.source, args, kwargs)
+
+        source = self.get_source()
+        result = bind_args_cached(fn, root_tx, source, args, kwargs)
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
@@ -441,8 +464,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if cell in side_effects:
                 cell_var = side_effects[cell]
 
-            elif self.source:
-                closure_cell = GetItemSource(ClosureSource(self.source), idx)
+            elif source:
+                closure_cell = GetItemSource(ClosureSource(source), idx)
                 closure_cell_contents = AttrSource(closure_cell, "cell_contents")
                 try:
                     contents_var = VariableTracker.build(
@@ -472,7 +495,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         if name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
-        return fn_var_getattr(tx, self.fn, self.source, name)
+        source = self.get_source()
+        return fn_var_getattr(tx, self.fn, source, name)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1044,9 +1068,24 @@ class FunctionDecoratedByContextlibContextManagerVariable(
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs) -> None:
+    def __init__(self, fn, obj, source_fn=None, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
+        self.source_fn = source_fn
+        # Note on source and source_fn
+        # Be careful with `source` when delegating to UserFunctionVariable
+        # (base-class) methods. In this __init__, `source` is a *bound method*
+        # object, but the base class expects the underlying *function* object.
+        # One way is to simplly use `__func__` to unwrap it.
+        #
+        # For recursive dict-tag optimizations, it can be faster to fetch the
+        # function directly from `cls.__dict__`; that’s why we pass on
+        # `source_fn`. Whenever it is possible to access the function from
+        # cls.__dict__, we pass that on to `source_fn`. Because bind_args
+        # operates on the unbound function, most guards should target
+        # `source_fn` rather than the original `source`.
+        if source_fn is None and kwargs.get("source") is not None:
+            self.source_fn = AttrSource(kwargs.get("source"), "__func__")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
@@ -1122,11 +1161,13 @@ class UserMethodVariable(UserFunctionVariable):
         return super().inspect_parameter_names()[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
-        source = self.source and AttrSource(self.source, name)
         if name == "__self__":
             return self.obj
         if name == "__func__":
-            return VariableTracker.build(tx, self.fn, source)
+            # We might have a better way to access the function object, this
+            # information is stored in self.source_fn, use that to construct the
+            # variable tracker.
+            return VariableTracker.build(tx, self.fn, self.source_fn)
         return super().var_getattr(tx, name)
 
 
@@ -1431,7 +1472,13 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
+            install_guard(
+                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
+                    GuardBuilder.FUNCTION_MATCH
+                )
+            )
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
@@ -1815,10 +1862,17 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
     ) -> "VariableTracker":
         constant_args = check_constant_args(args, kwargs)
         if constant_args:
-            value = self.fn(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+            try:
+                value = self.fn(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except TypeError as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=list(map(ConstantVariable.create, exc.args)),
+                )
             return variables.UserDefinedClassVariable(
                 value, mutation_type=ValueMutationNew()
             )
