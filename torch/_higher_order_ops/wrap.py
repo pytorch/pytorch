@@ -250,46 +250,6 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return super().__call__(gmod, *args, **kwargs)
 
 
-#         import torch.fx.traceback as fx_traceback
-#         from torch.fx import Interpreter
-
-#         if "_checkpoint_context_fn" in gmod.meta:
-#             warning_once(
-#                 log,
-#                 """
-# Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
-# Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
-# """,
-#             )
-#             # use_reentrant is set to False because this op is going to be traced.
-#             # And we ensure that AOT Autograd traces through the non reentrant
-#             # version of checkpointing.
-#             kwargs["use_reentrant"] = False
-#             # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
-#             # `torch.random.fork_rng` op (which is not supported yet under CUDA).
-#             # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
-#             # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
-#             # instead of in AOTAutograd).
-#             kwargs["preserve_rng_state"] = False
-#             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
-#             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
-#             # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-#             gmod = self.tag_nodes(gmod, is_sac=True)
-#             # Using interpreter allows preservation of metadata through torch.compile stack.
-#             with fx_traceback.preserve_node_meta():
-#                 from torch.utils.checkpoint import checkpoint
-
-#                 return checkpoint(Interpreter(gmod).run, *args, **kwargs)
-#         else:
-#             gmod = self.tag_nodes(gmod, is_sac=False)
-#             # Using interpreter allows preservation of metadata through torch.compile stack.
-#             # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
-#             # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
-#             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
-#             with fx_traceback.preserve_node_meta():
-#                 return Interpreter(gmod).run(*args)
-
-
 tag_activation_checkpoint = TagActivationCheckpoint()
 
 
