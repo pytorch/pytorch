@@ -25,15 +25,27 @@ class KernelInputs:
         self,
         input_nodes: list[Any],
         scalars: Optional[dict[str, Union[float, int]]] = None,
+        views: Optional[dict[str, Any]] = None,
     ):
         """
         Initialize with a tuple of input nodes.
 
+        You can use scalars to propagate through scalar values that are not nodes
+
+        You can use views if some templates/ops need specific nodes to be different
+        views of some of the input_nodes. It is your responsibility to manage this
+        correctly inside the heuristic e.g. through adjust_kernel_inputs
+
         Args:
             input_nodes: A tuple of input nodes to store
+            scalars: Optional dictionary of scalar values
+                e.g. {'alpha': 0.5}
+            views: Optional dictionary of view information
+                e.g. {'inp_unexpanded': inp}
         """
         self._input_nodes = input_nodes
         self._device_name: Optional[str] = None
+        self._views = views if views is not None else {}
         self._scalars = scalars if scalars is not None else {}
         assert len(input_nodes) > 0, "Expected at least one input node"
 
@@ -55,6 +67,15 @@ class KernelInputs:
         )
         return [self._input_nodes[i] for i in reorder]
 
+    def views(self) -> dict[str, Any]:
+        """
+        Return the stored view information.
+
+        Returns:
+            The dictionary of view information
+        """
+        return self._views
+
     @property
     def key(self) -> str:
         """
@@ -74,7 +95,7 @@ class KernelInputs:
         )
 
         # Create base key from node information
-        fmt_key = str(node_info)
+        fmt_key = f"{self.device_name}+{str(node_info)}"
 
         # Add scalar information if present
         if self._scalars:
@@ -85,7 +106,7 @@ class KernelInputs:
             scalars_key = "&".join(scalar_parts)
             fmt_key = f"{fmt_key}+{scalars_key}"
 
-        return f"{fmt_key}+{self.device_name}"
+        return f"{fmt_key}"
 
     @property
     def count(self) -> int:
@@ -117,6 +138,7 @@ class KernelInputs:
         """
         return self._input_nodes[0].get_device()
 
+    @property
     def device_name(self) -> Optional[str]:
         """
         Get the device name information.
@@ -200,6 +222,15 @@ class KernelInputs:
         """
         return self._input_nodes[idx].get_dtype()
 
+    def scalars(self) -> dict[str, Union[float, int]]:
+        """
+        Get the scalar values for all input nodes.
+
+        Returns:
+            A dictionary of scalar values for each input node
+        """
+        return self._scalars
+
     def get_scalar(self, name: str) -> Union[float, int]:
         """
         Get the scalar value for a given name.
@@ -224,6 +255,7 @@ class MMKernelInputs(KernelInputs):
         self,
         input_nodes: list[Any],
         scalars: Optional[dict[str, Union[float, int]]] = None,
+        views: Optional[dict[str, Any]] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):
@@ -233,7 +265,7 @@ class MMKernelInputs(KernelInputs):
         By default, we assume the last 2 input nodes are mat1 and mat2, but
         the caller can adjust when necessary
         """
-        super().__init__(input_nodes, scalars)
+        super().__init__(input_nodes, scalars, views)
         # for mm, we need at least 2 nodes, and we need to know which nodes
         # are the main matrixes e.g. addmm is (bias, mat1, mat2) whereas others
         # might be (mat1, mat2, scale), etc.
