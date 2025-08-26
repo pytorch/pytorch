@@ -1481,11 +1481,11 @@ def should_prefer_unfused_addmm(match):
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2")),
-    pass_dict=pass_patterns[1],
+    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
@@ -1534,6 +1534,7 @@ def native_matmul_pass(graph: torch.fx.Graph):
         K, N = mat2.shape[-2], mat2.shape[-1]
 
         # Skip if size is zero or one.
+        # TODO : support when size is one
         if M <= 1 or K <= 1 or N <= 1:
             return False
 
@@ -1543,18 +1544,28 @@ def native_matmul_pass(graph: torch.fx.Graph):
 
         return True
 
+    # TODO : support aten.baddmm
     @register_graph_pattern(
         CallFunction(
-            aten.addmm, KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2")
+            aten.addmm, 
+            KeywordArg("inp"), KeywordArg("mat1"), KeywordArg("mat2"),
+            beta = KeywordArg("beta"), alpha = KeywordArg("alpha")
         ),
         pass_dict=graph_pass[0],
         extra_check=native_matmul_extra_check,
     )
-    def addmm_to_mm_and_add(match: Match, inp, mat1, mat2):
-        def repl(inp, x1, x2):
-            return x1 @ x2 + inp
+    def addmm_to_mm_and_add(match: Match, inp, mat1, mat2, beta, alpha):
+        def repl(inp, x1, x2, beta, alpha):
+            if beta == 1 and alpha == 1:
+                return inp + x1 @ x2
+            elif beta == 1 and alpha != 1:
+                return inp + alpha * (x1 @ x2)
+            elif beta != 1 and alpha == 1:
+                return beta * inp + x1 @ x2
+            else:
+                return beta * inp + alpha * (x1 @ x2)
 
-        match.replace_by_example(repl, [inp, mat1, mat2])
+        match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
 
     @register_lowering_pattern(
         CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
