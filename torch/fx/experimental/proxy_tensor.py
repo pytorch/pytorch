@@ -2065,7 +2065,7 @@ class _MakefxTracer:
             nullcontext()
         )
         self.record_stack_traces = record_stack_traces
-        self.parent_tracer: Optional[_MakefxTracer] = None
+        self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
