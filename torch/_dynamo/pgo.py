@@ -619,6 +619,8 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
 def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     dynamic_sources: OrderedSet[str] = OrderedSet()
     for src, fs in code_state.automatic_dynamic.items():
+        if src.startswith("G['"):  # skip globals
+            continue
         dynamic = False
         if isinstance(fs.size, tuple):
             dynamic = auto_dynamic in fs.size  # type: ignore[operator]
