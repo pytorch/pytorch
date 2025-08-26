@@ -1249,6 +1249,31 @@ class TestTransformers(NNTestCase):
 
             self.assertRaises(RuntimeError, func)
 
+    @sdpa_kernel(backends=[SDPBackend.MATH])
+    def test_scaled_dot_product_attention_matmul_inconsistent_dtypes(self, device):
+        dtypes = [torch.bfloat16, torch.float16]
+        orig_status = torch._C._get_math_sdp_allow_fp16_bf16_reduction()
+        # set math_sdp to allow lower precision q/k/v
+        torch._C._set_math_sdp_allow_fp16_bf16_reduction(True)
+        for dtype in dtypes:
+
+            def rand_tensor(*shape):
+                return torch.rand(shape, device=device, dtype=dtype)
+
+            size = (1, 4, 2)
+            query = rand_tensor(*size)
+            key = rand_tensor(*size)
+            value = rand_tensor(*size)
+            # Construct sparse mask to pass the check at::areAnyTensorSubclassLike({attn, *attn_mask})
+            # and thus do attn = attn.add(*attn_mask) to generate mixed dtype inputs for matmul
+            indices = torch.tensor([[0, 0, 0, 0], [0, 1, 2, 3], [0, 1, 2, 3]])
+            values = torch.rand(4, dtype=torch.float)
+            sparse_mask = torch.sparse_coo_tensor(indices, values, (1, 4, 4), device=device, dtype=torch.float)
+            # There should be no inconsistent dtypes error
+            torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, sparse_mask, 0.0, False)
+        torch._C._set_math_sdp_allow_fp16_bf16_reduction(orig_status)
+
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
     def test_mask_check_fastpath(self):

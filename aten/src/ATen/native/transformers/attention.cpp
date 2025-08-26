@@ -916,13 +916,19 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
         attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value_expanded * dropout_scaling).to(origin_dtype), attn.to(origin_dtype));
+        return std::make_tuple(
+          at::matmul(attn.to(value_expanded.scalar_type()), value_expanded * dropout_scaling).to(origin_dtype),
+          attn.to(origin_dtype)
+        );
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }
     }
 
-    return std::make_tuple(at::matmul(attn, value_expanded).to(origin_dtype), attn.to(origin_dtype));
+    return std::make_tuple(
+      at::matmul(attn.to(value_expanded.scalar_type()), value_expanded).to(origin_dtype),
+      attn.to(origin_dtype)
+    );
 }
 
 std::tuple<at::Tensor, at::Tensor>
