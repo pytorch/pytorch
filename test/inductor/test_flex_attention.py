@@ -2384,6 +2384,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod, dtype=torch.float16, device=device
         )
+        self.run_test_with_paged_attention(
+            score_mod=score_mod,
+            dtype=torch.bfloat16,
+            KV_S=64,
+            device=device,
+        )
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")
