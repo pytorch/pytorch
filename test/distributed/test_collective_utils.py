@@ -10,6 +10,7 @@ from torch.distributed.collective_utils import (
     all_gather,
     broadcast,
 )
+from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -159,15 +160,10 @@ class TestCollectiveUtils(MultiProcessTestCase):
         for actual, expected in zip(value_ranks.values(), [{0}, {1}, {2, 3}]):
             self.assertEqual(actual, expected, actual)
 
-        # Prints something like this, I was too lazy to figure out how to check the log but at least make sure the
-        # function does not crash
-        # [rank0]:E0808 ] Generator desync detected:
-        # [rank0]:E0808 ] Ranks    (Seed, Offset) values
-        # [rank0]:E0808 ] -------  -----------------------
-        # [rank0]:E0808 ] 0        (456, 0)
-        # [rank0]:E0808 ] 1        (123, 4)
-        # [rank0]:E0808 ] 2-3      (123, 0)
-        _check_rng_sync(generator, group)
+        log_str = _check_rng_sync(generator, group)
+        FileCheck().check("Generator desync detected").check("Ranks").check("0").check(
+            "1"
+        ).check("2-3").run(log_str)
 
 
 instantiate_parametrized_tests(TestCollectiveUtils)
