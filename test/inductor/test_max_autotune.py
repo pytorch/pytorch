@@ -19,7 +19,7 @@ from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
@@ -1380,7 +1380,7 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity',
-                        'kwargs':{'EVEN_K':False,'FLOAT32_PRECISION':'"tf32"','USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
+                        'kwargs':{'EVEN_K':False,'ALLOW_TF32':True,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -1419,7 +1419,7 @@ class TestMaxAutotune(TestCase):
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
-                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'FLOAT32_PRECISION':'"tf32"',
+                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','kwargs':{'EVEN_K':False,'ALLOW_TF32':True,
                     'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -1681,6 +1681,26 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
+
+    @config.patch(
+        max_autotune_gemm=True,
+        max_autotune_prune_choices_based_on_shared_mem=True,
+    )
+    def test_max_autotune_prune_choices(self):
+        def mm(x, y):
+            return x @ y
+
+        M, K, N = (3, 3, 3)
+
+        x = torch.rand([M, K], device=GPU_TYPE, dtype=torch.float32)
+        y = torch.rand([K, N], device=GPU_TYPE, dtype=torch.float32)
+
+        compiled_f = torch.compile(mm)
+        compiled_f(x, y)
+
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
+        )
 
 
 class TestMaxAutotunePrecompile(TestCase):
