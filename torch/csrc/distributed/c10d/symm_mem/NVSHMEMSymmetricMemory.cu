@@ -297,13 +297,14 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
  private:
   at::Tensor _get_buffer_at_byte_offset(
-      int rank,
+      int peer,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
       size_t offset_bytes) {
-    auto peer_ptr = pai_->buffers_[rank];
+    TORCH_CHECK(peer >= 0 && peer < get_world_size(), "Invalid peer rank: ", peer);
+    auto peer_ptr = pai_->buffers_[peer];
     TORCH_CHECK(peer_ptr != nullptr,
-        "Cannot get buffer across nodes, my rank: ", get_rank(), ", peer: ", rank);
+        "Cannot get buffer across nodes, my rank: ", get_rank(), ", peer: ", peer);
     const size_t tensor_bytes = nbytes_of(sizes, dtype);
     const auto req_size = offset_bytes + tensor_bytes;
     TORCH_CHECK(
