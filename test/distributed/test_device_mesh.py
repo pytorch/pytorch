@@ -922,7 +922,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_2d["dp_shard"].mesh, unflatten_mesh["dp_shard"].mesh)
         # Existing unflatten dim name should not create a new pg.
         self.assertEqual(
-            get_mesh_pg_names(mesh_2d["tp"]), get_mesh_pg_names(unflatten_mesh["tp"])
+            mesh_2d["tp"]._layouts_to_groups, unflatten_mesh["tp"]._layouts_to_groups
         )
 
         # # Not supporting flatten a unflattened mesh.
@@ -940,10 +940,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh_dim_names=("world",),
         )
         self.assertFalse(hasattr(global_mesh.mesh_dim_names, "_dim_group_names"))
-        global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
-        global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
-        self.assertEqual(global_mesh["cp"].mesh, global_mesh["ep"].mesh)
-        self.assertEqual(global_mesh["tp"].mesh, global_mesh["ep_tp"].mesh)
+        non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        self.assertEqual(non_ep_mesh["cp"].mesh, ep_mesh["ep"].mesh)
+        self.assertEqual(non_ep_mesh["tp"].mesh, ep_mesh["ep_tp"].mesh)
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):
