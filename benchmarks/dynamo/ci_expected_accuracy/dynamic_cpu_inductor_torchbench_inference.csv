@@ -122,7 +122,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,24
+hf_BigBird,pass,25
 
 
 
@@ -142,7 +142,7 @@ hf_Longformer,pass,4
 
 
 
-hf_Reformer,pass,5
+hf_Reformer,pass,8
 
 
 
