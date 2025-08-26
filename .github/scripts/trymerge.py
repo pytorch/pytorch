@@ -450,14 +450,18 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
-def iter_issue_timeline_until_comment(org: str, repo: str, issue_number: int, target_comment_id: int, max_pages: int = 200) -> Any:
+def iter_issue_timeline_until_comment(
+    org: str, repo: str, issue_number: int, target_comment_id: int, max_pages: int = 200
+) -> Any:
     """
     Yield timeline entries in order until (and excluding) the entry whose id == target_comment_id
     *for a 'commented' event*. Stops as soon as the target comment is encountered.
     """
     page = 1
     while page <= max_pages:
-        url = f"https://api.github.com/repos/{org}/{repo}/issues/{issue_number}/timeline"
+        url = (
+            f"https://api.github.com/repos/{org}/{repo}/issues/{issue_number}/timeline"
+        )
         headers = {
             "Accept": "application/vnd.github+json, application/vnd.github.mockingbird-preview+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -497,7 +501,9 @@ def sha_from_force_push_after(ev: dict[str, Any]) -> Optional[str]:
     return ev.get("after_sha") or ev.get("head_sha")
 
 
-def reconstruct_head_before_comment(org: str, repo: str, pr_number: int, issue_comment_id: int) -> Optional[str]:
+def reconstruct_head_before_comment(
+    org: str, repo: str, pr_number: int, issue_comment_id: int
+) -> Optional[str]:
     """
     Reconstruct the PR head commit SHA that was present when a specific comment was posted.
     Returns None if no head-changing events found before the comment.
@@ -506,7 +512,9 @@ def reconstruct_head_before_comment(org: str, repo: str, pr_number: int, issue_c
     found_any_event = False
 
     try:
-        for ev in iter_issue_timeline_until_comment(org, repo, pr_number, issue_comment_id):
+        for ev in iter_issue_timeline_until_comment(
+            org, repo, pr_number, issue_comment_id
+        ):
             etype = ev.get("event")
             if etype == "committed":
                 sha = sha_from_committed_event(ev)
@@ -522,7 +530,9 @@ def reconstruct_head_before_comment(org: str, repo: str, pr_number: int, issue_c
                     print(f"Timeline: Found force push event with SHA {sha}")
             # Handle other head-changing events if needed
     except Exception as e:
-        print(f"Warning: Failed to reconstruct timeline for comment {issue_comment_id}: {e}")
+        print(
+            f"Warning: Failed to reconstruct timeline for comment {issue_comment_id}: {e}"
+        )
         return None
 
     return head if found_any_event else None
@@ -920,9 +930,13 @@ class GitHubPR:
         not any subsequent commits that may have been pushed after.
         """
         try:
-            sha = reconstruct_head_before_comment(self.org, self.project, self.pr_num, comment_id)
+            sha = reconstruct_head_before_comment(
+                self.org, self.project, self.pr_num, comment_id
+            )
             if sha:
-                print(f"Found commit {sha} that was present when comment {comment_id} was posted")
+                print(
+                    f"Found commit {sha} that was present when comment {comment_id} was posted"
+                )
             else:
                 print(f"No head-changing events found before comment {comment_id}")
             return sha
@@ -1246,7 +1260,7 @@ class GitHubPR:
         *,
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
-        comment_id: Optional[int] = None,
+        comment_id: int,
         ignore_current_checks: Optional[list[str]] = None,
     ) -> None:
         # Raises exception if matching rule is not found
@@ -1346,14 +1360,22 @@ class GitHubPR:
             # Get the commit SHA that was present when the comment was made
             commit_to_merge = self.get_commit_sha_at_comment(comment_id)
             if not commit_to_merge:
-                raise RuntimeError(f"Could not find commit that was pushed before comment {comment_id}")
+                raise RuntimeError(
+                    f"Could not find commit that was pushed before comment {comment_id}"
+                )
 
             # Validate that this commit actually belongs to this PR
             latest_commit = self.last_commit()["oid"]
             if commit_to_merge == latest_commit:
-                print(f"Merging commit {commit_to_merge}, which was HEAD when comment {comment_id} was posted")
+                print(
+                    f"Merging commit {commit_to_merge}, which was HEAD when comment {comment_id} was posted"
+                )
             else:
-                raise RuntimeError(f"Commit {commit_to_merge} was HEAD when comment {comment_id} was posted but now the latest commit on the PR is {latest_commit}. Please re-issue the merge command to merge the latest commit.")
+                raise RuntimeError(
+                    f"Commit {commit_to_merge} was HEAD when comment {comment_id} was posted "
+                    f"but now the latest commit on the PR is {latest_commit}. "
+                    f"Please re-issue the merge command to merge the latest commit."
+                )
 
         repo.fetch(commit_to_merge, pr_branch_name)
         repo._run_git("merge", "--squash", pr_branch_name)
@@ -2277,9 +2299,9 @@ def categorize_checks(
 def merge(
     pr: GitHubPR,
     repo: GitRepo,
+    comment_id: int,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
-    comment_id: Optional[int] = None,
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
@@ -2540,14 +2562,15 @@ def main() -> None:
         # Ensure comment id is set, else fail
         if not args.comment_id:
             raise ValueError(
-                "Comment ID is required for merging PRs, please provide it using --comment-id")
+                "Comment ID is required for merging PRs, please provide it using --comment-id"
+            )
 
         merge(
             pr,
             repo,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
-            comment_id=args.comment_id,
             ignore_current=args.ignore_current,
         )
     except Exception as e:
