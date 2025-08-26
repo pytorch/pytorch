@@ -712,20 +712,7 @@ struct ExpandableSegment {
   }
 
   // Maps a virtual memory range to physical memory.
-  virtual SegmentRange map(SegmentRange range) {
-    auto begin = segmentLeft(range.ptr);
-    auto end = segmentRight(range.ptr + range.size);
-    TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
-    if (begin == end) {
-      return rangeFromHandles(begin, end);
-    }
-    mapHandles(begin, end);
-    setAccess(device_, begin, end);
-    for (auto p : peers_) {
-      setAccess(p, begin, end);
-    }
-    return rangeFromHandles(begin, end);
-  }
+  virtual SegmentRange map(SegmentRange range) = 0;
 
   // Unmap a virtual memory range from physical memory.
   virtual SegmentRange unmap(SegmentRange range) {
@@ -785,7 +772,16 @@ struct ExpandableSegment {
   // [begin, end).
   virtual void setAccess(c10::DeviceIndex device, size_t begin, size_t end) = 0;
 
-  // Internal methods for segment calculations and iteration
+  // Internal methods for segment management, calculations and iteration
+
+  // Maps physical memory handles and sets access permissions for the segment.
+  void mapAndSetAccess(size_t begin, size_t end) {
+    mapHandles(begin, end);
+    setAccess(device_, begin, end);
+    for (auto p : peers_) {
+      setAccess(p, begin, end);
+    }
+  }
 
   // Returns the number of full segments required to cover `size` bytes.
   // Rounds up to ensure partial segments are counted.
