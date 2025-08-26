@@ -1306,9 +1306,7 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError(
-                            "Deleted index from getitem, did you erase the index and not properly replace it?"
-                        )
+                        raise AssertionError("can't handle")
                     replace(user, new[idx])
                 graph.erase_node(old)
 

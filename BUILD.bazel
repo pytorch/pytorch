@@ -279,7 +279,6 @@ header_template_rule(
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
         "@AT_KLEIDIAI_ENABLED@": "0",
-        "@AT_USE_EIGEN_SPARSE@": "0",
     },
 )
 
