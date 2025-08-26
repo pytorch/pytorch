@@ -757,7 +757,7 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", ["cpu"])
+    @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_select_with_input_idx(self, device, dynamic):
