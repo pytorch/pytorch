@@ -1113,7 +1113,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
-    def _qconv2d_test_helper(self, device="cpu", int8_mixed_bf16=False):
+    def _qconv2d_test_helper(
+        self,
+        device="cpu",
+        int8_mixed_bf16=False,
+        use_autocast_in_generate_qmodel_process=False,
+    ):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1146,7 +1151,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(
                 counters["inductor"]["qconv_weight_prepack_matcher_nodes"],
-                18 if int8_mixed_bf16 else 12,
+                (16 if use_autocast_in_generate_qmodel_process else 18)
+                if int8_mixed_bf16
+                else 12,
             )
             self.assertEqual(
                 counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
@@ -1158,6 +1165,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn,
             check_quantization=True,
             check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
+            use_autocast_in_generate_qmodel_process=use_autocast_in_generate_qmodel_process,
         )
 
     @skipIfNoDynamoSupport
@@ -1187,6 +1195,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
         """
         self._qconv2d_test_helper(int8_mixed_bf16=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocmArch(MI300_ARCH)
+    def test_qconv2d_int8_mixed_bf16_use_autocast(self):
+        r"""
+        This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
+        """
+        self._qconv2d_test_helper(
+            int8_mixed_bf16=True, use_autocast_in_generate_qmodel_process=True
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
