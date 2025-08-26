@@ -656,7 +656,7 @@ class EventPool {
 
  private:
   struct PerDevicePool {
-    alignas(64) std::mutex mutex_;
+    alignas(hardware_destructive_interference_size) std::mutex mutex_;
     std::vector<std::unique_ptr<cudaEvent_t>> event_pool_;
   };
   std::vector<PerDevicePool> pools_;
@@ -712,6 +712,11 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
                                             EventPool::Event,
                                             Block,
                                             CUDAExpandableSegment> {
+  using StreamT = cuda::CUDAStream;
+  using EventT = EventPool::Event;
+  using BlockT = Block;
+  using ExpandableSegmentT = CUDAExpandableSegment;
+
   void getMemoryInfo(
       c10::DeviceIndex device,
       size_t& free_bytes,
