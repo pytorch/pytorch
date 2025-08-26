@@ -3451,10 +3451,12 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
     @classmethod
     def should_wrap_in_hop(cls, value):
-        return (
-            value == torch.distributed.tensor.experimental._func_map._local_map_wrapped
-            and cls._enabled
-        )
+        if not torch.distributed.is_available():
+            return True
+
+        from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
+
+        return value == _local_map_wrapped and cls._enabled
 
     @staticmethod
     def build(**options):
