@@ -56,7 +56,7 @@ CACHE_ALIGN #define
   defined(CPU_CAPABILITY_AVX512) && (defined(__GNUC__) || defined(__GNUG__))
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
-#elif defined(CPU_CAPABILITY_SVE)
+#elif defined(CPU_CAPABILITY_SVE256)
 #define CHECK_DEQUANT_WITH_LOW_PRECISION 1
 #define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
@@ -136,7 +136,7 @@ template<typename T>
 struct VecTypeHelper {
     using holdType = typename T::value_type;
     using memStorageType = typename T::value_type;
-    static constexpr int holdCount = T::size();
+    static inline int holdCount = T::size();
     static constexpr int unitStorageCount = 1;
 };
 
@@ -399,9 +399,9 @@ T clamp_min(const T& a, const T& min) {
     return a < min ? min : a;
 }
 
-template <class VT, size_t N>
-void copy_interleave(VT(&vals)[N], VT(&interleaved)[N]) {
-    static_assert(N % 2 == 0, "should be even");
+template <class VT>
+void copy_interleave(VT * vals, VT * interleaved, size_t N) {
+    assert(N % 2 == 0);
     auto ptr1 = vals;
     auto ptr2 = vals + N / 2;
     for (size_t i = 0; i < N; i += 2) {
@@ -871,10 +871,10 @@ public:
         using UVT = UvalueType<T>;
         using BVT = BitType<UVT>;
         UVT absErr = correctEpsilon(toleranceEps);
-        constexpr int sizeX = VecTypeHelper<T>::holdCount * VecTypeHelper<T>::unitStorageCount;
+        const int sizeX = VecTypeHelper<T>::holdCount * VecTypeHelper<T>::unitStorageCount;
         constexpr int unitStorageCount = VecTypeHelper<T>::unitStorageCount;
-        CACHE_ALIGN UVT expArr[sizeX];
-        CACHE_ALIGN UVT actArr[sizeX];
+        UVT expArr[sizeX];
+        UVT actArr[sizeX];
         exp.store(expArr);
         act.store(actArr);
         if (bitwise)
@@ -942,7 +942,7 @@ void test_unary(
     using vec_type = T;
     using VT = ValueType<T>;
     using UVT = UvalueType<T>;
-    constexpr int el_count = vec_type::size();
+    const int el_count = vec_type::size();
     CACHE_ALIGN VT vals[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
@@ -1000,7 +1000,7 @@ void test_binary(
     using vec_type = T;
     using VT = ValueType<T>;
     using UVT = UvalueType<T>;
-    constexpr int el_count = vec_type::size();
+    const int el_count = vec_type::size();
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT expected[el_count];
@@ -1163,7 +1163,7 @@ void test_ternary(
     using vec_type = T;
     using VT = ValueType<T>;
     using UVT = UvalueType<T>;
-    constexpr int el_count = vec_type::size();
+    const int el_count = vec_type::size();
     CACHE_ALIGN VT vals0[el_count];
     CACHE_ALIGN VT vals1[el_count];
     CACHE_ALIGN VT vals2[el_count];
@@ -1203,12 +1203,15 @@ void test_ternary(
           auto input1 = vec_type::loadu(vals1);
           auto input2 = vec_type::loadu(vals2);
           auto actual = actualFunction(input0, input1, input2);
+          CACHE_ALIGN VT actual_[vec_type::size()];
+          actual.store(actual_);
           auto vec_expected = vec_type::loadu(expected);
+
           AssertVectorized<vec_type> vecAssert(
               testNameInfo, seed, vec_expected, actual, input0, input1, input2);
           if (vecAssert.check(
                   bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
-            return;
+                    return;
         } // trial
         changeSeedBy += 1;
     }
@@ -1573,19 +1576,19 @@ double getDefaultTolerance() {
 
 template<typename T, int N = 1>
 at::vec::VecMask<T, N> create_vec_mask(uint64_t bitmask) {
-  constexpr auto size = at::vec::Vectorized<T>::size();
-  std::array<int, N * size> mask;
+  const auto size = at::vec::Vectorized<T>::size();
+  int mask[N * size];
   for (int n = 0; n < N; n++) {
       for (int i = 0; i < size; i++) {
         mask[n * size + i] = (bitmask >> i) & 1;
       }
   }
-  return at::vec::VecMask<T, N>::from(mask.data());
+  return at::vec::VecMask<T, N>::from(mask);
 }
 
 template<typename T, int N = 1>
 at::vec::VecMask<T, N> generate_vec_mask(int seed) {
-  constexpr auto size = at::vec::Vectorized<T>::size();
+  const auto size = at::vec::Vectorized<T>::size();
   ValueGen<uint64_t> generator(0, (1ULL << size) - 1, seed);
   auto bitmask = generator.get();
   return create_vec_mask<T, N>(bitmask);

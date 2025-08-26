@@ -15,7 +15,7 @@ template <
 struct VecConvert {
   static inline VectorizedN<dst_t, dst_n> apply(
       const VectorizedN<src_t, src_n>& src) {
-    constexpr int count = std::min(
+    const int count = std::min(
         VectorizedN<src_t, src_n>::size(), VectorizedN<dst_t, dst_n>::size());
     __at_align__ src_t src_buf[VectorizedN<src_t, src_n>::size()];
     src.store(src_buf);
