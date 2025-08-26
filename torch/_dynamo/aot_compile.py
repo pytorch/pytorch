@@ -5,7 +5,7 @@ import inspect
 import pickle
 import types
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx
@@ -26,7 +26,9 @@ class SerializableCallable(abc.ABC):
         pass
 
 
-def bind_locals(signature, *args, **kwargs):
+def bind_locals(
+    signature: inspect.Signature, *args: Any, **kwargs: Any
+) -> dict[str, Any]:
     bound_arguments = signature.bind(*args, **kwargs)
     bound_arguments.apply_defaults()
     return bound_arguments.arguments
@@ -51,8 +53,9 @@ class CompileArtifacts:
         f_globals = {**import_sources, self.backend_id: self.compiled_fn}
         core = types.FunctionType(self.bytecode, f_globals)
 
-        def optimized_call(*args, **kwargs):
+        def optimized_call(*args: Any, **kwargs: Any) -> Any:
             f_locals = bind_locals(self.signature, *args, **kwargs)
+            assert self.guard_manager is not None
             if not self.guard_manager.check(f_locals):
                 reason = str(self.guard_manager.check_verbose(f_locals))
                 raise RuntimeError(f"GuardManager check failed, reason: {reason}")
@@ -67,11 +70,11 @@ class CompileArtifacts:
                 runtime_global_scope=f_globals,
             ).guard_manager
 
-        def save_compiled_function(path: str):
+        def save_compiled_function(path: str) -> None:
             with open(path, "wb") as f:
                 f.write(type(self).serialize(self))
 
-        optimized_call.save_compiled_function = save_compiled_function
+        optimized_call.save_compiled_function = save_compiled_function  # type: ignore[attr-defined]
         return optimized_call
 
     @classmethod
@@ -102,11 +105,11 @@ class CompileArtifacts:
 
 
 def aot_compile_fullgraph(
-    model,
-    example_inputs,
+    model: Any,
+    example_inputs: tuple[tuple[Any, ...], dict[str, Any]],
     hooks: Hooks,
-    backend,
-):
+    backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
+) -> Any:
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
     from torch._guards import compile_context, CompileContext, TracingContext
 
@@ -131,15 +134,18 @@ def aot_compile_fullgraph(
                 fn.__code__,
                 fn.__globals__,
                 f_locals,
-                builtins,
-                closure=(),
+                builtins.__dict__,
+                closure=(),  # type: ignore[arg-type]
             )
         )
         dynamo_output = capture_output.dynamo_output
         check_fn = dynamo_output.build_guards(fn.__code__, hooks=hooks, save=True)
+        assert check_fn.guards_state is not None
 
     backend_input = capture_output.backend_input
-    import_sources = dynamo_output.tracer_output.output_graph.import_sources
+    output_graph = dynamo_output.tracer_output.output_graph
+    assert output_graph is not None
+    import_sources = output_graph.import_sources
     with torch._guards.tracing(TracingContext(backend_input.fake_mode)):
         compiled_fn = backend(backend_input.graph_module, backend_input.example_inputs)
 
