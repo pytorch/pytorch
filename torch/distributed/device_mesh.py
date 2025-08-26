@@ -511,6 +511,7 @@ else:
                     warnings.warn(
                         f"Group for {layout} ({name=}) already exists, ignoring explicit group"
                     )
+                self._layouts_to_groups[layout] = layouts_to_groups_map[layout]
                 return
 
             # When user explicitly pass in a process group, we directly reuse that PG as backend rather
