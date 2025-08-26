@@ -106,6 +106,7 @@ class LazyVariableTracker(VariableTracker):
     def __str__(self) -> str:
         if self.is_realized():
             return repr(self.unwrap())
+        return f"{super().__repr__()} {self.peek_type()}"
         return super().__repr__()
 
     def __getattr__(self, item: str) -> Any:
