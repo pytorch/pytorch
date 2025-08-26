@@ -373,6 +373,42 @@ print(t.is_pinned())
                 torch.cuda.caching_allocator_delete(mem)
                 self.assertEqual(torch.cuda.memory_allocated(), prev)
 
+    def test_memory_stats(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.reset_accumulated_memory_stats()
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertEqual(prev_allocated, prev_max_allocated)
+        self.assertEqual(prev_reserved, prev_max_reserved)
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device="cuda")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
     def test_check_error(self):
         # Assert this call doesn't raise.
         torch.cuda.check_error(0)
@@ -3631,6 +3667,35 @@ exit(2)
         graph.replay()
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    )
+    @parametrize("keep_graph", [True, False])
+    def test_cuda_graph_raw_graph_exec(self, keep_graph):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(keep_graph=keep_graph)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        if keep_graph:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"You cannot access the raw (cuda|hip)GraphExec_t instance until instantiate\(\) has been called",
+            ):
+                graph.raw_cuda_graph_exec()
+
+            graph.instantiate()
+        raw_pointer = graph.raw_cuda_graph_exec()
+
+        cudart_cuda_graph_exec = cudart.cudaGraphExec_t(init_value=raw_pointer)
+        cuda_python_error_check(cudart.cudaGraphExecGetFlags(cudart_cuda_graph_exec))
+
+        graph.replay()
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_raw_graph_reset_and_recapture(self):
@@ -4484,28 +4549,28 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings(
                 "garbage_collection_threshold:1.2"
             )
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:none"
             )
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:1024"
             )
