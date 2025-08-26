@@ -26,10 +26,6 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 
 from . import errors, ops
 from ._internal.exporter._onnx_program import ONNXProgram
-from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
-    symbolic_helper,
-    utils,
-)
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     _run_symbolic_function,
     _run_symbolic_method,
@@ -342,6 +338,8 @@ def export(
     else:
         import warnings
 
+        from ._internal.torchscript_exporter.utils import export
+
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter will be the default. To switch now, set "
@@ -360,7 +358,7 @@ def export(
                 "through parameter dynamic_axes when dynamo=False."
             )
 
-        utils.export(
+        export(
             model,
             args,
             f,  # type: ignore[arg-type]

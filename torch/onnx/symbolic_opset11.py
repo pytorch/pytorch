@@ -1,3 +1,5 @@
 """Backward compatibility module for torch.onnx.symbolic_opset11."""
 
+__all__ = []
+
 from torch.onnx._internal.torchscript_exporter.symbolic_opset11 import *  # noqa: F401,F403
