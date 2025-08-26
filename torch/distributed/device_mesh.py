@@ -188,7 +188,7 @@ else:
             # Check whether the mesh_dim_name for flattened mesh is valid.
             self.flatten_name_to_root_dims.setdefault(root_mesh, {})
             invalid_dim_names = chain(
-                *list(not_none(root_mesh.mesh_dim_names)),
+                list(not_none(root_mesh.mesh_dim_names)),
                 *self.flatten_name_to_root_dims[root_mesh].keys(),
             )
             if mesh_dim_name in invalid_dim_names:
@@ -703,18 +703,17 @@ else:
             return self._hash
 
         def __eq__(self, other: object) -> bool:
+            if self is other:
+                return True
             if not isinstance(other, DeviceMesh):
                 return False
-            if id(self) == id(other):
-                return True
-            else:
-                return (
-                    self._flatten_mesh_list == other._flatten_mesh_list
-                    and self.mesh.shape == other.mesh.shape
-                    and self.device_type == other.device_type
-                    and self.mesh_dim_names == other.mesh_dim_names
-                    and self._thread_id == other._thread_id
-                )
+            return (
+                self._flatten_mesh_list == other._flatten_mesh_list
+                and self.mesh.shape == other.mesh.shape
+                and self.device_type == other.device_type
+                and self.mesh_dim_names == other.mesh_dim_names
+                and self._thread_id == other._thread_id
+            )
 
         def __getitem__(
             self, mesh_dim_names: Union[str, tuple[str, ...]]
