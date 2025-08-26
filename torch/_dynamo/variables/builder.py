@@ -3054,7 +3054,11 @@ def construct_tensor_variable(
     # So that subgraphs can access the unbacked symbol's proxy in parent graph
     # when lifting unbacked symbols of input tensors to subgraph inputs.
     # We do it lazily because the tensor may not be used in subgraphs.
-    tx.output.current_tracer.track_produced_symints(example_value, proxy)
+    # Note: that we only track_produced_symints when the proxy is not placeholder.
+    # i.e. only track the symints in intermediate results because for placeholders
+    # their symbols have already been tracked and bound when calling create_graph_input.
+    if proxy.node.op != "placeholder":
+        tx.output.current_tracer.track_produced_symints(example_value, proxy)
     specialized_props = target_cls.specialize(example_value)
     # TODO: not sure about this fake mode test
     if (
