@@ -38,7 +38,11 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     torch_key,
 )
-from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.subproc_pool import (
+    AnyPool,
+    SubprocException,
+    SubprocPool,
+)
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
@@ -450,7 +454,11 @@ class AsyncCompile:
             )
 
             def get_result() -> CachingAutotuner:
-                kernel, elapsed_us = task.result()
+                try:
+                    kernel, elapsed_us = task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
