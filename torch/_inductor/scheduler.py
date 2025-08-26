@@ -1278,7 +1278,8 @@ class SchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def has_side_effects(self) -> bool:
-        if hasattr(self._body, "has_op") and self._body.has_op("device_assert_async"):
+        # self._body is None sometimes that's why this check was added
+        if self._body is not None and self._body.has_op("device_assert_async"):
             return True
         return super().has_side_effects()
 
