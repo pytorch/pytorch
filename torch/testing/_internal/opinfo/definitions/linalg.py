@@ -1312,6 +1312,18 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="xpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_out",
                 device_type="mps",
@@ -2139,6 +2151,9 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # https://github.com/intel/torch-xpu-ops/issues/1963
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast',
+                        device_type='xpu', dtypes=[torch.float32]),
         ),
     ),
     OpInfo(

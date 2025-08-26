@@ -26,7 +26,6 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypesAnd,
     onlyOn,
     OpDTypes,
@@ -2827,7 +2826,7 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
-    @onlyCUDA
+    @onlyOn(['cuda', 'xpu'])
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
         "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
@@ -2835,7 +2834,7 @@ class TestFakeTensor(TestCase):
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @onlyCUDA
+    @onlyOn(['cuda', 'xpu'])
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
         "TestFakeTensor",
@@ -2859,7 +2858,7 @@ instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals())
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":

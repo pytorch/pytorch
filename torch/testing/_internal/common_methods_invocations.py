@@ -16260,6 +16260,11 @@ op_db: list[OpInfo] = [
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               # https://github.com/intel/torch-xpu-ops/issues/1963
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                            device_type='xpu', dtypes=[torch.float32]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='xpu', dtypes=[torch.float32]),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -18603,6 +18608,9 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               # https://github.com/intel/torch-xpu-ops/issues/1963
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast',
+                            device_type='xpu', dtypes=[torch.float32]),
            )),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -19551,7 +19559,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # AssertionError in CUDA variant
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type='cuda'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestDeviceUtils', 'test_device_mode_ops'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDeviceUtils', 'test_device_mode_ops'),
+               # https://github.com/intel/torch-xpu-ops/issues/1964
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type='xpu'))),
+               
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
@@ -20283,6 +20294,9 @@ op_db: list[OpInfo] = [
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+               # https://github.com/intel/torch-xpu-ops/issues/1962
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='xpu'),
            )
            ),
     OpInfo('logcumsumexp',
