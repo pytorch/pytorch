@@ -34,8 +34,8 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-// 3.14 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_14_PLUS)
+// 3.15 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_15_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -56,7 +56,13 @@ static PyObject* THPPyInterpreterFrame_f_locals(
   return self->locals;
 }
 
-#if IS_PYTHON_3_13_PLUS
+#if IS_PYTHON_3_14_PLUS
+static PyObject* THPPyInterpreterFrame_f_executable(
+    THPPyInterpreterFrame* self,
+    PyObject* _noargs) {
+  return PyStackRef_AsPyObjectNew(self->frame->f_executable);
+}
+#elif IS_PYTHON_3_13_PLUS
 DECLARE_PYOBJ_ATTR(f_executable)
 #else
 DECLARE_PYOBJ_ATTR(f_code)
@@ -109,11 +115,8 @@ static PyObject* THPPyInterpreterFrame_f_back(
 static PyObject* THPPyInterpreterFrame_closure(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_12_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_funcobj)->func_closure;
-  return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
-#elif IS_PYTHON_3_11_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_func)->func_closure;
+#if IS_PYTHON_3_11_PLUS
+  PyObject* closure = FUNC(self->frame)->func_closure;
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
 #else
   PyCodeObject* code = self->frame->f_code;
@@ -237,11 +240,10 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
+  PyFunctionObject* old_func = FUNC(frame);
 #if IS_PYTHON_3_12_PLUS
-  PyFunctionObject* old_func = (PyFunctionObject*)frame->f_funcobj;
   size_t size = code->co_framesize;
 #else
-  PyFunctionObject* old_func = frame->f_func;
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
 #endif
 
@@ -259,7 +261,11 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   Py_INCREF(func);
   // consumes reference to func
-#if IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef func_stackref = PyStackRef_FromPyObjectSteal((PyObject*)func);
+  _PyFrame_Initialize(
+      tstate, shadow, func_stackref, NULL, code, 0, frame->previous);
+#elif IS_PYTHON_3_12_PLUS
   _PyFrame_Initialize(shadow, func, NULL, code, 0);
 #else
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
@@ -468,7 +474,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
   return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
-#else // !(IS_PYTHON_3_14_PLUS)
+#else // !(IS_PYTHON_3_15_PLUS)
 
 // Fake definitions for everything we removed
 
@@ -497,7 +503,7 @@ static PyTypeObject THPPyInterpreterFrameType = {
     .tp_getset = THPPyInterpreterFrame_properties,
 };
 
-#endif // !(IS_PYTHON_3_14_PLUS)
+#endif // !(IS_PYTHON_3_15_PLUS)
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
