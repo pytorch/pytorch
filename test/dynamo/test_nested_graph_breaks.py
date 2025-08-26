@@ -105,7 +105,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 6)
 
     def test_single_graph_break_repeat(self):
         global f1, f2, f3
@@ -130,7 +129,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 3)
-        self.assertEqual(cnts.op_count, 10)
 
     def test_doubly_nested_graph_break(self):
         global f1, f2, f3
@@ -155,7 +153,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 3)
-        self.assertEqual(cnts.op_count, 7)
 
     def test_differing_arg_nums(self):
         global f1, f2, f3, f4
@@ -181,7 +178,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 10)
 
     def test_differing_locals_nums(self):
         global f1, f2, f3
@@ -210,7 +206,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 14)
 
     def test_supported_ctx_manager(self):
         global check, check_disabled, f1, f2, f3
@@ -253,8 +248,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 4)
-        # includes set_grad_enabled ops
-        self.assertEqual(cnts.op_count, 14)
 
     def test_inactive_ctx_manager(self):
         global check, f1, f2, f3
@@ -302,7 +295,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 3)
-        self.assertEqual(cnts.op_count, 7)
 
     def test_cells(self):
         def f1(x1):
@@ -335,7 +327,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 13)
 
     def test_side_effects_cells(self):
         cell1, cell2, cell3, cell4 = (torch.zeros(3),) * 4
@@ -373,7 +364,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 5)
 
     def test_side_effects_globals(self):
         global f1, f2, f3
@@ -411,7 +401,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 6)
 
     def test_side_effects_globals_different_module(self):
         global f1, f2, _test_nested_graph_breaks_helper
@@ -442,7 +431,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 7)
 
     @unittest.expectedFailure
     def test_nested_graph_break_in_loop(self):

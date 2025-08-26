@@ -356,6 +356,7 @@ class StackLocalsMetadata:
     locals_names: dict[str, int] = dc_field(
         default_factory=dict
     )  # order of locals codegen'd to the stack
+    cell_and_freevars: dict[str, int] = dc_field(default_factory=dict)
     stack_null_idxes: list[int] = dc_field(default_factory=list)
     locals_null_keys: list[str] = dc_field(default_factory=list)
     stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
@@ -1236,7 +1237,10 @@ class OutputGraph(OutputGraphGuardsState):
 
         meta.num_stack = len(stack_values)
 
-        cell_and_freevars = set(tx.cellvars() + tx.freevars())
+        cell_and_freevars = dict.fromkeys(tx.cellvars() + tx.freevars())
+        meta.cell_and_freevars = {
+            name: i for i, name in enumerate(cell_and_freevars.keys())
+        }
 
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
@@ -1252,8 +1256,7 @@ class OutputGraph(OutputGraphGuardsState):
             # This will in turn result in spurious variables showing up in the graph.
             # This was very tricky to debug. For an example, dump the graph at call_user_compiler
             # while running test_subgraphs.py
-            # Do not include top-frame unmodified locals here - otherwise, the compiled graph may
-            # erroneously include them as part of the return. We manually codegen them afterward.
+            # Do not load unmodified locals (load them at a later time) from the top frame
             if (
                 isinstance(v.source, LocalSource)
                 and v.source.local_name == k
@@ -1261,7 +1264,7 @@ class OutputGraph(OutputGraphGuardsState):
             ):
                 continue
             # Do not load cell/free vars
-            if k in cell_and_freevars:
+            if k in meta.cell_and_freevars:
                 continue
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
@@ -1335,12 +1338,12 @@ class OutputGraph(OutputGraphGuardsState):
                     prefix_insts.append(copy.copy(inst))
 
         # stack values and restore vars for each frame are pushed in reverse order
-        # i.e. last element corresponds to root frame (1),
-        # first element corresponds to current frame (N)
+        # i.e. last element corresponds to root frame, first element corresponds to current frame
         all_stack_values = []
         all_stack_locals_metas = []
         cur_tx: Optional[InstructionTranslatorBase] = tx
-        while cur_tx is not None:
+        while True:
+            assert cur_tx is not None
             # this should have been checked by the caller
             assert all(block.can_restore() for block in cur_tx.block_stack)
 
@@ -1349,11 +1352,8 @@ class OutputGraph(OutputGraphGuardsState):
             )
             all_stack_values.append(stack_values)
             all_stack_locals_metas.append(meta)
-
-            # Exit from all context manager variables to make sure global state is restored
-            for block in reversed(cur_tx.block_stack):
-                block.exit(cur_tx, is_graph_break=reason.graph_break)
-
+            if cur_tx is self.root_tx:
+                break
             cur_tx = cur_tx.parent
 
         # "Garbage collect the heap".
@@ -1370,6 +1370,10 @@ class OutputGraph(OutputGraphGuardsState):
             self.root_tx
         )
         self.add_output_instructions(alias_insts)
+
+        # Exit from all context manager variables to make sure global state is restored
+        for block in reversed(self.root_tx.block_stack):
+            block.exit(self.root_tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
 
@@ -1407,27 +1411,41 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.add_output_instructions(random_calls_instructions)
 
-        # Codegen stack convention before the unsupported instruction
-        # NOTE: in these comment blocks, "locals" EXCLUDE free and cell vars.
-        # NOTE: stack and locals must be codegen'd BEFORE the unsupported instruction, since the latter
-        # can arbitrarily mutate the former.
+        # FIXME: right now not dealing with cells because they're difficult to deal with
+        # codegen stack convention before the unsupported instruction
+        # NOTE: in this comment block, "cell" refers to a Python cell object - i.e. free and cell vars
         # [
-        #   frame N locals,
-        #   frame N-1 stack + locals,
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
         #   ...,
-        #   frame 1 stack + locals,
-        # ], frame N stack
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ], top stack_pops values of frame N
 
-        # see symbolic_convert.py for
         # codegen stack convention after the unsupported instruction
-        # NOTE: cells are loaded into continuation functions directly
+        # before calling resume function
+        # NOTE: need to push result of unsupported instruction to frame N stack
+        # [
+        #   (frame N stack (fixed), frame N non-cell locals, frame N cells),
+        #   ...,
+        #   (frame 2 stack, frame 2 non-cell locals, frame 2 cells),
+        # ], frame 1 stack + frame 1 non-cell locals
 
-        # this determines the order that values are codegen'd to the stack
-        stack_values_flat = [val for vals in all_stack_values for val in vals]
+        # (frame 1 cells should be loaded into the continuation function directly
+        # as part of the closure)
+
+        # NOTE: move the top stack_pops values from frame N to the beginning of the flat list.
+        # This is to prevent packing NULLs into a list.
+
+        cur_num_stack = all_stack_locals_metas[0].num_stack
+        stack_values_flat = (
+            all_stack_values[0][cur_num_stack - stack_pops : cur_num_stack]
+            + all_stack_values[0][: cur_num_stack - stack_pops]
+            + all_stack_values[0][cur_num_stack:]
+            + [val for vals in all_stack_values[1:] for val in vals]
+        )
         stored_graph_output_var = False
         graph_output_var = None
 
-        # call compiled fx graph and codegen all values - stack and locals
+        # call compiled fx graph and codegen everything - stack, locals, cells
         if (
             self.root_tx is tx  # single frame
             and stack_values_flat
@@ -1509,87 +1527,94 @@ class OutputGraph(OutputGraphGuardsState):
                 self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # store all stack and locals for each frame
+        # store all stack, locals, cells for each frame
         # current state of the stack:
-        # *(frame N stack), *(frame N locals),
-        # ...,
-        # *(frame 1 stack), *(frame 1 locals)
+        #   *(top stack_pops values), *(remaining stack_values_flat)
 
         self.add_output_instructions(
             [
                 create_instruction(
-                    "BUILD_LIST",
-                    arg=len(stack_values_flat) - all_stack_locals_metas[0].num_stack,
+                    "BUILD_LIST", arg=len(stack_values_flat) - stack_pops
                 ),
             ]
         )
 
-        # current state of the stack:
-        # *(frame N stack), [
-        #     *(frame N locals),
-        #     *(frame N-1 stack), *(frame N-1 locals),
-        #     ...
-        #     *(frame 1 stack), *(frame 1 locals),
-        # ]
-        # iterate current frame (N) to root frame (1)
-        # sliding window over frame stack/locals
+        # iterate current frame to root frame
+        # sliding window over frame stack/locals/cells
         start_idx = 0
         end_idx = 0
         for i, meta in enumerate(all_stack_locals_metas):
-            # do not pack frame N's stack into the value list
-            n_vals = len(meta.locals_names)
-            if i != 0:
-                n_vals += meta.num_stack
-            if n_vals == 0:
-                self.add_output_instructions(
-                    [
-                        create_instruction("BUILD_LIST", arg=0),
-                        *create_swap(2),
-                    ]
-                )
-                # [], stack_values_flat
-            else:
-                end_idx += n_vals
-                self.add_output_instructions(
-                    [
-                        create_dup_top(),
-                        *create_binary_slice(start_idx, end_idx),
-                        *create_swap(2),
-                    ]
-                )
-                start_idx += n_vals
-                # stack_values_flat[x:y], stack_values_flat
+            # stack, locals, cells
+            # account for removed stack_pops values in current frame
+            num_stack = meta.num_stack - stack_pops if i == 0 else meta.num_stack
+            counts = (
+                num_stack,
+                len(meta.locals_names),
+                # len(meta.cell_and_freevars),
+            )
+            self.add_output_instructions([create_dup_top()])
+            # values, values
+            for j, cnt in enumerate(counts):
+                end_idx += cnt
+                if start_idx == end_idx:
+                    self.add_output_instructions(
+                        [
+                            create_instruction("BUILD_LIST", arg=0),
+                            *create_swap(2),
+                        ]
+                    )
+                    # [], values
+                else:
+                    self.add_output_instructions(
+                        [
+                            create_dup_top(),
+                            *create_binary_slice(start_idx, end_idx),
+                            *create_swap(2),
+                        ]
+                    )
+                    # values[x:y], values
+                # add root frame's unmodified locals here
+                if i == len(all_stack_locals_metas) - 1 and j == 1:
+                    root_cg = PyCodegen(self.root_tx)
+                    unmodified_locals_names: dict[str, int] = {}
+                    for k, v in self.root_tx.symbolic_locals.items():
+                        if (
+                            isinstance(v.source, LocalSource)
+                            and v.source.local_name == k
+                        ):
+                            root_cg.append_output(root_cg.create_load(k))
+                            unmodified_locals_names[k] = len(meta.locals_names) + len(
+                                unmodified_locals_names
+                            )
+                    self.add_output_instructions(
+                        root_cg.get_instructions()
+                        + [
+                            create_instruction(
+                                "BUILD_LIST", arg=len(unmodified_locals_names)
+                            ),
+                            # arg=2 because we already swapped the locals list back
+                            create_instruction("LIST_EXTEND", arg=2),
+                        ]
+                    )
+                    meta.locals_names.update(unmodified_locals_names)
+                start_idx += cnt
 
-            # add root frame's unmodified locals here
-            if i == len(all_stack_locals_metas) - 1:
-                root_cg = PyCodegen(self.root_tx)
-                unmodified_locals_names: dict[str, int] = {}
-                for k, v in self.root_tx.symbolic_locals.items():
-                    if isinstance(v.source, LocalSource) and v.source.local_name == k:
-                        root_cg.append_output(root_cg.create_load(k))
-                        unmodified_locals_names[k] = len(meta.locals_names) + len(
-                            unmodified_locals_names
-                        )
-                self.add_output_instructions(
-                    root_cg.get_instructions()
-                    + [
-                        create_instruction(
-                            "BUILD_LIST", arg=len(unmodified_locals_names)
-                        ),
-                        # arg=2 because we already swapped the locals list back
-                        create_instruction("LIST_EXTEND", arg=2),
-                    ]
-                )
-                meta.locals_names.update(unmodified_locals_names)
-
-            # *(frame N stack), metas[0] stack + locals, ..., metas[i] stack + locals, stack_values_flat
+            # pack stack, locals, cells together
+            # values, stack, locals, cells, values
+            self.add_output_instructions(
+                [
+                    create_instruction("POP_TOP"),
+                    create_instruction("BUILD_TUPLE", arg=2),
+                    *create_swap(2),
+                ]
+            )
+            # (stack, locals, cells), values
 
         # current state of the stack:
-        # *(frame N stack)
-        # frame N locals,
-        # frame N-1 stack, frame N-1 locals,
-        # ...
-        # frame 1 stack, frame 1 locals,
+        # *(top stack_pops values),
+        # (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
+        # ...,
+        # (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
         # stack_values_flat
         #
 
@@ -1597,17 +1622,16 @@ class OutputGraph(OutputGraphGuardsState):
             [
                 create_instruction("POP_TOP"),
                 create_instruction("BUILD_LIST", arg=len(all_stack_locals_metas)),
-                *create_rot_n(all_stack_locals_metas[0].num_stack + 1),
+                *create_rot_n(stack_pops + 1),
             ]
         )
 
         # final state of the stack before running the unsupported bytecode:
         # [
-        #   [frame N locals],
-        #   [frame N-1 stack + locals],
+        #   (frame N stack (minus top stack_pops values), frame N non-cell locals, frame N cells),
         #   ...,
-        #   [frame 1 stack + locals],
-        # ], *(frame N stack)
+        #   (frame 1 stack, frame 1 non-cell locals, frame 1 cells),
+        # ], *(top stack_pops values of frame N)
 
         if graph_output_var and stored_graph_output_var:
             self.add_output_instructions(
