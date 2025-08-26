@@ -236,7 +236,7 @@ class TritonSymbols:
 
             assert len(tree_match) == 1, "# of Match expected to 1"
             
-            shape[tree_match[0].tensor_dim] = cls.get_block_size(tree_match[0])
+            shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
 
             return tuple(shape)
 
@@ -1199,6 +1199,7 @@ class TritonOverrides(OpOverrides):
             default = ir.Reduction.default_value("dot", var.dtype)
             return TritonKernelOverrides.where("r0_mask", var, default)
         
+
         if is_where_needed(a):
             a = where_cond(a)
         if is_where_needed(b):
@@ -1297,11 +1298,11 @@ class TritonOverrides(OpOverrides):
 
         assert len(dense_sizes) >= 3, "tl.dot can only do mm and bmm"
         
-        XBLOCK = TritonSymbols.block_sizes[SymT.XBLOCK]
-        YBLOCK = TritonSymbols.block_sizes[SymT.YBLOCK]
-        ZBLOCK = TritonSymbols.block_sizes[SymT.ZBLOCK]
-        RBLOCK = TritonSymbols.block_sizes[SymT.R0_INDEX]
-
+        XBLOCK = str(TritonSymbols.block_sizes[SymT.XBLOCK])
+        YBLOCK = str(TritonSymbols.block_sizes[SymT.YBLOCK])
+        ZBLOCK = str(TritonSymbols.block_sizes[SymT.ZBLOCK])
+        RBLOCK = str(TritonSymbols.block_sizes[SymT.R0_INDEX])
+        
         a_prepared = reshape_transpose_broadcast_for_dot(str(a), list(a_shape), [YBLOCK,RBLOCK])
         b_prepared = reshape_transpose_broadcast_for_dot(str(b), list(b_shape), [RBLOCK,XBLOCK])
 
