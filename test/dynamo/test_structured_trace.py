@@ -1503,6 +1503,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         finally:
             trace_log.removeHandler(payload_handler)
 
+    @requires_tlparse
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_graph_execution_order(self):
         """Verify graph execution order is aggregated into a single artifact."""
