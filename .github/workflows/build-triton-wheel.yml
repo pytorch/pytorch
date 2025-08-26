@@ -145,7 +145,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
           set +e
           docker exec -t "${container_name}" command -v pip
           has_pip=$?
@@ -194,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:
