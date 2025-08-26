@@ -34,9 +34,9 @@ WriteableTensorData getWriteableTensorData(
   return result;
 }
 
-bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
+bool checkHasValidSetGetState(const c10::ClassType& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->findMethod("__getstate__");
+  auto getstate = cls.findMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
   }
@@ -56,7 +56,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->findMethod("__setstate__");
+  auto setstate = cls.findMethod("__setstate__");
   if (!setstate) {
     return false;
   }
