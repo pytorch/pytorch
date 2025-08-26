@@ -3518,28 +3518,9 @@ def linear_cross_entropy(
         )
 
     def choose_chunking() -> str:
-        return _CrossEntropyChunkingStrategy.unfused_delegate
+        return "unfused_delegate"
 
-    if chunking_strategy is None:
-        chunking_strategy = choose_chunking().value
-
-    if False:
-        # TODO: How to handle getting `Proxy`s instead of strings?
-        torch._check_with(
-            AssertionError,
-            hasattr(_CrossEntropyChunkingStrategy, chunking_strategy),
-            lambda: (
-                "Expected one of"
-                f" {', '.join(i.value for i in _CrossEntropyChunkingStrategy)}"
-                f" but got {chunking_strategy=}"
-            ),
-        )
-        torch._check_with(
-            NotImplementedError,
-            chunking_strategy == _CrossEntropyChunkingStrategy.unfused_delegate.value,
-            lambda: f"{chunking_strategy=} is not yet implemented",
-        )
-
+    chunking_strategy = chunking_strategy or choose_chunking()
     return torch._C._nn.linear_cross_entropy_loss(
         input,
         target,

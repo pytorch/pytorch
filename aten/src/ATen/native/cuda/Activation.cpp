@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
 TORCH_IMPL_FUNC(gelu_out_cuda) (
   const Tensor& /*self*/, std::string_view approximate, const Tensor& /*result*/
 ) {
-  GeluCUDAKernelImpl(*this, get_gelutype_enum(approximate));
+  pGeluCUDAKernelImpl(*this, get_gelutype_enum(approximate));
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
