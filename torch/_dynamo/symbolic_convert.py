@@ -1685,6 +1685,7 @@ class InstructionTranslatorBase(
 
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
+        self.output.import_sources[alias] = module_name
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
