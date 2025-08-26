@@ -636,13 +636,14 @@ Tensor cross_entropy_loss_symint(
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
     TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
-    // Assume soft targets when input and target shapes are the same
+
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
     ret = cross_entropy_loss_prob_target(self, target, weight_, reduction, label_smoothing);
   } else if (label_smoothing > 0.0) {
     TORCH_CHECK(label_smoothing <= 1.0, "label_smoothing must be between 0.0 and 1.0. Got: ", label_smoothing);
+
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
