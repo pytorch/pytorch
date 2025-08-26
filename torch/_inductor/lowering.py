@@ -321,6 +321,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -347,6 +351,26 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+
+        def _is_cpu_scalar(x: TensorBox) -> TensorBox:
+            size = x.get_size()
+            cur_device = x.get_device()
+            if (
+                cur_device is not None
+                and cur_device.type == "cpu"
+                and cur_device != device
+                and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+            ):
+                return TensorBox(
+                    ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False))
+                )
+            return x
+
+        for i in args_indices:
+            args[i] = _is_cpu_scalar(args[i])
+
+        for k in kwargs_indices:
+            kwargs[k] = _is_cpu_scalar(kwargs[k])
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
@@ -1160,13 +1184,7 @@ def repeat(x, repeats):
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
 def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
-    view_out = TensorBox(View.create(x.data, sizes))
-    device = x.get_device()
-    if device == torch.device("cpu") and (
-        len(x.get_size()) == 0 or (len(x.get_size()) == 1 and x.get_size()[0] == 1)
-    ):
-        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(view_out, device, False)))
-    return view_out
+    return TensorBox(View.create(x.data, sizes))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
