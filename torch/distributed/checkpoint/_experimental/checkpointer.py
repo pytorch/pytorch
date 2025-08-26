@@ -35,16 +35,16 @@ class Checkpointer(abc.ABC):
     @abc.abstractmethod
     def save(
         self,
-        state_dict: STATE_DICT,
         path: str,
+        state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
     ) -> Optional[tuple[Future, Future]]:
         """
         Save a state dictionary to storage.
 
         Args:
-            state_dict: The state dictionary to save.
             path: The path where the checkpoint should be saved.
+            state_dict: The state dictionary to save.
             **kwargs: Additional keyword arguments to pass to the writer.
 
         Returns:
@@ -123,26 +123,26 @@ class SyncCheckpointer(Checkpointer):
 
     def save(
         self,
-        state_dict: STATE_DICT,
         path: str,
+        state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
     ) -> Optional[tuple[Future, Future]]:
         """
         Save a state dictionary to storage synchronously.
 
         Args:
-            state_dict: The state dictionary to save.
             path: The path where the checkpoint should be saved.
+            state_dict: The state dictionary to save.
             **kwargs: Additional keyword arguments to pass to the writer.
 
         Returns:
             Always returns None as operations are synchronous.
 
         Example:
-            checkpointer.save(state_dict, "/path/to/checkpoint")
+            checkpointer.save("/path/to/checkpoint", state_dict)
         """
         logger.debug("Saving checkpoint synchronously to %s", path)
-        self._writer.write(state_dict, path, **kwargs)
+        self._writer.write(path, state_dict, **kwargs)
         return None
 
     def load(
@@ -241,23 +241,23 @@ class AsyncCheckpointer(Checkpointer):
 
     def save(
         self,
-        state_dict: STATE_DICT,
         path: str,
+        state_dict: STATE_DICT,
         **kwargs: Any,
     ) -> Optional[tuple[Future, Future]]:
         """
         Save a state dictionary to storage asynchronously.
 
         Args:
-            state_dict: The state dictionary to save.
             path: The path where the checkpoint should be saved.
+            state_dict: The state dictionary to save.
             **kwargs: Additional keyword arguments to pass to the stager and writer.
 
         Returns:
             A tuple of (stage_future, write_future) representing the staging and writing operations.
 
         Example:
-            stage_future, write_future = checkpointer.save(state_dict, "/path/to/checkpoint")
+            stage_future, write_future = checkpointer.save("/path/to/checkpoint", state_dict)
             # ... do other work ...
             write_future.result()  # Wait for completion
         """

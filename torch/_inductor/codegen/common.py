@@ -44,6 +44,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import config, metrics
 from ..dtype_propagation import DtypePropagationOpsHandler
 from ..ops_handler import BasicMathOpsMixin, DefaultHandler
+from ..shape_propagation import ShapePropagationOpsHandler
 from ..utils import (
     boolean_ops,
     DeferredLineBase,
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     from ..ir import Buffer, ChoiceCaller, FixedLayout, IRNode
     from ..loop_body import LoopBody
     from ..scheduler import BaseScheduling, Scheduler, SchedulerNode
+    from ..shape_propagation import BlockShapeType
     from .wrapper import PythonWrapperCodegen
 
     _T = TypeVar("_T")
@@ -461,15 +463,18 @@ def get_scheduling_for_device(device: str) -> Optional[SchedulingConstructor]:
 
 
 def get_wrapper_codegen_for_device(
-    device: str, cpp_wrapper: bool = False
+    device: str, cpp_wrapper: bool = False, fx_wrapper: bool = False
 ) -> Optional[WrapperConstructor]:
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
-        return (
-            wrapper_codegen_obj.cpp_wrapper_codegen
-            if cpp_wrapper
-            else wrapper_codegen_obj.wrapper_codegen
-        )
+        if fx_wrapper:
+            from .wrapper_fxir import WrapperFxCodegen
+
+            return WrapperFxCodegen
+        elif cpp_wrapper:
+            return wrapper_codegen_obj.cpp_wrapper_codegen
+        else:
+            return wrapper_codegen_obj.wrapper_codegen
     return None
 
 
@@ -1770,6 +1775,7 @@ class CSEVariable:
         name: str,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ):
         super().__init__()
         assert isinstance(bounds, ValueRanges), type(bounds)
@@ -1777,6 +1783,7 @@ class CSEVariable:
         self.bounds = bounds
         self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
+        self.shape = shape
 
     def __str__(self) -> str:
         return self.name
@@ -1886,6 +1893,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         write: bool = True,
         assignment: bool = True,
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1906,8 +1914,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             assert isinstance(expr, str)
             cache_key = expr
         var = self.try_get(cache_key)
+        if shape is None and not assignment:
+            # since there's no assignment to a variable, use any shape here
+            # other than None to avoid the unknown shape failures
+            shape = ()
         if not var:
-            var = self.newvar(bounds, dtype)
+            var = self.newvar(bounds, dtype, shape)
             self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
@@ -1953,9 +1965,10 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
         self.varname_map[var_name] = var
         return var
 
@@ -1964,11 +1977,12 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> CSEVariableType:
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype)
+        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
         self.varname_map[name] = var
         return var
 
@@ -2424,19 +2438,27 @@ class CSEProxy(DefaultHandler):
 
         value = getattr(self.parent_handler, name)(*args, **kwargs)
         dtype_handler = DtypePropagationOpsHandler()
+        shape_handler = ShapePropagationOpsHandler()
 
         backend = get_current_backend()
 
+        shape_op = getattr(shape_handler, name)
         output_dtype = None
+        output_shape = None
+
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
+            output_shape = value.shape
         elif name == "masked" and backend == "cpp":
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
+            # TODO: fix me
+            output_shape = None
         elif backend in ("triton", "cpp", "mps"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
+            output_shape = shape_op(*args, **kwargs)
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
@@ -2444,7 +2466,7 @@ class CSEProxy(DefaultHandler):
 
         output_idx = 0
 
-        def do_cse(v: str) -> CSEVariable:
+        def do_cse(v: Union[str, CSEVariable]) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
             var_dtype: Optional[torch.dtype] = (
@@ -2452,17 +2474,28 @@ class CSEProxy(DefaultHandler):
                 if isinstance(output_dtype, (list, tuple))
                 else output_dtype
             )
+            var_shape: BlockShapeType = (
+                output_shape[output_idx]  # type: ignore[assignment]
+                if isinstance(output_shape, (list, tuple))
+                and len(output_shape) > 0
+                and isinstance(output_shape[0], (list, tuple))
+                else output_shape
+            )
             output_idx += 1
 
             # some cpp op implementations don't set the dtype
-            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
-                v.dtype = var_dtype
+            if isinstance(v, CSEVariable):
+                if backend == "cpp" and v.dtype is None:
+                    v.dtype = var_dtype
+                if v.shape is None:
+                    v.shape = var_shape
 
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
                 v,
                 bounds=bounds,
                 dtype=output_dtype,
+                shape=output_shape,
             )
 
             csevar.update_on_args(name, args, kwargs)
@@ -2559,7 +2592,13 @@ class CSEProxy(DefaultHandler):
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
-            var = self.kernel.cse.generate(self.kernel.compute, stm, bounds=new_bounds)
+            var = self.kernel.cse.generate(
+                self.kernel.compute,
+                stm,
+                bounds=new_bounds,
+                dtype=var.dtype,
+                shape=var.shape,
+            )
 
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):

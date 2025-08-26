@@ -1,10 +1,12 @@
 {
   "tools/test/docstring_linter_testdata/more_python_code.py.txt": {
-    "11": "class LintInit: lines=6, docs=0: (grandfathered)"
+    " 1": "def a_very_very_long(): lines=8, docs=0: (grandfathered)",
+    "10": "class LintInit: lines=6, docs=0: (grandfathered)"
   },
   "tools/test/docstring_linter_testdata/python_code.py.txt": {
-    "20": "class LongWithoutDocstring: lines=4, docs=0: (grandfathered)",
-    "25": "class LongWithShortDocstring: lines=6, docs=10: (grandfathered)",
-    "72": "def ImpossibleCombo.needs_docs(): lines=12, docs=0: (grandfathered)"
+    "17": "class LongWithoutDocstring: lines=6, docs=0: (grandfathered)",
+    "24": "class LongWithShortDocstring: lines=6, docs=10: (grandfathered)",
+    "54": "def long_without_docstring(): lines=7, docs=0: (grandfathered)",
+    "71": "def ImpossibleCombo.needs_docs(): lines=12, docs=0: (grandfathered)"
   }
 }

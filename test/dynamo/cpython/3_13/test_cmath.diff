@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_cmath.py b/test/dynamo/cpython/3_13/test_cmath.py
-index a96a5780b31..37fb665d97d 100644
+index a96a5780b31..d00dfca8a17 100644
 --- a/test/dynamo/cpython/3_13/test_cmath.py
 +++ b/test/dynamo/cpython/3_13/test_cmath.py
 @@ -1,5 +1,58 @@
@@ -111,7 +111,78 @@ index a96a5780b31..37fb665d97d 100644
      def rAssertAlmostEqual(self, a, b, rel_err = 2e-15, abs_err = 5e-323,
                             msg=None):
          """Fail if the two floating-point numbers are not almost equal.
-@@ -590,4 +676,4 @@ class IsCloseTests(test_math.IsCloseTests):
+@@ -165,38 +251,39 @@ class CMathTests(ComplexesAreIdenticalMixin, unittest.TestCase):
+         # end up being passed to the cmath functions
+ 
+         # usual case: new-style class implementing __complex__
+-        class MyComplex:
+-            def __init__(self, value):
+-                self.value = value
+-            def __complex__(self):
+-                return self.value
+-
+-        # classes for which __complex__ raises an exception
+-        class SomeException(Exception):
+-            pass
+-        class MyComplexException:
+-            def __complex__(self):
+-                raise SomeException
++        with torch._dynamo.set_fullgraph(fullgraph=False):
++            class MyComplex:
++                def __init__(self, value):
++                    self.value = value
++                def __complex__(self):
++                    return self.value
++
++            # classes for which __complex__ raises an exception
++            class SomeException(Exception):
++                pass
++            class MyComplexException:
++                def __complex__(self):
++                    raise SomeException
+ 
+-        # some classes not providing __float__ or __complex__
+-        class NeitherComplexNorFloat(object):
+-            pass
+-        class Index:
+-            def __int__(self): return 2
+-            def __index__(self): return 2
+-        class MyInt:
+-            def __int__(self): return 2
+-
+-        # other possible combinations of __float__ and __complex__
+-        # that should work
+-        class FloatAndComplex:
+-            def __float__(self):
+-                return flt_arg
+-            def __complex__(self):
+-                return cx_arg
+-        class JustFloat:
+-            def __float__(self):
+-                return flt_arg
++            # some classes not providing __float__ or __complex__
++            class NeitherComplexNorFloat(object):
++                pass
++            class Index:
++                def __int__(self): return 2
++                def __index__(self): return 2
++            class MyInt:
++                def __int__(self): return 2
++
++            # other possible combinations of __float__ and __complex__
++            # that should work
++            class FloatAndComplex:
++                def __float__(self):
++                    return flt_arg
++                def __complex__(self):
++                    return cx_arg
++            class JustFloat:
++                def __float__(self):
++                    return flt_arg
+ 
+         for f in self.test_functions:
+             # usual usage
+@@ -590,4 +677,4 @@ class IsCloseTests(test_math.IsCloseTests):
  
  
  if __name__ == "__main__":

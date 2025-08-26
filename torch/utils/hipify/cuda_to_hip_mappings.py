@@ -607,9 +607,12 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
             "channel_descriptor.h",
             ("hip/channel_descriptor.h", CONV_INCLUDE, API_RUNTIME),
         ),
-        ("device_functions.h", ("hip/device_functions.h", CONV_INCLUDE, API_RUNTIME)),
-        ("driver_types.h", ("hip/driver_types.h", CONV_INCLUDE, API_RUNTIME)),
-        ("library_types.h", ("hip/library_types.h", CONV_INCLUDE, API_RUNTIME)),
+        ('include "device_functions.h', ('include "hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <device_functions.h', ('include <hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "driver_types.h', ('include "hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <driver_types.h', ('include <hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "library_types.h', ('include "hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <library_types.h', ('include <hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
         ("cuComplex.h", ("hip/hip_complex.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_fp16.h", ("hip/hip_fp16.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_bf16.h", ("hip/hip_bf16.h", CONV_INCLUDE, API_RUNTIME)),
@@ -3996,6 +3999,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUDA_C_64U", ("HIP_C_64U", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_8F_E4M3", ("HIP_R_8F_E4M3", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_8F_E5M2", ("HIP_R_8F_E5M2", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_4F_E2M1", ("HIP_R_4F_E2M1", CONV_TYPE, API_RUNTIME)),
         (
             "MAJOR_VERSION",
             ("hipLibraryMajorVersion", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
@@ -7690,6 +7694,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", ("HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_AMAX_D_POINTER", ("HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", ("HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_A_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_A_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_B_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_B_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayout_t", ("hipblasLtMatrixLayout_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutOpaque_t", ("hipblasLtMatrixLayoutOpaque_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutAttribute_t", ("hipblasLtMatrixLayoutAttribute_t", CONV_MATH_FUNC, API_BLAS)),
@@ -8895,6 +8903,302 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 "HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
                 API_PYTORCH,
             ),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_alloc",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_alloc",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_alloc_with_stream",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc_with_stream", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_alloc_with_stream",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc_with_stream", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_delete",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_delete", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_delete",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_delete", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::init",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::init", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::init",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::init", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getMemoryFraction",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getMemoryFraction",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setMemoryFraction",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setMemoryFraction",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::emptyCache",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::emptyCache", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::emptyCache",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::emptyCache", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::enable",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::enable", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::enable",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::enable", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::isEnabled",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::isEnabled", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::isEnabled",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::isEnabled", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::cacheInfo",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::cacheInfo", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::cacheInfo",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::cacheInfo", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getBaseAllocation",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getBaseAllocation", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getBaseAllocation",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getBaseAllocation", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getDeviceStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getDeviceStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getDeviceStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getDeviceStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::resetAccumulatedStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::resetAccumulatedStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::resetAccumulatedStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::resetAccumulatedStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::resetPeakStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::resetPeakStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::resetPeakStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::resetPeakStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::snapshot",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::snapshot", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::snapshot",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::snapshot", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getCheckpointState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getCheckpointState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getCheckpointState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getCheckpointState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setCheckpointState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setCheckpointState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setCheckpointPoolState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointPoolState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setCheckpointPoolState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointPoolState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::beginAllocateToPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::beginAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::beginAllocateToPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::beginAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::endAllocateToPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::endAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::endAllocateToPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::endAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::recordHistory",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordHistory", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::recordHistory",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::recordHistory", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::recordAnnotation",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordAnnotation", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::recordAnnotation",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::recordAnnotation", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::pushCompileContext",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::pushCompileContext", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::pushCompileContext",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::pushCompileContext", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::popCompileContext",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::popCompileContext", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::popCompileContext",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::popCompileContext", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::isHistoryEnabled",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::isHistoryEnabled", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::isHistoryEnabled",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::isHistoryEnabled", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::checkPoolLiveAllocations",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::checkPoolLiveAllocations", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::checkPoolLiveAllocations",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::checkPoolLiveAllocations", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::attachOutOfMemoryObserver",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::attachOutOfMemoryObserver", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::attachOutOfMemoryObserver",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::attachOutOfMemoryObserver", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::attachAllocatorTraceTracker",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::attachAllocatorTraceTracker", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::attachAllocatorTraceTracker",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::attachAllocatorTraceTracker", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::releasePool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::releasePool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::releasePool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::releasePool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::createOrIncrefPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::createOrIncrefPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::createOrIncrefPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::createOrIncrefPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setUseOnOOM",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setUseOnOOM",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getPoolUseCount",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getPoolUseCount", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getPoolUseCount",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getPoolUseCount", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getIpcDevPtr",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getIpcDevPtr", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getIpcDevPtr",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getIpcDevPtr", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::shareIpcHandle",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::shareIpcHandle", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::shareIpcHandle",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::shareIpcHandle", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::name",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::name", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::name",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::name", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::memcpyAsync",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::memcpyAsync", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::memcpyAsync",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::memcpyAsync", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::enablePeerAccess",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::enablePeerAccess", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::enablePeerAccess",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::enablePeerAccess", API_PYTORCH),
         ),
         (
             "cuda::CUDAAllocator::recordStream",

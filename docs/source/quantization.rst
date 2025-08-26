@@ -110,7 +110,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.backend_config.executorch
 .. py:module:: torch.ao.quantization.backend_config.fbgemm
 .. py:module:: torch.ao.quantization.backend_config.native
-.. py:module:: torch.ao.quantization.backend_config.observation_type
 .. py:module:: torch.ao.quantization.backend_config.onednn
 .. py:module:: torch.ao.quantization.backend_config.qnnpack
 .. py:module:: torch.ao.quantization.backend_config.tensorrt

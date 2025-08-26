@@ -1,4 +1,6 @@
+import ast
 import contextlib
+import inspect
 import threading
 from collections.abc import Generator, Iterable
 from typing import Any, Callable, Optional, Union
@@ -7,6 +9,79 @@ from torch.utils._exposed_in import exposed_in
 
 from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
+
+
+triton_ops_to_kernels: dict[str, list[object]] = {}
+
+
+def get_triton_kernels_for_op(name: str) -> list[object]:
+    return triton_ops_to_kernels.get(name, [])
+
+
+def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+    """
+    Inspect the source of an arbitrary callable passed to torch._library.triton_op,
+    and grab all of the triton kernels that are wrapped inside of it.
+
+    TODO: This check is best effort. It does *not* handle the case where the triton
+    kernel is hidden behind recursive function calls.
+    """
+
+    def find_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+        try:
+            source = inspect.getsource(fn)
+        except (OSError, TypeError):
+            return []  # Source code not available
+
+        from torch._inductor.utils import IndentedBuffer
+
+        buffer = IndentedBuffer()
+        buffer.splice(source, strip=True)
+        tree = ast.parse(buffer.getrawvalue())
+
+        # Visitor to collect function calls and triton kernels
+        class Visitor(ast.NodeVisitor):
+            def __init__(self) -> None:
+                self.triton_kernels: list[Any] = []
+
+            def visit_Call(self, node: ast.Call) -> None:
+                triton_func_names = ("capture_triton", "wrap_triton")
+                if isinstance(node.func, ast.Attribute):
+                    attr = node.func
+                    if (
+                        isinstance(attr.value, ast.Attribute)
+                        and isinstance(attr.value.value, ast.Name)
+                        and attr.value.value.id == "torch"
+                        and attr.value.attr == "_library"
+                        and attr.attr in triton_func_names
+                    ):
+                        if node.args and isinstance(node.args[0], ast.Name):
+                            self.triton_kernels.append(node.args[0].id)
+
+                # Catch capture_triton, wrap_triton that's been
+                # imported directly
+                elif isinstance(node.func, ast.Name):
+                    if node.func.id in triton_func_names:
+                        if node.args and isinstance(node.args[0], ast.Name):
+                            self.triton_kernels.append(node.args[0].id)
+
+                self.generic_visit(node)
+
+        collector = Visitor()
+        collector.visit(tree)
+        closure_vars = inspect.getclosurevars(fn)
+        resolved = []
+        # First, resolve triton kernel names
+        for name in collector.triton_kernels:
+            if name in closure_vars.nonlocals:
+                resolved.append(closure_vars.nonlocals[name])
+            elif name in closure_vars.globals:
+                resolved.append(closure_vars.globals[name])
+            elif name in closure_vars.builtins:
+                resolved.append(closure_vars.builtins[name])
+        return resolved
+
+    return find_triton_kernels(fn)
 
 
 @exposed_in("torch.library")
@@ -175,6 +250,8 @@ def triton_op(
                 with mode:
                     return fn(*args, **kwargs)
 
+        triton_kernels = get_inner_triton_kernels(fn)
+        triton_ops_to_kernels[name] = triton_kernels
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result
 

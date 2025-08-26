@@ -192,6 +192,8 @@ For more information on dynamic shapes, see [The dynamic shapes manual](https://
 
 ## Logging Tools
 
+(tlparse-torch-trace)=
+
 ### tlparse / TORCH_TRACE
 
 `tlparse` / `TORCH_TRACE` are a pair of tools that produce compilation reports that look like this:
@@ -251,6 +253,8 @@ Here are some insights you can gain from a `tlparse`:
 - What intermediate compiler products did I generate for a given frame?
   For example, you can look at the high-level generated FX graph or the generated Triton code.
 - Is there relevant information for a particular frame? You can find these in `compilation_metrics`.
+
+(torch-logs)=
 
 ### TORCH_LOGS
 

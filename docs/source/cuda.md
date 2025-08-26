@@ -269,10 +269,6 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
 ```
 
 ```{eval-rst}
-.. py:module:: torch.cuda.error
-```
-
-```{eval-rst}
 .. py:module:: torch.cuda.gds
 ```
 

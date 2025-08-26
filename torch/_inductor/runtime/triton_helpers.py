@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from functools import wraps
 from typing import Any, Callable, TypeVar
 
 from .triton_compat import (  # noqa: F401
@@ -723,10 +722,9 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
     """
     if builtins_use_semantic_kwarg:
         # support Triton before and after https://github.com/triton-lang/triton/pull/7054
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            kwargs["_builder"] = kwargs["_semantic"]
-            del kwargs["_semantic"]
+        # and after https://github.com/triton-lang/triton/pull/7239
+        def wrapper(*args, _semantic, **kwargs):
+            kwargs["_builder"] = _semantic
             return f(*args, **kwargs)
     else:
         wrapper = f  # type: ignore[assignment]

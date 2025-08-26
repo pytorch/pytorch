@@ -14,7 +14,7 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -69,6 +69,7 @@ from .schema import (  # type: ignore[attr-defined]
     OptionalTensorArgument,
     OutputSpec,
     OutputTokenSpec,
+    ParameterMutationSpec,
     RangeConstraint,
     ScalarType,
     SCHEMA_VERSION,
@@ -255,6 +256,31 @@ def deserialize_device(d: Device) -> torch.device:
     return torch.device(type=d.type, index=d.index)
 
 
+def deserialize_size(sizes: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_size in sizes:
+        assert sym_int_size.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_size.type}"
+        )
+    return tuple(sym_int_size.as_int for sym_int_size in sizes)
+
+
+def deserialize_stride(strides: Sequence[SymInt]) -> tuple[int, ...]:
+    for sym_int_stride in strides:
+        assert sym_int_stride.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_stride.type}"
+        )
+    return tuple(sym_int_stride.as_int for sym_int_stride in strides)
+
+
+def deserialize_scalar_type(st: ScalarType) -> torch.dtype:
+    return _SERIALIZE_TO_TORCH_DTYPE[st]
+
+
+def deserialize_storage_offset(offset: SymInt) -> int:
+    assert offset.type == "as_int", f"Only as_int is supported, got {offset.type}"
+    return offset.as_int
+
+
 def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
     if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
         s = s.node.expr
@@ -325,7 +351,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
         requires_grad=t.requires_grad,
         device=Device(type=t.device.type, index=t.device.index),
         strides=[serialize_sym_int(s) for s in t.stride()],
-        storage_offset=serialize_sym_int(0),  # TODO needs to be fixed.
+        storage_offset=serialize_sym_int(t.storage_offset()),
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
@@ -1239,6 +1265,15 @@ class GraphModuleSerializer(metaclass=Final):
                 buffer_mutation=BufferMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     buffer_name=spec.target,
+                )
+            )
+        elif spec.kind == ep.OutputKind.PARAMETER_MUTATION:
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                parameter_mutation=ParameterMutationSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                    parameter_name=spec.target,
                 )
             )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_PARAMETER:
@@ -2199,6 +2234,12 @@ class GraphModuleDeserializer(metaclass=Final):
                 arg=ep.TensorArgument(name=o.buffer_mutation.arg.name),
                 target=o.buffer_mutation.buffer_name,
             )
+        elif o.type == "parameter_mutation":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.PARAMETER_MUTATION,
+                arg=ep.TensorArgument(name=o.parameter_mutation.arg.name),
+                target=o.parameter_mutation.parameter_name,
+            )
         elif o.type == "gradient_to_parameter":
             return ep.OutputSpec(
                 kind=ep.OutputKind.GRADIENT_TO_PARAMETER,
@@ -2979,13 +3020,17 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment,operator]
+        fields = {}
         type_hints = typing.get_type_hints(cls)
+        # For forward compatibility consideration, we ignore all the keys
+        # that are not showing up in the dataclass definition.
         for f in dataclasses.fields(cls):
             name = f.name
-            new_field_obj = _dict_to_dataclass(type_hints[name], getattr(obj, name))
-            setattr(obj, name, new_field_obj)
-        return obj
+            if name not in data:
+                continue
+            new_field_obj = _dict_to_dataclass(type_hints[name], data[name])
+            fields[name] = new_field_obj
+        return cls(**fields)  # type: ignore[operator]
     elif isinstance(data, list):
         if len(data) == 0:
             return data
@@ -2999,6 +3044,13 @@ def _dict_to_dataclass(cls, data):
     return data
 
 
+def _bytes_to_dataclass(cls: Any, artifact_bytes: bytes) -> Any:
+    artifact_str = artifact_bytes.decode("utf-8")
+    artifact_dict = json.loads(artifact_str)
+    artifact_dataclass = _dict_to_dataclass(cls, artifact_dict)
+    return artifact_dataclass
+
+
 def deserialize(
     artifact: SerializedArtifact,
     expected_opset_version: Optional[dict[str, int]] = None,
@@ -3006,10 +3058,8 @@ def deserialize(
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
     assert isinstance(artifact.exported_program, bytes)
-    exported_program_str = artifact.exported_program.decode("utf-8")
-    exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
+    serialized_exported_program = _bytes_to_dataclass(
+        ExportedProgram, artifact.exported_program
     )
     return ExportedProgramDeserializer(expected_opset_version).deserialize(
         serialized_exported_program,
@@ -3377,17 +3427,19 @@ def canonicalize(
         idx, (_arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
-            return 3, None, idx
+            return 4, None, idx
         elif spec.type == "loss_output":
-            return 3, None, idx
+            return 4, None, idx
+        elif spec.type == "parameter_mutation":
+            return 1, spec.parameter_mutation.parameter_name, idx
         elif spec.type == "buffer_mutation":
-            return 1, spec.buffer_mutation.buffer_name, idx
+            return 2, spec.buffer_mutation.buffer_name, idx
         elif spec.type == "gradient_to_parameter":
-            return 4, spec.gradient_to_parameter.parameter_name, idx
+            return 5, spec.gradient_to_parameter.parameter_name, idx
         elif spec.type == "gradient_to_user_input":
-            return 5, None, idx
+            return 6, None, idx
         elif spec.type == "user_input_mutation":
-            return 2, None, idx
+            return 3, None, idx
         elif spec.type == "token":
             return 0, None, idx
         else:
@@ -3499,6 +3551,9 @@ def canonicalize(
             t.name = replace_table[t.name]
         elif spec.type == "buffer_mutation":
             t = spec.buffer_mutation.arg
+            t.name = replace_table[t.name]
+        elif spec.type == "parameter_mutation":
+            t = spec.parameter_mutation.arg
             t.name = replace_table[t.name]
         elif spec.type == "gradient_to_parameter":
             t = spec.gradient_to_parameter.arg

@@ -12,6 +12,11 @@ import warnings
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
 
+from torch.numa.binding import (
+    maybe_temporarily_apply_numa_binding_to_current_process,
+    NumaOptions,
+)
+
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
@@ -24,6 +29,7 @@ __all__ = [
     "ProcessException",
     "ProcessExitedException",
     "ProcessRaisedException",
+    "should_use_parallel_start",
     "spawn",
     "SpawnContext",
     "start_processes",
@@ -221,6 +227,17 @@ class SpawnContext(ProcessContext):
         super().__init__(processes, error_files)
 
 
+def should_use_parallel_start(start_method: str) -> bool:
+    """
+    Returns:
+        Whether we will start subprocesses in parallel.
+    """
+    return (
+        start_method == "forkserver"
+        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
+    )
+
+
 # Note: [start_processes]
 # mp.start_processes handles both start_method='spawn' and 'fork'. It's supposed to be a
 # more generalized API than mp.spawn. Currently we only document mp.spawn as it's the
@@ -236,20 +253,21 @@ def start_processes(
     join=True,
     daemon=False,
     start_method="spawn",
+    numa_options: Optional[NumaOptions] = None,
 ):
     # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
     # this func will start processes in parallel if start_method is 'forkserver'.
     # Please opt in to this perf optimization by setting env var (TORCH_MP_PARALLEL_START) to 1.
     # todo: investigate why spawn does not work with threadpool and raises SIGINT
-    if (
-        start_method == "forkserver"
-        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
-    ):
+    if should_use_parallel_start(start_method):
         log.info("Starting processes in parallel.")
         start_parallel = True
     else:
         # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
         start_parallel = False
+
+    if numa_options is not None and start_parallel:
+        raise ValueError("NUMA binding is not compatible with parallel start")
 
     mp = multiprocessing.get_context(start_method)
     error_files = [None] * nprocs
@@ -267,12 +285,30 @@ def start_processes(
         )
         tf.close()
         os.unlink(tf.name)
+
         process = mp.Process(
             target=_wrap,
             args=(fn, i, args, tf.name),
             daemon=daemon,
         )
-        process.start()
+
+        # HACK [NUMA inheritance]: Subprocesses inherit the parent process's CPU
+        # affinity. So, we temporarily apply the bindings to the current process,
+        # and then immediately undo them.
+        # This is necessary because the alternatives would be to
+        # either
+        # 1. Use numactl CLI. However, Python's multiprocessing library
+        # does not provide an API which would allow us to prepend
+        # the command it runs with numactl options.
+        # 2. Wrap the provided function such that it first applies
+        # NUMA bindings, and then executes as expected. However, this
+        # can result in worse memory locality, because torch and CUDA
+        # initialization would occur before applying the bindings, thus
+        # allowing some memory to be allocated on the wrong NUMA nodes.
+        with maybe_temporarily_apply_numa_binding_to_current_process(
+            gpu_index=i, numa_options=numa_options
+        ):
+            process.start()
         return i, process, tf.name
 
     if not start_parallel:

@@ -206,6 +206,25 @@ class TestAutocastMPS(TestCase):
             y = m(x)
         self.assertEqual(y.dtype, torch.float32)
 
+    def test_conv3d_autocast(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/160415
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c1 = nn.Conv3d(3, 3, 1)
+                self.c2 = nn.Conv3d(3, 3, 1)
+
+            def forward(self, x):
+                x = self.c1(x)
+                x = self.c2(x)
+                return x
+
+        x = torch.randn(2, 3, 4, 4, 4, device="mps")
+        model = Foo().to("mps")
+        with torch.amp.autocast(device_type="mps"):
+            y = model(x)
+        self.assertEqual(y.dtype, torch.float16)
+
     def test_gradscaler_mps(self):
         # big model to force chunking/depth in the gradscaler dispatch
         class Model(nn.Module):
@@ -718,6 +737,33 @@ class TestAvgPool(TestCaseMPS):
             x.to('mps'), ceil_mode=True, count_include_pad=True, kernel_size=(1, 2),
             padding=(0, 1), stride=2)
         self.assertFalse(torch.isnan(y).any())
+
+    # Test some cases for avg_pool2d which used to mismatch CPU results.
+    # Addresses this issue: https://github.com/pytorch/pytorch/issues/160743
+    def test_avg_pool2d_ceil_mode_mismatch(self):
+        sizes = [
+            (4, 2, 3),
+            (5, 2, 3),
+            (50, 2, 3),
+            (4, 1, 2, 3),
+            (4, 4, 2, 3),
+            (2, 2, 4, 6),
+            (5, 40, 60),
+            (2, 2, 40, 60),
+        ]
+
+        kwargs = dict(kernel_size=[1, 3],
+                      stride=[2, 3],
+                      ceil_mode=True,
+                      divisor_override=7)
+
+        for input_size in sizes:
+            model = torch.nn.AvgPool2d(**kwargs)
+            x = torch.arange(math.prod(input_size), dtype=torch.float).reshape(input_size)
+            out_cpu = model(x)
+            out_mps = model(x.to("mps"))
+            msg = f'{input_size=}, {kwargs=}'
+            self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
 class TestMPS(TestCaseMPS):
@@ -5302,6 +5348,9 @@ class TestMPS(TestCaseMPS):
 
         helper()
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/160738
+        self.assertTrue(torch.var(torch.tensor(3.13, device='mps'), dim=0).isnan().item())
+
     # Test forward amax
     def test_amax(self):
         def helper(shape, dim, keepdim):
@@ -8882,6 +8931,12 @@ class TestPad(TestCaseMPS):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_constant_pad_nd_with_empty_pad(self):
+        # Empty constant pad is no-op
+        # See https://github.com/pytorch/pytorch/issues/161066
+        input_mps = torch.randn((2, 3, 4), device="mps")
+        output_mps = torch.constant_pad_nd(input_mps, [])
+        self.assertEqual(output_mps, input_mps)
 
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
@@ -12226,6 +12281,9 @@ class TestConsistency(TestCaseMPS):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
+            if op.name in "grid_sampler_3d":
+                atol, rtol = 1e-4, 1e-4
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
@@ -12326,6 +12384,39 @@ class TestConsistency(TestCaseMPS):
                 # together, introducing significant error for float16.
                 atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+    # The CPU impl of grid_sampler_3d gives a large amount of error for half
+    # precision types. So instead of testing MPS-vs-CPU outputs, test
+    # full-vs-half precision dtypes for MPS.
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_grid_sampler_3d_half_precision(self, device, dtype):
+        op = next((op for op in test_consistency_op_db if op.name == "grid_sampler_3d"), None)
+        include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
+
+        def get_samples():
+            return op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=(dtype.is_floating_point or dtype.is_complex),
+                include_conjugated_inputs=include_conjugated_inputs,
+                set_seed=True,
+            )
+
+        for half_sample in get_samples():
+            half_input = half_sample.input
+            half_grid, mode, padding_mode, align_corners = half_sample.args
+
+            full_input = half_input.to(torch.float).detach()
+            full_grid = half_grid.to(torch.float).detach()
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                half_out = op(half_input, half_grid, mode, padding_mode, align_corners)
+                full_out = op(full_input, full_grid, mode, padding_mode, align_corners)
+
+            atol, rtol = 1e-4, 1e-4
+
+            self.assertEqual(half_out, full_out.to(dtype), atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
         # Regression tesing for https://github.com/pytorch/pytorch/issues/149951

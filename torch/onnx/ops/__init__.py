@@ -208,7 +208,7 @@ def symbolic_multi_out(
 
                 # Create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
                 # The output tensors will have the specified dtypes and shapes
-                (out1, out2) = torch.onnx.ops.symbolic(
+                (out1, out2) = torch.onnx.ops.symbolic_multi_out(
                     "custom_domain::CustomOp",
                     (x,),
                     dict(attr_key="attr_value"),

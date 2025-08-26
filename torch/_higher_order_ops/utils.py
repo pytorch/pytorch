@@ -103,7 +103,9 @@ def _maybe_compile_and_run_fn(fn, *args):
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                    backend: Union[str, Callable[..., Any]] = (
+                        make_eager_backend_with_torch_function_mode(metadata_mode)
+                    )
                 else:
                     backend = "eager"
                 return torch.compile(fn, backend=backend, fullgraph=True)(*args)
@@ -914,19 +916,16 @@ def check_input_alias_and_mutation_return_outputs(
 
         def _get_shape_env(
             fake_args,
-        ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
+        ) -> torch.fx.experimental.symbolic_shapes.ShapeEnv:
             # detect_fake_mode requires there could be only one active fake mode. This
             # restricts the usage of this function because the global TracingContext
             # has a persistent fake mode but fake tensors can be created
             # outside of the tracing context (e.g. in testing).
             # Instead, we just look at fake_args fake tensor mode
-            if len(fake_args) == 0:
-                return torch.fx.experimental.symbolic_shapes.ShapeEnv()
-
             for arg in fake_args:
-                if isinstance(arg, FakeTensor):
+                if isinstance(arg, FakeTensor) and arg.fake_mode.shape_env is not None:
                     return arg.fake_mode.shape_env
-            return None
+            return torch.fx.experimental.symbolic_shapes.ShapeEnv()
 
         # Clone the fake args to avoid mutating the original fake args
         with ExitStack() as ctx_stack:
@@ -1218,3 +1217,13 @@ def _has_gen_schema(op: HigherOrderOperator):
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
     )
+
+
+def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    assert len(data) == len(masks)
+    return [item for item, keep in zip(data, masks) if keep]
+
+
+def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    data_iter = iter(data)
+    return [next(data_iter) if kept else None for kept in masks]

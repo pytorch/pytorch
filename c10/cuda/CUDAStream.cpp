@@ -147,7 +147,7 @@ static inline StreamIdType streamIdType(StreamId s) {
   // rightmost bit
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto val = (s >> 1) & mask_for_type;
-  TORCH_INTERNAL_ASSERT(val || !(s & 1), "invalid StreamId", s);
+  TORCH_CHECK(val || !(s & 1), "invalid StreamId", s);
   return StreamIdType(val);
 }
 
@@ -276,7 +276,7 @@ cudaStream_t CUDAStream::stream() const {
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
   if (st.isDefault()) {
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         si == 0,
         "Unrecognized stream ",
         stream_,
@@ -291,7 +291,7 @@ cudaStream_t CUDAStream::stream() const {
     return reinterpret_cast<cudaStream_t>(stream_id);
   } else {
     auto streamType = st.getStreamType();
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         streamType >= 1 && streamType <= max_stream_priorities,
         "Unrecognized stream ",
         stream_,

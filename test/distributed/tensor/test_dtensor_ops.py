@@ -289,7 +289,6 @@ dtensor_fails = {
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.leaky_relu"),
-    xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.logsigmoid"),
     xfail("nn.functional.margin_ranking_loss"),

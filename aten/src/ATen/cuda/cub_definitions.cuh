@@ -54,7 +54,7 @@
 
 // There were many bc-breaking changes in major version release of CCCL v3.0.0
 // Please see https://nvidia.github.io/cccl/cccl/3.0_migration_guide.html
-#if CUB_VERSION >= 300000
+#if CUB_VERSION >= 200800
 #define CUB_V3_PLUS() true
 #else
 #define CUB_V3_PLUS() false

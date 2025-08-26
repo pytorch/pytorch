@@ -25,7 +25,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
 )
 from torch.testing._internal.common_utils import (
@@ -201,7 +201,7 @@ def _test_pg_transport_with_sharded_tensor(self, device) -> None:
     torch.testing.assert_close(expected_local_tensor, received_local_tensor)
 
 
-class PgTransportCPU(MultiProcContinousTest):
+class PgTransportCPU(MultiProcContinuousTest):
     world_size = 8
     timeout: timedelta = timedelta(seconds=20)
 
@@ -227,7 +227,7 @@ class PgTransportCPU(MultiProcContinousTest):
         _test_pg_transport_with_sharded_tensor(self, self.device)
 
 
-class PgTransportCUDA(MultiProcContinousTest):
+class PgTransportCUDA(MultiProcContinuousTest):
     world_size = 2
     timeout: timedelta = timedelta(seconds=20)
 

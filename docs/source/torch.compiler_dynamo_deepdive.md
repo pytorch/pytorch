@@ -285,7 +285,7 @@ appear in the errors, and the `VariableTracker` method that throws the
 exception when you encounter a Dynamo error. In particular, sometimes we
 find that an object is tracked as a `UserDefinedObjectVariable` (this
 is Dynamo’s catch-all class), when it should have been tracked as
-something more specific. In these cases, the `SourceBuilder.__call__`
+something more specific. In these cases, the `VariableBuilder`
 logic is often to blame.
 
 **Debugging tip**. When running a program with `TORCH_LOGS=dynamo`,

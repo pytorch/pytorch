@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
 from torch.utils._import_utils import import_dill
+from pickle import UnpicklingError
 
 
 if not IS_WINDOWS:
@@ -1355,6 +1356,39 @@ class TestSerialization(TestCase, SerializationMixin):
                 with self.assertRaisesRegex(pickle.UnpicklingError,
                                             "file an issue with the following so that we can make `weights_only=True`"):
                     torch.load(f, weights_only=True)
+
+    def test_weights_only_blocked_func_error_msg(self):
+        import datetime
+        import zoneinfo
+
+        data = {
+            "a": torch.tensor([1, 2, 3]),
+            "b": datetime.datetime(2025, 1, 1, 12, 0, tzinfo=zoneinfo.ZoneInfo(key="UTC")),
+        }
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(data, f)
+            f.seek(0)
+
+            with torch.serialization.safe_globals([datetime.datetime, getattr, zoneinfo.ZoneInfo]):
+                with self.assertRaisesRegex(UnpicklingError, ".*_unpickle.*zoneinfo.ZoneInfo.*"):
+                    torch.load(f)
+
+
+    def test_weights_only_with_zoneinfo_unpickle_registration_success(self):
+        import datetime
+        import zoneinfo
+
+        data = {
+            "a": torch.tensor([1, 2, 3]),
+            "b": datetime.datetime(2025, 1, 1, 12, 0, tzinfo=zoneinfo.ZoneInfo(key="UTC")),
+        }
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(data, f)
+            f.seek(0)
+
+            with torch.serialization.safe_globals([datetime.datetime, getattr, zoneinfo.ZoneInfo, zoneinfo.ZoneInfo._unpickle]):
+                loaded_data = torch.load(f)
+                self.assertEqual(loaded_data, data)
 
     @parametrize('weights_only', (False, True))
     def test_serialization_math_bits(self, weights_only):

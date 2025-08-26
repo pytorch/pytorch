@@ -22,6 +22,8 @@ from .utils import (
     _stack_pytree,
     _unstack_pytree,
     create_bw_fn,
+    fill_none_with_masks,
+    filter_with_masks,
     materialize_as_graph,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -154,8 +156,12 @@ class MapAutogradOp(torch.autograd.Function):
 
         bw_f = create_bw_fn(ctx._f, fw_args)
 
+        grads_tensor_masks = []
+
         # Create a wrapper around thefor the bw_f
         def bw_f_wrapper(*args):
+            nonlocal grads_tensor_masks
+
             # Dissect args and re-order them for the ``ctx._bw_f``
             # args provided to the wrapper are composed of [*fw_mapped_args, *flat_grads, *pos_args]
             # The content of ``bw_f_tangents`` are the upstream gradients, i.e. flat_grads
@@ -165,7 +171,11 @@ class MapAutogradOp(torch.autograd.Function):
                 args, [num_mapped_args, num_grads, num_pos_args]
             )
             bw_f_primals = *fw_m_args, *pos_args
-            return bw_f(*bw_f_primals, *bw_f_tangents)
+            gradients = bw_f(*bw_f_primals, *bw_f_tangents)
+            grads_tensor_masks = [
+                True if isinstance(out, torch.Tensor) else out for out in gradients
+            ]
+            return filter_with_masks(gradients, grads_tensor_masks)
 
         def construct_args_single_step_bw():
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
@@ -194,7 +204,7 @@ class MapAutogradOp(torch.autograd.Function):
 
         grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
 
-        return None, None, *grads
+        return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):

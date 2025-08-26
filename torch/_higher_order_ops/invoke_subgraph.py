@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -74,8 +74,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
+            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            for o in operands
+        ), (
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+        )
 
         return super().__call__(subgraph, identifier, *operands)
 
@@ -134,7 +137,9 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                    backend: Union[str, Callable[..., Any]] = (
+                        make_eager_backend_with_torch_function_mode(metadata_mode)
+                    )
                 else:
                     backend = "eager"
 

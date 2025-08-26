@@ -1039,7 +1039,6 @@ class TestBasicOps(__TestCase):
         #     c = filter(isEven, range(6))
         #     self.pickletest(proto, c)
 
-    @pickle_deprecated
     def test_filterfalse(self):
         self.assertEqual(list(filterfalse(isEven, range(6))), [1,3,5])
         self.assertEqual(list(filterfalse(None, [0,1,0,2,0])), [0,0,0])
@@ -1049,9 +1048,10 @@ class TestBasicOps(__TestCase):
         self.assertRaises(TypeError, filterfalse, lambda x:x)
         self.assertRaises(TypeError, filterfalse, lambda x:x, range(6), 7)
         self.assertRaises(TypeError, filterfalse, isEven, 3)
-        self.assertRaises(TypeError, next, filterfalse(range(6), range(6)))
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            self.pickletest(proto, filterfalse(isEven, range(6)))
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            self.assertRaises(TypeError, next, filterfalse(range(6), range(6)))
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                self.pickletest(proto, filterfalse(isEven, range(6)))
 
     def test_zip(self):
         # XXX This is rather silly now that builtin zip() calls zip()...

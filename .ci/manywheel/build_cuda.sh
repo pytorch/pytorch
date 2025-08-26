@@ -66,6 +66,9 @@ case ${CUDA_VERSION} in
             TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
         fi
         ;;
+    13.0)
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+        ;;
     12.6)
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
         ;;
@@ -110,11 +113,15 @@ DEPS_SONAME=(
 )
 
 
-# CUDA_VERSION 12.6, 12.8, 12.9
-if [[ $CUDA_VERSION == 12* ]]; then
+# CUDA_VERSION 12.*, 13.*
+if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
-    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
+    # Compress the fatbin with -compress-mode=size for CUDA 13
+    if [[ $CUDA_VERSION == 13* ]]; then
+        export TORCH_NVCC_FLAGS="$TORCH_NVCC_FLAGS -compress-mode=size"
+    fi
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
@@ -134,6 +141,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
             "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            "/usr/local/cuda/lib64/libnvshmem_host.so.3"
             "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12"
             "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
         )
@@ -152,6 +160,7 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libcudart.so.12"
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
+            "libnvshmem_host.so.3"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
             "libcupti.so.12"
@@ -165,22 +174,29 @@ if [[ $CUDA_VERSION == 12* ]]; then
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
-            '$ORIGIN/../../nvidia/cublas/lib'
-            '$ORIGIN/../../nvidia/cuda_cupti/lib'
-            '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
-            '$ORIGIN/../../nvidia/cuda_runtime/lib'
             '$ORIGIN/../../nvidia/cudnn/lib'
-            '$ORIGIN/../../nvidia/cufft/lib'
-            '$ORIGIN/../../nvidia/curand/lib'
-            '$ORIGIN/../../nvidia/cusolver/lib'
-            '$ORIGIN/../../nvidia/cusparse/lib'
-            '$ORIGIN/../../nvidia/cusparselt/lib'
-            '$ORIGIN/../../cusparselt/lib'
-            '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvshmem/lib'
-            '$ORIGIN/../../nvidia/nvtx/lib'
-            '$ORIGIN/../../nvidia/cufile/lib'
+            '$ORIGIN/../../nvidia/nccl/lib'
+            '$ORIGIN/../../nvidia/cusparselt/lib'
         )
+        if [[ $CUDA_VERSION == 13* ]]; then
+            CUDA_RPATHS+=('$ORIGIN/../../nvidia/cu13/lib')
+        else
+            CUDA_RPATHS+=(
+                '$ORIGIN/../../nvidia/cublas/lib'
+                '$ORIGIN/../../nvidia/cuda_cupti/lib'
+                '$ORIGIN/../../nvidia/cuda_nvrtc/lib'
+                '$ORIGIN/../../nvidia/cuda_runtime/lib'
+                '$ORIGIN/../../nvidia/cufft/lib'
+                '$ORIGIN/../../nvidia/curand/lib'
+                '$ORIGIN/../../nvidia/cusolver/lib'
+                '$ORIGIN/../../nvidia/cusparse/lib'
+                '$ORIGIN/../../cusparselt/lib'
+                '$ORIGIN/../../nvidia/nvtx/lib'
+                '$ORIGIN/../../nvidia/cufile/lib'
+            )
+        fi
+
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'

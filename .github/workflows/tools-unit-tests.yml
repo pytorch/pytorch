@@ -1,0 +1,70 @@
+name: test-scripts-and-ci-tools
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/lumen_cli/**
+      - .github/workflows/tools-unit-tests.yml
+  pull_request:
+    paths:
+      - scripts/lumen_cli/**
+      - .github/workflows/tools-unit-tests.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  lumen-cli-unit-tests-python312:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Run tests
+        continue-on-error: true
+        run: |
+          set -ex
+          python3 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
+          pip install -e .ci/lumen_cli/
+          pytest -v -s .ci/lumen_cli/tests/*
+
+  lumen-cli-compatible-python39:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      - name: Run tests
+        continue-on-error: true
+        run: |
+          set -ex
+          python3 -m venv /tmp/venv
+          source /tmp/venv/bin/activate
+          pip install -e .ci/lumen_cli/

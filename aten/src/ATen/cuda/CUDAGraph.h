@@ -37,6 +37,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
+  cudaGraphExec_t raw_cuda_graph_exec();
 
  protected:
   cudaGraph_t graph_ = nullptr;

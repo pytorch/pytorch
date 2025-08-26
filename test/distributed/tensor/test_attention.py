@@ -1,11 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import functools
+import itertools
+import random
 import unittest
+from typing import Union
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, Tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
@@ -22,7 +26,11 @@ from torch.distributed.tensor.experimental._attention import (
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    _mask_mod_signature,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -446,18 +454,94 @@ compiled_create_block_mask = torch.compile(
 )
 
 
+def causal_mask(b, h, q_idx, kv_idx):
+    return q_idx >= kv_idx
+
+
+# copied from https://github.com/meta-pytorch/attention-gym/blob/main/attn_gym/masks/document_mask.py
+def generate_random_lengths(total_length, num_documents):
+    # Initialize all lengths to 1 to ensure each document has at least one token
+    lengths = [1] * num_documents
+    remaining_length = total_length - num_documents
+
+    # Randomly distribute the remaining length
+    for _ in range(remaining_length):
+        index = random.randint(0, num_documents - 1)
+        lengths[index] += 1
+
+    return lengths
+
+
+def length_to_offsets(
+    lengths: list[list[int]], device: Union[str, torch.device]
+) -> Tensor:
+    """Converts a list of lengths to a list of offsets.
+
+    Args:
+        lengths: A list of lengths.
+
+    """
+    offsets = [[0] + lengths_in_batch for lengths_in_batch in lengths]
+    offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
+    offsets = torch.cumsum(offsets, dim=-1)
+    return offsets
+
+
+def _offsets_to_doc_ids_tensor(offsets):
+    doc_ids = []
+    device = offsets.device
+    for batch_idx in range(offsets.size(0)):
+        counts = offsets[batch_idx][1:] - offsets[batch_idx][:-1]
+        doc_id = torch.repeat_interleave(
+            torch.arange(len(counts), device=device, dtype=torch.int32), counts
+        )
+        doc_ids.append(doc_id)
+
+    return torch.stack(doc_ids)
+
+
+def generate_doc_mask_mod(
+    mask_mod: _mask_mod_signature, offsets: Tensor
+) -> _mask_mod_signature:
+    """Generates mask mods that apply to inputs to flex attention in the sequence stacked
+    format.
+
+    Args:
+        mask_mod: The mask mod to apply to the documents
+        offsets: This tensor should be of shape(num_documents + 1)
+            this should contain the cumulative counts of document tokens.
+            e.g. if you have 3 documents of length 2, 4, 3 then
+            offsets = [0, 2, 6, 9]
+
+    Note:
+        What is the sequence stacked format? When assembling batches of inputs, we
+        take multiple sequences and stack them together to form 1 large sequence. We then
+        use masking to ensure that the attention scores are only applied to tokens within
+        the same document.
+    """
+    document_id = _offsets_to_doc_ids_tensor(offsets)
+
+    def doc_mask_mod(b, h, q_idx, kv_idx):
+        same_doc = document_id[b][q_idx] == document_id[b][kv_idx]
+        q_logical = q_idx - offsets[b, document_id[b, q_idx]]
+        kv_logical = kv_idx - offsets[b, document_id[b, kv_idx]]
+        inner_mask = mask_mod(b, h, q_logical, kv_logical)
+        return same_doc & inner_mask
+
+    return doc_mask_mod
+
+
 class RingFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
 
-    def _test_ring_flex_attention(self, qkv_size) -> None:
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
+    def _test_ring_flex_attention(
+        self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
+    ) -> None:
         torch.cuda.manual_seed(10)
         dtype = torch.float32
-        bs = 8
+        bs = B if B > 1 else 8
         query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
@@ -482,8 +566,8 @@ class RingFlexAttentionTest(DTensorTestBase):
         )
 
         block_mask = compiled_create_block_mask(
-            causal_mask,
-            B=1,
+            mask_func,
+            B=B,
             H=1,
             Q_LEN=query_tokens,
             KV_LEN=context_tokens,
@@ -531,8 +615,8 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
         cp_block_mask = create_cp_block_mask(
-            causal_mask,
-            B=1,
+            mask_func,
+            B=B,
             H=1,
             Q_LEN=query_tokens,
             KV_LEN=context_tokens,
@@ -574,8 +658,8 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
-        torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_lse, expect_lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
@@ -583,9 +667,9 @@ class RingFlexAttentionTest(DTensorTestBase):
             [cp_q.grad, cp_k.grad, cp_v.grad],
             [2, 2, 2],
         )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=1e-6, rtol=1e-2)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=1e-6, rtol=1e-2)
+        torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
@@ -606,6 +690,53 @@ class RingFlexAttentionTest(DTensorTestBase):
                 {"qkv_size": [64 * self.world_size]},
                 self._test_ring_flex_attention,
             )
+
+    # TODO: merge with the above test
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_ring_flex_attention_document_mask(self) -> None:
+        random.seed(10)
+
+        # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
+        # compilations: 1 for single-rank flex_attention and 1 for CP flex_attention.
+        # In order to avoid the "exceeds_recompile_limit" error, we need to increase
+        # the cache_size_limit to 12 which is the total number of compilations in our
+        # test case.
+        torch._dynamo.config.cache_size_limit = 12
+
+        # initialize document mask
+        doc_count = 28
+        batch_size_list = [2, 4, 8]
+        max_seq_len_list = [
+            256 * self.world_size,
+            2048,
+            # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
+        ]
+
+        # TODO: change this for-loop to run_subtests
+        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # for each subtest. This can be baked into self._test_ring_flex_attention as
+        # a str argument denoting mask type.
+        for batch_size, max_seq_len in itertools.product(
+            batch_size_list, max_seq_len_list
+        ):
+            lengths = [
+                generate_random_lengths(max_seq_len, doc_count)
+                for _ in range(batch_size)
+            ]
+            offsets = length_to_offsets(lengths, self.device_type)
+            document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+
+            # construct testing function
+            test_func = functools.partial(
+                self._test_ring_flex_attention,
+                qkv_size=max_seq_len,
+                B=batch_size,
+                mask_func=document_causal_mask,
+                atol=1e-6,
+            )
+
+            test_func()
 
 
 if __name__ == "__main__":

@@ -74,15 +74,15 @@ aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10650000000,0
 
 
 
-mm_loop_inductor_gpu,compile_time_instruction_count,4461000000,0.1
+mm_loop_inductor_gpu,compile_time_instruction_count,4820968837,0.1
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8417000000,0.1
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8802129167,0.1
 
 
 
-basic_NestedModule_eager,compile_time_instruction_count,9199000000,0.1
+basic_NestedModule_eager,compile_time_instruction_count,9554000000,0.1
 
 
 

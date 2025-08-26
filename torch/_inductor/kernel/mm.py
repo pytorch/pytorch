@@ -283,16 +283,20 @@ persistent_tma_mm_template = TritonTemplate(
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     {%- else %}
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[K, 1] if A_ROW_MAJOR else [M, 1],
+        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
         block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=B,
         shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[N, 1] if B_ROW_MAJOR else [K, 1],
+        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
     {%- endif %}
@@ -319,13 +323,13 @@ persistent_tma_mm_template = TritonTemplate(
 
         {%- if TMA_EXPERIMENTAL_API %}
         a = tl._experimental_descriptor_load(
-            a_desc,
+            a_desc_ptr,
             [rm, rk] if A_ROW_MAJOR else [rk, rm],
             [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
             A.dtype.element_ty,
         )
         b = tl._experimental_descriptor_load(
-            b_desc,
+            b_desc_ptr,
             [rk, rn] if B_ROW_MAJOR else [rn, rk],
             [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
             B.dtype.element_ty,
@@ -461,16 +465,18 @@ device_tma = r"""
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     {%- else %}
+    stride_am = {{stride("A", 0)}}
+    stride_bn = {{stride("B", 1)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K],
-        strides=[K, 1],
+        strides=[stride_am, 1],
         block_shape=[BLOCK_M, BLOCK_K],
     )
     b_desc = triton.language.make_tensor_descriptor(
         base=B,
         shape=[N, K],
-        strides=[K, 1],
+        strides=[stride_bn, 1],
         block_shape=[BLOCK_N, BLOCK_K],
     )
     {%- endif %}
@@ -562,18 +568,21 @@ def lazy_register_extern_choice(fn):
     return ExternKernelChoice(fn)
 
 
-aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
+aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 
 aten_addmm = ExternKernelChoice(
-    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
 )
 
-aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm_out")
+aten__int_mm = ExternKernelChoice(
+    torch._int_mm, "at::_int_mm_out", op_overload=aten._int_mm.out
+)
 
 aten__sparse_semi_structured_mm = ExternKernelChoice(
     torch._sparse_semi_structured_mm,
     "at::_sparse_semi_structured_mm",
     has_out_variant=False,
+    op_overload=aten._sparse_semi_structured_mm.default,
 )
 
 aten__fp8_mm = ExternKernelChoice(

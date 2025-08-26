@@ -55,6 +55,17 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
+  /**
+   * Returns device name
+   */
+  std::string getName() const;
+
+  /**
+   * Returns number of GPU cores.
+   * 1 Core = 16 ExecutionUnit x 8 ALU x 24 threads
+   */
+  unsigned getCoreCount() const;
+
   ~MPSDevice();
 
  private:

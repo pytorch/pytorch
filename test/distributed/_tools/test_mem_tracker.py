@@ -5,11 +5,12 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
     skipIfTorchDynamo,
+    TEST_CUDA,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
@@ -24,25 +25,29 @@ class TestMemTracker(TestCase):
         del inp
 
     def _reset_mem_stats(self, dev: torch.device):
-        torch.cuda.empty_cache()
-        torch.cuda.reset_accumulated_memory_stats(dev)
-        torch.cuda.reset_peak_memory_stats(dev)
+        mod = torch.get_device_module(dev)
+        mod.empty_cache()
+        mod.reset_accumulated_memory_stats(dev)
+        mod.reset_peak_memory_stats(dev)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
+    )
     @skipIfRocm()
-    def test_cuda_tracker_equivalence(
+    def test_accelerator_tracker_equivalence(
         self,
     ):
         """
         Tests that the tracker correctly calculates the peak memory.
         """
-        dev = torch.device(torch.cuda.current_device())
+        dev = torch.device(torch.accelerator.current_device_index())
         self._init_cublas_workspace(dev)
         gc.collect(1)
         self._reset_mem_stats(dev)
-        mem_stats = torch.cuda.memory_stats(dev)
-        pre_cuda_active = mem_stats["active_bytes.all.current"]
+        mod = torch.get_device_module(dev)
+        mem_stats = mod.memory_stats(dev)
+        pre_acc_active = mem_stats["active_bytes.all.current"]
         bsz, n_layers, dim, dtype = 16, 4, 512, torch.bfloat16
 
         class DummyModel(nn.Module):
@@ -74,25 +79,28 @@ class TestMemTracker(TestCase):
         # Check for accuracy of peak memory
 
         tracker_max = mt.get_tracker_snapshot("peak")[dev]["Total"]
-        mem_stats = torch.cuda.memory_stats(dev)
-        cuda_max = mem_stats["active_bytes.all.peak"] - pre_cuda_active
-        accuracy = tracker_max / cuda_max
+        mem_stats = mod.memory_stats(dev)
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "Neither CUDA or XPU is not available"
+    )
     def test_tracker_with_activation_checkpointing(
         self,
     ):
         """
         Tests that the tracker correctly computes the peak memory during activation checkpointing.
         """
-        dev = torch.device(torch.cuda.current_device())
+        dev = torch.device(torch.accelerator.current_device_index())
         self._init_cublas_workspace(dev)
         gc.collect(1)
         self._reset_mem_stats(dev)
-        mem_stats = torch.cuda.memory_stats(dev)
-        pre_cuda_active = mem_stats["active_bytes.all.current"]
+        mod = torch.get_device_module(dev)
+        mem_stats = mod.memory_stats(dev)
+        pre_acc_active = mem_stats["active_bytes.all.current"]
 
         bsz, n_layers, dim, dtype = 128, 4, 1024, torch.float16
 
@@ -144,9 +152,9 @@ class TestMemTracker(TestCase):
 
         # Check for accuracy of peak memory
         tracker_max = mt.get_tracker_snapshot("peak")[dev]["Total"]
-        mem_stats = torch.cuda.memory_stats(dev)
-        cuda_max = mem_stats["active_bytes.all.peak"] - pre_cuda_active
-        accuracy = tracker_max / cuda_max
+        mem_stats = mod.memory_stats(dev)
+        acc_max = mem_stats["active_bytes.all.peak"] - pre_acc_active
+        accuracy = tracker_max / acc_max
         self.assertAlmostEqual(accuracy, 1.0, delta=0.1)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")

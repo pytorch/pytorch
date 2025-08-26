@@ -92,6 +92,7 @@ def package_cuda_wheel(wheel_path, desired_cuda) -> None:
         "/usr/local/cuda/lib64/libnccl.so.2",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
+        "/usr/local/cuda/lib64/libnvshmem_host.so.3",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     build_vars = "CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
-        build_vars = "MAX_JOBS=5 " + build_vars
+        build_vars += "MAX_JOBS=5 "
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
     desired_cuda = os.getenv("DESIRED_CUDA")

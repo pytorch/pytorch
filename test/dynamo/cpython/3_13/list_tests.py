@@ -319,13 +319,14 @@ class CommonTest(seq_tests.CommonTest):
         self.assertRaises(TypeError, a.extend)
 
         # overflow test. issue1621
-        class CustomIter:
-            def __iter__(self):
-                return self
-            def __next__(self):
-                raise StopIteration
-            def __length_hint__(self):
-                return sys.maxsize
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class CustomIter:
+                def __iter__(self):
+                    return self
+                def __next__(self):
+                    raise StopIteration
+                def __length_hint__(self):
+                    return sys.maxsize
         a = self.type2test([1,2,3,4])
         a.extend(CustomIter())
         self.assertEqual(a, [1,2,3,4])
@@ -386,21 +387,23 @@ class CommonTest(seq_tests.CommonTest):
         a = self.type2test([NEVER_EQ])
         self.assertRaises(ValueError, a.remove, ALWAYS_EQ)
 
-        class BadExc(Exception):
-            pass
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadExc(Exception):
+                pass
 
-        class BadCmp:
-            def __eq__(self, other):
-                if other == 2:
-                    raise BadExc()
-                return False
+            class BadCmp:
+                def __eq__(self, other):
+                    if other == 2:
+                        raise BadExc()
+                    return False
 
         a = self.type2test([0, 1, 2, 3])
         self.assertRaises(BadExc, a.remove, BadCmp())
 
-        class BadCmp2:
-            def __eq__(self, other):
-                raise BadExc()
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class BadCmp2:
+                def __eq__(self, other):
+                    raise BadExc()
 
         d = self.type2test('abcdefghcij')
         d.remove('c')
@@ -425,13 +428,14 @@ class CommonTest(seq_tests.CommonTest):
         self.assertRaises(ValueError, a.index, 2, 0, 4)
         self.assertEqual(a, self.type2test([-2, -1, 0, 1, 2]))
 
-        # Test modifying the list during index's iteration
-        class EvilCmp:
-            def __init__(self, victim):
-                self.victim = victim
-            def __eq__(self, other):
-                del self.victim[:]
-                return False
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            # Test modifying the list during index's iteration
+            class EvilCmp:
+                def __init__(self, victim):
+                    self.victim = victim
+                def __eq__(self, other):
+                    del self.victim[:]
+                    return False
         a = self.type2test()
         a[:] = [EvilCmp(a) for _ in range(100)]
         # This used to seg fault before patch #1005778

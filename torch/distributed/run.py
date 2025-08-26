@@ -382,7 +382,7 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
-from torch.distributed.numa.binding import (
+from torch.numa.binding import (
     AffinityMode as _AffinityMode,  # Signify as private with _
     NumaOptions as _NumaOptions,
 )

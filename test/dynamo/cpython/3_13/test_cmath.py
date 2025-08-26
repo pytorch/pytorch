@@ -251,38 +251,39 @@ class CMathTests(__TestCase):
         # end up being passed to the cmath functions
 
         # usual case: new-style class implementing __complex__
-        class MyComplex:
-            def __init__(self, value):
-                self.value = value
-            def __complex__(self):
-                return self.value
+        with torch._dynamo.set_fullgraph(fullgraph=False):
+            class MyComplex:
+                def __init__(self, value):
+                    self.value = value
+                def __complex__(self):
+                    return self.value
 
-        # classes for which __complex__ raises an exception
-        class SomeException(Exception):
-            pass
-        class MyComplexException:
-            def __complex__(self):
-                raise SomeException
+            # classes for which __complex__ raises an exception
+            class SomeException(Exception):
+                pass
+            class MyComplexException:
+                def __complex__(self):
+                    raise SomeException
 
-        # some classes not providing __float__ or __complex__
-        class NeitherComplexNorFloat(object):
-            pass
-        class Index:
-            def __int__(self): return 2
-            def __index__(self): return 2
-        class MyInt:
-            def __int__(self): return 2
+            # some classes not providing __float__ or __complex__
+            class NeitherComplexNorFloat(object):
+                pass
+            class Index:
+                def __int__(self): return 2
+                def __index__(self): return 2
+            class MyInt:
+                def __int__(self): return 2
 
-        # other possible combinations of __float__ and __complex__
-        # that should work
-        class FloatAndComplex:
-            def __float__(self):
-                return flt_arg
-            def __complex__(self):
-                return cx_arg
-        class JustFloat:
-            def __float__(self):
-                return flt_arg
+            # other possible combinations of __float__ and __complex__
+            # that should work
+            class FloatAndComplex:
+                def __float__(self):
+                    return flt_arg
+                def __complex__(self):
+                    return cx_arg
+            class JustFloat:
+                def __float__(self):
+                    return flt_arg
 
         for f in self.test_functions:
             # usual usage

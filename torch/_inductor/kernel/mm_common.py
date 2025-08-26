@@ -180,7 +180,7 @@ def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
     )
 
 
-def is_batch_stride_largest(mat1, mat2, layout) -> bool:
+def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
     """
     Checking if the batch stride is the largest in the stride.
     """
@@ -188,7 +188,7 @@ def is_batch_stride_largest(mat1, mat2, layout) -> bool:
     strides = [mat1.get_stride(), mat2.get_stride(), layout.stride]
     for size, stride in zip(sizes, strides):
         assert len(size) == len(stride) == 3, "Expect 3D tensors"
-        if stride[0] != sympy_product(size[1:]):
+        if stride[0] != 0 and stride[0] != sympy_product(size[1:]):
             return False
 
     return True

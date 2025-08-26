@@ -682,6 +682,14 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.unfold", f16): {
         "reference_in_float": True,
     },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f32): {
+        "check_gradient": False,
+    },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f64): {
+        "check_gradient": False,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(

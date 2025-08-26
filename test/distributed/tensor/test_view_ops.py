@@ -12,6 +12,7 @@ from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
@@ -640,6 +641,25 @@ class TestViewOps(DTensorTestBase):
             RuntimeError, "Attempted to flatten unevenly sharded dimension"
         ):
             dtensor_x.view(-1, 8)
+
+    @with_comms
+    def test_squeeze_(self):
+        mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
+        torch.manual_seed(self.rank)
+        x = torch.randn((1, 4), device=self.device_type)
+        dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
+        self._test_op_on_dtensor(
+            torch.ops.aten.squeeze_.dim,
+            dist_x,
+            0,
+        )
+        # check DTensor subclass metadata as well as placements
+        self.assertEqual(dist_x.shape, torch.Size([8]))
+        self.assertEqual(
+            dist_x.stride(),
+            (1,),
+        )
+        self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
 
 if __name__ == "__main__":

@@ -1205,6 +1205,45 @@ class TagSafetyChecks(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
 
+    def test_nn_module_tag_overridden_getattr_safe(self):
+        class Baz(torch.nn.Module, metaclass=abc.ABCMeta):
+            def __init__(self):
+                super().__init__()
+                self.norm = 2
+
+            def __getattr__(self, key):
+                if key == "a":
+                    return 5
+                return super().__getattr__(key)
+
+            def forward(self, x):
+                return x + self.a + self.norm
+
+        baz = Baz()
+
+        def fn(x):
+            x = x + baz(x)
+            return x
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            baz_source = LocalSource("baz")
+
+            # Check tagness of baz
+            baz_mgr = builder.get_guard_manager_from_source(baz_source)
+            self.assertTrue(baz_mgr.is_tag_safe())
+            self.assertTrue(baz_mgr.is_tag_safe_root())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(torch.randn(4, 4))
+
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     def test_disabling(self):
