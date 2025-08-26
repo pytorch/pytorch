@@ -447,7 +447,7 @@ class AsyncCompile:
                 load_kernel,
                 extra_env,
                 extra_config,
-                **({name: kernel_name} if self.process_pool is SubprocPool else {}),
+                **({"name": kernel_name} if self.process_pool is SubprocPool else {}),
             )
 
             def get_result() -> CachingAutotuner:
