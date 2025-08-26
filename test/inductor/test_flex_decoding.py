@@ -1527,8 +1527,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        # self.run_test(score_mod, device=device)
-        # self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test(score_mod, device=device)
+        self.run_test_with_paged_attention(score_mod, device=device)
         self.run_test_with_paged_attention(
             score_mod=score_mod,
             dtype=torch.bfloat16,
@@ -1545,7 +1545,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
-    def test_max__autotune_with_captured(self, device):
+    def test_max_autotune_with_captured(self, device):
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
         tok_scale = torch.randn(S, device=device)
