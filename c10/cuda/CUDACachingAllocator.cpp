@@ -65,7 +65,7 @@ struct ExpandableSegmentTraits<cuda::CUDAStream> {
     CUmemGenericAllocationHandle handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
   };
-  using HandleT = Handle*;
+  using HandleT = Handle;
 };
 #endif
 } // namespace CachingDeviceAllocator
@@ -251,6 +251,9 @@ Instead these mapping have to be done manually. The allocator now has an
 */
 
 struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
+  // begin must be aligned to segment_size_.
+  // returns the actual range mapped, which may be
+  // greater than requested if size is not aligned to segment_size_.
   SegmentRange map(SegmentRange range) override {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
@@ -329,7 +332,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
           C10_CUDA_DRIVER_CHECK(status);
         }
       }
-      handles_.at(i) = Handle{handle, std::nullopt};
+      handles_.at(i) = HandleT{handle, std::nullopt};
     }
     mapHandles(begin, end);
     setAccess(device_, begin, end);
@@ -435,7 +438,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
             CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
         LOG(INFO) << "use posix fd to import expandable segments.";
         close((int)myfd);
-        segment->handles_.emplace_back(Handle{handle, std::nullopt});
+        segment->handles_.emplace_back(HandleT{handle, std::nullopt});
       }
       close((int)pidfd);
     } else {
@@ -450,7 +453,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
             (void*)&fabric_handle,
             CU_MEM_HANDLE_TYPE_FABRIC));
         LOG(INFO) << "use fabric handle to import expandable segments.";
-        segment->handles_.emplace_back(Handle{handle, std::nullopt});
+        segment->handles_.emplace_back(HandleT{handle, std::nullopt});
       }
     }
     segment->mapHandles(0, header.num_handles);
@@ -514,7 +517,7 @@ struct CUDAExpandableSegment : ExpandableSegment<cuda::CUDAStream> {
     CUdeviceptr devPtr = reinterpret_cast<CUdeviceptr>(ptr_);
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      Handle h = handles_.at(i).value();
+      auto& h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           devPtr + segment_size_ * i, segment_size_));
@@ -873,6 +876,14 @@ struct CUDACachingDeviceAllocatorImpl : CachingDeviceAllocatorImpl<
 
   void synchronize_event(const EventT& event) override {
     C10_CUDA_CHECK(cudaEventSynchronize(*event));
+  }
+
+  void synchronize_device_before_release_block(c10::DeviceIndex device
+                                               [[maybe_unused]]) override {
+    // See Note [Safe to Release Blocks on BlockPool]
+    // It is safe to call `cudaFree` even if there are still in-flight kernel
+    // accesses to the device pointer. So no explicit synchronization is needed.
+    // Do nothing!
   }
 
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
