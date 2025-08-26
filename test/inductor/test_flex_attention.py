@@ -38,6 +38,7 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -4336,6 +4337,7 @@ class GraphModule(torch.nn.Module):
 
     @largeTensorTest("38GB", "cuda")  # emperically
     @skip_on_cpu
+    @unittest.skipIf(IS_FBCODE, "Skip large tensor test in fbcode")
     def test_int64_indexing_large_stride(self, device):
         B = 1
         H = 64
