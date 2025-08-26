@@ -51,12 +51,12 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    pid = tl.program_id(0).to(INDEX_DTYPE)
+    pid = tl.program_id(0)
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-    off_zq = tl.program_id(1).to(INDEX_DTYPE) # q batch idx
-    off_hkv = tl.program_id(2).to(INDEX_DTYPE) # kv head idx
+    off_zq = tl.program_id(1) # q batch idx
+    off_hkv = tl.program_id(2) # kv head idx
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
