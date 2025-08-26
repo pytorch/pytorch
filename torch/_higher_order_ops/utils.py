@@ -1149,6 +1149,12 @@ def materialize_as_graph(
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
+                # fake_mode is needed because parent tracer's fake_mode might
+                # be None but the associated inputs have fake mode or there
+                # is a global tracing context with fake mode. We nneed to
+                # make sure the fake mode when tracing subgraph is consistent.
+                if fake_mode := detect_fake_mode(unfunc_t):
+                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(fn)(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
