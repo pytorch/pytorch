@@ -195,50 +195,56 @@ class TritonSymbols:
     }
 
     @classmethod
-    def get_block_shape(cls, var: sympy.Symbol) -> BlockShapeType:
-        # return block shape of index var
-        # e.g., sympy.Symbol("y1") -> (YBLOCK,1,1)
-      
-        if symbol_is_type(var, SymT.TMP):
-            cse_var = V.kernel.cse.varname_map[var.name]
-            return cse_var.shape
+    def get_block_shape(cls, expr: sympy.Expr) -> BlockShapeType:
+        # return block shape of sympy Expression
+        # e.g., tmp13 = y1 -> (YBLOCK,1,1)
+        # e.g., x0 - tmp13 -> (YBLOCK,XBLOCK,1)
+        from torch._inductor.shape_propagation import get_broadcasted_shape 
+        
+        expr_shape: BlockShapeType = () 
+        expr_vars = expr.free_symbols
+        for var in expr_vars :
+            if symbol_is_type(var, SymT.TMP):
+                cse_var = V.kernel.cse.varname_map[var.name]
+                var_shape = cse_var.shape
+            elif symbol_is_type(
+                var,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                    SymT.INDEX,
+                    SymT.FLOAT,
+                    SymT.UNBACKED_FLOAT,
+                ),
+            ):
+                var_shape = () 
+            else:
+                symbol_matches = [
+                    symt 
+                    for symt in cls.block_types
+                    if symbol_is_type(var, symt)
+                ]
+                assert len(symbol_matches) == 1, f"Ambiguous type: {var.name}"
 
-        elif symbol_is_type(
-            var,
-            (
-                SymT.UNBACKED_INT,
-                SymT.SIZE,
-                SymT.PRECOMPUTED_SIZE,
-                SymT.INDEX,
-                SymT.FLOAT,
-                SymT.UNBACKED_FLOAT,
-            ),
-        ):
-            return () 
+                sym = symbol_matches[0]
+                ndim = V.kernel.triton_tensor_ndim()
+                shape: BlockShapeType = [1]*ndim
 
-        else:
-            symbol_matches = [
-                symt 
-                for symt in cls.block_types
-                if symbol_is_type(var, symt)
-            ]
-            assert len(symbol_matches) == 1, f"Ambiguous type: {var.name}"
-
-            sym = symbol_matches[0]
-            ndim = V.kernel.triton_tensor_ndim()
-            shape: BlockShapeType = [1]*ndim
-
-            tree_match = [
-                tree
-                for tree in V.kernel.active_range_trees()
-                if prefix_str[sym] == tree.prefix
-            ]
-
-            assert len(tree_match) == 1, "# of Match expected to 1"
+                tree_match = [
+                    tree
+                    for tree in V.kernel.active_range_trees()
+                    if prefix_str[sym] == tree.prefix
+                ]
+                assert len(tree_match) == 1, "# of Match expected to 1"
+                
+                shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
+                var_shape = tuple(shape)
             
-            shape[tree_match[0].tensor_dim] = str(cls.get_block_size(tree_match[0]))
+            # Union current variable shape
+            expr_shape = get_broadcasted_shape(expr_shape, var_shape)
 
-            return tuple(shape)
+        return expr_shape
 
     @classmethod
     def get_block_size(cls, tree: IterationRanges) -> sympy.Symbol:
@@ -1179,8 +1185,15 @@ class TritonOverrides(OpOverrides):
         # TODO: Optimize - We don't need both operands to be zeroed except NaN * 0
         def is_where_needed(var):
             # Skip if the variable doesn't have a reduction mask
-            if not 'r0_mask' in var.mask_vars:
+            if not any(map(prefix_is_reduction, var.mask_vars)):
                 return False 
+
+            reduction_range = V.kernel.range_trees[-1]
+            assert reduction_range.is_reduction
+            
+            # Skip if reduction mask (r0_mask) was already constant
+            if V.kernel._has_constant_mask(reduction_range):
+                return False
 
             # Skip if the variable is already zeroed outside the mask
             # (e.g., from tl.load(..., other=0.0))
@@ -1194,7 +1207,7 @@ class TritonOverrides(OpOverrides):
                     return False
 
             return True
-
+        
         def where_cond(var):
             default = ir.Reduction.default_value("dot", var.dtype)
             return TritonKernelOverrides.where("r0_mask", var, default)
@@ -1658,6 +1671,11 @@ class TritonKernelOverrides(TritonOverrides):
             expr, block_ptr=False, tma_compatibility_checker=None
         )
         assert isinstance(indexing, IndexingOptions)
+        
+        if indexing.expand_shape :
+            shape = indexing.expand_shape
+        else :
+            shape = TritonSymbols.get_block_shape(indexing.index)
 
         # Our sympy expr printing casts to the current kernel index dtype.
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
@@ -1673,11 +1691,11 @@ class TritonKernelOverrides(TritonOverrides):
                 indexing.index_str,
                 bounds=get_bounds_index_expr(expr),
                 dtype=dtype,
-                shape=indexing.expand_shape,
+                shape=shape,
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
-
+        
         if dtype not in (torch.int32, torch.int64):
             var = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2906,17 +2924,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
                 # Inferring from indexing.expand_shape alone may also fail when dense indexing is absent.
                 # so, iterate over variables in the indexexpr to accurately infer the block shape.
-                from torch._inductor.shape_propagation import get_broadcasted_shape 
-                index_shape: BlockShapeType = () 
-                index_vars = indexing.index.free_symbols
-                for var in index_vars :
-                    var_shape = TritonSymbols.get_block_shape(var)
-                    index_shape = get_broadcasted_shape(index_shape, var_shape)
-
                 if indexing.expand_shape :
                     shape = indexing.expand_shape
                 else :
-                    shape = index_shape
+                    shape = TritonSymbols.get_block_shape(indexing.index)
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
