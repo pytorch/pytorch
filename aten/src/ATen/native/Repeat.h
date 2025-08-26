@@ -23,18 +23,20 @@ static inline Tensor repeat_interleave_common(
   TORCH_CHECK(
       repeats.scalar_type() == at::kLong || repeats.scalar_type() == at::kInt,
       "repeats has to be Long or Int tensor");
+  TORCH_CHECK(
+      (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
   if (repeats.size(0) == 0) {
     return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   Tensor repeats_ = repeats.contiguous();
   Tensor cumsum = repeats.cumsum(0);
+  TORCH_CHECK(
+      (cumsum >= 0).all().item<uint8_t>(), "cumulative sum values overflowed. check the repeats tensor values");
   int64_t total = 0;
   if (output_size.has_value()) {
     total = output_size.value();
   } else {
     total = cumsum[-1].item<int64_t>();
-    TORCH_CHECK(
-        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
   }
 
   Tensor result = at::empty({total}, repeats.options());
