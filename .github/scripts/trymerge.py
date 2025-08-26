@@ -450,6 +450,84 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
 
 
+def iter_issue_timeline_until_comment(org: str, repo: str, issue_number: int, target_comment_id: int, max_pages: int = 200) -> Any:
+    """
+    Yield timeline entries in order until (and excluding) the entry whose id == target_comment_id
+    *for a 'commented' event*. Stops as soon as the target comment is encountered.
+    """
+    page = 1
+    while page <= max_pages:
+        url = f"https://api.github.com/repos/{org}/{repo}/issues/{issue_number}/timeline"
+        headers = {
+            "Accept": "application/vnd.github+json, application/vnd.github.mockingbird-preview+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        params = {"per_page": 100, "page": page}
+
+        # Build URL with parameters
+        if params:
+            param_str = "&".join(f"{k}={v}" for k, v in params.items())
+            url = f"{url}?{param_str}"
+
+        batch = gh_fetch_url(url, headers=headers)
+
+        if not batch:
+            return
+        for ev in batch:
+            # The target is the *issue comment* row with event == "commented" and id == issue_comment_id
+            if ev.get("event") == "commented" and ev.get("id") == target_comment_id:
+                return  # stop BEFORE yielding this comment
+            yield ev
+        if len(batch) < 100:
+            return
+        page += 1
+    # If we got here without finding the comment, we just streamed everything we could
+
+
+def sha_from_committed_event(ev: dict[str, Any]) -> Optional[str]:
+    """Extract SHA from committed event in timeline"""
+    return ev.get("sha")
+
+
+def sha_from_force_push_after(ev: dict[str, Any]) -> Optional[str]:
+    """Extract SHA from force push event in timeline"""
+    after = ev.get("after") or ev.get("after_commit") or {}
+    if isinstance(after, dict):
+        return after.get("sha") or after.get("oid")
+    return ev.get("after_sha") or ev.get("head_sha")
+
+
+def reconstruct_head_before_comment(org: str, repo: str, pr_number: int, issue_comment_id: int) -> Optional[str]:
+    """
+    Reconstruct the PR head commit SHA that was present when a specific comment was posted.
+    Returns None if no head-changing events found before the comment.
+    """
+    head = None
+    found_any_event = False
+
+    try:
+        for ev in iter_issue_timeline_until_comment(org, repo, pr_number, issue_comment_id):
+            etype = ev.get("event")
+            if etype == "committed":
+                sha = sha_from_committed_event(ev)
+                if sha:
+                    head = sha
+                    found_any_event = True
+                    print(f"Timeline: Found committed event with SHA {sha}")
+            elif etype == "head_ref_force_pushed":
+                sha = sha_from_force_push_after(ev)
+                if sha:
+                    head = sha
+                    found_any_event = True
+                    print(f"Timeline: Found force push event with SHA {sha}")
+            # Handle other head-changing events if needed
+    except Exception as e:
+        print(f"Warning: Failed to reconstruct timeline for comment {issue_comment_id}: {e}")
+        return None
+
+    return head if found_any_event else None
+
+
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
     rc = gh_graphql(GH_GET_PR_INFO_QUERY, name=proj, owner=org, number=pr_no)
     return rc["data"]["repository"]["pullRequest"]
@@ -834,6 +912,23 @@ class GitHubPR:
 
     def get_commit_count(self) -> int:
         return int(self.info["commits_with_authors"]["totalCount"])
+
+    def get_commit_sha_at_comment(self, comment_id: int) -> Optional[str]:
+        """
+        Get the PR head commit SHA that was present when a specific comment was posted.
+        This ensures we only merge the state of the PR at the time the merge command was issued,
+        not any subsequent commits that may have been pushed after.
+        """
+        try:
+            sha = reconstruct_head_before_comment(self.org, self.project, self.pr_num, comment_id)
+            if sha:
+                print(f"Found commit {sha} that was present when comment {comment_id} was posted")
+            else:
+                print(f"No head-changing events found before comment {comment_id}")
+            return sha
+        except Exception as e:
+            print(f"Error reconstructing commit at comment time: {e}")
+            return None
 
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
@@ -1231,28 +1326,54 @@ class GitHubPR:
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
             repo.checkout(branch_to_merge_into)
-        if not self.is_ghstack_pr():
-            msg = self.gen_commit_message()
-            pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(self.last_commit()["oid"], pr_branch_name)
-            repo._run_git("merge", "--squash", pr_branch_name)
-            repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
 
-            # Did the PR change since we started the merge?
-            pulled_sha = repo.show_ref(pr_branch_name)
-            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
-            if pulled_sha != latest_pr_status.last_commit()["oid"]:
-                raise RuntimeError(
-                    "PR has been updated since CI checks last passed. Please rerun the merge command."
-                )
-            return []
-        else:
+        # It's okay to skip the commit SHA check for ghstack PRs since folks who
+        # author them have write access to the repo anyways.
+        if self.is_ghstack_pr():
             return self.merge_ghstack_into(
                 repo,
                 skip_mandatory_checks,
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
             )
+
+        msg = self.gen_commit_message()
+        pr_branch_name = f"__pull-request-{self.pr_num}__init__"
+
+        # Determine which commit SHA to merge
+        commit_to_merge = None
+        if comment_id:
+            # Get the commit SHA that was present when the comment was made
+            commit_to_merge = self.get_commit_sha_at_comment(comment_id)
+            if not commit_to_merge:
+                raise RuntimeError(f"Could not find commit that was pushed before comment {comment_id}")
+
+            # Validate that this commit actually belongs to this PR
+            latest_commit = self.last_commit()["oid"]
+            if commit_to_merge == latest_commit:
+                print(f"Merging commit {commit_to_merge}, which was HEAD when comment {comment_id} was posted")
+            else:
+                raise RuntimeError(f"Commit {commit_to_merge} was HEAD when comment {comment_id} was posted but now the latest commit on the PR is {latest_commit}. Please re-issue the merge command to merge the latest commit.")
+
+        repo.fetch(commit_to_merge, pr_branch_name)
+        repo._run_git("merge", "--squash", pr_branch_name)
+        repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+        # Check if the commit we merged is what we intended to merge
+        pulled_sha = repo.show_ref(pr_branch_name)
+        if pulled_sha != commit_to_merge:
+            raise RuntimeError(
+                f"Expected to merge commit {commit_to_merge}, but got {pulled_sha}."
+            )
+
+        # Only check for PR updates if we're merging the latest commit
+        if commit_to_merge == self.last_commit()["oid"]:
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
+        return []
 
 
 class MergeRuleFailedError(RuntimeError):
