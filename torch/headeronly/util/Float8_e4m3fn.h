@@ -209,18 +209,17 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    */
   f_bits ^= sign;
 
-  if(f_bits > fp32_inf){
+  if (f_bits > fp32_inf) {
     // NaN - all exponent and mantissa bits set to 1
     result = 0x7F;
-  } else if (f_bits >= fp8_inf){
+  } else if (f_bits >= fp8_inf) {
     // Input number is 480 or larger and thus needs to be clamped
     // Largest fp8e4m3fn normal number is 448
     result = 0x7E;
   } else if (f_bits < (UINT32_C(121) << 23)) {
     // Input number is smaller than 2^(-6), which is the smallest
     // fp8e4m3fn normal number
-    f_bits =
-        fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
+    f_bits = fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
     result = static_cast<uint8_t>(f_bits - denorm_mask);
   } else {
     // resulting mantissa is odd
