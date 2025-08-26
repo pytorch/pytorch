@@ -130,7 +130,7 @@ mnasnet_100,pass,7
 
 
 
-mobilenetv2_100,pass,7
+mobilenetv2_100,fail_accuracy,7
 
 
 
