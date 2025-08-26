@@ -9,6 +9,7 @@ import torch.utils._pytree as pytree
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.types import _dtype
 
 
@@ -247,7 +248,14 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
-        return super().__call__(gmod, *args, **kwargs)
+        dispatch_key_set = torch._ops._compute_keyset(
+            args, kwargs, self.non_fallthrough_keys
+        )
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+        if dispatch_key == torch._C.DispatchKey.PreDispatch:
+            return super().__call__(gmod, *args, **kwargs)
+
+        return tag_activation_checkpoint_impl(gmod, *args, **kwargs)
 
 
 tag_activation_checkpoint = TagActivationCheckpoint()
@@ -294,32 +302,6 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             return Interpreter(gmod).run(*args)
 
 
-@tag_activation_checkpoint.py_impl(torch._C.DispatchKey.Autograd)
-def autograd_key(
-    gmod: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    return tag_activation_checkpoint_impl(gmod, *args, **kwargs)
-
-
-@tag_activation_checkpoint.py_impl(torch._C.DispatchKey.CPU)
-@tag_activation_checkpoint.py_impl(torch._C.DispatchKey.CUDA)
-def real_impl(
-    gmod: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    return tag_activation_checkpoint_impl(gmod, *args, **kwargs)
-
-
-from typing import Any, Optional
-
-import torch
-from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-
-
 @tag_activation_checkpoint.py_impl(ProxyTorchDispatchMode)
 def proxy_mode_key(
     proxy_mode: ProxyTorchDispatchMode,
@@ -328,7 +310,7 @@ def proxy_mode_key(
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
     assert proxy_mode.pre_dispatch, (
-        "post-dispatch mode should have inlined at Autograd key"
+        "post-dispatch mode should have inlined in the Autograd key"
     )
     example_out = tag_activation_checkpoint(gmod, *args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
@@ -336,6 +318,9 @@ def proxy_mode_key(
     qualname = proxy_mode.tracer.get_fresh_qualname("wrap_body")  # type: ignore[union-attr]
     proxy_mode.tracer.root.register_module(qualname, gmod)  # type: ignore[union-attr]
     proxy_gmod = proxy_mode.tracer.unwrap_proxy(gmod)  # type: ignore[union-attr, call-overload]
+    for node in proxy_gmod.graph.nodes:
+        if "example_value" in node.meta:
+            node.meta["val"] = node.meta["example_value"]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
         tag_activation_checkpoint,
