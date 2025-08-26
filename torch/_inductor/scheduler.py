@@ -3892,6 +3892,10 @@ class Scheduler:
         if not isinstance(node1, SchedulerNode) or not isinstance(node2, SchedulerNode):
             return None
 
+        # only support computued buffer
+        if not (isinstance(node1, ir.ComputedBuffer) and isinstance(node2, ir.ComputedBuffer)):
+            return None
+
         # only support pointwise nodes with the same size
         n1_sizes, n2_sizes = node1._sizes, node2._sizes
         n1_iter_sizes, n1_reduce_sizes = n1_sizes
