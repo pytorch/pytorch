@@ -157,11 +157,9 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
     bool does_op_promote_integer_inputs_to_float = false) {
   for (const auto i : c10::irange(tensorList.size())) {
     // For division, integer inputs will result in float.
-    if (does_op_promote_integer_inputs_to_float) {
-      if (at::isIntegralType(
-              tensorList[i].scalar_type(), /*includeBool*/ true)) {
-        return false;
-      }
+    if (does_op_promote_integer_inputs_to_float &&
+        at::isIntegralType(tensorList[i].scalar_type(), /*includeBool*/ true)) {
+      return false;
     }
     if (!scalarList.empty()) {
       const auto& scalar =
