@@ -24,7 +24,12 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
     TrainingMode as TrainingMode,
 )
 
-from . import errors, ops
+from . import (  # Deprecated members {utils, symbolic_helper} are excluded from __all__
+    errors,
+    ops,
+    symbolic_helper,
+    utils,
+)
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     _run_symbolic_function,
