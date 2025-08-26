@@ -698,6 +698,14 @@ bool Context::hasLAPACK() {
 #endif
 }
 
+bool Context::hasEigenSparse() {
+#if AT_USE_EIGEN_SPARSE()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasZenDNN() {
 #if AT_ZENDNN_ENABLED()
   return true;
